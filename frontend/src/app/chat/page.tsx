@@ -177,7 +177,7 @@ const normalizeTableMarkdown = (text: string): string => {
   // パターン1: ヘッダー行と区切り行が同一行にある場合
   // 例: | A | B | |---|---| -> | A | B |\n|---|---|
   normalized = normalized.replace(
-    /(\|[^\n|]+\|[^\n|]*\|)\s*\|\s*(-{2,}[^|]*\|)+/g,
+    /(\|[^\n|]+\|[^\n|]*\|)\s*\|\s*(-{2,}[^|]*\|(?:\s*-{2,}[^|]*\|)*)/g,
     (_match, header) => {
       const cols = header.split("|").filter((c: string) => c.trim()).length;
       const separator = Array(cols).fill("---").join(" | ");
@@ -188,19 +188,19 @@ const normalizeTableMarkdown = (text: string): string => {
   // パターン2: 区切り行とデータ行が同一行にある場合
   // 例: |---|---| | データ1 | 値1 | -> |---|---|\n| データ1 | 値1 |
   normalized = normalized.replace(
-    /(\|\s*-{2,}[^|]*\|)+\s*(\|[^\n|]+\|[^\n|]*\|)/g,
+    /(\|\s*-{2,}[^|]*\|(?:\s*-{2,}[^|]*\|)*)\s+(\|[^\n|]+\|[^\n|]*\|)/g,
     (_match, sep, dataRow) => `${sep.trim()}\n${dataRow.trim()}`
   );
 
-  // パターン3: ヘッダー行・区切り行・データ行が1行に詰まっている場合
+  // パターン3: データ行が同一行に詰まっている場合
+  // 例: | A | B | | C | D | -> | A | B |\n| C | D |
   normalized = normalized.replace(
-    /(\|[^\n|]+\|[^\n|]*\|)\s*\|\s*(-{2,}[^|]*\|)+\s*(\|[^\n|]+\|[^\n|]*\|)/g,
-    (_match, header, _sep, dataRow) => {
-      const cols = header.split("|").filter((c: string) => c.trim()).length;
-      const separator = Array(cols).fill("---").join(" | ");
-      return `${header.trim()}\n| ${separator} |\n${dataRow.trim()}`;
-    }
+    /(\|[^\n|]+\|[^\n|]*\|)\s+(?=\|[^\n|]+\|)/g,
+    (_match, row) => `${row.trim()}\n`
   );
+
+  // 余分な連続改行を整理
+  normalized = normalized.replace(/\n{3,}/g, "\n\n");
 
   return normalized;
 };
