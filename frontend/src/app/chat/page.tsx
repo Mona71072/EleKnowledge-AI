@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 
 interface Message {
@@ -39,6 +40,7 @@ export default function ChatPage() {
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSession, setCurrentSession] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -134,26 +136,26 @@ export default function ChatPage() {
     em: ({ children }: any) => <em className="italic">{children}</em>,
     // テーブル関連コンポーネント（グラフ・図表を綺麗に表示）
     table: ({ children }: any) => (
-      <div className="overflow-x-auto my-4 rounded-lg border border-gray-300 shadow-sm">
+      <div className="overflow-x-auto my-4 rounded-lg border-2 border-gray-400 shadow-md bg-white">
         <table className="min-w-full border-collapse">
           {children}
         </table>
       </div>
     ),
     thead: ({ children }: any) => (
-      <thead className="bg-gray-100">{children}</thead>
+      <thead className="bg-gray-200">{children}</thead>
     ),
     tbody: ({ children }: any) => (
-      <tbody className="bg-white divide-y divide-gray-200">{children}</tbody>
+      <tbody className="bg-white">{children}</tbody>
     ),
     tr: ({ children }: any) => (
-      <tr className="hover:bg-gray-50 transition-colors">{children}</tr>
+      <tr className="hover:bg-blue-50 transition-colors border-b border-gray-300">{children}</tr>
     ),
     th: ({ children }: any) => (
-      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-100 border-b border-gray-300">{children}</th>
+      <th className="px-5 py-4 text-left text-sm font-bold text-gray-900 bg-gray-200 border-r border-gray-400 last:border-r-0 whitespace-nowrap">{children}</th>
     ),
     td: ({ children }: any) => (
-      <td className="px-4 py-3 text-sm text-gray-700 border-b border-gray-200">{children}</td>
+      <td className="px-5 py-4 text-sm text-gray-800 border-r border-gray-300 last:border-r-0 align-top">{children}</td>
     ),
     // 画像コンポーネント
     img: ({ src, alt, ...props }: any) => (
@@ -165,6 +167,43 @@ export default function ChatPage() {
       />
     ),
   };
+
+// Markdownテーブルの崩れを自動補正するユーティリティ
+const normalizeTableMarkdown = (text: string): string => {
+  if (!text) return text;
+
+  let normalized = text;
+
+  // パターン1: ヘッダー行と区切り行が同一行にある場合
+  // 例: | A | B | |---|---| -> | A | B |\n|---|---|
+  normalized = normalized.replace(
+    /(\|[^\n|]+\|[^\n|]*\|)\s*\|\s*(-{2,}[^|]*\|)+/g,
+    (_match, header) => {
+      const cols = header.split("|").filter((c: string) => c.trim()).length;
+      const separator = Array(cols).fill("---").join(" | ");
+      return `${header.trim()}\n| ${separator} |`;
+    }
+  );
+
+  // パターン2: 区切り行とデータ行が同一行にある場合
+  // 例: |---|---| | データ1 | 値1 | -> |---|---|\n| データ1 | 値1 |
+  normalized = normalized.replace(
+    /(\|\s*-{2,}[^|]*\|)+\s*(\|[^\n|]+\|[^\n|]*\|)/g,
+    (_match, sep, dataRow) => `${sep.trim()}\n${dataRow.trim()}`
+  );
+
+  // パターン3: ヘッダー行・区切り行・データ行が1行に詰まっている場合
+  normalized = normalized.replace(
+    /(\|[^\n|]+\|[^\n|]*\|)\s*\|\s*(-{2,}[^|]*\|)+\s*(\|[^\n|]+\|[^\n|]*\|)/g,
+    (_match, header, _sep, dataRow) => {
+      const cols = header.split("|").filter((c: string) => c.trim()).length;
+      const separator = Array(cols).fill("---").join(" | ");
+      return `${header.trim()}\n| ${separator} |\n${dataRow.trim()}`;
+    }
+  );
+
+  return normalized;
+};
 
   // 認可トークン取得関数
   const getAuthToken = async (): Promise<string | null> => {
@@ -361,6 +400,11 @@ export default function ChatPage() {
     // ローカル UI 更新
     setMessages([...messages, userMessage]);
     setInput('');
+    // textareaの高さをリセット
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = '42px';
+    }
     setLoading(true);
     setError('');
 
@@ -819,14 +863,14 @@ export default function ChatPage() {
                           <div className="chat-markdown text-gray-800 text-[13px] sm:text-[14px]">
                             {streamingMessageId === message.id ? (
                               <>
-                                <ReactMarkdown components={markdownComponents}>
-                                  {streamingMessages[message.id] || ''}
+                                <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+                                  {normalizeTableMarkdown(streamingMessages[message.id] || '')}
                                 </ReactMarkdown>
                                 <span className="inline-block w-2 h-5 bg-blue-500 ml-1 animate-pulse" />
                               </>
                             ) : (
-                              <ReactMarkdown components={markdownComponents}>
-                                {streamingMessages[message.id] || message.content}
+                              <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+                                {normalizeTableMarkdown(streamingMessages[message.id] || message.content)}
                               </ReactMarkdown>
                             )}
                           </div>
@@ -1024,24 +1068,35 @@ export default function ChatPage() {
             <div className="p-3 sm:p-4">
               <div className="flex gap-2 sm:gap-3 items-end">
                 <div className="flex-1 relative">
-                  <input
-                    type="text"
+                  <textarea
+                    ref={textareaRef}
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyPress={(e) => {
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      // 高さを自動調整
+                      const target = e.target as HTMLTextAreaElement;
+                      target.style.height = 'auto';
+                      target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
+                    }}
+                    onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         handleSendMessage();
                       }
                     }}
-                    placeholder="質問を入力してください... (Enterで送信)"
+                    placeholder="質問を入力してください... (Shift+Enterで改行、Enterで送信)"
                     disabled={loading}
-                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 text-sm transition-all placeholder:text-gray-500 placeholder:opacity-100 shadow-sm hover:border-gray-400 bg-white text-gray-900"
+                    rows={1}
+                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 text-sm transition-all placeholder:text-gray-500 placeholder:opacity-100 shadow-sm hover:border-gray-400 bg-white text-gray-900 resize-none min-h-[42px] max-h-[200px] overflow-y-auto"
+                    style={{
+                      height: 'auto',
+                      minHeight: '42px',
+                    }}
                   />
                   {input.trim() && (
                     <button
                       onClick={() => setInput('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600 transition-colors"
                       aria-label="入力をクリア"
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
