@@ -136,26 +136,26 @@ export default function ChatPage() {
     em: ({ children }: any) => <em className="italic">{children}</em>,
     // テーブル関連コンポーネント（グラフ・図表を綺麗に表示）
     table: ({ children }: any) => (
-      <div className="overflow-x-auto my-4 rounded-lg border-2 border-gray-400 shadow-md bg-white">
+      <div className="overflow-x-auto my-6 rounded-xl border border-gray-200 shadow-lg bg-white">
         <table className="min-w-full border-collapse">
           {children}
         </table>
       </div>
     ),
     thead: ({ children }: any) => (
-      <thead className="bg-gray-200">{children}</thead>
+      <thead className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200">{children}</thead>
     ),
     tbody: ({ children }: any) => (
-      <tbody className="bg-white">{children}</tbody>
+      <tbody className="bg-white [&>tr:nth-child(even)]:bg-gray-50">{children}</tbody>
     ),
     tr: ({ children }: any) => (
-      <tr className="hover:bg-blue-50 transition-colors border-b border-gray-300">{children}</tr>
+      <tr className="hover:bg-blue-100 hover:shadow-sm transition-all duration-150 border-b border-gray-200 last:border-b-0">{children}</tr>
     ),
     th: ({ children }: any) => (
-      <th className="px-5 py-4 text-left text-sm font-bold text-gray-900 bg-gray-200 border-r border-gray-400 last:border-r-0 whitespace-nowrap">{children}</th>
+      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-800 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50 border-r border-blue-200 last:border-r-0 whitespace-nowrap">{children}</th>
     ),
     td: ({ children }: any) => (
-      <td className="px-5 py-4 text-sm text-gray-800 border-r border-gray-300 last:border-r-0 align-top">{children}</td>
+      <td className="px-6 py-4 text-sm text-gray-700 border-r border-gray-200 last:border-r-0 align-top leading-relaxed">{children}</td>
     ),
     // 画像コンポーネント
     img: ({ src, alt, ...props }: any) => (
