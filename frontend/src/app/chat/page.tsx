@@ -175,9 +175,9 @@ const normalizeTableMarkdown = (text: string): string => {
   let normalized = text;
 
   // パターン1: ヘッダー行と区切り行が同一行にある場合
-  // 例: | A | B | |---|---| -> | A | B |\n|---|---|
+  // 例: | A | B | C | |---|---| -> | A | B | C |\n|---|---|---|
   normalized = normalized.replace(
-    /(\|[^\n|]+\|[^\n|]*\|)\s*\|\s*(-{2,}[^|]*\|(?:\s*-{2,}[^|]*\|)*)/g,
+    /(\|(?:[^\n|]+\|)+)\s*\|\s*(-{2,}[^|]*\|(?:\s*-{2,}[^|]*\|)*)/g,
     (_match, header) => {
       const cols = header.split("|").filter((c: string) => c.trim()).length;
       const separator = Array(cols).fill("---").join(" | ");
@@ -186,16 +186,16 @@ const normalizeTableMarkdown = (text: string): string => {
   );
 
   // パターン2: 区切り行とデータ行が同一行にある場合
-  // 例: |---|---| | データ1 | 値1 | -> |---|---|\n| データ1 | 値1 |
+  // 例: |---|---| | データ1 | 値1 | 値2 | -> |---|---|\n| データ1 | 値1 | 値2 |
   normalized = normalized.replace(
-    /(\|\s*-{2,}[^|]*\|(?:\s*-{2,}[^|]*\|)*)\s+(\|[^\n|]+\|[^\n|]*\|)/g,
+    /(\|\s*-{2,}[^|]*\|(?:\s*-{2,}[^|]*\|)*)\s+(\|(?:[^\n|]+\|)+)/g,
     (_match, sep, dataRow) => `${sep.trim()}\n${dataRow.trim()}`
   );
 
   // パターン3: データ行が同一行に詰まっている場合
-  // 例: | A | B | | C | D | -> | A | B |\n| C | D |
+  // 例: | A | B | C | | D | E | F | -> | A | B | C |\n| D | E | F |
   normalized = normalized.replace(
-    /(\|[^\n|]+\|[^\n|]*\|)\s+(?=\|[^\n|]+\|)/g,
+    /(\|(?:[^\n|]+\|)+)\s+(?=\|(?:[^\n|]+\|)+)/g,
     (_match, row) => `${row.trim()}\n`
   );
 

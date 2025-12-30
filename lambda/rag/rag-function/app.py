@@ -450,6 +450,11 @@ def extract_citations_from_selected(selected_results: list) -> tuple:
             continue
 
         doc_name = doc_uri.split('/')[-1]
+        
+        # .mdファイルは参考資料として表示しない（読み取りは行うが、ユーザーには表示しない）
+        if doc_name.lower().endswith('.md'):
+            continue
+
         citations.append(doc_name)
 
         # S3 URIをHTTPS署名付きURLに変換
