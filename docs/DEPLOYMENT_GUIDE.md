@@ -336,20 +336,34 @@ aws cloudformation describe-stacks \
   --query 'Stacks[0].Outputs'
 ```
 
-### Step 4: Knowledge Base 構築
+### Step 4: Knowledge Base 手動設定
 
 ```bash
-# Knowledge Base ID をSSM Parameterに保存
-KB_ID="YOUR_KB_ID_HERE"
+# 1. AWS Bedrock コンソール上で Knowledge Base を作成
+# 2. 作成後、Knowledge Base ID を取得
+# 例: KB_ELEKNOWLEDGE_001
 
-aws ssm put-parameter \
-  --name "/EleKnowledge-AI/${ENVIRONMENT}/knowledge-base-id" \
-  --value "${KB_ID}" \
-  --type "String" \
-  --overwrite \
+# 3. Phase 2 SAM テンプレートのパラメータを確認
+sam deploy \
+  --stack-name EleKnowledge-AI-${ENVIRONMENT}-phase2 \
   --profile ${AWS_PROFILE} \
-  --region ${REGION}
+  --region ${REGION} \
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    "BedrockKnowledgeBaseId=KB_ELEKNOWLEDGE_001" \
+    file://parameters-${ENVIRONMENT}.json
+
+# 注: Knowledge Base ID は環境変数として Lambda 関数に自動設定されます
+# Lambda 関数内では KNOWLEDGE_BASE_ID 環境変数から取得可能です
 ```
+
+**Knowledge Base 作成手順:**
+1. AWS Bedrock コンソール → Knowledge Base → Create Knowledge Base
+2. 名前: `eleknowledge-${ENVIRONMENT}-kb`
+3. Data Source: S3 バケット (`eleknowledge-${ENVIRONMENT}-documents`)
+4. メタデータ設定: ドキュメントのタイプ、製品、モデル等を設定
+5. 同期実行
+6. Knowledge Base ID を控える（デプロイ時に使用）
 
 ### Step 5: Amplify デプロイ
 
