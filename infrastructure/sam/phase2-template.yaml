@@ -484,17 +484,6 @@ Resources:
       LogGroupName: !Sub /aws/apigateway/${ProjectName}-${Environment}-chat-api
       RetentionInDays: !Ref LogRetentionInDays
 
-  # ============================================================================
-  # Parameters (for Knowledge Base ID)
-  # ============================================================================
-  KnowledgeBaseId:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Name: !Sub /${ProjectName}/${Environment}/knowledge-base-id
-      Type: String
-      Value: PLACEHOLDER
-      Description: Knowledge Base ID (update after manual creation)
-
 Outputs:
   # API Gateway
   RagApiUrl:

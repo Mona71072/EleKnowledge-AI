@@ -154,7 +154,6 @@ EleKnowledge-AIは、昇降機に関する知識を集約し、AIを活用して
 - **User DB:** Amazon DynamoDB (users)
 - **Chat History:** Amazon DynamoDB (eleknowledge-chatlogs)
 - **Document Storage:** Amazon S3
-- **IP Whitelist:** Amazon DynamoDB (ip-whitelist)
 
 ---
 
