@@ -10,6 +10,7 @@ Parameters:
     Default: development
     AllowedValues:
       - development
+      - staging
       - production
     Description: Environment name
   
@@ -18,10 +19,104 @@ Parameters:
     Default: EleKnowledge-AI
     Description: Project name
   
+  AWS Region:
+    Type: String
+    Default: us-east-1
+    AllowedValues:
+      - us-east-1
+      - ap-northeast-1
+      - eu-west-1
+    Description: AWS Region (Bedrock availability required)
+  
   Phase1StackName:
     Type: String
     Default: EleKnowledge-AI-development-phase1
     Description: Phase 1 CloudFormation stack name for importing values
+  
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-sonnet-4-20250514-v1:0
+    Description: Bedrock LLM Model ID
+  
+  RagLambdaTimeout:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 900
+    Description: RAG Lambda function timeout (seconds)
+  
+  RagLambdaMemory:
+    Type: Number
+    Default: 1024
+    AllowedValues:
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 3008
+    Description: RAG Lambda function memory (MB)
+  
+  ChatLambdaTimeout:
+    Type: Number
+    Default: 30
+    MinValue: 10
+    MaxValue: 300
+    Description: Chat Management Lambda function timeout (seconds)
+  
+  ChatLambdaMemory:
+    Type: Number
+    Default: 512
+    AllowedValues:
+      - 128
+      - 256
+      - 512
+      - 1024
+    Description: Chat Management Lambda function memory (MB)
+  
+  RagApiThrottleBurst:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    MaxValue: 10000
+    Description: RAG API Gateway throttle burst limit
+  
+  RagApiThrottleRate:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 10000
+    Description: RAG API Gateway throttle rate limit
+  
+  ChatApiThrottleBurst:
+    Type: Number
+    Default: 50
+    MinValue: 1
+    MaxValue: 10000
+    Description: Chat API Gateway throttle burst limit
+  
+  ChatApiThrottleRate:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 10000
+    Description: Chat API Gateway throttle rate limit
+  
+  LogRetentionInDays:
+    Type: Number
+    Default: 30
+    AllowedValues:
+      - 1
+      - 3
+      - 5
+      - 7
+      - 14
+      - 30
+      - 60
+      - 90
+      - 180
+      - 365
+    Description: CloudWatch Logs retention period (days)
 
 Globals:
   Function:
@@ -34,6 +129,7 @@ Globals:
       Variables:
         ENVIRONMENT: !Ref Environment
         PROJECT_NAME: !Ref ProjectName
+        AWS_REGION: !Ref AWS Region
     Tags:
       Project: !Ref ProjectName
       Environment: !Ref Environment
@@ -224,12 +320,12 @@ Resources:
       Handler: app.lambda_handler
       Description: RAG query processing with Knowledge Base and Claude 4
       Role: !GetAtt RagLambdaRole.Arn
-      Timeout: 300
-      MemorySize: 1024
+      Timeout: !Ref RagLambdaTimeout
+      MemorySize: !Ref RagLambdaMemory
       Environment:
         Variables:
           KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
-          BEDROCK_MODEL_ID: anthropic.claude-sonnet-4-20250514-v1:0
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
           DOCUMENTS_BUCKET:
@@ -250,8 +346,8 @@ Resources:
       Handler: app.lambda_handler
       Description: Chat session and message management
       Role: !GetAtt RagLambdaRole.Arn
-      Timeout: 30
-      MemorySize: 512
+      Timeout: !Ref ChatLambdaTimeout
+      MemorySize: !Ref ChatLambdaMemory
       Environment:
         Variables:
           CHATLOGS_TABLE:
@@ -322,8 +418,8 @@ Resources:
           AuthorizationType: NONE
         - ResourcePath: "/*"
           HttpMethod: "*"
-          ThrottlingBurstLimit: 20
-          ThrottlingRateLimit: 5
+          ThrottlingBurstLimit: !Ref RagApiThrottleBurst
+          ThrottlingRateLimit: !Ref RagApiThrottleRate
           LoggingLevel: INFO
           DataTraceEnabled: true
           MetricsEnabled: true
@@ -363,8 +459,8 @@ Resources:
           AuthorizationType: NONE
         - ResourcePath: "/*"
           HttpMethod: "*"
-          ThrottlingBurstLimit: 50
-          ThrottlingRateLimit: 10
+          ThrottlingBurstLimit: !Ref ChatApiThrottleBurst
+          ThrottlingRateLimit: !Ref ChatApiThrottleRate
           LoggingLevel: INFO
           DataTraceEnabled: true
           MetricsEnabled: true
@@ -380,13 +476,13 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /aws/apigateway/${ProjectName}-${Environment}-rag-api
-      RetentionInDays: 30
+      RetentionInDays: !Ref LogRetentionInDays
   
   ChatApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /aws/apigateway/${ProjectName}-${Environment}-chat-api
-      RetentionInDays: 30
+      RetentionInDays: !Ref LogRetentionInDays
 
   # ============================================================================
   # Parameters (for Knowledge Base ID)

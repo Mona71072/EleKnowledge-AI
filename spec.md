@@ -3,10 +3,10 @@
 ## プロジェクト情報
 
 **プロジェクト名:** EleKnowledge-AI  
-**バージョン:** 1.0.1  
-**最終更新日:** 2025-10-15  
+**バージョン:** 1.2.0  
+**最終更新日:** 2026-01-22  
 **作成者:** Development Team  
-**ステータス:** Phase 2 開発中
+**ステータス:** Phase 1 完成・Phase 2 完成・Phase 3 準備中
 
 ---
 
@@ -160,15 +160,15 @@ EleKnowledge-AIは、昇降機に関する知識を集約し、AIを活用して
 
 ## 3. 機能仕様
 
-### 3.1 Phase 1: 基盤整備（2ヶ月）
+### 3.1 Phase 1: 基盤整備（2ヶ月）【完成】
 
-#### 3.1.1 認証システム
+#### 3.1.1 認証システム【完成】
 
 **Phase 1実装機能:**
-- ユーザー登録（サインアップ）
-- ログイン・ログアウト
-- パスワードリセット
-- MFA（多要素認証）※オプション
+- ✅ ユーザー登録（サインアップ）
+- ✅ ログイン・ログアウト
+- ✅ パスワードリセット
+- ✅ MFA（多要素認証）※オプション
 
 **将来的な拡張（Phase 4以降）:**
 - SAML 2.0統合（社内IdP連携）
@@ -225,12 +225,15 @@ const signIn = async (email: string, password: string) => {
 }
 ```
 
-#### 3.1.2 ホーム画面
+#### 3.1.2 ホーム画面【完成】
 
 **機能:**
-- ログイン後のランディングページ
-- 3つの主要機能への導線
-- ユーザー情報表示
+- ✅ ログイン後のランディングページ
+- ✅ 3つの主要機能への導線
+- ✅ ユーザー情報表示
+- ✅ 開発モード（認証スキップ機能）搭載
+- ✅ インフォモーダル機能（Knowledge Base説明、質問例表示）
+- ✅ レスポンシブデザイン対応
 
 **UI構成:**
 ```
@@ -1257,12 +1260,22 @@ interface ErrorDisplay {
 - GitHub Actions経由でデプロイ
 - Blue/Green デプロイ（本番）
 
-### 8.4 インフラ as Code
+### 8.4 インフラ as Code【完成】
 
 **使用ツール:**
-- AWS CloudFormation
-- AWS SAM
-- Terraform（検討中）
+- ✅ AWS CloudFormation
+- ✅ AWS SAM（phase1-template.yaml）
+- Terraform（将来検討）
+
+**Phase 1 SAM テンプレート実装内容:**
+- ✅ Cognito User Pool作成
+- ✅ Cognito User Pool Client設定
+- ✅ DynamoDB テーブル設定（users、chatlogs）
+- ✅ S3 バケット設定（documents、uploads）
+- ✅ Lambda実行ロール・ポリシー定義
+- ✅ Lambda関数デプロイ設定
+- ✅ API Gateway設定（CORS、スロットリング、ログ出力）
+- ✅ CloudWatch Logs設定（30日保管）
 
 ### 8.5 コスト試算
 
