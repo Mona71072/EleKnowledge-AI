@@ -1,0 +1,18 @@
+version = 0.1
+
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "eleknowledge-troubleshooting"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-"
+s3_prefix = "eleknowledge-troubleshooting/"
+region = "us-east-1"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM,CAPABILITY_NAMED_IAM"
+parameter_overrides = [
+  "Environment=development",
+  "AgentId=D6FAGLJPPO",
+  "AgentAliasId=XXXXXXXXXX",
+  "KnowledgeBaseId=HIFYJUGPOR",
+  "SitesTableName=sites"
+]
