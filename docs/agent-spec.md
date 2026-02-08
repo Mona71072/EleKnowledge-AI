@@ -63,12 +63,10 @@ Action 2はVer2で実装
 
 ```typescript
 interface TroubleshootingRequest {
-  constructionNumber: string;      // 必須: 工事番号（半角英数8文字指定）
+  constructionNumber: string;      // 可選（constructionNumber、modelどちらかは必須）: 工事番号（半角英数8文字指定）
   troubleDescription: string;      // 必須: 不具合情報（5-2000文字）
   model?: string;                  // 可選: KE-LGなどリストから選択（一項目のみ選択可能）
-  classification?: string;         // 可選: トラブル分類（機械的or電気的を選択）
   errorCode?: string;              // 可選: E001など（半角英数4文字指定）
-  troubleOccurredAt?: string;      // ISO 8601
 }
 ```
 
@@ -116,16 +114,15 @@ interface TroubleshootingResponse {
 ## 4. Action Group仕様
 
 ### 4.1 Action 1: DB Search
-
 **目的:** 現場情報、設備仕様を取得
-
+- 起動条件：入力にconstructionNumberがあったとき
+- フロー：sitesテーブルにconstructionNumberでクエリ→現場情報出力
 **DynamoDBテーブル:**
 - sites: constructionNumber (PK) → 現場番号
 
 ### 4.2 Action 2: KB Search1
-
 **目的:** 現場仕様・トラブル情報と合致する類似事例を検索
-
+- 起動条件：
 **メタデータフィルター:**
 - document: Trouble-Cases,Trouble-Reports
 - model: KE-LG,CM-MAなど

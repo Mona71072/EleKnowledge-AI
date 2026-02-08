@@ -117,5 +117,5 @@ aws secretsmanager create-secret \
 - [Bedrock Agent カスタムオーケストレーション](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-custom-orchestration.html)
 - [.clinerules セキュリティルール](../.clinerules)
 
-**作成日:** 2026-02-04  
+**作成日:** 2026-02-04
 **バージョン:** 1.0.0

@@ -1,0 +1,37 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  TroubleshootingSmallOrchestratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://eleknowledge-deployment-bucket/troubleshoot-small/function.zip
+      Runtime: python3.8
+      Handler: app.lambda_handler
+      Timeout: 30
+      Tracing: Active
+      LoggingConfig:
+        LogFormat: JSON
+        ApplicationLogLevel: INFO
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock-agent-runtime:InvokeAgent
+                - secretsmanager:GetSecretValue
+              Resource:
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/D6FAGLPPO"
+                - !Sub "${BedrockAgentConfigArn}"
+
+Parameters:
+  BedrockAgentConfigArn:
+    Type: String
+    Description: "Secrets Manager ARN for Bedrock Agent Config"
+    Default: "arn:aws:secretsmanager:us-east-1:423623870147:secret:EleKnowledgeAI/BedrockAgentConfig-8sBN5B"
+
+Outputs:
+  LambdaFunctionArn:
+    Description: "ARN of Troubleshooting Small Orchestrator Lambda"
+    Value: !GetAtt TroubleshootingSmallOrchestratorFunction.Arn

@@ -18,7 +18,7 @@ bedrock_client = boto3.client('bedrock-agent-runtime',
     region_name=os.environ.get('BEDROCK_REGION', 'us-east-1'))
 
 # 環境変数
-KB_ID = os.environ.get('KB_ID')
+KB_ID = os.environ.get('KnowledgeBaseId')
 
 
 class KBSearchError(Exception):

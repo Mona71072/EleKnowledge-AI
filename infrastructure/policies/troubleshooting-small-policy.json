@@ -1,0 +1,20 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agent-runtime:InvokeAgent",
+        "secretsmanager:GetSecretValue",
+        "dynamodb:Query"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:us-east-1:${AWS::AccountId}:agent/BEDROCK_AGENT_ID_PLACEHOLDER",
+        "arn:aws:secretsmanager:us-east-1:${AWS::AccountId}:secret:EleKnowledgeAI/BedrockAgentConfig-*"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:${AWS::AccountId}:table/sites"
+      ]
+    }
+  ]
+}

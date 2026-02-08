@@ -1,52 +1,14 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
-Description: 'Phase 3 - Troubleshooting Agent Infrastructure (SAM Template)'
-
-Parameters:
-  Environment:
-    Type: String
-    Default: dev
-    AllowedValues:
-      - dev
-      - staging
-      - prod
-    Description: Environment name
-  
-  AgentId:
-    Type: String
-    Description: Bedrock Agent ID
-  
-  AgentAliasId:
-    Type: String
-    Description: Bedrock Agent Alias ID
-  
-  KnowledgeBaseId:
-    Type: String
-    Description: Knowledge Base ID
-  
-  SitesTableName:
-    Type: String
-    Default: sites
-    Description: DynamoDB sites table name
+Description: 'Phase 3 - Troubleshooting Agent Infrastructure'
 
 Globals:
   Function:
-    Runtime: python3.11
-    Timeout: 60
+    Runtime: python3.13
     MemorySize: 512
-    Tracing: Active
-    Environment:
-      Variables:
-        AWS_REGION: !Ref AWS::Region
-        ENVIRONMENT: !Ref Environment
-    Tags:
-      Phase: Phase3
-      Component: TroubleshootingAgent
 
 Resources:
-  # ==================== IAM Roles ====================
-  
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -57,20 +19,7 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
       Policies:
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                  - dynamodb:Scan
-                Resource: !GetAtt SitesTable.Arn
         - PolicyName: BedrockAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -78,246 +27,42 @@ Resources:
               - Effect: Allow
                 Action:
                   - bedrock:InvokeAgent
-                  - bedrock-agent-runtime:InvokeAgent
-                  - bedrock:Retrieve
-                  - bedrock-agent-runtime:Retrieve
+                  - dynamodb:Query
+                  - ssm:GetParameter
                 Resource: '*'
 
-  # ==================== DynamoDB Table ====================
-  
-  SitesTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !Ref SitesTableName
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: constructionNumber
-          AttributeType: S
-      KeySchema:
-        - AttributeName: constructionNumber
-          KeyType: HASH
-      Tags:
-        - Key: Phase
-          Value: Phase3
-
-  # ==================== Orchestrator Lambda ====================
-  
   OrchestratorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'troubleshooting-orchestrator-${Environment}'
-      CodeUri: ../../lambda/troubleshooting/orchestrator/
+      FunctionName: "troubleshooting-orchestrator-dev"
+      Timeout: 60
+      CodeUri: s3://eleknowledge-troubleshooting-deployment-20260205/orchestrator.zip
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          AGENT_ID: !Ref AgentId
-          AGENT_ALIAS_ID: !Ref AgentAliasId
-          SITES_TABLE: !Ref SitesTableName
-      Events:
-        ApiEvent:
-          Type: Api
-          Properties:
-            RestApiId: !Ref TroubleshootingApi
-            Path: /troubleshooting/analyze
-            Method: POST
-      Tags:
-        Function: Orchestrator
 
-  # ==================== DB Search Lambda ====================
-  
   DBSearchFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'troubleshooting-db-search-${Environment}'
-      CodeUri: ../../lambda/troubleshooting/db-search/
+      FunctionName: "troubleshooting-db-search-dev"
+      Timeout: 60
+      CodeUri: s3://eleknowledge-troubleshooting-deployment-20260205/db-search.zip
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          SITES_TABLE: !Ref SitesTableName
-      Tags:
-        Function: DBSearch
 
-  # ==================== KB Search1 Lambda ====================
-  
   KBSearch1Function:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'troubleshooting-kb-search1-${Environment}'
-      CodeUri: ../../lambda/troubleshooting/kb-search1/
+      FunctionName: "troubleshooting-kb-search1-dev"
+      Timeout: 60
+      CodeUri: s3://eleknowledge-troubleshooting-deployment-20260205/kb-search1.zip
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          KB_ID: !Ref KnowledgeBaseId
-      Tags:
-        Function: KBSearch1
 
-  # ==================== KB Search2 Lambda ====================
-  
-  KBSearch2Function:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub 'troubleshooting-kb-search2-${Environment}'
-      CodeUri: ../../lambda/troubleshooting/kb-search2/
-      Handler: app.lambda_handler
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          KB_ID: !Ref KnowledgeBaseId
-      Tags:
-        Function: KBSearch2
-
-  # ==================== KB Search3 Lambda ====================
-  
-  KBSearch3Function:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub 'troubleshooting-kb-search3-${Environment}'
-      CodeUri: ../../lambda/troubleshooting/kb-search3/
-      Handler: app.lambda_handler
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          KB_ID: !Ref KnowledgeBaseId
-      Tags:
-        Function: KBSearch3
-
-  # ==================== API Gateway ====================
-  
   TroubleshootingApi:
     Type: AWS::Serverless::Api
     Properties:
-      Name: !Sub 'troubleshooting-api-${Environment}'
-      StageName: !Ref Environment
-      TracingEnabled: true
-      MethodSettings:
-        - ResourcePath: '/**'
-          HttpMethod: '*'
-          LoggingLevel: INFO
-          DataTraceEnabled: true
-          MetricsEnabled: true
-      Tags:
-        Service: TroubleshootingAgent
-
-  # ==================== CloudWatch Log Groups ====================
-  
-  OrchestratorLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/troubleshooting-orchestrator-${Environment}'
-      RetentionInDays: 30
-
-  DBSearchLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/troubleshooting-db-search-${Environment}'
-      RetentionInDays: 30
-
-  KBSearch1LogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/troubleshooting-kb-search1-${Environment}'
-      RetentionInDays: 30
-
-  KBSearch2LogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/troubleshooting-kb-search2-${Environment}'
-      RetentionInDays: 30
-
-  KBSearch3LogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/troubleshooting-kb-search3-${Environment}'
-      RetentionInDays: 30
-
-  ApiLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/apigateway/troubleshooting-api-${Environment}'
-      RetentionInDays: 30
-
-  # ==================== CloudWatch Alarms ====================
-  
-  OrchestratorErrorAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'troubleshooting-orchestrator-errors-${Environment}'
-      AlarmDescription: Alert on Orchestrator Lambda errors
-      MetricName: Errors
-      Namespace: AWS/Lambda
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 5
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: FunctionName
-          Value: !Ref OrchestratorFunction
-
-  OrchestratorDurationAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'troubleshooting-orchestrator-duration-${Environment}'
-      AlarmDescription: Alert if Orchestrator Lambda takes too long
-      MetricName: Duration
-      Namespace: AWS/Lambda
-      Statistic: Average
-      Period: 60
-      EvaluationPeriods: 2
-      Threshold: 50000
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: FunctionName
-          Value: !Ref OrchestratorFunction
+      StageName: "dev"
 
 Outputs:
-  TroubleshootingApiEndpoint:
-    Description: Troubleshooting API endpoint URL
-    Value: !Sub 'https://${TroubleshootingApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
-    Export:
-      Name: !Sub '${AWS::StackName}-ApiEndpoint'
-
-  OrchestratorFunctionArn:
-    Description: Orchestrator Lambda Function ARN
+  OrchestratorArn:
     Value: !GetAtt OrchestratorFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-OrchestratorArn'
-
-  DBSearchFunctionArn:
-    Description: DB Search Lambda Function ARN
-    Value: !GetAtt DBSearchFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-DBSearchArn'
-
-  KBSearch1FunctionArn:
-    Description: KB Search1 Lambda Function ARN
-    Value: !GetAtt KBSearch1Function.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-KBSearch1Arn'
-
-  KBSearch2FunctionArn:
-    Description: KB Search2 Lambda Function ARN
-    Value: !GetAtt KBSearch2Function.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-KBSearch2Arn'
-
-  KBSearch3FunctionArn:
-    Description: KB Search3 Lambda Function ARN
-    Value: !GetAtt KBSearch3Function.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-KBSearch3Arn'
-
-  SitesTableName:
-    Description: Sites DynamoDB Table Name
-    Value: !Ref SitesTable
-    Export:
-      Name: !Sub '${AWS::StackName}-SitesTableName'
-
-  SitesTableArn:
-    Description: Sites DynamoDB Table ARN
-    Value: !GetAtt SitesTable.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-SitesTableArn'

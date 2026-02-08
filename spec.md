@@ -146,13 +146,14 @@ EleKnowledge-AIは、昇降機に関する知識を集約し、AIを活用して
 - **認証:** AWS Cognito User Pool
 
 #### AI/ML
-- **LLM:** Amazon Bedrock Claude 4 Sonnet
+- **LLM:** Amazon Bedrock Claude 4.5 Haiku
 - **Vector Store:** Amazon Bedrock Knowledge Base
 - **Multi-Agent:** Amazon Bedrock Agent (Phase 3)
 
 #### データストア
 - **User DB:** Amazon DynamoDB (users)
 - **Chat History:** Amazon DynamoDB (eleknowledge-chatlogs)
+- **Sites DB:** Amazon DynamoDB(sites)
 - **Document Storage:** Amazon S3
 
 ---
