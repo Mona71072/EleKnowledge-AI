@@ -11,7 +11,7 @@
 
 ## 1. 概要
 
-本ドキュメントは、`agent-spec.md` の仕様に基づいて、PoC実装を進めるための詳細ガイドです。
+本ドキュメントは、[agent-spec.md](../../agent-spec.md) の仕様に基づいて、PoC実装を進めるための詳細ガイドです。関連仕様は [phase3-troubleshooting-spec.md](phase3-troubleshooting-spec.md) も参照してください。
 
 ### 1.1 実装構成
 
