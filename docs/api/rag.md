@@ -1,3 +1,10 @@
+---
+status: production
+phase: 2
+last-verified: 2026-04-24
+related-code: lambda/rag/
+---
+
 # RAG処理API
 
 > spec.md §7.2 から切り出し。Phase 2 の RAG クエリエンドポイントを記載する。

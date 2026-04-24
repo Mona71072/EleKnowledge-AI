@@ -1,3 +1,9 @@
+---
+status: production
+last-verified: 2026-04-24
+related-code: infrastructure/, amplify.yml, samconfig.toml
+---
+
 # 🚀 デプロイ構成
 
 > 本ドキュメントは [spec.md](../spec.md) §8 から切り出された詳細仕様です。

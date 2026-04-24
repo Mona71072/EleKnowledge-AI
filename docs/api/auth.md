@@ -1,3 +1,10 @@
+---
+status: production
+phase: 1
+last-verified: 2026-04-24
+related-code: lambda/auth/
+---
+
 # 認証API
 
 > spec.md §7.1 から切り出し。Phase 1 で実装済みの認証系エンドポイントを記載する。

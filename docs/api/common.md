@@ -1,3 +1,9 @@
+---
+status: production
+last-verified: 2026-04-24
+related-code: lambda/, infrastructure/
+---
+
 # API 共通仕様（エラーハンドリング・スロットリング）
 
 > spec.md §7.4-7.5 から切り出し。全 API 共通のエラーレスポンス形式と API Gateway スロットリング設定をまとめる。
