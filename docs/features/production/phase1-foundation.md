@@ -1,3 +1,10 @@
+---
+status: production
+phase: 1
+last-verified: 2026-04-24
+related-code: frontend/src/app/, lambda/auth/
+---
+
 # Phase 1: 基盤整備（2ヶ月）【完成】
 
 > 本ドキュメントは [spec.md](../../../spec.md) §3.1 から切り出された Phase 1 の機能仕様です。

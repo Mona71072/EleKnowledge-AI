@@ -1,3 +1,9 @@
+---
+status: production
+last-verified: 2026-04-24
+related-code: infrastructure/, lambda/, waf-rules.json
+---
+
 # セキュリティ
 
 > 出典: 旧 [spec.md](../spec.md) §5（PR #10 で本ファイルに切り出し）

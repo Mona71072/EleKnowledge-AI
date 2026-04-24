@@ -1,3 +1,10 @@
+---
+status: development
+phase: 3
+last-verified: 2026-04-24
+related-code: lambda/troubleshooting/, lambda/troubleshooting-small/
+---
+
 # 🔧 トラブルシューティング エージェント実装ガイド
 
 ## ドキュメント情報

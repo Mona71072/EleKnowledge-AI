@@ -1,3 +1,10 @@
+---
+status: production
+phase: 2
+last-verified: 2026-04-24
+related-code: frontend/src/app/, lambda/rag/, lambda/chat/
+---
+
 # Phase 2: RAGチャット機能（2ヶ月）
 
 > 本ドキュメントは [spec.md](../../../spec.md) §3.2 から切り出された Phase 2 の機能仕様です。

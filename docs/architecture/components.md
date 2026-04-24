@@ -1,3 +1,9 @@
+---
+status: production
+last-verified: 2026-04-24
+related-code: frontend/src/, lambda/, infrastructure/
+---
+
 # コンポーネント構成
 
 > 出典: 旧 [spec.md](../../spec.md) §2.2（PR #10 で本ファイルに切り出し）

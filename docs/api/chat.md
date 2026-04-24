@@ -1,3 +1,10 @@
+---
+status: production
+phase: 2
+last-verified: 2026-04-24
+related-code: lambda/chat/
+---
+
 # チャット管理API
 
 > spec.md §7.3 から切り出し。Phase 2 のチャットセッション管理エンドポイントを記載する。

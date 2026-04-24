@@ -1,3 +1,9 @@
+---
+status: production
+last-verified: 2026-04-24
+related-code: infrastructure/, frontend/, lambda/
+---
+
 # アーキテクチャ概要（システム全体図）
 
 > 出典: 旧 [spec.md](../../spec.md) §2.1（PR #10 で本ファイルに切り出し）

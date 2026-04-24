@@ -1,3 +1,10 @@
+---
+status: development
+phase: 3
+last-verified: 2026-04-24
+related-code: (未実装)
+---
+
 # Phase 3: 品質書類チェック機能
 
 > 本ドキュメントは [spec.md](../../../spec.md) §3.3.2 から切り出された Phase 3 品質書類チェック機能の機能仕様です。
