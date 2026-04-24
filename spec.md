@@ -53,108 +53,16 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 
 ## 2. アーキテクチャ
 
-### 2.1 システム全体図
+詳細は以下に切り出しました。
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     社内ネットワーク                          │
-│                   (IP: x.x.x.0/24)                       │
-└─────────────────┬───────────────────────────────────────────┘
-                  │ HTTPS
-                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│               AWS Amplify Hosting                            │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │              AWS WAF (統合)                           │   │
-│  │  • IP制限: x.x.x.x/32 のみ許可                   │   │
-│  │  • レート制限: 2000 req/5min                         │   │
-│  │  • マネージドルール: SQL Injection 防御               │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │           Next.js Application                         │   │
-│  │  • ホーム画面                                         │   │
-│  │  • RAGチャット画面                                    │   │
-│  │  • トラブルシューティング画面                         │   │
-│  │  • 品質書類チェック画面                               │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────┬───────────────────────────────────────────┘
-                  │ HTTPS + Cognito Token
-                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Amazon API Gateway (3つのAPI)                   │
-│  ┌──────────────┬──────────────┬──────────────────────┐     │
-│  │ 認証API      │ RAG処理API   │ チャット管理API      │     │
-│  └──────────────┴──────────────┴──────────────────────┘     │
-│  • Cognito認証統合                                           │
-│  • Gateway Response設定                                      │
-│  • レート制限 (Throttling)                                   │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-┌─────────────────▼───────────────────────────────────────────┐
-│                  AWS Lambda Functions                       │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ 認証Lambda群                                         │    │
-│  │  • login-function                                   │    │
-│  │  • signup-function                                  │    │
-│  │  • verify-function                                  │    │
-│  └─────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ RAG処理Lambda                                        │    │
-│  │  • rag-function                                     │    │
-│  │  • KB検索 + Claude 4.5Haiku応答生成                  │    │
-│  └─────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ チャット管理Lambda                                   │    │
-│  │  • chat-management-function                         │    │
-│  └─────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ 新機能Lambda (Phase 3で追加)                         │    │
-│  │  • troubleshooting-lambda                           │    │
-│  │  • quality-check-lambda                             │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-┌─────────────────▼───────────────────────────────────────────┐
-│           VPC: eleknowledge-vpc (x.x.x.0/24)           │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ Private Subnets                                     │    │
-│  │  • eleknowledge-private-1a (x.x.x.0/26)        │    │
-│  │  • eleknowledge-private-1b (x.x.x.64/26)       │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-┌─────────────────▼───────────────────────────────────────────┐
-│                    AWS Services                             │
-│  ┌──────────┬──────────┬──────────┬──────────┬─────────┐    │
-│  │ Cognito  │ DynamoDB │ Bedrock  │ S3       │ Secrets │    │
-│  │ User Pool│ Tables   │ KB+Agent │ Storage  │ Manager │    │
-│  └──────────┴──────────┴──────────┴──────────┴─────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
+- システム全体図: [docs/architecture/overview.md](docs/architecture/overview.md)
+- コンポーネント構成: [docs/architecture/components.md](docs/architecture/components.md)
 
-### 2.2 コンポーネント構成
-
-#### フロントエンド
-- **Framework:** Next.js 14 (App Router)
-- **UI Library:** Tailwind CSS + shadcn/ui
-- **状態管理:** React Context API / Zustand
-- **ホスティング:** AWS Amplify Hosting
-
-#### バックエンド
-- **API Gateway:** 3つの独立したREST API
-- **Lambda Runtime:** Python 3.11 / Node.js 18
-- **認証:** AWS Cognito User Pool
-
-#### AI/ML
-- **LLM:** Amazon Bedrock Claude 4.5 Haiku
-- **Vector Store:** Amazon Bedrock Knowledge Base
-- **Multi-Agent:** Amazon Bedrock Agent (Phase 3)
-
-#### データストア
-- **User DB:** Amazon DynamoDB (users)
-- **Chat History:** Amazon DynamoDB (eleknowledge-chatlogs)
-- **Sites DB:** Amazon DynamoDB(sites)
-- **Document Storage:** Amazon S3
+**概要:**
+- 🌐 **入口**: 社内ネットワーク → AWS Amplify Hosting（WAF: IP 制限・レート制限・マネージドルール統合）
+- ⚙️ **API/コンピュート**: API Gateway 3 系統（認証 / RAG / チャット管理）+ Lambda（Python 3.11 / Node.js 18）
+- 🧠 **AI/ML**: Bedrock Claude 4.5 Haiku、Knowledge Base（Titan Embeddings G1 + OpenSearch Serverless）、Bedrock Agent（Phase 3）
+- 💾 **データ**: DynamoDB（users / chatlogs / sites）、S3（documents / uploads）、Cognito User Pool、Secrets Manager
 
 ---
 
@@ -205,234 +113,37 @@ PoC 詳細設計は [docs/agent-spec.md](docs/agent-spec.md)、実装ガイド�
 
 ## 4. 技術スタック
 
-### 4.1 フロントエンド
+詳細仕様は [docs/tech-stack.md](docs/tech-stack.md) に切り出しました。
 
-| カテゴリ | 技術 | バージョン | 用途 |
-|---------|------|-----------|------|
-| Framework | Next.js | 14.x | App Router、SSR/SSG |
-| UI Library | React | 18.x | コンポーネント開発 |
-| スタイリング | Tailwind CSS | 3.x | ユーティリティファースト |
-| UI Components | shadcn/ui | latest | 再利用可能コンポーネント |
-| 状態管理 | Zustand | 4.x | 軽量状態管理 |
-| フォーム | React Hook Form | 7.x | フォーム検証 |
-| HTTP Client | Axios | 1.x | API通信 |
-| 認証 | AWS Amplify | 6.x | Cognito統合 |
-
-### 4.2 バックエンド
-
-| カテゴリ | 技術 | バージョン | 用途 |
-|---------|------|-----------|------|
-| Lambda Runtime | Python | 3.11 | RAG処理、DB操作 |
-| Lambda Runtime | Node.js | 18.x | 認証処理 |
-| API Gateway | REST API | v1 | APIエンドポイント |
-| 認証 | AWS Cognito | - | ユーザー管理 |
-| パッケージ管理 | pip / npm | - | 依存関係管理 |
-
-### 4.3 AI/ML
-
-| カテゴリ | 技術 | モデル | 用途 |
-|---------|------|--------|------|
-| LLM | Amazon Bedrock | Claude 4 Sonnet | RAG応答生成 |
-| Embedding | Amazon Bedrock | Titan Embeddings G1 | ベクトル化 |
-| Vector DB | OpenSearch Serverless | - | Knowledge Base |
-| Multi-Agent | Bedrock Agent | - | 複雑タスク処理（Phase 3） |
-
-### 4.4 インフラ
-
-| カテゴリ | サービス | 用途 |
-|---------|---------|------|
-| ホスティング | AWS Amplify | フロントエンド配信 |
-| セキュリティ | AWS WAF | IP制限、攻撃防御 |
-| データベース | DynamoDB | ユーザー、チャット履歴 |
-| ストレージ | S3 | ドキュメント保存 |
-| シークレット | Secrets Manager | API Key管理 |
-| ログ | CloudWatch Logs | ログ集約 |
-| 監視 | CloudWatch | メトリクス、アラート |
+**概要:**
+- 🖥️ **フロント**: Next.js 14 / React 18 / Tailwind CSS / shadcn/ui / Zustand / React Hook Form / Axios / AWS Amplify
+- ⚙️ **バックエンド**: Lambda（Python 3.11 / Node.js 18）、API Gateway REST、AWS Cognito
+- 🧠 **AI/ML**: Bedrock Claude 4 Sonnet、Titan Embeddings G1、OpenSearch Serverless、Bedrock Agent
+- ☁️ **インフラ**: Amplify / WAF / DynamoDB / S3 / Secrets Manager / CloudWatch
 
 ---
 
 ## 5. セキュリティ
 
-### 5.1 認証・認可
+詳細仕様は [docs/security.md](docs/security.md) に切り出しました。
 
-**認証方式:**
-- AWS Cognito User Pool
-- JWT（JSON Web Token）ベース
-- Access Token（1時間）+ Refresh Token（30日）
-
-**認可:**
-- API Gateway Cognito Authorizer
-- Lambdaでユーザー権限チェック
-- リソースベースのアクセス制御
-
-### 5.2 データ暗号化
-
-**転送時の暗号化:**
-- すべての通信はHTTPS（TLS 1.2以上）
-- API Gateway → Lambda: AWS内部通信（暗号化済み）
-
-**保管時の暗号化:**
-- DynamoDB: AWS管理キー（デフォルト暗号化）
-- S3: SSE-S3（サーバーサイド暗号化）
-- Secrets Manager: AWS KMS暗号化
-
-### 5.3 ネットワークセキュリティ
-
-**VPC構成:**
-- Private Subnet内にLambda配置
-- NAT Gateway経由で外部API接続
-- Security Groupで通信制限
-
-**IP制限:**
-- AWS WAF IP Set: 192.168.28.0/24
-- 社内ネットワークからのみアクセス可能
-
-### 5.4 環境変数管理
-
-**機密情報の保護:**
-- すべての機密情報は`.env`ファイルで管理
-- `.env`は`.gitignore`に記載（Git管理外）
-- 本番環境はAWS Secrets Managerで管理
-
-**環境変数の種類:**
-```bash
-# AWS設定
-AWS_REGION=us-east-1
-AWS_ACCOUNT_ID=xxxxx
-
-# Cognito
-COGNITO_USER_POOL_ID=xxxxx
-COGNITO_CLIENT_ID=xxxxx
-
-# Bedrock
-BEDROCK_KB_ID=xxxxx
-BEDROCK_MODEL_ID=anthropic.claude-sonnet-4-xxxxx
-
-# DynamoDB
-DYNAMODB_USERS_TABLE=eleknowledge-users
-DYNAMODB_CHATLOGS_TABLE=eleknowledge-chatlogs
-
-# S3
-S3_DOCUMENTS_BUCKET=eleknowledge-documents
-```
-
-### 5.5 入力検証
-
-**バックエンド検証:**
-- すべてのユーザー入力をサニタイゼーション
-- XSS対策: HTMLエスケープ
-- SQLインジェクション対策: パラメータ化クエリ（DynamoDB）
-- 入力長制限: 最大文字数制限
-
-**フロントエンド検証:**
-- React Hook Formでバリデーション
-- 型安全性（TypeScript）
-- CSRFトークン（必要に応じて）
+**概要:**
+- 🔐 **認証・認可**: Cognito User Pool + JWT（Access 1h / Refresh 30d）、API Gateway Cognito Authorizer
+- 🔒 **暗号化**: HTTPS（TLS 1.2+）、DynamoDB / S3 / Secrets Manager すべて保管時暗号化
+- 🛡️ **ネットワーク**: Private Subnet + NAT Gateway、WAF IP Set による社内限定アクセス
+- 🔑 **シークレット管理**: `.env`（dev）/ Secrets Manager（prod）
+- ✅ **入力検証**: サニタイゼーション、XSS/SQLi 対策、TypeScript 型安全
 
 ---
 
 ## 6. データモデル
 
-### 6.1 DynamoDB テーブル設計
+詳細仕様は [docs/data-model.md](docs/data-model.md) に切り出しました。
 
-#### 6.1.1 users テーブル
-
-```typescript
-{
-  userId: string;           // Partition Key (Cognito Sub)
-  email: string;            // Email
-  username: string;         // ユーザー名
-  createdAt: string;        // 作成日時（ISO 8601）
-  lastLoginAt: string;      // 最終ログイン
-  role: 'admin' | 'user';   // ロール
-}
-```
-
-#### 6.1.2 eleknowledge-chatlogs テーブル
-
-```typescript
-{
-  sessionId: string;        // Partition Key
-  messageId: string;        // Sort Key (ULID)
-  userId: string;           // ユーザーID（GSI）
-  role: 'user' | 'assistant';
-  content: string;          // メッセージ内容
-  timestamp: string;        // タイムスタンプ
-  citations?: string[];     // 引用（AIのみ）
-  sourceDocuments?: object[]; // ソース文書
-  feedback?: string;        // フィードバック
-  ttl: number;              // TTL（30日後削除）
-}
-```
-
-**GSI (Global Secondary Index):**
-- userId-timestamp-index: ユーザーごとの履歴取得
-
-### 6.2 S3 バケット構成
-
-#### 6.2.1 eleknowledge-documents（Knowledge Base用）
-
-```
-eleknowledge-documents/
-├── manuals/              # マニュアル
-├── policies/             # 規定・ポリシー
-├── reports/              # 報告書
-└── specifications/       # 仕様書
-```
-
-#### 6.2.2 eleknowledge-uploads（一時アップロード用）
-
-```
-eleknowledge-uploads/
-├── tmp/                  # 一時ファイル（24時間で削除）
-└── processed/            # 処理済みファイル
-```
-
-### 6.3 データライフサイクル管理
-
-#### チャット履歴の保管期間
-
-**ポリシー:**
-- 保管期間: 最終更新から**30日間**
-- 自動削除: DynamoDB TTL機能で実装
-- UI表示: 各セッションに残り日数を表示
-
-**実装:**
-```python
-# TTL設定（メッセージ保存時）
-ttl_timestamp = int(time.time()) + (30 * 24 * 60 * 60)  # 30日後
-
-item = {
-    'sessionId': session_id,
-    'messageId': message_id,
-    'content': content,
-    'timestamp': datetime.now().isoformat(),
-    'ttl': ttl_timestamp  # TTL属性
-}
-```
-
-**UI表示例:**
-```typescript
-// 残り日数の計算と表示
-const daysUntilDeletion = calculateDaysUntilDeletion(session.ttl);
-// "あと15日で削除されます"
-```
-
-#### S3 ドキュメントのライフサイクル
-
-**ライフサイクルポリシー:**
-- 30日: Standard → Glacier（アーカイブ）
-- 90日: Glacier → Deep Archive
-- 1年: 削除（ポリシーに基づく）
-
-**一時ファイル:**
-- tmp/ 配下: 24時間で自動削除
-
-#### 削除通知
-
-**通知設定:**
-- 削除7日前: メール通知（オプション）
-- 削除1日前: UI内通知バナー表示
+**概要:**
+- 🗄️ **DynamoDB**: `users`（Cognito Sub をキー）、`eleknowledge-chatlogs`（sessionId + messageId、TTL 30日、userId-timestamp GSI）
+- 🪣 **S3**: `eleknowledge-documents`（manuals/policies/reports/specifications）、`eleknowledge-uploads`（tmp は 24h で自動削除）
+- ♻️ **ライフサイクル**: チャット履歴 30 日 TTL、S3 は 30d→Glacier / 90d→Deep Archive / 1y→削除、削除 7/1 日前に通知
 
 ---
 
