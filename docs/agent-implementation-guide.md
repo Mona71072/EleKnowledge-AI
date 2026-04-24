@@ -39,7 +39,7 @@
 ```python
 {
     "actionType": "db-search",
-    "constructionNumber": "SITE_001",
+    "constructionNumber": "EQL0001",
     "filters": {
         "includeHistory": True,
         "maxResults": 1
