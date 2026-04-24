@@ -169,6 +169,6 @@ DB Search response: {
 ## 次のステップ
 
 すべてのテストが完了したら：
-1. テスト結果を roadmap.md に記録
+1. テスト結果を `docs/features/development/phase3-troubleshooting-spec.md` に記録
 2. 本番環境への移行準備
 3. パフォーマンス最適化（キャッシング、並列処理）
