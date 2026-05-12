@@ -6,21 +6,58 @@ import json
 import logging
 import os
 import re
-import uuid  # 追加
+import uuid
 from typing import Dict, Any
 import boto3
 
-# 環境変数 (本番用)
-# AGENT_ID = ssm.get_parameter(Name='/eleknowledge/bedrock/agent-id')['Parameter']['Value']
-# AGENT_ALIAS_ID = ssm.get_parameter(Name='/eleknowledge/bedrock/agent-alias-id')['Parameter']['Value']
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 # 技術検証用 (本番環境では削除)
 AGENT_ID = "D6FAGLJPPO"  # ダミー値
 AGENT_ALIAS_ID = "WBXLCRHOCD"  # ダミー値
 
+ALLOWED_MODELS = ['KE-LG', 'KM-LD', 'CM-MA', 'ME-CH']
+
+
+class ValidationError(Exception):
+    """入力バリデーションエラー"""
+    pass
+
+
 def validate_input(request_body: Dict[str, Any]) -> Dict[str, Any]:
     """入力バリデーション"""
-    # ... 省略 ...
+    construction_number = request_body.get('constructionNumber', '').strip()
+    model = request_body.get('model', '').strip()
+
+    # constructionNumber か model のどちらかは必須
+    if not construction_number and not model:
+        raise ValidationError("constructionNumber か model のどちらかは必須です")
+
+    if construction_number and not re.match(r'^[A-Za-z0-9]{8}$', construction_number):
+        raise ValidationError("工事番号は半角英数8文字で指定してください")
+
+    trouble_description = request_body.get('troubleDescription', '').strip()
+    if not trouble_description:
+        raise ValidationError("troubleDescription は必須です")
+    if len(trouble_description) < 5 or len(trouble_description) > 2000:
+        raise ValidationError("不具合情報は5～2000文字で入力してください")
+
+    if model and model not in ALLOWED_MODELS:
+        raise ValidationError(f"model は {ALLOWED_MODELS} から選択してください")
+
+    error_code = request_body.get('errorCode', '').strip()
+    if error_code and not re.match(r'^[A-Z0-9]{4}$', error_code):
+        raise ValidationError("エラーコードは半角英数4文字で指定してください")
+
+    result = {'troubleDescription': trouble_description}
+    if construction_number:
+        result['constructionNumber'] = construction_number
+    if model:
+        result['model'] = model
+    if error_code:
+        result['errorCode'] = error_code
+    return result
 
 def format_agent_input(validated_data: Dict[str, Any]) -> str:
     """Agent入力フォーマット"""

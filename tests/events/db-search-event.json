@@ -1,0 +1,8 @@
+{
+  "actionGroup": "db-search",
+  "apiPath": "/site-info",
+  "httpMethod": "GET",
+  "parameters": {
+    "constructionNumber": "EIK54801"
+  }
+}

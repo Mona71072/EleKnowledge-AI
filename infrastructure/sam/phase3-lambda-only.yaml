@@ -20,8 +20,9 @@ Globals:
         ENVIRONMENT: !Ref Environment
         AGENT_ID: PLACEHOLDER_AGENT_ID
         AGENT_ALIAS_ID: PLACEHOLDER_AGENT_ALIAS_ID
-        KB_ID: PLACEHOLDER_KB_ID
-        SITES_TABLE: sites
+        KnowledgeBaseId: PLACEHOLDER_KB_ID
+        SitesTableName: sites
+        BEDROCK_REGION: us-east-1
 
 Resources:
   LambdaExecutionRole:
