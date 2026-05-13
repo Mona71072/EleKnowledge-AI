@@ -249,40 +249,26 @@ export default function HomePage() {
             </Card>
           </Link>
 
-          <button
-            type="button"
-            className="text-left"
-            onClick={() =>
-              openInfoModal({
-                title: 'トラブルシューティング（近日公開）',
-                description: '現場トラブルの状況から、原因候補と確認手順を整理して提案します。',
-                bullets: [
-                  '症状の聞き取りテンプレート',
-                  '原因候補の優先度付け',
-                  '安全な確認手順と記録',
-                ],
-              })
-            }
-          >
-            <Card variant="default" padding="md" className="h-full hover:shadow-lg transition-all duration-300 border-2 border-transparent hover:border-purple-200">
-            <div className="flex items-center justify-center h-14 w-14 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 text-white mb-4 shadow-md">
+          <Link href="/troubleshooting" className="group block h-full">
+            <Card variant="default" padding="md" className="h-full group-hover:shadow-xl transition-all duration-300 transform group-hover:-translate-y-2 border-2 border-transparent group-hover:border-purple-200">
+            <div className="flex items-center justify-center h-14 w-14 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 text-white mb-4 group-hover:from-purple-600 group-hover:to-purple-700 transition-all duration-300 shadow-md group-hover:shadow-lg">
               <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
             </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">トラブルシューティング</h3>
+            <h3 className="text-xl font-semibold text-gray-900 group-hover:text-purple-600 transition-colors mb-2">トラブルシューティング</h3>
             <p className="text-sm text-gray-600 mb-4 leading-relaxed">
               現場トラブルの原因分析と対処方法提案
             </p>
-            <span className="inline-flex items-center px-3 py-1.5 bg-yellow-100 text-yellow-800 text-xs font-semibold rounded-full border border-yellow-200">
+            <span className="inline-flex items-center px-3 py-1.5 bg-purple-100 text-purple-800 text-xs font-semibold rounded-full border border-purple-200">
               <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
               </svg>
-              近日公開
+              PoC 利用可能
             </span>
             </Card>
-          </button>
+          </Link>
 
           <button
             type="button"
