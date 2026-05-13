@@ -1,0 +1,8 @@
+{
+  "body": "{\"model\": \"KE-LG\"}",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "httpMethod": "POST",
+  "path": "/troubleshooting/analyze"
+}

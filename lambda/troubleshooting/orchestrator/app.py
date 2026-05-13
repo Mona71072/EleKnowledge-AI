@@ -61,14 +61,18 @@ def validate_input(request_body: Dict[str, Any]) -> Dict[str, Any]:
 
 def format_agent_input(validated_data: Dict[str, Any]) -> str:
     """Agent入力フォーマット"""
-    return f"""
-【現場情報】
-工事番号: {validated_data['constructionNumber']}
-不具合内容: {validated_data['troubleDescription']}
+    lines = ["【現場情報】"]
+    if 'constructionNumber' in validated_data:
+        lines.append(f"工事番号: {validated_data['constructionNumber']}")
+    if 'model' in validated_data:
+        lines.append(f"機種: {validated_data['model']}")
+    if 'errorCode' in validated_data:
+        lines.append(f"エラーコード: {validated_data['errorCode']}")
+    lines.append(f"不具合内容: {validated_data['troubleDescription']}")
+    lines.append("\n【処理要求】")
+    lines.append("現場情報を取得し、トラブルシューティングを行ってください")
+    return "\n".join(lines)
 
-【処理要求】
-現場情報を取得してください
-"""
 
 def invoke_agent(input_text: str) -> Dict[str, Any]:
     """Bedrock Agent呼び出し"""
@@ -79,23 +83,29 @@ def invoke_agent(input_text: str) -> Dict[str, Any]:
         agentAliasId=AGENT_ALIAS_ID,
         sessionId=session_id,
         inputText=input_text,
-        agentRuntimeConfigurations=[
-            {
-                "actionGroup": {
-                    "actionGroupId": "QEBTU9FRS1",  # 技術検証用
-                    "actionGroupName": "GetSiteInfo"
-                }
-            }
-        ]
     )
     return response
+
+
+def parse_agent_response(response: Dict[str, Any]) -> str:
+    """Bedrock Agent EventStream からテキストを抽出"""
+    output_parts = []
+    for event in response.get('completion', []):
+        if 'chunk' in event:
+            chunk_bytes = event['chunk'].get('bytes', b'')
+            if chunk_bytes:
+                output_parts.append(chunk_bytes.decode('utf-8'))
+    result = "".join(output_parts)
+    return result if result else "応答を取得できませんでした"
+
 
 def format_orchestration_response(status_code: int, response: Dict[str, Any]) -> Dict[str, Any]:
     """オーケストレーションレスポンス整形"""
     return {
         'statusCode': status_code,
-        'body': json.dumps(response)
+        'body': json.dumps(response, ensure_ascii=False)
     }
+
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Lambdaハンドラ"""
@@ -104,7 +114,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         validated = validate_input(body)
         input_text = format_agent_input(validated)
         agent_response = invoke_agent(input_text)
-        return format_orchestration_response(200, agent_response)
+        result_text = parse_agent_response(agent_response)
+        return format_orchestration_response(200, {"result": result_text})
     except ValidationError as e:
         return format_orchestration_response(400, {"error": str(e)})
     except Exception as e:
