@@ -97,7 +97,7 @@ def search_knowledge_base(query: str) -> List[Dict[str, Any]]:
                     'overrideSearchType': 'SEMANTIC'
                 }
             },
-            text=query
+            retrievalQuery={'text': query}
         )
         
         results = []

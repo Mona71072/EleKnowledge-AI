@@ -113,7 +113,7 @@ def search_knowledge_base(query: str, filters: Dict[str, Any]) -> List[Dict[str,
             retrievalConfiguration={
                 'vectorSearchConfiguration': vector_config
             },
-            text=query
+            retrievalQuery={'text': query}
         )
         
         results = []
