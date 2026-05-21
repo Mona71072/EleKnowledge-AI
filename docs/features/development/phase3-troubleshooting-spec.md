@@ -1,8 +1,8 @@
 ---
 status: development
 phase: 3
-last-verified: 2026-04-24
-related-code: lambda/troubleshooting/, lambda/troubleshooting-small/
+last-verified: 2026-05-21
+related-code: lambda/troubleshooting/, frontend/src/app/troubleshooting/
 ---
 
 # Phase 3: トラブルシューティング機能
@@ -11,10 +11,10 @@ related-code: lambda/troubleshooting/, lambda/troubleshooting-small/
 > 全体索引は [spec.md](../../../spec.md) を参照してください。
 >
 > **関連ドキュメント:**
-> - PoC 詳細設計: [docs/agent-spec.md](../../agent-spec.md)
+> - API 仕様: [docs/api/troubleshooting.md](../../api/troubleshooting.md)
 > - 実装ガイド: [phase3-troubleshooting-implementation-guide.md](phase3-troubleshooting-implementation-guide.md)
 >
-> **注:** Phase 3 の詳細仕様は、Phase 2 実装完了後に改めて策定します。現時点では概要・PoC 設計レベルの記載です。
+> **PoC 検証状況（2026-05-21）:** E2E テスト完了。orchestrator → Bedrock Agent → 4 action groups の全フロー動作確認済み。
 
 ## 目的
 
@@ -24,199 +24,120 @@ related-code: lambda/troubleshooting/, lambda/troubleshooting-small/
 
 ```typescript
 interface TroubleshootingInput {
-  siteNumber: string;        // 現場番号
-  troubleDescription: string; // トラブル内容
-  equipmentModel?: string;    // 機器型番
-  symptom?: string;          // 症状
-  errorCode?: string;        // エラーコード
-  photos?: File[];           // 現場写真
+  constructionNumber?: string; // 工事番号（半角英数8文字）
+  model?: string;              // 機種名（KE-LG / KM-LD / CM-MA / ME-CH）
+  troubleDescription: string;  // 不具合内容（5〜2000文字）
+  errorCode?: string;          // エラーコード（半角英数4文字）
+  // constructionNumber か model のどちらかは必須
 }
 ```
 
 ## 処理フロー
 
 ```
-1. ユーザー入力（現場番号、トラブル内容）
+1. ユーザー入力（工事番号、不具合情報）
    ↓
-2. Bedrock Agent（メインオーケストレーター）起動
+2. POST /troubleshooting/analyze → troubleshooting-orchestrator Lambda
+   ├─ 入力バリデーション
+   └─ Bedrock Agent invoke (D6FAGLJPPO / TSTALIASID)
    ↓
-3. Action Group 1: DB検索Lambda実行
-   ├─ 現場番号から仕様データ取得
-   │   └─ DynamoDB/RDS: sites テーブル
-   ├─ 機器型番、設置環境、メンテナンス履歴
-   └─ 過去のトラブル履歴
+3. Action 1 — GetSiteInfo (db-search Lambda)
+   └─ DynamoDB sites テーブル → 現場名・機種・制御システム・担当者
    ↓
-4. Knowledge Base検索
-   ├─ セマンティック検索で類似トラブル事例抽出
-   │   └─ フィルター: document-type = "trouble-case"
-   ├─ 関連技術資料の検索
-   │   └─ フィルター: product = {該当製品}
-   └─ トラブルシューティングマニュアル
+4. Action 2 — KB Search1 (kb-search1 Lambda)
+   └─ KB (OCLVRJDMAH) セマンティック検索
+       └─ フィルター: document = Trouble-Cases or Trouble-Reports, model, control-system
    ↓
-5. Claude 4による統合分析
-   ├─ 入力情報の整理
-   ├─ 類似事例との比較
-   ├─ 原因推定（優先度順）
-   └─ 対処方法の提案（ステップバイステップ）
+5. Action 3 — KB Search2 (kb-search2 Lambda)
+   └─ KB (OCLVRJDMAH) トラブルシュートマニュアル全文検索（フィルターなし）
    ↓
-6. 結果出力
-   ├─ トラブル分析サマリー
-   ├─ 考えられる原因（Top 3）
-   ├─ 推奨対処方法
-   ├─ 参照資料
-   └─ エスカレーション判断
+6. Action 4 — KB Search3 (kb-search3 Lambda)
+   └─ KB (OCLVRJDMAH) セマンティック検索
+       └─ フィルター: document = C資料, model, control-system
+   ↓
+7. claude-haiku-4-5 による統合分析・回答生成
+   └─ 現場情報 + 検索結果 → 日本語テキスト形式の対処手順
 ```
 
-## Bedrock Agent設定
+## AWS リソース（PoC 環境）
 
-```json
-{
-  "agentName": "troubleshooting-agent",
-  "description": "現場トラブルの原因分析と対処方法提案",
-  "foundationModel": "anthropic.claude-sonnet-4-20250514-v1:0",
-  "instruction": "あなたは電気設備のトラブルシューティング専門家です...",
-  "actionGroups": [
-    {
-      "actionGroupName": "db-search",
-      "description": "現場情報とトラブル履歴の検索",
-      "lambdaArn": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:db-search-lambda"
-    }
-  ],
-  "knowledgeBases": [
-    {
-      "knowledgeBaseId": "KB_ELEKNOWLEDGE_001",
-      "description": "技術資料とトラブル事例データベース"
-    }
-  ]
-}
-```
+| リソース | 値 |
+|---------|-----|
+| Bedrock Agent ID | `D6FAGLJPPO` |
+| Agent Alias | `TSTALIASID`（DRAFT）|
+| Foundation Model | `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Knowledge Base ID | `OCLVRJDMAH` |
+| DynamoDB テーブル | `sites` |
+| API Gateway | `s8dbirs0m6`（chat-api と共用） |
 
-## DB検索Lambda (db-search-lambda)
+## Lambda 構成
 
-```python
-def lambda_handler(event, context):
-    """
-    Bedrock Agentから呼び出されるAction Group
-    現場情報とトラブル履歴を検索
-    """
-    parameters = event['parameters']
-    site_number = parameters[0]['value']
-    
-    # DynamoDBから現場情報取得
-    site_info = get_site_info(site_number)
-    
-    # トラブル履歴取得
-    trouble_history = get_trouble_history(site_number)
-    
-    return {
-        'response': {
-            'actionGroup': 'db-search',
-            'function': 'get_site_info',
-            'functionResponse': {
-                'responseBody': {
-                    'TEXT': {
-                        'body': json.dumps({
-                            'site_info': site_info,
-                            'trouble_history': trouble_history
-                        }, ensure_ascii=False)
-                    }
-                }
-            }
-        }
-    }
-```
+| Lambda 関数名 | 役割 | Bedrock Agent での呼び出し形式 |
+|-------------|------|-------------------------------|
+| `troubleshooting-orchestrator` | エントリーポイント。バリデーション + Agent invoke | API Gateway から直接呼び出し |
+| `troubleshooting-db-search` | DynamoDB から現場情報取得 | apiSchema (POST /site-info) |
+| `troubleshooting-kb-search1` | トラブル事例・報告書検索 | functionSchema (`searchTroubleCases`) |
+| `troubleshooting-kb-search2` | マニュアル全文検索 | functionSchema (`searchTroubleshootManuals`) |
+| `troubleshooting-kb-search3` | C資料（詳細技術資料）検索 | functionSchema (`searchCMaterialDocs`) |
+
+## DynamoDB sites テーブルスキーマ
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `constructionNumber` | String (PK) | 工事番号（例: `EIK54801`） |
+| `sitesName` | String | 現場名 |
+| `sitesNumber` | String | 現場番号 |
+| `model` | String | 機種名（例: `KE-LG`） |
+| `controlSystem` | String | 制御システム名（例: `VFGLF`） |
+| `constructionRep` | String | 担当者名 |
 
 ## 出力フォーマット
 
 ```typescript
 interface TroubleshootingResult {
-  analysisId: string;
-  siteNumber: string;
-  timestamp: string;
-  
-  // トラブル分析
-  analysis: {
-    summary: string;
-    severity: 'low' | 'medium' | 'high' | 'critical';
-    estimatedCause: string[];
-  };
-  
-  // 原因候補
-  possibleCauses: Array<{
-    cause: string;
-    probability: number;
-    evidence: string[];
-    referenceDocuments: string[];
-  }>;
-  
-  // 対処方法
-  solutions: Array<{
-    step: number;
-    action: string;
-    caution: string;
-    estimatedTime: string;
-    requiredTools: string[];
-  }>;
-  
-  // 参照資料
-  references: Array<{
-    documentName: string;
-    documentType: string;
-    relevance: number;
-  }>;
-  
-  // エスカレーション判断
-  escalation: {
-    required: boolean;
-    reason?: string;
-    department?: string;
-  };
+  result: string; // Bedrock Agent が生成した日本語テキスト（Markdown 形式）
 }
 ```
 
-## UI画面
+レスポンスは構造化 JSON ではなく、Agent が生成した自然言語テキスト。
+現場情報・対処手順・エラーコード解説などが含まれる（フォーマットは Agent が自律的に決定）。
+
+## UI 画面
+
+実装済み: `frontend/src/app/troubleshooting/page.tsx`
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ 🔧 トラブルシューティング                                │
+│ ← トラブルシューティング                                 │
 ├─────────────────────────────────────────────────────────┤
+│ トラブル情報を入力                                       │
+│ 工事番号か機種のどちらかは必須                           │
 │                                                         │
-│ 現場番号: [___________]  [検索]                         │
+│ 工事番号: [___________]（半角英数8文字）                 │
+│ 機種: [選択してください v]                               │
+│ エラーコード: [___________]（任意）                      │
 │                                                         │
-│ トラブル内容:                                            │
+│ 不具合情報 *                                            │
 │ ┌─────────────────────────────────────────────────┐     │
 │ │                                                 │     │
-│ │                                                 │     │
 │ └─────────────────────────────────────────────────┘     │
+│                                    0 / 2000             │
 │                                                         │
-│ 機器型番: [___________]                                 │
-│ エラーコード: [___________]                             │
-│                                                         │
-│ 📷 現場写真をアップロード [ファイル選択]                 │
-│                                                         │
-│                          [分析開始]                      │
-│                                                         │
+│           [  トラブルを分析する  ]                       │
+│                （最大60秒）                              │
 ├─────────────────────────────────────────────────────────┤
-│ 📊 分析結果                                              │
+│ 分析結果                          [もう一度分析する]     │
 │                                                         │
-│ ✅ トラブル分析サマリー                                  │
-│ 電源ユニットの故障が疑われます。                         │
-│ 重要度: 🔴 高                                           │
+│ （Bedrock Agent の回答テキスト）                         │
 │                                                         │
-│ 🔍 考えられる原因（確率順）                              │
-│ 1. ヒューズ断線（70%）                                  │
-│    📄 メンテナンスマニュアル p.42                        │
-│ 2. 過電流保護回路の誤作動（20%）                         │
-│    📄 トラブル事例集 #123                               │
-│ 3. 接触不良（10%）                                      │
-│                                                         │
-│ 🛠️ 推奨対処方法                                          │
-│ Step 1: 電源を切断する [重要] (5分)                     │
-│ Step 2: ヒューズを点検する (10分)                       │
-│ Step 3: テスターで導通確認 (5分)                        │
-│                                                         │
-│ ⚠️ エスカレーション: 不要                                │
-│                                                         │
-│ [レポートダウンロード] [履歴に保存]                      │
+│            [新しいトラブルを入力]                        │
 └─────────────────────────────────────────────────────────┘
 ```
+
+## 今後の対応（本実装フェーズ）
+
+- [ ] Bedrock Agent 設定・アクション設定を `phase3-template.yaml` に IaC 化
+- [ ] `TSTALIASID`（DRAFT）を本番用バージョン alias に切り替え
+- [ ] KB データ（Trouble-Cases / C資料）の整備
+- [ ] レスポンスタイムアウト対策（API Gateway 29 秒上限、非同期化の検討）
+- [ ] 本ドキュメントを `docs/features/production/` に昇格

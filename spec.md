@@ -74,6 +74,7 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 | [docs/api/auth.md](docs/api/auth.md) | 認証API |
 | [docs/api/rag.md](docs/api/rag.md) | RAG処理API |
 | [docs/api/chat.md](docs/api/chat.md) | チャット管理API |
+| [docs/api/troubleshooting.md](docs/api/troubleshooting.md) | トラブルシューティングAPI（Phase 3 / 開発中） |
 | [docs/api/common.md](docs/api/common.md) | 共通仕様（エラーハンドリング・スロットリング） |
 
 ### 🚀 デプロイ
