@@ -13,8 +13,18 @@ import { ErrorMessage } from '@/components/ui/ErrorMessage';
 
 const ALLOWED_MODELS = ['KE-LG', 'KM-LD', 'CM-MA', 'ME-CH'] as const;
 
+interface SourceDocument {
+  documentName: string;
+  title?: string;
+  sourceUri: string;
+  documentType: string;
+  model: string;
+  relevance: number;
+}
+
 interface TroubleshootingResult {
   result: string;
+  sourceDocuments?: SourceDocument[];
 }
 
 interface FormState {
@@ -58,6 +68,16 @@ function validateForm(form: FormState): FormErrors {
   return errors;
 }
 
+const getUniqueDocs = (docs: SourceDocument[] = []) => {
+  const seen = new Set<string>();
+  return docs.filter((doc) => {
+    const key = doc.sourceUri || doc.documentName;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 export default function TroubleshootingPage() {
   const router = useRouter();
   const [pageLoading, setPageLoading] = useState(true);
@@ -65,6 +85,7 @@ export default function TroubleshootingPage() {
   const [result, setResult] = useState<TroubleshootingResult | null>(null);
   const [apiError, setApiError] = useState('');
   const [formErrors, setFormErrors] = useState<FormErrors>({});
+  const [showAllCitations, setShowAllCitations] = useState(false);
 
   const [form, setForm] = useState<FormState>({
     constructionNumber: '',
@@ -161,6 +182,7 @@ export default function TroubleshootingPage() {
     setResult(null);
     setApiError('');
     setFormErrors({});
+    setShowAllCitations(false);
   };
 
   if (pageLoading) {
@@ -306,6 +328,79 @@ export default function TroubleshootingPage() {
                 <div className="prose prose-sm max-w-none text-gray-800 whitespace-pre-wrap leading-relaxed">
                   {result.result}
                 </div>
+
+                {/* 参考資料 */}
+                {result.sourceDocuments && result.sourceDocuments.length > 0 && (() => {
+                  const uniqueDocs = getUniqueDocs(result.sourceDocuments);
+                  if (!uniqueDocs.length) return null;
+                  const primaryDocs = uniqueDocs.slice(0, 3);
+                  const extraDocs = uniqueDocs.slice(3);
+                  return (
+                    <div className="mt-4 pt-4 border-t border-gray-200 space-y-1.5">
+                      <p className="text-sm font-semibold text-gray-700 mb-2.5 flex items-center gap-1.5">
+                        <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        参考資料
+                      </p>
+                      <div className="space-y-1.5">
+                        {primaryDocs.map((doc, idx) => (
+                          <a
+                            key={`${doc.sourceUri || doc.documentName}-${idx}`}
+                            href={doc.sourceUri}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"
+                          >
+                            <svg className="w-4 h-4 flex-shrink-0 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <span className="truncate flex-1">
+                              {doc.title ? `${doc.title}【${doc.documentName}】` : `【${doc.documentName}】`}
+                            </span>
+                            <span className="text-gray-500 text-xs bg-gray-100 px-2 py-0.5 rounded-full">{(doc.relevance * 100).toFixed(0)}%</span>
+                          </a>
+                        ))}
+
+                        {extraDocs.length > 0 && (
+                          <div className="space-y-1.5">
+                            <button
+                              onClick={() => setShowAllCitations((prev) => !prev)}
+                              className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1.5"
+                              aria-expanded={showAllCitations}
+                            >
+                              <svg className={`w-4 h-4 transition-transform ${showAllCitations ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                              {showAllCitations ? '折りたたむ' : `さらに ${extraDocs.length} 件表示`}
+                            </button>
+                            {showAllCitations && (
+                              <div className="space-y-1.5">
+                                {extraDocs.map((doc, idx) => (
+                                  <a
+                                    key={`${doc.sourceUri || doc.documentName}-extra-${idx}`}
+                                    href={doc.sourceUri}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"
+                                  >
+                                    <svg className="w-4 h-4 flex-shrink-0 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <span className="truncate flex-1">
+                                      {doc.title ? `${doc.title}【${doc.documentName}】` : `【${doc.documentName}】`}
+                                    </span>
+                                    <span className="text-gray-500 text-xs bg-gray-100 px-2 py-0.5 rounded-full">{(doc.relevance * 100).toFixed(0)}%</span>
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
 

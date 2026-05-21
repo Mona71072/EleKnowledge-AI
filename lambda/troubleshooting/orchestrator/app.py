@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 import boto3
 
 logger = logging.getLogger()
@@ -15,8 +15,11 @@ logger.setLevel(logging.INFO)
 
 AGENT_ID = os.environ.get('AGENT_ID', '')
 AGENT_ALIAS_ID = os.environ.get('AGENT_ALIAS_ID', 'TSTALIASID')
+DOCUMENTS_BUCKET = os.environ.get('DOCUMENTS_BUCKET', '')
 
 ALLOWED_MODELS = ['KE-LG', 'KM-LD', 'CM-MA', 'ME-CH']
+
+s3_client = boto3.client('s3', region_name=os.environ.get('BEDROCK_REGION', 'us-east-1'))
 
 
 class ValidationError(Exception):
@@ -86,16 +89,60 @@ def invoke_agent(input_text: str) -> Dict[str, Any]:
     return response
 
 
-def parse_agent_response(response: Dict[str, Any]) -> str:
-    """Bedrock Agent EventStream からテキストを抽出"""
+def parse_agent_response(response: Dict[str, Any]) -> Tuple[str, List[Dict]]:
+    """Bedrock Agent EventStream からテキストと citation を抽出"""
     output_parts = []
+    raw_refs = []
+
     for event in response.get('completion', []):
         if 'chunk' in event:
-            chunk_bytes = event['chunk'].get('bytes', b'')
+            chunk = event['chunk']
+            chunk_bytes = chunk.get('bytes', b'')
             if chunk_bytes:
                 output_parts.append(chunk_bytes.decode('utf-8'))
+            for citation in chunk.get('attribution', {}).get('citations', []):
+                raw_refs.extend(citation.get('retrievedReferences', []))
+
     result = "".join(output_parts)
-    return result if result else "応答を取得できませんでした"
+    return result if result else "応答を取得できませんでした", raw_refs
+
+
+def build_source_documents(raw_refs: List[Dict]) -> List[Dict]:
+    """retrievedReferences から presigned URL 付き sourceDocuments を生成"""
+    seen = set()
+    docs = []
+    for ref in raw_refs:
+        uri = (ref.get('location', {}).get('s3Location', {}).get('uri') or
+               ref.get('metadata', {}).get('x-amz-bedrock-kb-source-uri', ''))
+        if not uri or uri in seen:
+            continue
+        doc_name = uri.split('/')[-1]
+        if doc_name.lower().endswith('.md'):
+            continue
+        seen.add(uri)
+
+        metadata = ref.get('metadata', {})
+        signed_url = uri
+        if DOCUMENTS_BUCKET and uri.startswith('s3://'):
+            key = uri.replace(f's3://{DOCUMENTS_BUCKET}/', '')
+            try:
+                signed_url = s3_client.generate_presigned_url(
+                    'get_object',
+                    Params={'Bucket': DOCUMENTS_BUCKET, 'Key': key},
+                    ExpiresIn=2592000,
+                )
+            except Exception as e:
+                logger.warning(f'presigned URL 生成失敗: {e}')
+
+        docs.append({
+            'documentName': doc_name,
+            'title': metadata.get('title'),
+            'sourceUri': signed_url,
+            'documentType': metadata.get('document', 'unknown'),
+            'model': metadata.get('model', ''),
+            'relevance': float(ref.get('score', 0.0)),
+        })
+    return docs
 
 
 def format_orchestration_response(status_code: int, response: Dict[str, Any]) -> Dict[str, Any]:
@@ -117,8 +164,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         validated = validate_input(body)
         input_text = format_agent_input(validated)
         agent_response = invoke_agent(input_text)
-        result_text = parse_agent_response(agent_response)
-        return format_orchestration_response(200, {"result": result_text})
+        result_text, raw_refs = parse_agent_response(agent_response)
+        source_documents = build_source_documents(raw_refs)
+        return format_orchestration_response(200, {
+            "result": result_text,
+            "sourceDocuments": source_documents,
+        })
     except ValidationError as e:
         return format_orchestration_response(400, {"error": str(e)})
     except Exception as e:

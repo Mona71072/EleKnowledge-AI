@@ -53,13 +53,40 @@ User Pool: `us-east-1_fCbgU2FR9` / Client ID: `5e3penrp89bbscs1001b246tqj`
 
 ```json
 {
-  "result": "【現場情報】\n工事番号: EIK54801\n現場名: ○○川崎\n...\n\n【トラブルシューティング】\n..."
+  "result": "【現場情報】\n工事番号: EIK54801\n現場名: ○○川崎\n...\n\n【トラブルシューティング】\n...",
+  "sourceDocuments": [
+    {
+      "documentName": "KE-LG_troubleshoot.pdf",
+      "title": "KE-LG トラブルシューティングガイド",
+      "sourceUri": "https://eleknowledge-ai-development-documents.s3.amazonaws.com/...（presigned URL, 30日有効）",
+      "documentType": "Trouble-Cases",
+      "model": "KE-LG",
+      "relevance": 0.85
+    }
+  ]
 }
 ```
 
 | フィールド | 型 | 説明 |
 |-----------|------|------|
 | `result` | string | Bedrock Agent が生成したトラブルシューティング回答（Markdown 形式） |
+| `sourceDocuments` | array | 回答の根拠となった参照文書リスト（空の場合は `[]`） |
+
+**`sourceDocuments` 要素の型:**
+
+| フィールド | 型 | 説明 |
+|-----------|------|------|
+| `documentName` | string | S3 オブジェクトキーのファイル名部分 |
+| `title` | string \| null | KB メタデータの `title` フィールド |
+| `sourceUri` | string | S3 presigned URL（有効期限 30 日）。生成失敗時は `s3://` URI |
+| `documentType` | string | KB メタデータの `document` フィールド（例: `Trouble-Cases`, `C資料`） |
+| `model` | string | KB メタデータの `model` フィールド |
+| `relevance` | number | 検索スコア（0.0〜1.0） |
+
+> **仕組み**: Bedrock Agent の invoke_agent EventStream `chunk.attribution.citations[].retrievedReferences[]` から取得。
+> Agent に直接紐付いた KB（`UBDLEGMD6D` 技術資料 / `HIFYJUGPOR` トラブルシュートマニュアル）の引用のみ含まれる。
+> action group 経由（OCLVRJDMAH）の引用はこのフィールドには含まれない。
+> `.md` ファイルは除外。重複 URI は排除（最初の出現を採用）。
 
 ### Response 400
 

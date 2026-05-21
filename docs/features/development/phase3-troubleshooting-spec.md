@@ -94,13 +94,25 @@ interface TroubleshootingInput {
 ## 出力フォーマット
 
 ```typescript
+interface SourceDocument {
+  documentName: string;   // S3 オブジェクトキーのファイル名
+  title: string | null;   // KB メタデータの title フィールド
+  sourceUri: string;      // S3 presigned URL（有効期限 30 日）
+  documentType: string;   // KB メタデータの document フィールド
+  model: string;          // KB メタデータの model フィールド
+  relevance: number;      // 検索スコア（0.0〜1.0）
+}
+
 interface TroubleshootingResult {
-  result: string; // Bedrock Agent が生成した日本語テキスト（Markdown 形式）
+  result: string;                    // Bedrock Agent が生成した日本語テキスト（Markdown 形式）
+  sourceDocuments: SourceDocument[]; // 参照文書リスト（空の場合は []）
 }
 ```
 
-レスポンスは構造化 JSON ではなく、Agent が生成した自然言語テキスト。
-現場情報・対処手順・エラーコード解説などが含まれる（フォーマットは Agent が自律的に決定）。
+`result` は Agent が生成した自然言語テキスト。現場情報・対処手順・エラーコード解説などが含まれる。
+
+`sourceDocuments` は Agent に直接紐付いた KB（`UBDLEGMD6D` / `HIFYJUGPOR`）の引用から生成。
+action group 経由（OCLVRJDMAH）の引用は含まれない。`.md` ファイルは除外済み。
 
 ## UI 画面
 
