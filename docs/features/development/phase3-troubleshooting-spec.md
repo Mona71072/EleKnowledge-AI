@@ -153,3 +153,26 @@ action group 経由（OCLVRJDMAH）の引用は含まれない。`.md` ファイ
 - [ ] KB データ（Trouble-Cases / C資料）の整備
 - [ ] レスポンスタイムアウト対策（API Gateway 29 秒上限、非同期化の検討）
 - [ ] 本ドキュメントを `docs/features/production/` に昇格
+- [ ] **sourceDocuments の引用取得を信頼性高く実装する**（後日対応、詳細は下記）
+
+## 既知の制限事項
+
+### sourceDocuments の非決定性（2026-05-21 確認）
+
+`sourceDocuments` は Bedrock Agent EventStream の `chunk.attribution.citations` から取得しているが、**引用が返る頻度は非決定的**。
+
+**原因:**
+
+Agent `D6FAGLJPPO` には KB へのアクセス経路が2系統ある。
+
+| 系統 | KB | 引用取得 | 使用頻度 |
+|---|---|---|---|
+| 直接紐付き KB | `UBDLEGMD6D`（技術資料）/ `HIFYJUGPOR`（マニュアル） | `chunk.attribution.citations` に出る | 非決定的（毎回とは限らない） |
+| action group KB | `OCLVRJDMAH`（kb-search1/2/3 経由） | citations に**出ない** | 毎回呼ばれる |
+
+Agent がどちらを使うかはその実行ごとに異なる。action group 経由の検索結果（毎回確実に使われる）は citations に含まれないため、`sourceDocuments` は空になることがある。
+
+**後日対応候補:**
+
+- **DynamoDB セッションストア案**: kb-search Lambda が session_id をキーに引用情報を DynamoDB に書き込み、orchestrator が読み出す。信頼性が高いが新テーブルが必要。
+- **trace パース案**: `invoke_agent(enableTrace=True)` で action group の出力テキストを trace イベントから取得し、構造化引用データを埋め込んで解析する。新 AWS リソース不要だが実装が複雑。

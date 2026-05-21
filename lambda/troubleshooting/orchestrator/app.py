@@ -93,15 +93,25 @@ def parse_agent_response(response: Dict[str, Any]) -> Tuple[str, List[Dict]]:
     """Bedrock Agent EventStream からテキストと citation を抽出"""
     output_parts = []
     raw_refs = []
+    chunk_count = 0
+    citation_count = 0
 
     for event in response.get('completion', []):
         if 'chunk' in event:
+            chunk_count += 1
             chunk = event['chunk']
             chunk_bytes = chunk.get('bytes', b'')
             if chunk_bytes:
                 output_parts.append(chunk_bytes.decode('utf-8'))
             for citation in chunk.get('attribution', {}).get('citations', []):
+                citation_count += 1
                 raw_refs.extend(citation.get('retrievedReferences', []))
+
+    logger.info(f"EventStream: chunks={chunk_count}, citations={citation_count}, retrievedRefs={len(raw_refs)}")
+    for i, ref in enumerate(raw_refs):
+        uri = (ref.get('location', {}).get('s3Location', {}).get('uri') or
+               ref.get('metadata', {}).get('x-amz-bedrock-kb-source-uri', ''))
+        logger.info(f"  ref[{i}]: uri={uri}, score={ref.get('score')}, metadata={ref.get('metadata', {})}")
 
     result = "".join(output_parts)
     return result if result else "応答を取得できませんでした", raw_refs
