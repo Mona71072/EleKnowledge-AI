@@ -13,9 +13,8 @@ import boto3
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# 技術検証用 (本番環境では削除)
-AGENT_ID = "D6FAGLJPPO"  # ダミー値
-AGENT_ALIAS_ID = "WBXLCRHOCD"  # ダミー値
+AGENT_ID = os.environ.get('AGENT_ID', '')
+AGENT_ALIAS_ID = os.environ.get('AGENT_ALIAS_ID', 'TSTALIASID')
 
 ALLOWED_MODELS = ['KE-LG', 'KM-LD', 'CM-MA', 'ME-CH']
 
