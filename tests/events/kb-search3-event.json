@@ -1,0 +1,11 @@
+{
+  "actionGroup": "kb-search-3",
+  "apiPath": "/c-materials",
+  "httpMethod": "GET",
+  "actionInvocation": {
+    "parameters": [
+      {"name": "query", "value": "昇降機が途中で停止する 原因 回路図"},
+      {"name": "model", "value": "KE-LG"}
+    ]
+  }
+}

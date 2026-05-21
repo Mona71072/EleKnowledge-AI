@@ -57,66 +57,63 @@ def validate_parameters(params: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_metadata_filter(params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    メタデータフィルターを構築
-    
-    Args:
-        params: 検証済みパラメータ
-        
-    Returns:
-        メタデータフィルター
+    メタデータフィルターを構築（Bedrock KB API 形式）
+
+    document は Trouble-Cases or Trouble-Reports。
+    model / controlSystem が指定された場合は andAll で絞り込む。
     """
-    filters = {}
-    
-    # document フィルター: Trouble-Cases または Trouble-Reports
-    filters['document'] = {
-        'or': [
+    document_filter = {
+        'orAll': [
             {'equals': {'key': 'document', 'value': 'Trouble-Cases'}},
-            {'equals': {'key': 'document', 'value': 'Trouble-Reports'}}
+            {'equals': {'key': 'document', 'value': 'Trouble-Reports'}},
         ]
     }
-    
-    # model フィルター（指定された場合）
+
+    extra_conditions = [document_filter]
+
     if 'model' in params:
-        filters['model'] = {
-            'equals': {'key': 'model', 'value': params['model']}
-        }
-    
-    # control-system フィルター（指定された場合）
+        extra_conditions.append({'equals': {'key': 'model', 'value': params['model']}})
+
     if 'controlSystem' in params:
-        filters['controlSystem'] = {
-            'equals': {'key': 'control-system', 'value': params['controlSystem']}
-        }
-    
-    return filters
+        extra_conditions.append({'equals': {'key': 'control-system', 'value': params['controlSystem']}})
+
+    if len(extra_conditions) == 1:
+        return document_filter
+
+    return {'andAll': extra_conditions}
 
 
 def search_knowledge_base(query: str, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Knowledge Base を検索
-    
+
     Args:
         query: 検索クエリ
-        filters: メタデータフィルター
-        
+        filters: メタデータフィルター（Bedrock KB API 形式）
+
     Returns:
         検索結果リスト
-        
+
     Raises:
         KBSearchError: 検索失敗
     """
     try:
         logger.info(f"Searching KB with query: {query}")
-        
+
+        vector_config: Dict[str, Any] = {
+            'numberOfResults': 10,
+            'overrideSearchType': 'SEMANTIC',
+        }
+        if filters:
+            vector_config['filter'] = filters
+
         # Bedrock Retrieve API を呼び出し
         response = bedrock_client.retrieve(
             knowledgeBaseId=KB_ID,
             retrievalConfiguration={
-                'vectorSearchConfiguration': {
-                    'numberOfResults': 10,
-                    'overrideSearchType': 'SEMANTIC'
-                }
+                'vectorSearchConfiguration': vector_config
             },
-            text=query
+            retrievalQuery={'text': query}
         )
         
         results = []

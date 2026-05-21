@@ -57,63 +57,58 @@ def validate_parameters(params: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_metadata_filter(params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    メタデータフィルターを構築
-    
-    Args:
-        params: 検証済みパラメータ
-        
-    Returns:
-        メタデータフィルター
+    メタデータフィルターを構築（Bedrock KB API 形式）
+
+    document は C資料 固定。
+    model / controlSystem が指定された場合は andAll で絞り込む。
     """
-    filters = {}
-    
-    # document フィルター: C資料
-    filters['document'] = {
-        'equals': {'key': 'document', 'value': 'C資料'}
-    }
-    
-    # model フィルター（指定された場合）
+    conditions: List[Dict[str, Any]] = [
+        {'equals': {'key': 'document', 'value': 'C資料'}}
+    ]
+
     if 'model' in params:
-        filters['model'] = {
-            'equals': {'key': 'model', 'value': params['model']}
-        }
-    
-    # control-system フィルター（指定された場合）
+        conditions.append({'equals': {'key': 'model', 'value': params['model']}})
+
     if 'controlSystem' in params:
-        filters['controlSystem'] = {
-            'equals': {'key': 'control-system', 'value': params['controlSystem']}
-        }
-    
-    return filters
+        conditions.append({'equals': {'key': 'control-system', 'value': params['controlSystem']}})
+
+    if len(conditions) == 1:
+        return conditions[0]
+
+    return {'andAll': conditions}
 
 
 def search_knowledge_base(query: str, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Knowledge Base を検索（C資料）
-    
+
     Args:
         query: 検索クエリ
-        filters: メタデータフィルター
-        
+        filters: メタデータフィルター（Bedrock KB API 形式）
+
     Returns:
         検索結果リスト
-        
+
     Raises:
         KBSearchError: 検索失敗
     """
     try:
         logger.info(f"Searching KB for C-Materials with query: {query}")
-        
+
+        vector_config: Dict[str, Any] = {
+            'numberOfResults': 10,
+            'overrideSearchType': 'SEMANTIC',
+        }
+        if filters:
+            vector_config['filter'] = filters
+
         # Bedrock Retrieve API を呼び出し
         response = bedrock_client.retrieve(
             knowledgeBaseId=KB_ID,
             retrievalConfiguration={
-                'vectorSearchConfiguration': {
-                    'numberOfResults': 10,
-                    'overrideSearchType': 'SEMANTIC'
-                }
+                'vectorSearchConfiguration': vector_config
             },
-            text=query
+            retrievalQuery={'text': query}
         )
         
         results = []

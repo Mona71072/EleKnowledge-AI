@@ -1,17 +1,68 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
-Description: 'Phase 3 - Troubleshooting Agent Infrastructure'
+Description: 'Phase 3 - Troubleshooting Agent Full Stack (Lambda + DynamoDB + API Gateway)'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: development
+    AllowedValues:
+      - development
+      - staging
+      - production
+    Description: Environment name
+
+  KnowledgeBaseId:
+    Type: String
+    Description: Bedrock Knowledge Base ID
+
+  AgentId:
+    Type: String
+    Description: Bedrock Agent ID
+    Default: PLACEHOLDER_AGENT_ID
+
+  AgentAliasId:
+    Type: String
+    Description: Bedrock Agent Alias ID
+    Default: PLACEHOLDER_AGENT_ALIAS_ID
+
+  BedrockRegion:
+    Type: String
+    Default: us-east-1
+    AllowedValues:
+      - us-east-1
+      - ap-northeast-1
+    Description: AWS Region for Bedrock API calls
+
+  Phase1StackName:
+    Type: String
+    Default: EleKnowledge-AI-development-phase1
+    Description: Phase 1 CloudFormation stack name (for UserPoolArn import)
 
 Globals:
   Function:
-    Runtime: python3.13
+    Runtime: python3.11
+    Timeout: 60
     MemorySize: 512
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        AGENT_ID: !Ref AgentId
+        AGENT_ALIAS_ID: !Ref AgentAliasId
+        KnowledgeBaseId: !Ref KnowledgeBaseId
+        SitesTableName: !Ref SitesTable
+        BEDROCK_REGION: !Ref BedrockRegion
 
 Resources:
+  # ──────────────────────────────────────────
+  # IAM
+  # ──────────────────────────────────────────
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub troubleshooting-lambda-role-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -19,6 +70,9 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
       Policies:
         - PolicyName: BedrockAccess
           PolicyDocument:
@@ -27,42 +81,141 @@ Resources:
               - Effect: Allow
                 Action:
                   - bedrock:InvokeAgent
-                  - dynamodb:Query
-                  - ssm:GetParameter
+                  - bedrock-agent-runtime:InvokeAgent
+                  - bedrock:Retrieve
+                  - bedrock-agent-runtime:Retrieve
                 Resource: '*'
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !GetAtt SitesTable.Arn
 
+  # ──────────────────────────────────────────
+  # DynamoDB
+  # ──────────────────────────────────────────
+  SitesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub sites-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: constructionNumber
+          AttributeType: S
+      KeySchema:
+        - AttributeName: constructionNumber
+          KeyType: HASH
+
+  # ──────────────────────────────────────────
+  # Lambda Functions
+  # ──────────────────────────────────────────
   OrchestratorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: "troubleshooting-orchestrator-dev"
-      Timeout: 60
-      CodeUri: s3://eleknowledge-troubleshooting-deployment-20260205/orchestrator.zip
+      FunctionName: !Sub troubleshooting-orchestrator-${Environment}
+      CodeUri: ../../lambda/troubleshooting/orchestrator/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        AnalyzeApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TroubleshootingApi
+            Path: /troubleshooting/analyze
+            Method: post
 
   DBSearchFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: "troubleshooting-db-search-dev"
-      Timeout: 60
-      CodeUri: s3://eleknowledge-troubleshooting-deployment-20260205/db-search.zip
+      FunctionName: !Sub troubleshooting-db-search-${Environment}
+      CodeUri: ../../lambda/troubleshooting/db-search/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
 
   KBSearch1Function:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: "troubleshooting-kb-search1-dev"
-      Timeout: 60
-      CodeUri: s3://eleknowledge-troubleshooting-deployment-20260205/kb-search1.zip
+      FunctionName: !Sub troubleshooting-kb-search1-${Environment}
+      CodeUri: ../../lambda/troubleshooting/kb-search1/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
 
+  KBSearch2Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub troubleshooting-kb-search2-${Environment}
+      CodeUri: ../../lambda/troubleshooting/kb-search2/
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  KBSearch3Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub troubleshooting-kb-search3-${Environment}
+      CodeUri: ../../lambda/troubleshooting/kb-search3/
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  # ──────────────────────────────────────────
+  # API Gateway
+  # ──────────────────────────────────────────
   TroubleshootingApi:
     Type: AWS::Serverless::Api
     Properties:
-      StageName: "dev"
+      Name: !Sub troubleshooting-api-${Environment}
+      StageName: !Ref Environment
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn:
+              Fn::ImportValue: !Sub ${Phase1StackName}-UserPoolArn
+      Cors:
+        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowMethods: "'POST,OPTIONS'"
+      GatewayResponses:
+        UNAUTHORIZED:
+          StatusCode: 401
+          ResponseTemplates:
+            application/json: '{"error": "認証が必要です"}'
+        ACCESS_DENIED:
+          StatusCode: 403
+          ResponseTemplates:
+            application/json: '{"error": "アクセスが拒否されました"}'
 
 Outputs:
-  OrchestratorArn:
+  TroubleshootingApiUrl:
+    Description: Troubleshooting API エンドポイント URL
+    Value: !Sub https://${TroubleshootingApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/troubleshooting/analyze
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiUrl
+
+  OrchestratorFunctionArn:
     Value: !GetAtt OrchestratorFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-OrchestratorArn
+
+  DBSearchFunctionArn:
+    Value: !GetAtt DBSearchFunction.Arn
+
+  KBSearch1FunctionArn:
+    Value: !GetAtt KBSearch1Function.Arn
+
+  KBSearch2FunctionArn:
+    Value: !GetAtt KBSearch2Function.Arn
+
+  KBSearch3FunctionArn:
+    Value: !GetAtt KBSearch3Function.Arn
+
+  SitesTableName:
+    Value: !Ref SitesTable
+    Export:
+      Name: !Sub ${AWS::StackName}-SitesTableName
