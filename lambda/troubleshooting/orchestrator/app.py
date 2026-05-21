@@ -102,7 +102,11 @@ def format_orchestration_response(status_code: int, response: Dict[str, Any]) ->
     """オーケストレーションレスポンス整形"""
     return {
         'statusCode': status_code,
-        'body': json.dumps(response, ensure_ascii=False)
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+        },
+        'body': json.dumps(response, ensure_ascii=False),
     }
 
 
