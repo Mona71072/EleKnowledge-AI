@@ -8,14 +8,14 @@ import time
 
 BASE = os.path.join(os.path.dirname(__file__), '..', 'lambda', 'troubleshooting')
 ROLE_ARN = 'arn:aws:iam::423623870147:role/troubleshooting-lambda-poc-role'
-KB_ID = 'CIHUAJILAB'
+KB_ID = 'OCLVRJDMAH'
 
 ENV_VARS = {
     'KnowledgeBaseId': KB_ID,
     'SitesTableName': 'sites',
     'BEDROCK_REGION': 'us-east-1',
-    'AGENT_ID': 'PLACEHOLDER',
-    'AGENT_ALIAS_ID': 'PLACEHOLDER',
+    'AGENT_ID': 'D6FAGLJPPO',
+    'AGENT_ALIAS_ID': 'TSTALIASID',
     'ENVIRONMENT': 'development',
 }
 
@@ -52,6 +52,10 @@ def deploy(func_name, dir_name):
                  '--function-name', func_name,
                  '--zip-file', f'fileb://{zip_path}',
                  '--query', 'FunctionName', '--output', 'text'])
+        if r.returncode == 0:
+            run(['aws', 'lambda', 'update-function-configuration',
+                 '--function-name', func_name,
+                 '--environment', f'file://{env_path}'])
         status = 'Updated'
     else:
         r = run(['aws', 'lambda', 'create-function',

@@ -52,54 +52,55 @@ def format_response(site_info: Dict[str, Any]) -> str:
     """レスポンスフォーマット"""
     result = [
         f"工事番号: {site_info['constructionNumber']}",
-        f"現場名: {site_info.get('siteName', '不明')}",
-        f"住所: {site_info.get('address', '不明')}",
+        f"現場名: {site_info.get('sitesName', '不明')}",
+        f"現場番号: {site_info.get('sitesNumber', '不明')}",
         "\n設置機器情報:",
+        f"  機種: {site_info.get('model', '不明')}",
+        f"  制御システム: {site_info.get('controlSystem', '不明')}",
     ]
-    equipment = site_info.get('installedEquipment', [])
-    if not equipment:
-        result.append("  - なし")
-    else:
-        for idx, eq in enumerate(equipment, 1):
-            result.append(f"  {idx}. 機種: {eq['model']}, 制御システム: {eq['controlSystem']}")
+    if site_info.get('constructionRep'):
+        result.append(f"\n担当者: {site_info['constructionRep']}")
     return "\n".join(result)
+
+
+def _extract_params(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Bedrock Agent (list/requestBody) / テストイベント (dict) 両フォーマット対応"""
+    # POST requestBody 形式 (Bedrock Agent API Schema)
+    req_body = event.get('requestBody', {}).get('content', {}).get('application/json', {})
+    if req_body.get('properties'):
+        return {p['name']: p.get('value', '') for p in req_body['properties']}
+    # GET query parameters 形式 (top-level list)
+    raw = event.get('parameters', [])
+    if isinstance(raw, list):
+        return {p['name']: p.get('value', '') for p in raw}
+    return raw  # dict 形式 (テストイベント用)
+
+
+def _make_response(event: Dict[str, Any], status: int, body: str) -> Dict[str, Any]:
+    """Bedrock Agent action group レスポンス形式"""
+    return {
+        'messageVersion': '1.0',
+        'response': {
+            'actionGroup': event.get('actionGroup', ''),
+            'apiPath': event.get('apiPath', '/site-info'),
+            'httpMethod': event.get('httpMethod', 'GET'),
+            'httpStatusCode': status,
+            'responseBody': {'TEXT': {'body': body}},
+        },
+    }
 
 
 def lambda_handler(event, context):
     """Lambdaハンドラー"""
     try:
-        # パラメータ取得
-        parameters = event.get('parameters', {})
+        parameters = _extract_params(event)
         validated = validate_parameters(parameters)
-        
-        # DynamoDB検索
         site_data = query_dynamodb(validated['constructionNumber'])
-        
-        # 結果整形
         formatted = format_response(site_data)
-        
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'actionGroup': event['actionGroup'],
-                'apiPath': event['apiPath'],
-                'httpMethod': event['httpMethod'],
-                'responseBody': {
-                    'TEXT': {
-                        'body': formatted
-                    }
-                }
-            })
-        }
+        return _make_response(event, 200, formatted)
     except DBSearchError as e:
         logger.error(f"処理エラー: {str(e)}")
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': str(e)})
-        }
+        return _make_response(event, 400, f"エラー: {str(e)}")
     except Exception as e:
         logger.error(f"予期しないエラー: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': '内部エラーが発生しました'})
-        }
+        return _make_response(event, 500, "内部エラーが発生しました")

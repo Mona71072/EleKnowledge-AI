@@ -175,76 +175,45 @@ def format_results(results: List[Dict[str, Any]]) -> str:
     return "\n".join(formatted)
 
 
+def _extract_params(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Bedrock Agent (top-level list) / テストイベント (actionInvocation.parameters) 両対応"""
+    raw = event.get('parameters', [])
+    if isinstance(raw, list) and raw:
+        return {p['name']: p.get('value', '') for p in raw}
+    action_inv_params = event.get('actionInvocation', {}).get('parameters', [])
+    return {p['name']: p.get('value', '') for p in action_inv_params}
+
+
+def _make_response(event: Dict[str, Any], status: int, body: str) -> Dict[str, Any]:
+    """Bedrock Agent functionSchema action group レスポンス形式"""
+    return {
+        'messageVersion': '1.0',
+        'response': {
+            'actionGroup': event.get('actionGroup', ''),
+            'function': event.get('function', 'searchTroubleCases'),
+            'functionResponse': {
+                'responseBody': {'TEXT': {'body': body}},
+            },
+        },
+    }
+
+
 def lambda_handler(event, context):
-    """
-    Action 2: KB Search1 Lambda ハンドラー
-    Bedrock Agent からのアクション実行要求に応答
-    
-    Args:
-        event: Lambda イベント
-        context: Lambda コンテキスト
-        
-    Returns:
-        レスポンス
-    """
+    """Action 2: KB Search1 Lambda ハンドラー"""
     logger.info(f"KB Search1 Action invoked: {json.dumps(event)}")
-    
+
     try:
-        # パラメータ抽出
-        action_group = event.get('actionGroup', '')
-        action_invocation = event.get('actionInvocation', {})
-        parameters = {}
-        
-        if 'parameters' in action_invocation:
-            for param in action_invocation['parameters']:
-                parameters[param.get('name')] = param.get('value', '')
-        
+        parameters = _extract_params(event)
         logger.info(f"Parameters: {parameters}")
-        
-        # パラメータ検証
         validated_params = validate_parameters(parameters)
-        
-        # メタデータフィルター構築
         filters = build_metadata_filter(validated_params)
-        
-        # Knowledge Base 検索
         results = search_knowledge_base(validated_params['query'], filters)
-        
-        # 結果フォーマット
         formatted_result = format_results(results)
-        
         logger.info("KB Search1 completed successfully")
-        
-        # Bedrock Agent 用レスポンス
-        return {
-            'actionGroup': action_group,
-            'actionInvocation': action_invocation,
-            'responseBody': {
-                'TEXT': {
-                    'body': formatted_result
-                }
-            }
-        }
-        
+        return _make_response(event, 200, formatted_result)
     except KBSearchError as e:
         logger.error(f"KB Search error: {str(e)}")
-        return {
-            'actionGroup': event.get('actionGroup', ''),
-            'actionInvocation': event.get('actionInvocation', {}),
-            'responseBody': {
-                'TEXT': {
-                    'body': f"エラー: {str(e)}"
-                }
-            }
-        }
+        return _make_response(event, 400, f"エラー: {str(e)}")
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return {
-            'actionGroup': event.get('actionGroup', ''),
-            'actionInvocation': event.get('actionInvocation', {}),
-            'responseBody': {
-                'TEXT': {
-                    'body': f"予期しないエラーが発生しました: {str(e)}"
-                }
-            }
-        }
+        return _make_response(event, 500, f"予期しないエラーが発生しました: {str(e)}")
