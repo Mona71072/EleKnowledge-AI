@@ -2,7 +2,7 @@
   "httpMethod": "GET",
   "path": "/history",
   "queryStringParameters": {
-    "sessionId": "REPLACE_WITH_ACTUAL_SESSION_ID"
+    "sessionId": "5ed6e306-c2dd-49fd-81c5-7ff056dca257"
   },
   "requestContext": {
     "authorizer": {

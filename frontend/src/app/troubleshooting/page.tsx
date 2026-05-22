@@ -23,6 +23,7 @@ interface SourceDocument {
 }
 
 interface TroubleshootingResult {
+  sessionId?: string;
   result: string;
   sourceDocuments?: SourceDocument[];
 }
@@ -156,7 +157,7 @@ export default function TroubleshootingPage() {
       if (form.errorCode) payload.errorCode = form.errorCode.trim();
 
       const response = await axios.post<TroubleshootingResult>(
-        `${API_URL}/troubleshooting/analyze`,
+        `${API_URL}/analyze`,
         payload,
         {
           headers: {
@@ -204,6 +205,12 @@ export default function TroubleshootingPage() {
             </svg>
           </Link>
           <h1 className="text-xl font-bold text-gray-900">トラブルシューティング</h1>
+          <Link
+            href="/troubleshooting/history"
+            className="ml-auto text-sm text-blue-600 hover:text-blue-700 hover:underline"
+          >
+            履歴
+          </Link>
         </div>
       </header>
 
@@ -320,7 +327,17 @@ export default function TroubleshootingPage() {
             <Card variant="elevated" padding="none">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">分析結果</h2>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">分析結果</h2>
+                    {result.sessionId && (
+                      <Link
+                        href={`/troubleshooting/history?sessionId=${result.sessionId}`}
+                        className="text-xs text-blue-500 hover:underline"
+                      >
+                        履歴で確認
+                      </Link>
+                    )}
+                  </div>
                   <Button variant="outline" size="sm" onClick={handleReset}>
                     もう一度分析する
                   </Button>

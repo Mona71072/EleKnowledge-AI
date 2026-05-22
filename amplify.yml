@@ -34,3 +34,4 @@ env:
   variables:
     NODE_ENV: production
     NEXT_PUBLIC_AWS_REGION: us-east-1
+    NEXT_PUBLIC_TROUBLESHOOTING_API_URL: https://ajnmw83sri.execute-api.us-east-1.amazonaws.com/development
