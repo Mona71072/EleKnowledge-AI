@@ -9,6 +9,7 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Dict, List, Tuple
 
 import boto3
@@ -107,12 +108,23 @@ def fetch_citations(session_id: str) -> List[Dict]:
     return resp.get("Item", {}).get("citations", [])
 
 
+def _to_decimal(obj: Any) -> Any:
+    """DynamoDB 書き込み前に float を Decimal に変換する（再帰）"""
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _to_decimal(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_decimal(v) for v in obj]
+    return obj
+
+
 def save_session_result(session_id: str, result_text: str, source_docs: List[Dict]):
     dynamodb_resource.Table(SESSIONS_TABLE).update_item(
         Key={"session_id": session_id},
         UpdateExpression="SET #r = :r, sourceDocuments = :sd",
         ExpressionAttributeNames={"#r": "result"},
-        ExpressionAttributeValues={":r": result_text, ":sd": source_docs},
+        ExpressionAttributeValues={":r": result_text, ":sd": _to_decimal(source_docs)},
     )
 
 
