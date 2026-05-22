@@ -163,7 +163,7 @@ def parse_agent_response(response: Dict[str, Any]) -> Tuple[str, List[Dict]]:
 # ---------------------------------------------------------------------------
 
 def _append_doc(docs: List[Dict], seen: set, uri: str, meta: Dict, score: float):
-    if not uri or uri in seen or uri.lower().endswith(".md"):
+    if not uri or uri in seen:
         return
     seen.add(uri)
     signed_url = uri
@@ -183,7 +183,7 @@ def _append_doc(docs: List[Dict], seen: set, uri: str, meta: Dict, score: float)
         "sourceUri": signed_url,
         "documentType": meta.get("document", "unknown"),
         "model": meta.get("model", ""),
-        "relevance": float(score),
+        "relevance": float(score) if score is not None else 0.0,
     })
 
 
