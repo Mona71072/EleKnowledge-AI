@@ -5,5 +5,10 @@
     "Content-Type": "application/json"
   },
   "httpMethod": "POST",
-  "path": "/troubleshooting/analyze"
+  "path": "/analyze",
+  "requestContext": {
+    "authorizer": {
+      "userId": "test-user-sub-001"
+    }
+  }
 }
