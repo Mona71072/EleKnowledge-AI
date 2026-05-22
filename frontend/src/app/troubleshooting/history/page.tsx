@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
@@ -63,7 +63,7 @@ const getUniqueDocs = (docs: SourceDocument[] = []) => {
   });
 };
 
-export default function HistoryPage() {
+function HistoryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pageLoading, setPageLoading] = useState(true);
@@ -289,5 +289,17 @@ export default function HistoryPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function HistoryPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loading size="lg" text="読み込み中..." />
+      </div>
+    }>
+      <HistoryContent />
+    </Suspense>
   );
 }
