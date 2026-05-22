@@ -44,6 +44,14 @@ class TroubleshootingStack(core.Stack):
             resources=["*"]
         ))
 
+        role.add_to_policy(iam.PolicyStatement(
+            actions=["s3:GetObject", "s3:ListBucket"],
+            resources=[
+                "arn:aws:s3:::eleknowledge-ai-development-documents",
+                "arn:aws:s3:::eleknowledge-ai-development-documents/*",
+            ]
+        ))
+
         return role
 
     def _create_sites_table(self) -> dynamodb.Table:
