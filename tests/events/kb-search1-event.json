@@ -1,11 +1,11 @@
 {
   "actionGroup": "kb-search-1",
-  "apiPath": "/trouble-cases",
-  "httpMethod": "GET",
-  "actionInvocation": {
-    "parameters": [
-      {"name": "query", "value": "昇降機が途中で停止する"},
-      {"name": "model", "value": "KE-LG"}
-    ]
+  "function": "searchTroubleCases",
+  "parameters": [
+    {"name": "query", "value": "昇降機が途中で停止する"},
+    {"name": "model", "value": "KE-LG"}
+  ],
+  "sessionAttributes": {
+    "session_id": "test-session-id-001"
   }
 }

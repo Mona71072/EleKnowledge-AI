@@ -6,6 +6,7 @@ C資料（詳細な技術資料）を検索
 import json
 import logging
 import os
+import time
 from typing import Dict, Any, List
 import boto3
 
@@ -14,11 +15,13 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # AWS クライアント
-bedrock_client = boto3.client('bedrock-agent-runtime', 
+bedrock_client = boto3.client('bedrock-agent-runtime',
     region_name=os.environ.get('BEDROCK_REGION', 'us-east-1'))
+dynamodb_resource = boto3.resource('dynamodb')
 
 # 環境変数
 KB_ID = os.environ.get('KnowledgeBaseId')
+SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE', 'troubleshooting-sessions')
 
 
 class KBSearchError(Exception):
@@ -170,6 +173,34 @@ def format_results(results: List[Dict[str, Any]]) -> str:
     return "\n".join(formatted)
 
 
+def write_citations(session_id: str, results: List[Dict[str, Any]]):
+    """KB 検索結果の引用情報を DynamoDB セッションに書き込む"""
+    if not session_id:
+        return
+    citations = [
+        {
+            'uri': r.get('location', {}).get('s3Location', {}).get('uri', ''),
+            'title': r.get('metadata', {}).get('title'),
+            'document': r.get('metadata', {}).get('document', 'unknown'),
+            'model': r.get('metadata', {}).get('model', ''),
+            'score': str(r.get('score', 0.0)),
+        }
+        for r in results
+        if r.get('location', {}).get('s3Location', {}).get('uri', '')
+    ]
+    if not citations:
+        return
+    try:
+        dynamodb_resource.Table(SESSIONS_TABLE).update_item(
+            Key={'session_id': session_id},
+            UpdateExpression='SET citations = list_append(if_not_exists(citations, :empty), :c)',
+            ExpressionAttributeValues={':c': citations, ':empty': []},
+        )
+        logger.info(f"Citations written: session_id={session_id}, count={len(citations)}")
+    except Exception as e:
+        logger.warning(f"Citations write failed: {e}")
+
+
 def _extract_params(event: Dict[str, Any]) -> Dict[str, Any]:
     """Bedrock Agent (top-level list) / テストイベント (actionInvocation.parameters) 両対応"""
     raw = event.get('parameters', [])
@@ -198,11 +229,13 @@ def lambda_handler(event, context):
     logger.info(f"KB Search3 Action invoked: {json.dumps(event)}")
 
     try:
+        session_id = event.get('sessionAttributes', {}).get('session_id', '')
         parameters = _extract_params(event)
         logger.info(f"Parameters: {parameters}")
         validated_params = validate_parameters(parameters)
         filters = build_metadata_filter(validated_params)
         results = search_knowledge_base(validated_params['query'], filters)
+        write_citations(session_id, results)
         formatted_result = format_results(results)
         logger.info("KB Search3 completed successfully")
         return _make_response(event, 200, formatted_result)
