@@ -1,0 +1,4 @@
+{
+  "authorizationToken": "Bearer invalid-token-for-deny-test",
+  "methodArn": "arn:aws:execute-api:us-east-1:123456789012:test-api-id/development/POST/analyze"
+}

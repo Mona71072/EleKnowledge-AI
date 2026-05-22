@@ -1,0 +1,12 @@
+{
+  "httpMethod": "GET",
+  "path": "/history",
+  "queryStringParameters": {
+    "sessionId": "REPLACE_WITH_ACTUAL_SESSION_ID"
+  },
+  "requestContext": {
+    "authorizer": {
+      "userId": "test-user-sub-001"
+    }
+  }
+}
