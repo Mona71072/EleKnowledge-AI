@@ -25,6 +25,10 @@ def _get_jwks() -> dict:
 
 
 def _build_policy(principal_id: str, effect: str, method_arn: str, user_id: str) -> dict:
+    # method_arn 例: arn:aws:execute-api:us-east-1:123:abc123/development/POST/analyze
+    # → arn:aws:execute-api:us-east-1:123:abc123/*  にワイルドカード化して全エンドポイントに適用
+    parts = method_arn.split("/")
+    wildcard_arn = "/".join(parts[:2]) + "/*" if len(parts) >= 2 else method_arn
     return {
         "principalId": principal_id,
         "policyDocument": {
@@ -33,7 +37,7 @@ def _build_policy(principal_id: str, effect: str, method_arn: str, user_id: str)
                 {
                     "Action": "execute-api:Invoke",
                     "Effect": effect,
-                    "Resource": method_arn,
+                    "Resource": wildcard_arn,
                 }
             ],
         },

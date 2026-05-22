@@ -121,8 +121,9 @@ function HistoryContent() {
       }
       try {
         await fetchList();
-      } catch {
-        setError('履歴の取得に失敗しました');
+      } catch (err: any) {
+        const msg = err.response?.data?.error || err.response?.data?.message || '履歴の取得に失敗しました';
+        setError(msg);
       }
       setPageLoading(false);
     };
