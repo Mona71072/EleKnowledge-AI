@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Tuple
+from urllib.parse import urlparse
 
 import boto3
 
@@ -174,21 +175,42 @@ def parse_agent_response(response: Dict[str, Any]) -> Tuple[str, List[Dict]]:
 # sourceDocuments 生成
 # ---------------------------------------------------------------------------
 
+def _presign_source_uri(uri: str) -> str:
+    parsed_uri = urlparse(uri)
+    if parsed_uri.scheme != "s3":
+        logger.warning(f"source document URI is not an S3 URI: {uri}")
+        return uri
+    if not parsed_uri.netloc or not parsed_uri.path.lstrip("/"):
+        logger.warning(f"source document S3 URI is malformed: {uri}")
+        return uri
+    if not DOCUMENTS_BUCKET:
+        logger.warning(f"source document bucket is not configured: {uri}")
+        return uri
+    if parsed_uri.netloc != DOCUMENTS_BUCKET:
+        logger.warning(
+            f"source document bucket mismatch: expected={DOCUMENTS_BUCKET}, "
+            f"actual={parsed_uri.netloc}"
+        )
+        return uri
+
+    try:
+        return s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": parsed_uri.netloc, "Key": parsed_uri.path.lstrip("/")},
+            ExpiresIn=2592000,
+        )
+    except Exception as e:
+        logger.warning(f"presigned URL generation failed: {e}")
+        return uri
+
+
 def _append_doc(docs: List[Dict], seen: set, uri: str, meta: Dict, score: float):
     if not uri or uri in seen:
+        if not uri:
+            logger.warning("source document URI is empty")
         return
     seen.add(uri)
-    signed_url = uri
-    if DOCUMENTS_BUCKET and uri.startswith("s3://"):
-        key = uri.replace(f"s3://{DOCUMENTS_BUCKET}/", "")
-        try:
-            signed_url = s3_client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": DOCUMENTS_BUCKET, "Key": key},
-                ExpiresIn=2592000,
-            )
-        except Exception as e:
-            logger.warning(f"presigned URL 生成失敗: {e}")
+    signed_url = _presign_source_uri(uri)
     docs.append({
         "documentName": uri.split("/")[-1],
         "title": meta.get("title"),

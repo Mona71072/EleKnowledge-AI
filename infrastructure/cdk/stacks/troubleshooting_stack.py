@@ -8,10 +8,18 @@ from aws_cdk import (
 )
 
 class TroubleshootingStack(core.Stack):
-    def __init__(self, scope: core.Construct, id: str, environment: str = "development", **kwargs):
+    def __init__(
+        self,
+        scope: core.Construct,
+        id: str,
+        environment: str = "development",
+        documents_bucket: str = "eleknowledge-ai-troubleshooting-docs",
+        **kwargs
+    ):
         super().__init__(scope, id, **kwargs)
 
         self.environment = environment
+        self.documents_bucket = documents_bucket
         lambda_role = self._create_lambda_role()
         sites_table = self._create_sites_table()
         sessions_table = self._create_sessions_table()
@@ -47,8 +55,8 @@ class TroubleshootingStack(core.Stack):
         role.add_to_policy(iam.PolicyStatement(
             actions=["s3:GetObject", "s3:ListBucket"],
             resources=[
-                "arn:aws:s3:::eleknowledge-ai-development-documents",
-                "arn:aws:s3:::eleknowledge-ai-development-documents/*",
+                f"arn:aws:s3:::{self.documents_bucket}",
+                f"arn:aws:s3:::{self.documents_bucket}/*",
             ]
         ))
 
@@ -94,6 +102,7 @@ class TroubleshootingStack(core.Stack):
                 "AGENT_ALIAS_ID": "PLACEHOLDER",
                 "SITES_TABLE": sites_table.table_name,
                 "SESSIONS_TABLE": sessions_table.table_name,
+                "DOCUMENTS_BUCKET": self.documents_bucket,
             },
             tracing=lambda_.Tracing.ACTIVE
         )

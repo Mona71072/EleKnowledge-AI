@@ -35,6 +35,11 @@ Parameters:
       - ap-northeast-1
     Description: AWS Region for Bedrock API calls
 
+  DocumentsBucket:
+    Type: String
+    Default: eleknowledge-ai-troubleshooting-docs
+    Description: S3 bucket that stores troubleshooting citation documents
+
   Phase1StackName:
     Type: String
     Default: EleKnowledge-AI-development-phase1
@@ -104,8 +109,8 @@ Resources:
                   - s3:GetObject
                   - s3:ListBucket
                 Resource:
-                  - arn:aws:s3:::eleknowledge-ai-development-documents
-                  - arn:aws:s3:::eleknowledge-ai-development-documents/*
+                  - !Sub arn:aws:s3:::${DocumentsBucket}
+                  - !Sub arn:aws:s3:::${DocumentsBucket}/*
 
   # ──────────────────────────────────────────
   # DynamoDB
@@ -134,6 +139,9 @@ Resources:
       CodeUri: ../../lambda/troubleshooting/orchestrator/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DOCUMENTS_BUCKET: !Ref DocumentsBucket
       Events:
         AnalyzeApi:
           Type: Api

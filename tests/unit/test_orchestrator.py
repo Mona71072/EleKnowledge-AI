@@ -122,6 +122,51 @@ def test_build_source_documents_raw_refs_only():
     assert docs[0]["documentName"] == "file.pdf"
     assert docs[0]["sourceUri"] == "https://presigned.example.com/file.pdf"
     assert docs[0]["relevance"] == 0.9
+    orchestrator.s3_client.generate_presigned_url.assert_called_once_with(
+        "get_object",
+        Params={"Bucket": "test-bucket", "Key": "file.pdf"},
+        ExpiresIn=2592000,
+    )
+
+
+def test_build_source_documents_presigns_troubleshooting_markdown_uri():
+    orchestrator.DOCUMENTS_BUCKET = "eleknowledge-ai-troubleshooting-docs"
+    orchestrator.s3_client = MagicMock()
+    orchestrator.s3_client.generate_presigned_url.return_value = "https://presigned.example.com/1505C0.md"
+
+    raw_refs = [{
+        "location": {"s3Location": {"uri": "s3://eleknowledge-ai-troubleshooting-docs/1505C0.md"}},
+        "metadata": {},
+        "score": 0.9,
+    }]
+    docs = orchestrator.build_source_documents(raw_refs)
+
+    assert docs[0]["documentName"] == "1505C0.md"
+    assert docs[0]["sourceUri"] == "https://presigned.example.com/1505C0.md"
+    orchestrator.s3_client.generate_presigned_url.assert_called_once_with(
+        "get_object",
+        Params={"Bucket": "eleknowledge-ai-troubleshooting-docs", "Key": "1505C0.md"},
+        ExpiresIn=2592000,
+    )
+
+
+def test_build_source_documents_presigns_nested_s3_key():
+    orchestrator.DOCUMENTS_BUCKET = "test-bucket"
+    orchestrator.s3_client = MagicMock()
+    orchestrator.s3_client.generate_presigned_url.return_value = "https://presigned.example.com/manual.md"
+
+    raw_refs = [{
+        "location": {"s3Location": {"uri": "s3://test-bucket/manuals/1505C0.md"}},
+        "metadata": {},
+        "score": 0.9,
+    }]
+    orchestrator.build_source_documents(raw_refs)
+
+    orchestrator.s3_client.generate_presigned_url.assert_called_once_with(
+        "get_object",
+        Params={"Bucket": "test-bucket", "Key": "manuals/1505C0.md"},
+        ExpiresIn=2592000,
+    )
 
 
 def test_build_source_documents_dynamo_citations_only():
@@ -165,9 +210,10 @@ def test_build_source_documents_deduplication():
     assert docs[0]["relevance"] == pytest.approx(0.9)
 
 
-def test_build_source_documents_excludes_md():
+def test_build_source_documents_includes_md():
     orchestrator.DOCUMENTS_BUCKET = "test-bucket"
     orchestrator.s3_client = MagicMock()
+    orchestrator.s3_client.generate_presigned_url.return_value = "https://presigned.example.com/readme.md"
 
     raw_refs = [{
         "location": {"s3Location": {"uri": "s3://test-bucket/readme.md"}},
@@ -175,7 +221,36 @@ def test_build_source_documents_excludes_md():
         "score": 0.7,
     }]
     docs = orchestrator.build_source_documents(raw_refs)
-    assert docs == []
+    assert docs[0]["documentName"] == "readme.md"
+    assert docs[0]["sourceUri"] == "https://presigned.example.com/readme.md"
+
+
+def test_build_source_documents_keeps_uri_for_unconfigured_bucket():
+    orchestrator.DOCUMENTS_BUCKET = "expected-bucket"
+    orchestrator.s3_client = MagicMock()
+    uri = "s3://other-bucket/1505C0.md"
+
+    raw_refs = [{"location": {"s3Location": {"uri": uri}}, "metadata": {}, "score": 0.7}]
+    docs = orchestrator.build_source_documents(raw_refs)
+
+    assert docs[0]["sourceUri"] == uri
+    orchestrator.s3_client.generate_presigned_url.assert_not_called()
+
+
+@pytest.mark.parametrize("uri", [
+    "s3://test-bucket",
+    "s3:///1505C0.md",
+    "https://example.com/1505C0.md",
+])
+def test_build_source_documents_keeps_uri_when_not_signable(uri):
+    orchestrator.DOCUMENTS_BUCKET = "test-bucket"
+    orchestrator.s3_client = MagicMock()
+
+    raw_refs = [{"location": {"s3Location": {"uri": uri}}, "metadata": {}, "score": 0.7}]
+    docs = orchestrator.build_source_documents(raw_refs)
+
+    assert docs[0]["sourceUri"] == uri
+    orchestrator.s3_client.generate_presigned_url.assert_not_called()
 
 
 def test_build_source_documents_skips_empty_uri():
