@@ -1,20 +1,20 @@
 ---
 status: development
 phase: 3
-last-verified: 2026-05-21
-related-code: lambda/troubleshooting/orchestrator/
+last-verified: 2026-05-22
+related-code: lambda/troubleshooting/orchestrator/, lambda/troubleshooting/history/, lambda/troubleshooting/authorizer/
 ---
 
 # トラブルシューティング API
 
-Phase 3 のトラブルシューティング機能が使用するエンドポイント。
-**Base URL は chat-api と共用**: `https://s8dbirs0m6.execute-api.us-east-1.amazonaws.com/development`
+Phase 3 のトラブルシューティング機能が使用するエンドポイント。  
+**専用 API Gateway**: `troubleshooting-api`（chat-api とは別 Gateway）
 
 フロントエンド環境変数: `NEXT_PUBLIC_TROUBLESHOOTING_API_URL`
 
 ## 認証
 
-全エンドポイントで Cognito ID トークンが必要。
+全エンドポイントで Cognito ID トークンが必要。Lambda Authorizer（`troubleshooting-authorizer`）が JWT を検証し、`sub` クレームを `userId` として後段 Lambda に渡す。
 
 ```
 Authorization: Bearer <Cognito ID Token>
@@ -24,11 +24,12 @@ User Pool: `us-east-1_fCbgU2FR9` / Client ID: `5e3penrp89bbscs1001b246tqj`
 
 ---
 
-## POST /troubleshooting/analyze
+## POST /analyze
 
-トラブル情報を受け取り、Bedrock Agent 経由で原因分析と対処方法を返す。
+トラブル情報を受け取り、Bedrock Agent 経由で原因分析と対処方法を返す。  
+セッションを `troubleshooting-sessions` テーブルに保存し、`sessionId` をレスポンスに含める。
 
-**Lambda:** `troubleshooting-orchestrator`
+**Lambda:** `troubleshooting-orchestrator`  
 **Bedrock Agent:** `D6FAGLJPPO` (alias: `TSTALIASID` = DRAFT)
 
 ### Request
@@ -53,12 +54,13 @@ User Pool: `us-east-1_fCbgU2FR9` / Client ID: `5e3penrp89bbscs1001b246tqj`
 
 ```json
 {
+  "sessionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "result": "【現場情報】\n工事番号: EIK54801\n現場名: ○○川崎\n...\n\n【トラブルシューティング】\n...",
   "sourceDocuments": [
     {
       "documentName": "KE-LG_troubleshoot.pdf",
       "title": "KE-LG トラブルシューティングガイド",
-      "sourceUri": "https://eleknowledge-ai-development-documents.s3.amazonaws.com/...（presigned URL, 30日有効）",
+      "sourceUri": "https://s3.amazonaws.com/...（presigned URL, 30日有効）",
       "documentType": "Trouble-Cases",
       "model": "KE-LG",
       "relevance": 0.85
@@ -69,8 +71,9 @@ User Pool: `us-east-1_fCbgU2FR9` / Client ID: `5e3penrp89bbscs1001b246tqj`
 
 | フィールド | 型 | 説明 |
 |-----------|------|------|
+| `sessionId` | string | セッション ID（UUID）。履歴取得時に使用 |
 | `result` | string | Bedrock Agent が生成したトラブルシューティング回答（Markdown 形式） |
-| `sourceDocuments` | array | 回答の根拠となった参照文書リスト（空の場合は `[]`） |
+| `sourceDocuments` | array | 参照文書リスト。action group KB（kb-search1/3）由来の引用を含む |
 
 **`sourceDocuments` 要素の型:**
 
@@ -83,10 +86,9 @@ User Pool: `us-east-1_fCbgU2FR9` / Client ID: `5e3penrp89bbscs1001b246tqj`
 | `model` | string | KB メタデータの `model` フィールド |
 | `relevance` | number | 検索スコア（0.0〜1.0） |
 
-> **仕組み**: Bedrock Agent の invoke_agent EventStream `chunk.attribution.citations[].retrievedReferences[]` から取得。
-> Agent に直接紐付いた KB（`UBDLEGMD6D` 技術資料 / `HIFYJUGPOR` トラブルシュートマニュアル）の引用のみ含まれる。
-> action group 経由（OCLVRJDMAH）の引用はこのフィールドには含まれない。
-> `.md` ファイルは除外。重複 URI は排除（最初の出現を採用）。
+> **仕組み**: action group KB（OCLVRJDMAH）の引用は kb-search1/3 が DynamoDB セッションストアに書き込み、orchestrator が読み出して統合する。  
+> Bedrock Agent EventStream `chunk.attribution.citations` からの引用も併用し、URI で重複排除する。  
+> `.md` ファイルは除外。
 
 ### Response 400
 
@@ -98,7 +100,7 @@ User Pool: `us-east-1_fCbgU2FR9` / Client ID: `5e3penrp89bbscs1001b246tqj`
 
 ### Response 401
 
-Cognito トークンなし / 期限切れ。
+Cognito トークンなし / 期限切れ / 検証失敗。
 
 ### Response 500
 
@@ -110,23 +112,113 @@ Bedrock Agent 呼び出しエラー等の予期しない例外。
 
 ---
 
+## GET /history
+
+ユーザーのトラブルシューティング履歴を取得する。  
+`sessionId` 指定なし → 一覧。`sessionId` 指定あり → 詳細。
+
+**Lambda:** `troubleshooting-history`
+
+### GET /history（一覧）
+
+**Response 200:**
+
+```json
+{
+  "sessions": [
+    {
+      "sessionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "timestamp": "2026-05-22T10:30:00+00:00",
+      "input": {
+        "constructionNumber": "EIK54801",
+        "model": "KE-LG",
+        "troubleDescription": "エレベーターが動かない..."
+      },
+      "preview": "【現場情報】\n工事番号: EIK54801\n..."
+    }
+  ]
+}
+```
+
+| フィールド | 型 | 説明 |
+|-----------|------|------|
+| `sessions` | array | セッション一覧（最新50件、新しい順） |
+| `sessions[].sessionId` | string | セッション ID |
+| `sessions[].timestamp` | string | 実行日時（ISO 8601 UTC） |
+| `sessions[].input` | object | リクエスト入力内容 |
+| `sessions[].preview` | string | `result` の先頭 100 文字 |
+
+### GET /history?sessionId={sessionId}（詳細）
+
+**Response 200:**
+
+```json
+{
+  "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "userId": "cognito-sub-uuid",
+  "timestamp": "2026-05-22T10:30:00+00:00",
+  "input": {
+    "constructionNumber": "EIK54801",
+    "model": "KE-LG",
+    "troubleDescription": "エレベーターが動かない..."
+  },
+  "result": "【現場情報】\n工事番号: EIK54801\n...",
+  "sourceDocuments": [...]
+}
+```
+
+**Response 404:**  
+セッションが存在しない、または他ユーザーのセッションへのアクセス時。
+
+---
+
 ## 処理フロー
 
 ```
-POST /troubleshooting/analyze
-  → API Gateway (s8dbirs0m6) — CognitoAuthorizer (uum6s9)
+POST /analyze
+  → troubleshooting-api (API Gateway)
+      → Lambda Authorizer (troubleshooting-authorizer)
+           └─ Cognito JWT 検証 → userId (sub) を context に付与
   → troubleshooting-orchestrator Lambda
-      ├─ 入力バリデーション
-      └─ Bedrock Agent invoke (D6FAGLJPPO / TSTALIASID)
-           ├─ GetSiteInfo (db-search Lambda)
-           │    └─ DynamoDB sites テーブル → 現場名・機種・制御システム
-           ├─ Action2-KB-Serch1 (kb-search1 Lambda)
-           │    └─ KB (OCLVRJDMAH) Trouble-Cases/Trouble-Reports 検索
-           ├─ Action3-KB-Serch2 (kb-search2 Lambda)
-           │    └─ KB (OCLVRJDMAH) トラブルシュートマニュアル全文検索
-           └─ Action4-KB-Serch3 (kb-search3 Lambda)
-                └─ KB (OCLVRJDMAH) C資料（詳細技術資料）検索
+      ├─ init_session(session_id, input, userId) → DynamoDB troubleshooting-sessions
+      ├─ Bedrock Agent invoke (D6FAGLJPPO / TSTALIASID)
+      │    ├─ GetSiteInfo (db-search Lambda)
+      │    │    └─ DynamoDB sites テーブル → 現場名・機種・制御システム
+      │    ├─ Action2-KB-Search1 (kb-search1 Lambda)
+      │    │    ├─ KB (OCLVRJDMAH) Trouble-Cases/Trouble-Reports 検索
+      │    │    └─ write_citations(session_id, results) → DynamoDB
+      │    ├─ Action3-KB-Search2 (kb-search2 Lambda)
+      │    │    └─ KB (OCLVRJDMAH) トラブルシュートマニュアル全文検索
+      │    └─ Action4-KB-Search3 (kb-search3 Lambda)
+      │         ├─ KB (OCLVRJDMAH) C資料（詳細技術資料）検索
+      │         └─ write_citations(session_id, results) → DynamoDB
+      ├─ fetch_citations(session_id) → DynamoDB
+      ├─ build_source_documents(raw_refs + dynamo_citations)
+      └─ save_session_result(session_id, result, sourceDocuments) → DynamoDB
+
+GET /history
+  → troubleshooting-api (API Gateway)
+      → Lambda Authorizer → userId 取得
+  → troubleshooting-history Lambda
+      └─ DynamoDB troubleshooting-sessions (userId-timestamp-index GSI)
 ```
+
+---
+
+## DynamoDB: troubleshooting-sessions テーブル
+
+| 属性 | 型 | 説明 |
+|------|-----|------|
+| `session_id` (PK) | String | UUID（orchestrator が生成） |
+| `userId` | String | Cognito sub クレーム。GSI パーティションキー |
+| `timestamp` | String | ISO 8601 UTC。GSI ソートキー |
+| `ttl` | Number | Unix epoch + 30 日（DynamoDB TTL 自動削除） |
+| `input` | Map | リクエスト入力（constructionNumber, model, 等） |
+| `citations` | List | kb-search1/3 が書き込んだ引用情報（uri, title, document, model, score） |
+| `result` | String | Agent が生成した回答テキスト |
+| `sourceDocuments` | List | presigned URL 付き sourceDocuments（最終レスポンス形式） |
+
+**GSI:** `userId-timestamp-index`
 
 ---
 
@@ -135,5 +227,5 @@ POST /troubleshooting/analyze
 | ヘッダー | 値 |
 |---------|-----|
 | `Access-Control-Allow-Origin` | `*` |
-| `Access-Control-Allow-Methods` | `POST, OPTIONS` |
+| `Access-Control-Allow-Methods` | `GET, POST, OPTIONS` |
 | `Access-Control-Allow-Headers` | `Content-Type, Authorization` |

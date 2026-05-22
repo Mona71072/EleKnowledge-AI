@@ -1,7 +1,7 @@
 ---
 status: development
 phase: 3
-last-verified: 2026-05-21
+last-verified: 2026-05-22
 related-code: lambda/troubleshooting/, frontend/src/app/troubleshooting/
 ---
 
@@ -104,15 +104,16 @@ interface SourceDocument {
 }
 
 interface TroubleshootingResult {
+  sessionId: string;                 // セッション ID（UUID）。履歴取得 GET /history?sessionId= で使用
   result: string;                    // Bedrock Agent が生成した日本語テキスト（Markdown 形式）
-  sourceDocuments: SourceDocument[]; // 参照文書リスト（空の場合は []）
+  sourceDocuments: SourceDocument[]; // 参照文書リスト（DynamoDB セッションストア経由で確実に取得）
 }
 ```
 
 `result` は Agent が生成した自然言語テキスト。現場情報・対処手順・エラーコード解説などが含まれる。
 
-`sourceDocuments` は Agent に直接紐付いた KB（`UBDLEGMD6D` / `HIFYJUGPOR`）の引用から生成。
-action group 経由（OCLVRJDMAH）の引用は含まれない。`.md` ファイルは除外済み。
+`sourceDocuments` は DynamoDB セッションストア経由で取得する（action group KB: OCLVRJDMAH）。
+`chunk.attribution.citations` からの引用も統合し URI で重複排除。`.md` ファイルは除外。
 
 ## UI 画面
 
@@ -153,7 +154,7 @@ action group 経由（OCLVRJDMAH）の引用は含まれない。`.md` ファイ
 - [ ] KB データ（Trouble-Cases / C資料）の整備
 - [ ] レスポンスタイムアウト対策（API Gateway 29 秒上限、非同期化の検討）
 - [ ] 本ドキュメントを `docs/features/production/` に昇格
-- [ ] **sourceDocuments の引用取得を信頼性高く実装する**（後日対応、詳細は下記）
+- [x] **sourceDocuments の引用取得を信頼性高く実装する**（DynamoDB セッションストア方式で実装済み、詳細は [docs/api/troubleshooting.md](../../api/troubleshooting.md)）
 
 ## 既知の制限事項
 
