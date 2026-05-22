@@ -62,28 +62,23 @@ def build_metadata_filter(params: Dict[str, Any]) -> Dict[str, Any]:
     """
     メタデータフィルターを構築（Bedrock KB API 形式）
 
-    document は Trouble-Cases or Trouble-Reports。
-    model / controlSystem が指定された場合は andAll で絞り込む。
+    S3 ドキュメントに .metadata.json が未設定のため document フィルターは使用しない。
+    model / controlSystem が指定された場合のみ絞り込む。
     """
-    document_filter = {
-        'orAll': [
-            {'equals': {'key': 'document', 'value': 'Trouble-Cases'}},
-            {'equals': {'key': 'document', 'value': 'Trouble-Reports'}},
-        ]
-    }
-
-    extra_conditions = [document_filter]
+    conditions: List[Dict[str, Any]] = []
 
     if 'model' in params:
-        extra_conditions.append({'equals': {'key': 'model', 'value': params['model']}})
+        conditions.append({'equals': {'key': 'model', 'value': params['model']}})
 
     if 'controlSystem' in params:
-        extra_conditions.append({'equals': {'key': 'control-system', 'value': params['controlSystem']}})
+        conditions.append({'equals': {'key': 'control-system', 'value': params['controlSystem']}})
 
-    if len(extra_conditions) == 1:
-        return document_filter
+    if len(conditions) == 0:
+        return {}
+    if len(conditions) == 1:
+        return conditions[0]
 
-    return {'andAll': extra_conditions}
+    return {'andAll': conditions}
 
 
 def search_knowledge_base(query: str, filters: Dict[str, Any]) -> List[Dict[str, Any]]:

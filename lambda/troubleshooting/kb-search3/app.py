@@ -62,12 +62,10 @@ def build_metadata_filter(params: Dict[str, Any]) -> Dict[str, Any]:
     """
     メタデータフィルターを構築（Bedrock KB API 形式）
 
-    document は C資料 固定。
-    model / controlSystem が指定された場合は andAll で絞り込む。
+    S3 ドキュメントに .metadata.json が未設定のため document フィルターは使用しない。
+    model / controlSystem が指定された場合のみ絞り込む。
     """
-    conditions: List[Dict[str, Any]] = [
-        {'equals': {'key': 'document', 'value': 'C資料'}}
-    ]
+    conditions: List[Dict[str, Any]] = []
 
     if 'model' in params:
         conditions.append({'equals': {'key': 'model', 'value': params['model']}})
@@ -75,6 +73,8 @@ def build_metadata_filter(params: Dict[str, Any]) -> Dict[str, Any]:
     if 'controlSystem' in params:
         conditions.append({'equals': {'key': 'control-system', 'value': params['controlSystem']}})
 
+    if len(conditions) == 0:
+        return {}
     if len(conditions) == 1:
         return conditions[0]
 
