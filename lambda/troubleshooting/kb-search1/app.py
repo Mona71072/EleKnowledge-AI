@@ -120,9 +120,10 @@ def search_knowledge_base(query: str, filters: Dict[str, Any]) -> List[Dict[str,
                 result_item = {
                     'content': result.get('content', ''),
                     'score': result.get('score', 0.0),
-                    'location': result.get('location', {})
+                    'location': result.get('location', {}),
+                    'metadata': result.get('metadata', {}),
                 }
-                
+
                 # Citation 情報取得
                 if 'metadata' in result:
                     metadata = result['metadata']
