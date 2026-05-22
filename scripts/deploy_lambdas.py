@@ -17,6 +17,7 @@ ENV_VARS = {
     'AGENT_ID': 'D6FAGLJPPO',
     'AGENT_ALIAS_ID': 'TSTALIASID',
     'ENVIRONMENT': 'development',
+    'DOCUMENTS_BUCKET': 'eleknowledge-ai-development-documents',
 }
 
 FUNCTIONS = [
