@@ -30,7 +30,7 @@ class TroubleshootingStack(core.Stack):
         self.orchestrator_fn = self._create_orchestrator_lambda(lambda_role, sites_table, sessions_table)
         self.db_search_fn = self._create_db_search_lambda(lambda_role, sites_table)
         self.kb_search1_fn = self._create_kb_search1_lambda(lambda_role, sessions_table)
-        self.kb_search2_fn = self._create_kb_search2_lambda(lambda_role)
+        self.kb_search2_fn = self._create_kb_search2_lambda(lambda_role, sessions_table)
         self.kb_search3_fn = self._create_kb_search3_lambda(lambda_role, sessions_table)
         self.history_fn = self._create_history_lambda(lambda_role, sessions_table)
         self.authorizer_fn = self._create_authorizer_lambda()
@@ -103,6 +103,7 @@ class TroubleshootingStack(core.Stack):
                 "SITES_TABLE": sites_table.table_name,
                 "SESSIONS_TABLE": sessions_table.table_name,
                 "DOCUMENTS_BUCKET": self.documents_bucket,
+                "DEFAULT_CONTROL_SYSTEM": "VFGLF",
             },
             tracing=lambda_.Tracing.ACTIVE
         )
@@ -133,13 +134,14 @@ class TroubleshootingStack(core.Stack):
             timeout=core.Duration.seconds(60),
             memory_size=512,
             environment={
-                "KnowledgeBaseId": "PLACEHOLDER",
+                "KnowledgeBaseId": "GKCWPMZUD0",
                 "SESSIONS_TABLE": sessions_table.table_name,
+                "DEFAULT_CONTROL_SYSTEM": "VFGLF",
             },
             tracing=lambda_.Tracing.ACTIVE
         )
 
-    def _create_kb_search2_lambda(self, role: iam.Role) -> lambda_.Function:
+    def _create_kb_search2_lambda(self, role: iam.Role, sessions_table: dynamodb.Table) -> lambda_.Function:
         return lambda_.Function(
             self, "KBSearch2Function",
             function_name="troubleshooting-kb-search2",
@@ -149,7 +151,11 @@ class TroubleshootingStack(core.Stack):
             role=role,
             timeout=core.Duration.seconds(60),
             memory_size=512,
-            environment={"KnowledgeBaseId": "PLACEHOLDER"},
+            environment={
+                "KnowledgeBaseId": "OCLVRJDMAH",
+                "SESSIONS_TABLE": sessions_table.table_name,
+                "DEFAULT_CONTROL_SYSTEM": "VFGLF",
+            },
             tracing=lambda_.Tracing.ACTIVE
         )
 
@@ -164,8 +170,9 @@ class TroubleshootingStack(core.Stack):
             timeout=core.Duration.seconds(60),
             memory_size=512,
             environment={
-                "KnowledgeBaseId": "PLACEHOLDER",
+                "KnowledgeBaseId": "LCCRXQFJB9",
                 "SESSIONS_TABLE": sessions_table.table_name,
+                "DEFAULT_CONTROL_SYSTEM": "VFGLF",
             },
             tracing=lambda_.Tracing.ACTIVE
         )

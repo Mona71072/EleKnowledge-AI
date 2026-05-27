@@ -17,11 +17,12 @@ logger.setLevel(logging.INFO)
 # AWS クライアント
 bedrock_client = boto3.client('bedrock-agent-runtime',
     region_name=os.environ.get('BEDROCK_REGION', 'us-east-1'))
-dynamodb_resource = boto3.resource('dynamodb')
+dynamodb_resource = boto3.resource('dynamodb', region_name=os.environ.get('BEDROCK_REGION', 'us-east-1'))
 
 # 環境変数
-KB_ID = os.environ.get('KnowledgeBaseId')
+KB_ID = os.environ.get('KnowledgeBaseId', 'LCCRXQFJB9')
 SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE', 'troubleshooting-sessions')
+DEFAULT_CONTROL_SYSTEM = os.environ.get('DEFAULT_CONTROL_SYSTEM', 'VFGLF')
 
 
 class KBSearchError(Exception):
@@ -48,12 +49,11 @@ def validate_parameters(params: Dict[str, Any]) -> Dict[str, Any]:
     
     validated = {'query': query}
     
-    # オプションパラメータ
-    if 'model' in params and params['model']:
-        validated['model'] = params['model'].strip()
-    
-    if 'controlSystem' in params and params['controlSystem']:
-        validated['controlSystem'] = params['controlSystem'].strip()
+    # Temporary Ver 1.1 behavior: always search with a control-system filter.
+    validated['controlSystem'] = params.get('controlSystem', '').strip() or DEFAULT_CONTROL_SYSTEM
+
+    if 'errorCode' in params and params['errorCode']:
+        validated['errorCode'] = params['errorCode'].strip().upper()
     
     return validated
 
@@ -62,16 +62,14 @@ def build_metadata_filter(params: Dict[str, Any]) -> Dict[str, Any]:
     """
     メタデータフィルターを構築（Bedrock KB API 形式）
 
-    S3 ドキュメントに .metadata.json が未設定のため document フィルターは使用しない。
-    model / controlSystem が指定された場合のみ絞り込む。
+    Temporary Ver 1.1 behavior: always filter by control-system.
     """
-    conditions: List[Dict[str, Any]] = []
+    conditions: List[Dict[str, Any]] = [
+        {'equals': {'key': 'control-system', 'value': params.get('controlSystem') or DEFAULT_CONTROL_SYSTEM}}
+    ]
 
-    if 'model' in params:
-        conditions.append({'equals': {'key': 'model', 'value': params['model']}})
-
-    if 'controlSystem' in params:
-        conditions.append({'equals': {'key': 'control-system', 'value': params['controlSystem']}})
+    if 'errorCode' in params:
+        conditions.append({'equals': {'key': 'error-code', 'value': params['errorCode']}})
 
     if len(conditions) == 0:
         return {}
@@ -185,6 +183,7 @@ def write_citations(session_id: str, results: List[Dict[str, Any]]):
             'document': r.get('metadata', {}).get('document', 'unknown'),
             'model': r.get('metadata', {}).get('model', ''),
             'score': str(r.get('score', 0.0)),
+            'source_action': 'c_material',
         }
         for r in results
         if r.get('location', {}).get('s3Location', {}).get('uri', '')

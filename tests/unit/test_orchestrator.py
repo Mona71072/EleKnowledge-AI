@@ -92,14 +92,23 @@ def test_validate_input_invalid_error_code():
         })
 
 
+def test_validate_input_four_character_error_code_raises():
+    with pytest.raises(orchestrator.ValidationError):
+        orchestrator.validate_input({
+            "model": "KE-LG",
+            "troubleDescription": "停止してしまい復旧できない",
+            "errorCode": "E001",
+        })
+
+
 def test_validate_input_with_all_fields():
     data = orchestrator.validate_input({
         "constructionNumber": "EIK54801",
         "model": "KE-LG",
         "troubleDescription": "停止してしまい復旧できない",
-        "errorCode": "E001",
+        "errorCode": "e34",
     })
-    assert data["errorCode"] == "E001"
+    assert data["errorCode"] == "E34"
     assert data["model"] == "KE-LG"
 
 

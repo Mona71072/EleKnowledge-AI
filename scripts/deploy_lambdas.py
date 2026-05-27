@@ -8,16 +8,20 @@ import sys
 
 BASE = os.path.join(os.path.dirname(__file__), '..', 'lambda', 'troubleshooting')
 ROLE_ARN = 'arn:aws:iam::423623870147:role/troubleshooting-lambda-poc-role'
-KB_ID = 'OCLVRJDMAH'
+KB_IDS = {
+    'kb-search1': 'GKCWPMZUD0',
+    'kb-search2': 'OCLVRJDMAH',
+    'kb-search3': 'LCCRXQFJB9',
+}
 
 ENV_VARS = {
-    'KnowledgeBaseId': KB_ID,
     'SitesTableName': 'sites',
     'BEDROCK_REGION': 'us-east-1',
     'AGENT_ID': 'D6FAGLJPPO',
     'AGENT_ALIAS_ID': 'TSTALIASID',
     'ENVIRONMENT': 'development',
     'DOCUMENTS_BUCKET': 'eleknowledge-ai-troubleshooting-docs',
+    'DEFAULT_CONTROL_SYSTEM': 'VFGLF',
 }
 
 AUTHORIZER_ENV_VARS = {
@@ -49,8 +53,12 @@ def deploy(func_name, dir_name):
         zf.write(app_path, 'app.py')
     print(f'  Zipped: {zip_path}')
 
+    env_vars = dict(ENV_VARS)
+    if dir_name in KB_IDS:
+        env_vars['KnowledgeBaseId'] = KB_IDS[dir_name]
+
     with open(env_path, 'w') as f:
-        json.dump({'Variables': ENV_VARS}, f)
+        json.dump({'Variables': env_vars}, f)
 
     exists = run(['aws', 'lambda', 'get-function', '--function-name', func_name])
 

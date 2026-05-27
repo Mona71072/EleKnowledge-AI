@@ -27,7 +27,7 @@ ALLOWED_MODELS = ["KE-LG", "KM-LD", "CM-MA", "ME-CH"]
 TTL_30_DAYS = 30 * 24 * 3600
 
 s3_client = boto3.client("s3", region_name=os.environ.get("BEDROCK_REGION", "us-east-1"))
-dynamodb_resource = boto3.resource("dynamodb")
+dynamodb_resource = boto3.resource("dynamodb", region_name=os.environ.get("BEDROCK_REGION", "us-east-1"))
 
 
 class ValidationError(Exception):
@@ -58,8 +58,8 @@ def validate_input(request_body: Dict[str, Any]) -> Dict[str, Any]:
         raise ValidationError(f"model は {ALLOWED_MODELS} から選択してください")
 
     error_code = request_body.get("errorCode", "").strip()
-    if error_code and not re.match(r"^[A-Z0-9]{4}$", error_code):
-        raise ValidationError("エラーコードは半角英数4文字で指定してください")
+    if error_code and not re.match(r"^[A-Za-z0-9]{3}$", error_code):
+        raise ValidationError("エラーコードは半角英数字3文字で指定してください")
 
     result = {"troubleDescription": trouble_description}
     if construction_number:
@@ -67,7 +67,7 @@ def validate_input(request_body: Dict[str, Any]) -> Dict[str, Any]:
     if model:
         result["model"] = model
     if error_code:
-        result["errorCode"] = error_code
+        result["errorCode"] = error_code.upper()
     return result
 
 
@@ -218,6 +218,7 @@ def _append_doc(docs: List[Dict], seen: set, uri: str, meta: Dict, score: float)
         "documentType": meta.get("document", "unknown"),
         "model": meta.get("model", ""),
         "relevance": float(score) if score is not None else 0.0,
+        "source_action": meta.get("source_action", ""),
     })
 
 
@@ -234,7 +235,12 @@ def build_source_documents(raw_refs: List[Dict], dynamo_citations: List[Dict] = 
     # DynamoDB 由来（action group KB: kb-search1/3 が書き込んだ引用）
     for c in (dynamo_citations or []):
         _append_doc(docs, seen, c.get("uri", ""),
-                    {"title": c.get("title"), "document": c.get("document", "unknown"), "model": c.get("model", "")},
+                    {
+                        "title": c.get("title"),
+                        "document": c.get("document", "unknown"),
+                        "model": c.get("model", ""),
+                        "source_action": c.get("source_action", ""),
+                    },
                     float(c.get("score", 0.0)))
 
     return docs

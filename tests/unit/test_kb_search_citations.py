@@ -55,6 +55,7 @@ def test_write_citations_calls_dynamodb(mocker):
     assert len(citations) == 1
     assert citations[0]["uri"] == "s3://bucket/file.pdf"
     assert citations[0]["document"] == "Trouble-Cases"
+    assert citations[0]["source_action"] == "trouble_cases"
 
 
 def test_write_citations_empty_session_id_skips(mocker):

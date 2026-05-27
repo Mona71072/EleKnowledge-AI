@@ -17,9 +17,12 @@ logger.setLevel(logging.INFO)
 # AWS クライアント
 bedrock_client = boto3.client('bedrock-agent-runtime', 
     region_name=os.environ.get('BEDROCK_REGION', 'us-east-1'))
+dynamodb_resource = boto3.resource('dynamodb', region_name=os.environ.get('BEDROCK_REGION', 'us-east-1'))
 
 # 環境変数
-KB_ID = os.environ.get('KnowledgeBaseId')
+KB_ID = os.environ.get('KnowledgeBaseId', 'OCLVRJDMAH')
+SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE', 'troubleshooting-sessions')
+DEFAULT_CONTROL_SYSTEM = os.environ.get('DEFAULT_CONTROL_SYSTEM', 'VFGLF')
 
 
 class KBSearchError(Exception):
@@ -44,7 +47,29 @@ def validate_parameters(params: Dict[str, Any]) -> Dict[str, Any]:
     if not query:
         raise KBSearchError("query は必須です")
     
-    return {'query': query}
+    validated = {
+        'query': query,
+        'controlSystem': params.get('controlSystem', '').strip() or DEFAULT_CONTROL_SYSTEM,
+    }
+
+    if 'errorCode' in params and params['errorCode']:
+        validated['errorCode'] = params['errorCode'].strip().upper()
+
+    return validated
+
+
+def build_metadata_filter(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the Bedrock KB metadata filter for manual retrieval."""
+    conditions: List[Dict[str, Any]] = [
+        {'equals': {'key': 'control-system', 'value': params.get('controlSystem') or DEFAULT_CONTROL_SYSTEM}}
+    ]
+
+    if 'errorCode' in params:
+        conditions.append({'equals': {'key': 'error-code', 'value': params['errorCode']}})
+
+    if len(conditions) == 1:
+        return conditions[0]
+    return {'andAll': conditions}
 
 
 def build_search_query(params: Dict[str, Any]) -> str:
@@ -72,7 +97,7 @@ def build_search_query(params: Dict[str, Any]) -> str:
     return " ".join(query_parts)
 
 
-def search_knowledge_base(query: str) -> List[Dict[str, Any]]:
+def search_knowledge_base(query: str, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Knowledge Base を全文検索（メタデータフィルターなし）
     
@@ -88,14 +113,18 @@ def search_knowledge_base(query: str) -> List[Dict[str, Any]]:
     try:
         logger.info(f"Searching KB with query: {query}")
         
+        vector_config: Dict[str, Any] = {
+            'numberOfResults': 5,
+            'overrideSearchType': 'SEMANTIC',
+        }
+        if filters:
+            vector_config['filter'] = filters
+
         # Bedrock Retrieve API を呼び出し
         response = bedrock_client.retrieve(
             knowledgeBaseId=KB_ID,
             retrievalConfiguration={
-                'vectorSearchConfiguration': {
-                    'numberOfResults': 5,
-                    'overrideSearchType': 'SEMANTIC'
-                }
+                'vectorSearchConfiguration': vector_config
             },
             retrievalQuery={'text': query}
         )
@@ -106,7 +135,8 @@ def search_knowledge_base(query: str) -> List[Dict[str, Any]]:
                 result_item = {
                     'content': result.get('content', ''),
                     'score': result.get('score', 0.0),
-                    'location': result.get('location', {})
+                    'location': result.get('location', {}),
+                    'metadata': result.get('metadata', {}),
                 }
                 results.append(result_item)
         
@@ -141,6 +171,35 @@ def format_results(results: List[Dict[str, Any]]) -> str:
         formatted.append("-" * 80)
     
     return "\n".join(formatted)
+
+
+def write_citations(session_id: str, results: List[Dict[str, Any]]):
+    """Write manual KB citation metadata into the troubleshooting session."""
+    if not session_id:
+        return
+    citations = [
+        {
+            'uri': r.get('location', {}).get('s3Location', {}).get('uri', ''),
+            'title': r.get('metadata', {}).get('title'),
+            'document': r.get('metadata', {}).get('document', 'unknown'),
+            'model': r.get('metadata', {}).get('model', ''),
+            'score': str(r.get('score', 0.0)),
+            'source_action': 'manual',
+        }
+        for r in results
+        if r.get('location', {}).get('s3Location', {}).get('uri', '')
+    ]
+    if not citations:
+        return
+    try:
+        dynamodb_resource.Table(SESSIONS_TABLE).update_item(
+            Key={'session_id': session_id},
+            UpdateExpression='SET citations = list_append(if_not_exists(citations, :empty), :c)',
+            ExpressionAttributeValues={':c': citations, ':empty': []},
+        )
+        logger.info(f"Citations written: session_id={session_id}, count={len(citations)}")
+    except Exception as e:
+        logger.warning(f"Citations write failed: {e}")
 
 
 def _extract_params(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -185,8 +244,11 @@ def lambda_handler(event, context):
         parameters = _extract_params(event)
         logger.info(f"Parameters: {parameters}")
         validated_params = validate_parameters(parameters)
-        search_query = build_search_query({**validated_params, **parameters})
-        results = search_knowledge_base(search_query)
+        search_query = build_search_query({**parameters, **validated_params})
+        filters = build_metadata_filter(validated_params)
+        results = search_knowledge_base(search_query, filters)
+        session_id = event.get('sessionAttributes', {}).get('session_id', '')
+        write_citations(session_id, results)
         formatted_result = format_results(results)
         logger.info("KB Search2 completed successfully")
         return _make_response(event, 200, formatted_result)

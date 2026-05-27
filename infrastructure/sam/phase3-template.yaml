@@ -16,6 +16,27 @@ Parameters:
   KnowledgeBaseId:
     Type: String
     Description: Bedrock Knowledge Base ID
+    Default: OCLVRJDMAH
+
+  TroubleCasesKnowledgeBaseId:
+    Type: String
+    Description: Bedrock Knowledge Base ID for trouble cases
+    Default: GKCWPMZUD0
+
+  TroubleshootingManualKnowledgeBaseId:
+    Type: String
+    Description: Bedrock Knowledge Base ID for troubleshooting manuals
+    Default: OCLVRJDMAH
+
+  CMaterialKnowledgeBaseId:
+    Type: String
+    Description: Bedrock Knowledge Base ID for C materials
+    Default: LCCRXQFJB9
+
+  DefaultControlSystem:
+    Type: String
+    Description: Temporary default control-system metadata filter
+    Default: VFGLF
 
   AgentId:
     Type: String
@@ -59,6 +80,7 @@ Globals:
         KnowledgeBaseId: !Ref KnowledgeBaseId
         SitesTableName: !Ref SitesTable
         BEDROCK_REGION: !Ref BedrockRegion
+        DEFAULT_CONTROL_SYSTEM: !Ref DefaultControlSystem
 
 Resources:
   # ──────────────────────────────────────────
@@ -165,6 +187,9 @@ Resources:
       CodeUri: ../../lambda/troubleshooting/kb-search1/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          KnowledgeBaseId: !Ref TroubleCasesKnowledgeBaseId
 
   KBSearch2Function:
     Type: AWS::Serverless::Function
@@ -173,6 +198,9 @@ Resources:
       CodeUri: ../../lambda/troubleshooting/kb-search2/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          KnowledgeBaseId: !Ref TroubleshootingManualKnowledgeBaseId
 
   KBSearch3Function:
     Type: AWS::Serverless::Function
@@ -181,6 +209,9 @@ Resources:
       CodeUri: ../../lambda/troubleshooting/kb-search3/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          KnowledgeBaseId: !Ref CMaterialKnowledgeBaseId
 
   # ──────────────────────────────────────────
   # API Gateway
