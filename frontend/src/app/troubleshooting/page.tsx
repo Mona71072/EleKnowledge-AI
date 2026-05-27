@@ -20,6 +20,7 @@ interface SourceDocument {
   documentType: string;
   model: string;
   relevance: number;
+  source_action?: string;
 }
 
 interface TroubleshootingResult {
@@ -62,8 +63,8 @@ function validateForm(form: FormState): FormErrors {
     errors.troubleDescription = '不具合情報は2000文字以内で入力してください';
   }
 
-  if (form.errorCode && !/^[A-Z0-9]{4}$/.test(form.errorCode)) {
-    errors.errorCode = 'エラーコードは半角英大文字・数字4文字で入力してください';
+  if (form.errorCode && !/^[A-Za-z0-9]{3}$/.test(form.errorCode)) {
+    errors.errorCode = 'エラーコードは半角英数字3文字で入力してください';
   }
 
   return errors;
@@ -154,7 +155,7 @@ export default function TroubleshootingPage() {
       };
       if (form.constructionNumber) payload.constructionNumber = form.constructionNumber.trim();
       if (form.model) payload.model = form.model;
-      if (form.errorCode) payload.errorCode = form.errorCode.trim();
+      if (form.errorCode) payload.errorCode = form.errorCode.trim().toUpperCase();
 
       const response = await axios.post<TroubleshootingResult>(
         `${API_URL}/analyze`,
@@ -261,11 +262,11 @@ export default function TroubleshootingPage() {
                 {/* エラーコード */}
                 <Input
                   label="エラーコード"
-                  placeholder="例: E001（半角英大文字・数字4文字）"
+                  placeholder="例: E34（半角英数字3文字）"
                   value={form.errorCode}
                   onChange={handleChange('errorCode')}
                   error={formErrors.errorCode}
-                  maxLength={4}
+                  maxLength={3}
                   helperText="任意"
                 />
 
@@ -277,7 +278,7 @@ export default function TroubleshootingPage() {
                   <textarea
                     value={form.troubleDescription}
                     onChange={handleChange('troubleDescription')}
-                    placeholder="例: 昇降機が2階と3階の間で停止し、ドアが開かない状態が続いています。エラー表示はパネルに E001 と出ています。"
+                    placeholder="例: 昇降機が2階と3階の間で停止し、ドアが開かない状態が続いています。エラー表示はパネルに E34 と出ています。"
                     rows={5}
                     maxLength={2000}
                     className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors text-base text-gray-900 placeholder:text-gray-500 resize-y ${
