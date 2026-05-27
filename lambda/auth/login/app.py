@@ -1,5 +1,5 @@
 ﻿"""
-EleKnowledge-AI Login Lambda Function
+EleKnowledge Login Lambda Function
 Cognito User Pool Authentication
 """
 import json

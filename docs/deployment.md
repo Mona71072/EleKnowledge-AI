@@ -1,8 +1,13 @@
 ---
-status: production
-last-verified: 2026-04-24
+status: legacy
+last-verified: 2026-05-27
 related-code: infrastructure/, amplify.yml, samconfig.toml
 ---
+
+> [!WARNING]
+> Legacy deployment architecture. Do not use this document for the new AWS account migration to `ap-northeast-1`.
+> Use [AWS Migration Runbook](aws-migration-runbook.md) and [AWS Resource Map](aws-resource-map.md) instead.
+> This file may still contain old `us-east-1` and `EleKnowledge-AI-*` assumptions.
 
 # 🚀 デプロイ構成
 

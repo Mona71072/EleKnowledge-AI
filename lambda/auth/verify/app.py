@@ -1,5 +1,5 @@
 ﻿"""
-EleKnowledge-AI Email Verification Lambda Function
+EleKnowledge Email Verification Lambda Function
 Cognito Email Confirmation
 """
 import json

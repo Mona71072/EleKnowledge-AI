@@ -37,9 +37,8 @@ def _response(status: int, body: dict) -> dict:
 
 
 def lambda_handler(event, context):
-    user_id = (
-        event.get("requestContext", {}).get("authorizer", {}).get("userId", "")
-    )
+    authorizer = event.get("requestContext", {}).get("authorizer", {})
+    user_id = authorizer.get("userId") or authorizer.get("claims", {}).get("sub") or ""
     if not user_id:
         return _response(401, {"error": "認証情報が不正です"})
 

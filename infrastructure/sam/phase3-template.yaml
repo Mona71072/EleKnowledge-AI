@@ -6,32 +6,36 @@ Description: 'Phase 3 - Troubleshooting Agent Full Stack (Lambda + DynamoDB + AP
 Parameters:
   Environment:
     Type: String
-    Default: development
+    Default: dev
     AllowedValues:
-      - development
-      - staging
-      - production
+      - dev
+      - prd
     Description: Environment name
+
+  ProjectName:
+    Type: String
+    Default: EleKnowledge
+    Description: Project name for resource tagging
 
   KnowledgeBaseId:
     Type: String
     Description: Bedrock Knowledge Base ID
-    Default: OCLVRJDMAH
+    Default: pending
 
   TroubleCasesKnowledgeBaseId:
     Type: String
     Description: Bedrock Knowledge Base ID for trouble cases
-    Default: GKCWPMZUD0
+    Default: pending
 
   TroubleshootingManualKnowledgeBaseId:
     Type: String
     Description: Bedrock Knowledge Base ID for troubleshooting manuals
-    Default: OCLVRJDMAH
+    Default: pending
 
   CMaterialKnowledgeBaseId:
     Type: String
     Description: Bedrock Knowledge Base ID for C materials
-    Default: LCCRXQFJB9
+    Default: pending
 
   DefaultControlSystem:
     Type: String
@@ -41,34 +45,23 @@ Parameters:
   AgentId:
     Type: String
     Description: Bedrock Agent ID
-    Default: PLACEHOLDER_AGENT_ID
+    Default: pending
 
   AgentAliasId:
     Type: String
     Description: Bedrock Agent Alias ID
-    Default: PLACEHOLDER_AGENT_ALIAS_ID
+    Default: pending
 
   BedrockRegion:
     Type: String
-    Default: us-east-1
+    Default: ap-northeast-1
     AllowedValues:
-      - us-east-1
       - ap-northeast-1
     Description: AWS Region for Bedrock API calls
 
-  DocumentsBucket:
-    Type: String
-    Default: eleknowledge-ai-troubleshooting-docs
-    Description: S3 bucket that stores troubleshooting citation documents
-
-  Phase1StackName:
-    Type: String
-    Default: EleKnowledge-AI-development-phase1
-    Description: Phase 1 CloudFormation stack name (for UserPoolArn import)
-
 Globals:
   Function:
-    Runtime: python3.11
+    Runtime: python3.13
     Timeout: 60
     MemorySize: 512
     Tracing: Active
@@ -79,8 +72,14 @@ Globals:
         AGENT_ALIAS_ID: !Ref AgentAliasId
         KnowledgeBaseId: !Ref KnowledgeBaseId
         SitesTableName: !Ref SitesTable
+        SESSIONS_TABLE: !Ref SessionsTable
         BEDROCK_REGION: !Ref BedrockRegion
         DEFAULT_CONTROL_SYSTEM: !Ref DefaultControlSystem
+    Tags:
+      Project: !Ref ProjectName
+      Env: !Ref Environment
+      ManagedBy: SAM
+      Phase: "3"
 
 Resources:
   # ──────────────────────────────────────────
@@ -89,7 +88,7 @@ Resources:
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub troubleshooting-lambda-role-${Environment}
+      RoleName: !Sub troubleshooting-lambda-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -119,9 +118,14 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
                   - dynamodb:Query
                   - dynamodb:Scan
-                Resource: !GetAtt SitesTable.Arn
+                Resource:
+                  - !GetAtt SitesTable.Arn
+                  - !GetAtt SessionsTable.Arn
+                  - !Sub ${SessionsTable.Arn}/index/*
         - PolicyName: S3Access
           PolicyDocument:
             Version: '2012-10-17'
@@ -131,8 +135,23 @@ Resources:
                   - s3:GetObject
                   - s3:ListBucket
                 Resource:
-                  - !Sub arn:aws:s3:::${DocumentsBucket}
-                  - !Sub arn:aws:s3:::${DocumentsBucket}/*
+                  - !Sub
+                    - arn:aws:s3:::${BucketName}
+                    - BucketName:
+                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
+                  - !Sub
+                    - arn:aws:s3:::${BucketName}/*
+                    - BucketName:
+                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "3"
 
   # ──────────────────────────────────────────
   # DynamoDB
@@ -150,6 +169,54 @@ Resources:
       KeySchema:
         - AttributeName: constructionNumber
           KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "3"
+
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub sessions-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: userId-timestamp-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "3"
 
   # ──────────────────────────────────────────
   # Lambda Functions
@@ -157,13 +224,14 @@ Resources:
   OrchestratorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub troubleshooting-orchestrator-${Environment}
+      FunctionName: !Sub orchestrator-${Environment}
       CodeUri: ../../lambda/troubleshooting/orchestrator/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
-          DOCUMENTS_BUCKET: !Ref DocumentsBucket
+          DOCUMENTS_BUCKET:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
       Events:
         AnalyzeApi:
           Type: Api
@@ -175,7 +243,7 @@ Resources:
   DBSearchFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub troubleshooting-db-search-${Environment}
+      FunctionName: !Sub db-search-${Environment}
       CodeUri: ../../lambda/troubleshooting/db-search/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
@@ -183,7 +251,7 @@ Resources:
   KBSearch1Function:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub troubleshooting-kb-search1-${Environment}
+      FunctionName: !Sub kb-search-cases-${Environment}
       CodeUri: ../../lambda/troubleshooting/kb-search1/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
@@ -194,7 +262,7 @@ Resources:
   KBSearch2Function:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub troubleshooting-kb-search2-${Environment}
+      FunctionName: !Sub kb-search-manuals-${Environment}
       CodeUri: ../../lambda/troubleshooting/kb-search2/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
@@ -205,13 +273,56 @@ Resources:
   KBSearch3Function:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub troubleshooting-kb-search3-${Environment}
+      FunctionName: !Sub kb-search-materials-${Environment}
       CodeUri: ../../lambda/troubleshooting/kb-search3/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
           KnowledgeBaseId: !Ref CMaterialKnowledgeBaseId
+
+  HistoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub history-${Environment}
+      CodeUri: ../../lambda/troubleshooting/history/
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 256
+      Events:
+        HistoryApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TroubleshootingApi
+            Path: /troubleshooting/history
+            Method: get
+
+  AgentIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /eleknowledge/${Environment}/agent-id
+      Type: String
+      Value: !Ref AgentId
+      Description: Bedrock Agent ID for troubleshooting
+      Tags:
+        Project: !Ref ProjectName
+        Env: !Ref Environment
+        ManagedBy: SAM
+        Phase: "3"
+
+  AgentAliasIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /eleknowledge/${Environment}/agent-alias-id
+      Type: String
+      Value: !Ref AgentAliasId
+      Description: Bedrock Agent Alias ID for troubleshooting
+      Tags:
+        Project: !Ref ProjectName
+        Env: !Ref Environment
+        ManagedBy: SAM
+        Phase: "3"
 
   # ──────────────────────────────────────────
   # API Gateway
@@ -226,11 +337,11 @@ Resources:
         Authorizers:
           CognitoAuthorizer:
             UserPoolArn:
-              Fn::ImportValue: !Sub ${Phase1StackName}-UserPoolArn
+              Fn::ImportValue: !Sub ${ProjectName}-${Environment}-CognitoUserPoolArn
       Cors:
         AllowOrigin: "'*'"
         AllowHeaders: "'Content-Type,Authorization'"
-        AllowMethods: "'POST,OPTIONS'"
+        AllowMethods: "'GET,POST,OPTIONS'"
       GatewayResponses:
         UNAUTHORIZED:
           StatusCode: 401
@@ -265,7 +376,25 @@ Outputs:
   KBSearch3FunctionArn:
     Value: !GetAtt KBSearch3Function.Arn
 
+  HistoryFunctionArn:
+    Value: !GetAtt HistoryFunction.Arn
+
   SitesTableName:
     Value: !Ref SitesTable
     Export:
       Name: !Sub ${AWS::StackName}-SitesTableName
+
+  SessionsTableName:
+    Value: !Ref SessionsTable
+    Export:
+      Name: !Sub ${AWS::StackName}-SessionsTableName
+
+  AgentIdParameterName:
+    Value: !Ref AgentIdParameter
+    Export:
+      Name: !Sub ${AWS::StackName}-AgentIdParameterName
+
+  AgentAliasIdParameterName:
+    Value: !Ref AgentAliasIdParameter
+    Export:
+      Name: !Sub ${AWS::StackName}-AgentAliasIdParameterName

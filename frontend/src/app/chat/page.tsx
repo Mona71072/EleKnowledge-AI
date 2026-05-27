@@ -555,7 +555,7 @@ const normalizeTableMarkdown = (text: string): string => {
               </svg>
             </div>
             <div>
-              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">EleKnowledge-AI</h1>
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">EleKnowledge</h1>
               <span className="hidden sm:inline-block text-[10px] text-gray-500 mt-0 leading-tight">RAGチャット</span>
             </div>
           </div>
@@ -808,7 +808,7 @@ const normalizeTableMarkdown = (text: string): string => {
                     </div>
                   </div>
                   <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 whitespace-nowrap leading-tight" style={{ writingMode: 'horizontal-tb', textOrientation: 'mixed' }}>
-                    EleKnowledge-AIへようこそ！
+                    EleKnowledgeへようこそ！
                   </h2>
                   <p className="text-gray-600 text-base sm:text-lg mb-6 break-words whitespace-normal leading-relaxed" style={{ writingMode: 'horizontal-tb', textOrientation: 'mixed' }}>
                     技術資料を検索して質問にお答えします

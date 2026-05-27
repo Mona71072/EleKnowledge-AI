@@ -1,31 +1,28 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  EleKnowledge-AI Phase 1: Infrastructure Setup
+  EleKnowledge Phase 1: Infrastructure Setup
   Authentication System, DynamoDB, S3, Lambda, API Gateway
 
 Parameters:
   Environment:
     Type: String
-    Default: development
+    Default: dev
     AllowedValues:
-      - development
-      - staging
-      - production
+      - dev
+      - prd
     Description: Environment name
   
   ProjectName:
     Type: String
-    Default: EleKnowledge-AI
+    Default: EleKnowledge
     Description: Project name for resource tagging
   
-  AWS Region:
+  AwsRegion:
     Type: String
     Default: ap-northeast-1
     AllowedValues:
-      - us-east-1
       - ap-northeast-1
-      - eu-west-1
     Description: AWS Region
   
   AllowedIPCIDR:
@@ -118,11 +115,6 @@ Parameters:
       - "false"
     Description: Enable DynamoDB Point-in-Time Recovery
 
-Conditions:
-  IsProvisionedMode: !Equals
-    - !Ref DynamoDBBillingMode
-    - PROVISIONED
-
 Globals:
   Function:
     Timeout: 30
@@ -140,7 +132,7 @@ Globals:
         DYNAMODB_CHATLOGS_TABLE: !Ref ChatLogsTable
     Tags:
       Project: !Ref ProjectName
-      Environment: !Ref Environment
+      Env: !Ref Environment
       ManagedBy: SAM
       Phase: "1"
 
@@ -151,7 +143,7 @@ Resources:
   CognitoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
-      UserPoolName: !Sub ${ProjectName}-${Environment}-user-pool
+      UserPoolName: !Sub users-${Environment}
       UsernameAttributes:
         - email
       UsernameConfiguration:
@@ -189,14 +181,14 @@ Resources:
         EmailSendingAccount: COGNITO_DEFAULT
       UserPoolTags:
         Project: !Ref ProjectName
-        Environment: !Ref Environment
+        Env: !Ref Environment
         ManagedBy: SAM
         Phase: "1"
 
   CognitoUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
-      ClientName: !Sub ${ProjectName}-${Environment}-client
+      ClientName: !Sub users-${Environment}-client
       UserPoolId: !Ref CognitoUserPool
       GenerateSecret: false
       ExplicitAuthFlows:
@@ -225,7 +217,7 @@ Resources:
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub ${ProjectName}-${Environment}-users
+      TableName: !Sub users-${Environment}
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: userId
@@ -249,7 +241,7 @@ Resources:
       Tags:
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Environment
+        - Key: Env
           Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
@@ -259,7 +251,7 @@ Resources:
   ChatLogsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub ${ProjectName}-${Environment}-chatlogs
+      TableName: !Sub chatlogs-${Environment}
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: sessionId
@@ -294,7 +286,7 @@ Resources:
       Tags:
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Environment
+        - Key: Env
           Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
@@ -307,7 +299,7 @@ Resources:
   DocumentsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub eleknowledge-ai-${Environment}-documents
+      BucketName: !Sub documents-${Environment}-${AWS::AccountId}
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -334,7 +326,7 @@ Resources:
       Tags:
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Environment
+        - Key: Env
           Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
@@ -344,7 +336,7 @@ Resources:
   UploadsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub eleknowledge-ai-${Environment}-uploads
+      BucketName: !Sub uploads-${Environment}-${AWS::AccountId}
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -363,7 +355,7 @@ Resources:
       Tags:
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Environment
+        - Key: Env
           Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
@@ -376,7 +368,7 @@ Resources:
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${ProjectName}-${Environment}-lambda-role
+      RoleName: !Sub auth-lambda-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -437,7 +429,7 @@ Resources:
       Tags:
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Environment
+        - Key: Env
           Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
@@ -450,7 +442,7 @@ Resources:
   SignupFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub ${ProjectName}-${Environment}-signup
+      FunctionName: !Sub signup-${Environment}
       CodeUri: ../../lambda/auth/signup/
       Handler: app.lambda_handler
       Description: User signup function
@@ -471,7 +463,7 @@ Resources:
   LoginFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub ${ProjectName}-${Environment}-login
+      FunctionName: !Sub login-${Environment}
       CodeUri: ../../lambda/auth/login/
       Handler: app.lambda_handler
       Description: User login function
@@ -492,7 +484,7 @@ Resources:
   VerifyFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub ${ProjectName}-${Environment}-verify
+      FunctionName: !Sub verify-${Environment}
       CodeUri: ../../lambda/auth/verify/
       Handler: app.lambda_handler
       Description: Email verification function
@@ -512,7 +504,7 @@ Resources:
   ForgotPasswordFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub ${ProjectName}-${Environment}-forgot-password
+      FunctionName: !Sub forgot-password-${Environment}
       CodeUri: ../../lambda/auth/forgot-password/
       Handler: app.lambda_handler
       Description: Forgot password request function
@@ -532,7 +524,7 @@ Resources:
   ConfirmPasswordResetFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub ${ProjectName}-${Environment}-confirm-password-reset
+      FunctionName: !Sub confirm-password-reset-${Environment}
       CodeUri: ../../lambda/auth/confirm-password-reset/
       Handler: app.lambda_handler
       Description: Confirm password reset function
@@ -555,7 +547,7 @@ Resources:
   AuthApi:
     Type: AWS::Serverless::Api
     Properties:
-      Name: !Sub ${ProjectName}-${Environment}-auth-api
+      Name: !Sub auth-api-${Environment}
       StageName: !Ref Environment
       Cors:
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
@@ -581,7 +573,7 @@ Resources:
           MetricsEnabled: true
       Tags:
         Project: !Ref ProjectName
-        Environment: !Ref Environment
+        Env: !Ref Environment
         ManagedBy: SAM
         Phase: "1"
 
@@ -591,7 +583,7 @@ Resources:
   ApiGatewayLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /aws/apigateway/${ProjectName}-${Environment}-auth-api
+      LogGroupName: !Sub /aws/apigateway/auth-api-${Environment}
       RetentionInDays: 30
 
 Outputs:

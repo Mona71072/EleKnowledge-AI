@@ -2,9 +2,14 @@ version = 0.1
 
 [default]
 [default.deploy.parameters]
-stack_name = "eleknowledge-troubleshooting"
-s3_bucket = "eleknowledge-deployment-bucket"
+stack_name = "troubleshooting-dev"
+resolve_s3 = true
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
-region = "us-east-1"
+region = "ap-northeast-1"
 confirm_changeset = false
 disable_rollback = false
+parameter_overrides = [
+    "Environment=dev",
+    "ProjectName=EleKnowledge",
+    "BedrockRegion=ap-northeast-1"
+]

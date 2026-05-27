@@ -12,7 +12,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <head>
-        <title>EleKnowledge-AI</title>
+        <title>EleKnowledge</title>
         <meta name="description" content="AI-powered knowledge management system for electrical equipment" />
       </head>
       <body className="antialiased">

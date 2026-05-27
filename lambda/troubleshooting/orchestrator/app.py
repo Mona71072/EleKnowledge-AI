@@ -26,8 +26,8 @@ SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "troubleshooting-sessions")
 ALLOWED_MODELS = ["KE-LG", "KM-LD", "CM-MA", "ME-CH"]
 TTL_30_DAYS = 30 * 24 * 3600
 
-s3_client = boto3.client("s3", region_name=os.environ.get("BEDROCK_REGION", "us-east-1"))
-dynamodb_resource = boto3.resource("dynamodb", region_name=os.environ.get("BEDROCK_REGION", "us-east-1"))
+s3_client = boto3.client("s3", region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-1"))
+dynamodb_resource = boto3.resource("dynamodb", region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-1"))
 
 
 class ValidationError(Exception):
@@ -90,7 +90,8 @@ def format_agent_input(validated_data: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def extract_user_id(event: Dict[str, Any]) -> str:
-    return event.get("requestContext", {}).get("authorizer", {}).get("userId", "anonymous")
+    authorizer = event.get("requestContext", {}).get("authorizer", {})
+    return authorizer.get("userId") or authorizer.get("claims", {}).get("sub") or "anonymous"
 
 
 def init_session(session_id: str, validated: Dict[str, Any], user_id: str):

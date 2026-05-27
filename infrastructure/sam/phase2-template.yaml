@@ -1,37 +1,39 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  EleKnowledge-AI Phase 2: RAG Chat System
+  EleKnowledge Phase 2: RAG Chat System
   Knowledge Base, RAG Lambda, Chat Management, OpenSearch Serverless
 
 Parameters:
   Environment:
     Type: String
-    Default: development
+    Default: dev
     AllowedValues:
-      - development
-      - staging
-      - production
+      - dev
+      - prd
     Description: Environment name
   
   ProjectName:
     Type: String
-    Default: EleKnowledge-AI
+    Default: EleKnowledge
     Description: Project name
   
-  AWS Region:
+  AwsRegion:
     Type: String
     Default: ap-northeast-1
     AllowedValues:
-      - us-east-1
       - ap-northeast-1
-      - eu-west-1
     Description: AWS Region (Bedrock availability required)
   
   Phase1StackName:
     Type: String
-    Default: EleKnowledge-AI-development-phase1
+    Default: EleKnowledge-dev-phase1
     Description: Phase 1 CloudFormation stack name for importing values
+
+  KnowledgeBaseId:
+    Type: String
+    Default: pending
+    Description: Bedrock Knowledge Base ID to expose to Lambda and SSM after KB creation
   
   BedrockModelId:
     Type: String
@@ -129,10 +131,9 @@ Globals:
       Variables:
         ENVIRONMENT: !Ref Environment
         PROJECT_NAME: !Ref ProjectName
-        AWS_REGION: !Ref AWS Region
     Tags:
       Project: !Ref ProjectName
-      Environment: !Ref Environment
+      Env: !Ref Environment
       ManagedBy: SAM
       Phase: "2"
 
@@ -143,14 +144,16 @@ Resources:
   KnowledgeBaseCollection:
     Type: AWS::OpenSearchServerless::Collection
     Properties:
-      Name: !Sub eleknowledge-${Environment}-kb
+      Name: !Sub kb-${Environment}
       Type: VECTORSEARCH
-      Description: Vector database for EleKnowledge-AI Knowledge Base
+      Description: Vector database for EleKnowledge Knowledge Base
       Tags:
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Environment
+        - Key: Env
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
         - Key: Phase
           Value: "2"
     DependsOn: KnowledgeBaseEncryptionPolicy
@@ -159,7 +162,7 @@ Resources:
   KnowledgeBaseEncryptionPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
     Properties:
-      Name: !Sub eleknowledge-${Environment}-enc
+      Name: !Sub kb-${Environment}-enc
       Type: encryption
       Policy: !Sub |
         {
@@ -167,7 +170,7 @@ Resources:
             {
               "ResourceType": "collection",
               "Resource": [
-                "collection/eleknowledge-${Environment}-kb"
+                "collection/kb-${Environment}"
               ]
             }
           ],
@@ -177,7 +180,7 @@ Resources:
   KnowledgeBaseNetworkPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
     Properties:
-      Name: !Sub eleknowledge-${Environment}-net
+      Name: !Sub kb-${Environment}-net
       Type: network
       Policy: !Sub |
         [
@@ -186,13 +189,13 @@ Resources:
               {
                 "ResourceType": "collection",
                 "Resource": [
-                  "collection/eleknowledge-${Environment}-kb"
+                  "collection/kb-${Environment}"
                 ]
               },
               {
                 "ResourceType": "dashboard",
                 "Resource": [
-                  "collection/eleknowledge-${Environment}-kb"
+                  "collection/kb-${Environment}"
                 ]
               }
             ],
@@ -206,7 +209,7 @@ Resources:
   KnowledgeBaseRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${ProjectName}-${Environment}-kb-role
+      RoleName: !Sub kb-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -246,13 +249,26 @@ Resources:
                   - aoss:DescribeCollectionItems
                 Resource: '*'
 
+  KnowledgeBaseIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /eleknowledge/${Environment}/knowledge-base-id
+      Type: String
+      Value: !Ref KnowledgeBaseId
+      Description: Bedrock Knowledge Base ID for EleKnowledge RAG
+      Tags:
+        Project: !Ref ProjectName
+        Env: !Ref Environment
+        ManagedBy: SAM
+        Phase: "2"
+
   # ============================================================================
   # Lambda Execution Role (Phase 2)
   # ============================================================================
   RagLambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${ProjectName}-${Environment}-rag-lambda-role
+      RoleName: !Sub rag-lambda-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -315,7 +331,7 @@ Resources:
   RagFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub ${ProjectName}-${Environment}-rag
+      FunctionName: !Sub rag-${Environment}
       CodeUri: ../../lambda/rag/rag-function/
       Handler: app.lambda_handler
       Description: RAG query processing with Knowledge Base and Claude 4
@@ -341,7 +357,7 @@ Resources:
   ChatManagementFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub ${ProjectName}-${Environment}-chat-management
+      FunctionName: !Sub chat-${Environment}
       CodeUri: ../../lambda/chat/chat-management/
       Handler: app.lambda_handler
       Description: Chat session and message management
@@ -390,7 +406,7 @@ Resources:
   RagApi:
     Type: AWS::Serverless::Api
     Properties:
-      Name: !Sub ${ProjectName}-${Environment}-rag-api
+      Name: !Sub rag-api-${Environment}
       StageName: !Ref Environment
       Cors:
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
@@ -398,6 +414,7 @@ Resources:
         AllowOrigin: "'*'"
         MaxAge: "'3600'"
       Auth:
+        AddDefaultAuthorizerToCorsPreflight: false
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
           CognitoAuthorizer:
@@ -413,9 +430,6 @@ Resources:
             Headers:
               Access-Control-Allow-Origin: "'*'"
       MethodSettings:
-        - ResourcePath: "/*"
-          HttpMethod: "OPTIONS"
-          AuthorizationType: NONE
         - ResourcePath: "/*"
           HttpMethod: "*"
           ThrottlingBurstLimit: !Ref RagApiThrottleBurst
@@ -425,13 +439,13 @@ Resources:
           MetricsEnabled: true
       Tags:
         Project: !Ref ProjectName
-        Environment: !Ref Environment
+        Env: !Ref Environment
         Phase: "2"
   
   ChatApi:
     Type: AWS::Serverless::Api
     Properties:
-      Name: !Sub ${ProjectName}-${Environment}-chat-api
+      Name: !Sub chat-api-${Environment}
       StageName: !Ref Environment
       Cors:
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
@@ -439,6 +453,7 @@ Resources:
         AllowOrigin: "'*'"
         MaxAge: "'3600'"
       Auth:
+        AddDefaultAuthorizerToCorsPreflight: false
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
           CognitoAuthorizer:
@@ -455,9 +470,6 @@ Resources:
               Access-Control-Allow-Origin: "'*'"
       MethodSettings:
         - ResourcePath: "/*"
-          HttpMethod: "OPTIONS"
-          AuthorizationType: NONE
-        - ResourcePath: "/*"
           HttpMethod: "*"
           ThrottlingBurstLimit: !Ref ChatApiThrottleBurst
           ThrottlingRateLimit: !Ref ChatApiThrottleRate
@@ -466,7 +478,7 @@ Resources:
           MetricsEnabled: true
       Tags:
         Project: !Ref ProjectName
-        Environment: !Ref Environment
+        Env: !Ref Environment
         Phase: "2"
 
   # ============================================================================
@@ -475,13 +487,13 @@ Resources:
   RagApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /aws/apigateway/${ProjectName}-${Environment}-rag-api
+      LogGroupName: !Sub /aws/apigateway/rag-api-${Environment}
       RetentionInDays: !Ref LogRetentionInDays
   
   ChatApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /aws/apigateway/${ProjectName}-${Environment}-chat-api
+      LogGroupName: !Sub /aws/apigateway/chat-api-${Environment}
       RetentionInDays: !Ref LogRetentionInDays
 
 Outputs:
@@ -530,3 +542,9 @@ Outputs:
     Value: !GetAtt KnowledgeBaseRole.Arn
     Export:
       Name: !Sub ${ProjectName}-${Environment}-KnowledgeBaseRoleArn
+
+  KnowledgeBaseIdParameterName:
+    Description: SSM parameter that stores the Bedrock Knowledge Base ID
+    Value: !Ref KnowledgeBaseIdParameter
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-KnowledgeBaseIdParameterName

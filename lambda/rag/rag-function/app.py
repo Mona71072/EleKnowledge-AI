@@ -1,5 +1,5 @@
 """
-EleKnowledge-AI RAG Lambda Function
+EleKnowledge RAG Lambda Function
 Knowledge Base + Claude 4 Integration
 """
 import json
@@ -19,7 +19,7 @@ KNOWLEDGE_BASE_ID = os.environ.get('KNOWLEDGE_BASE_ID', 'PLACEHOLDER')
 BEDROCK_MODEL_ID = os.environ.get('BEDROCK_MODEL_ID')
 CHATLOGS_TABLE_NAME = os.environ.get('DYNAMODB_CHATLOGS_TABLE')
 DOCUMENTS_BUCKET = os.environ.get('DOCUMENTS_BUCKET')
-AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-1')
 
 # Initialize AWS clients with region from environment
 bedrock_agent = boto3.client('bedrock-agent-runtime', region_name=AWS_REGION)
@@ -252,7 +252,7 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
 """
       
         else:
-            system_prompt = """あなたはEleKnowledge-AIの技術サポートアシスタントです。
+            system_prompt = """あなたはEleKnowledgeの技術サポートアシスタントです。
 電気設備・昇降機に関する専門知識を持ち、与えられた質問に対して正確かつ丁寧に回答します。
 
 【回答ルール】

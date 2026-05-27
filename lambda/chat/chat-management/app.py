@@ -1,5 +1,5 @@
 """
-EleKnowledge-AI Chat Management Lambda Function
+EleKnowledge Chat Management Lambda Function
 Session and Message Management
 """
 import json
@@ -11,7 +11,7 @@ from botocore.exceptions import ClientError
 from decimal import Decimal
 
 # Initialize AWS clients
-dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'ap-northeast-1'))
 
 # Environment variables
 CHATLOGS_TABLE_NAME = os.environ.get('CHATLOGS_TABLE')

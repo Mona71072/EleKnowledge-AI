@@ -1,5 +1,5 @@
 """
-EleKnowledge-AI Confirm Password Reset Lambda Function
+EleKnowledge Confirm Password Reset Lambda Function
 Cognito New Password Challenge
 """
 import json

@@ -16,12 +16,12 @@ logger.setLevel(logging.INFO)
 
 # AWS クライアント
 bedrock_client = boto3.client('bedrock-agent-runtime',
-    region_name=os.environ.get('BEDROCK_REGION', 'us-east-1'))
-dynamodb_resource = boto3.resource('dynamodb', region_name=os.environ.get('BEDROCK_REGION', 'us-east-1'))
+    region_name=os.environ.get('BEDROCK_REGION', 'ap-northeast-1'))
+dynamodb_resource = boto3.resource('dynamodb', region_name=os.environ.get('BEDROCK_REGION', 'ap-northeast-1'))
 
 # 環境変数
-KB_ID = os.environ.get('KnowledgeBaseId', 'GKCWPMZUD0')
-SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE', 'troubleshooting-sessions')
+KB_ID = os.environ.get('KnowledgeBaseId', 'pending')
+SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE', 'sessions-dev')
 DEFAULT_CONTROL_SYSTEM = os.environ.get('DEFAULT_CONTROL_SYSTEM', 'VFGLF')
 
 
