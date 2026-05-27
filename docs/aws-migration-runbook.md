@@ -197,7 +197,7 @@ aws cloudformation describe-stacks `
 
 Required output:
 
-- `TroubleshootingApiUrl`
+- `TroubleshootingApiUrl`: base URL ending in `/{env}/troubleshooting`; the frontend appends `/analyze` and `/history`.
 
 ## 6. Configure Amplify Environment Variables
 
@@ -209,7 +209,7 @@ Set these in Amplify Hosting for the new app/branch:
 | `NEXT_PUBLIC_API_URL` | Phase 1 `AuthApiUrl` |
 | `NEXT_PUBLIC_RAG_API_URL` | Phase 2 `RagApiUrl` |
 | `NEXT_PUBLIC_CHAT_API_URL` | Phase 2 `ChatApiUrl` |
-| `NEXT_PUBLIC_TROUBLESHOOTING_API_URL` | Phase 3 `TroubleshootingApiUrl` |
+| `NEXT_PUBLIC_TROUBLESHOOTING_API_URL` | Phase 3 `TroubleshootingApiUrl` base URL |
 | `NEXT_PUBLIC_COGNITO_USER_POOL_ID` | Phase 1 `CognitoUserPoolId` |
 | `NEXT_PUBLIC_COGNITO_CLIENT_ID` | Phase 1 `CognitoClientId` |
 

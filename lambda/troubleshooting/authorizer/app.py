@@ -1,5 +1,5 @@
 """
-Cognito JWT Lambda Authorizer
+Legacy Cognito JWT verifier
 Bearer トークンを Cognito User Pool の公開鍵で検証し、userId (sub) を context に付与する。
 """
 import json

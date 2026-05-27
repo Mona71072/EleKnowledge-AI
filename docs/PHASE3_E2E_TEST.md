@@ -27,7 +27,7 @@ Orchestrator Lambda 経由で Bedrock Agent の全体的な動作確認
 ### テスト実行手順
 
 1. **AWS Lambda コンソールで Orchestrator 関数を開く**
-   - 関数名: `troubleshooting-orchestrator`
+   - 関数名: `orchestrator-dev`
 
 2. **テストイベント作成**
    - テスト名: `test_normal_case`
@@ -50,7 +50,7 @@ Orchestrator Lambda 経由で Bedrock Agent の全体的な動作確認
    - Citation 形式での参照文書情報
 
 ### ログの確認
-- CloudWatch Logs: `/aws/lambda/troubleshooting-orchestrator`
+- CloudWatch Logs: `/aws/lambda/orchestrator-dev`
 - Bedrock Agent の実行ログを確認
 
 ## テストシナリオ 2: 入力検証テスト
@@ -172,7 +172,7 @@ DB Search response: {
 
 ### 確認手順
 
-1. **AWS DynamoDB コンソールで `troubleshooting-sessions` テーブルを開く**
+1. **AWS DynamoDB コンソールで `sessions-dev` テーブルを開く**
 2. **テスト実行後のアイテムを確認**
 
 **期待されるアイテム構造:**
@@ -244,7 +244,7 @@ DB Search response: {
 
 ### テスト実行手順
 
-1. **AWS Lambda コンソールで `troubleshooting-history` を開く**
+1. **AWS Lambda コンソールで `history-dev` を開く**
 2. **テストイベント作成**（`tests/events/history-list-event.json` を使用）:
 
 ```json

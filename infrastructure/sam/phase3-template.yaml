@@ -354,8 +354,8 @@ Resources:
 
 Outputs:
   TroubleshootingApiUrl:
-    Description: Troubleshooting API エンドポイント URL
-    Value: !Sub https://${TroubleshootingApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/troubleshooting/analyze
+    Description: Troubleshooting API base URL for frontend requests
+    Value: !Sub https://${TroubleshootingApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/troubleshooting
     Export:
       Name: !Sub ${AWS::StackName}-ApiUrl
 

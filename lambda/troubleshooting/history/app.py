@@ -14,7 +14,7 @@ from boto3.dynamodb.conditions import Key
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "troubleshooting-sessions")
+SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "sessions-dev")
 dynamodb_resource = boto3.resource("dynamodb")
 
 

@@ -44,7 +44,7 @@
 ```
 フロントエンド入力（工事番号・機種・不具合内容・エラーコード）
   ↓
-API Gateway + Lambda Authorizer（Cognito JWT 検証）
+API Gateway + Cognito Authorizer（Cognito JWT 検証）
   ↓
 Orchestrator Lambda
   ├→ 入力検証・正規化
@@ -364,10 +364,10 @@ def format_agent_input(body: dict) -> str:
 | Agent Alias | `TSTALIASID`（DRAFT）|
 | Foundation Model | `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
 | Knowledge Base ID | `OCLVRJDMAH` |
-| DynamoDB: sessions | `troubleshooting-sessions`（TTL: 30日） |
+| DynamoDB: sessions | `sessions-dev` / `sessions-prd`（TTL: 30日） |
 | DynamoDB: sites | `sites`（PK: constructionNumber） |
 | API Gateway | `troubleshooting-api`（専用 Gateway） |
-| リージョン | `us-east-1` |
+| リージョン | `ap-northeast-1` |
 
 ---
 
@@ -375,13 +375,13 @@ def format_agent_input(body: dict) -> str:
 
 | Lambda 関数名 | 役割 | 呼び出し形式 |
 |---|---|---|
-| `troubleshooting-orchestrator` | エントリーポイント・セッション管理・後処理 | API Gateway → 直接 |
-| `troubleshooting-db-search` | DynamoDB から現場情報取得 | apiSchema (POST /site-info) |
-| `troubleshooting-kb-search1` | トラブル事例・報告書 KB 検索 | functionSchema (`searchTroubleCases`) |
-| `troubleshooting-kb-search2` | マニュアル KB 検索 | functionSchema (`searchTroubleshootManuals`) |
-| `troubleshooting-kb-search3` | C資料 KB 検索 | functionSchema (`searchCMaterialDocs`) |
-| `troubleshooting-history` | 履歴一覧・詳細取得 | API Gateway → 直接 |
-| `troubleshooting-authorizer` | Cognito JWT 検証・userId 抽出 | Lambda Authorizer |
+| `orchestrator-dev` / `orchestrator-prd` | エントリーポイント・セッション管理・後処理 | API Gateway → 直接 |
+| `db-search-dev` / `db-search-prd` | DynamoDB から現場情報取得 | apiSchema (POST /site-info) |
+| `kb-search-cases-dev` / `kb-search-cases-prd` | トラブル事例・報告書 KB 検索 | functionSchema (`searchTroubleCases`) |
+| `kb-search-manuals-dev` / `kb-search-manuals-prd` | マニュアル KB 検索 | functionSchema (`searchTroubleshootManuals`) |
+| `kb-search-materials-dev` / `kb-search-materials-prd` | C資料 KB 検索 | functionSchema (`searchCMaterialDocs`) |
+| `history-dev` / `history-prd` | 履歴一覧・詳細取得 | API Gateway → 直接 |
+| Cognito Authorizer | Cognito JWT 検証・`claims.sub` 抽出 | API Gateway managed authorizer |
 
 ---
 

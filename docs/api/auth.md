@@ -9,7 +9,7 @@ related-code: lambda/auth/
 
 > spec.md §7.1 から切り出し。Phase 1 で実装済みの認証系エンドポイントを記載する。
 
-**Base URL:** `https://xxxxx.execute-api.us-east-1.amazonaws.com/prod`
+**Base URL:** Phase 1 `AuthApiUrl` output, e.g. `https://{api-id}.execute-api.{region}.amazonaws.com/{env}`
 
 ## POST /auth/signup
 ユーザー登録

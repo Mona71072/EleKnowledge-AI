@@ -9,7 +9,7 @@ related-code: lambda/rag/
 
 > spec.md §7.2 から切り出し。Phase 2 の RAG クエリエンドポイントを記載する。
 
-**Base URL:** `https://yyyyy.execute-api.us-east-1.amazonaws.com/prod`
+**Base URL:** Phase 2 `RagApiUrl` output, e.g. `https://{api-id}.execute-api.{region}.amazonaws.com/{env}`
 
 ## POST /rag/query
 RAGクエリ実行

@@ -128,7 +128,7 @@ def write_citations(session_id: str, results: list) -> None:
 
 ### 3.2 確認方法
 
-DynamoDB コンソール → `troubleshooting-sessions` テーブルで対象セッションの `citations` リストに `"source_action": "trouble_cases"` が含まれることを確認する。
+DynamoDB コンソール → `sessions-dev`（本番は `sessions-prd`）テーブルで対象セッションの `citations` リストに `"source_action": "trouble_cases"` が含まれることを確認する。
 
 ---
 
@@ -212,7 +212,7 @@ def search_knowledge_base(query: str, model: str | None, error_code: str | None)
 import boto3
 from decimal import Decimal
 
-dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("BEDROCK_REGION", "us-east-1"))
+dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-1"))
 SESSIONS_TABLE = os.environ["SESSIONS_TABLE"]
 
 def write_citations(session_id: str, results: list) -> None:

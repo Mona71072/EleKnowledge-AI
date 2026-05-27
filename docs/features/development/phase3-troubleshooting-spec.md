@@ -101,7 +101,7 @@ interface TroubleshootingInput {
 | Agent Alias | `TSTALIASID`（DRAFT）|
 | Foundation Model | `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
 | Knowledge Base ID | `OCLVRJDMAH` |
-| DynamoDB: sessions | `troubleshooting-sessions`（TTL: 30日） |
+| DynamoDB: sessions | `sessions-dev` / `sessions-prd`（TTL: 30日） |
 | DynamoDB: sites | `sites`（PK: constructionNumber） |
 | API Gateway | `troubleshooting-api`（chat-api とは別 Gateway） |
 
@@ -111,11 +111,11 @@ interface TroubleshootingInput {
 
 | Lambda 関数名 | 役割 | Bedrock Agent 呼び出し形式 |
 |---|---|---|
-| `troubleshooting-orchestrator` | エントリーポイント・セッション管理・後処理 | API Gateway から直接 |
-| `troubleshooting-db-search` | DynamoDB から現場情報取得 | apiSchema (POST /site-info) |
-| `troubleshooting-kb-search1` | トラブル事例・報告書 KB 検索 | functionSchema (`searchTroubleCases`) |
-| `troubleshooting-kb-search2` | マニュアル KB 検索 | functionSchema (`searchTroubleshootManuals`) |
-| `troubleshooting-kb-search3` | C資料 KB 検索 | functionSchema (`searchCMaterialDocs`) |
+| `orchestrator-dev` / `orchestrator-prd` | エントリーポイント・セッション管理・後処理 | API Gateway から直接 |
+| `db-search-dev` / `db-search-prd` | DynamoDB から現場情報取得 | apiSchema (POST /site-info) |
+| `kb-search-cases-dev` / `kb-search-cases-prd` | トラブル事例・報告書 KB 検索 | functionSchema (`searchTroubleCases`) |
+| `kb-search-manuals-dev` / `kb-search-manuals-prd` | マニュアル KB 検索 | functionSchema (`searchTroubleshootManuals`) |
+| `kb-search-materials-dev` / `kb-search-materials-prd` | C資料 KB 検索 | functionSchema (`searchCMaterialDocs`) |
 
 ---
 
@@ -196,9 +196,9 @@ interface TroubleshootingResult {
 
 | source_action | バッジ表示 | 対応アクション |
 |---|---|---|
-| `trouble_cases` | `② トラブル事例` | kb-search1 |
-| `manual` | `③ マニュアル` | kb-search2 |
-| `c_material` | `④ C資料` | kb-search3 |
+| `trouble_cases` | `② トラブル事例` | `kb-search-cases-{env}` |
+| `manual` | `③ マニュアル` | `kb-search-manuals-{env}` |
+| `c_material` | `④ C資料` | `kb-search-materials-{env}` |
 
 ---
 

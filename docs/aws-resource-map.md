@@ -77,7 +77,7 @@ Use [AWS Migration Runbook](aws-migration-runbook.md) for deployment order, Bedr
 | `NEXT_PUBLIC_API_URL` | Amplify environment variable | Auth API base URL from Phase 1 output | `amplify.yml` |
 | `NEXT_PUBLIC_RAG_API_URL` | Amplify environment variable | RAG API base URL from Phase 2 output | `amplify.yml` |
 | `NEXT_PUBLIC_CHAT_API_URL` | Amplify environment variable | Chat API base URL from Phase 2 output | `amplify.yml` |
-| `NEXT_PUBLIC_TROUBLESHOOTING_API_URL` | Amplify environment variable | Troubleshooting API URL from Phase 3 output | `amplify.yml` |
+| `NEXT_PUBLIC_TROUBLESHOOTING_API_URL` | Amplify environment variable | Troubleshooting API base URL from Phase 3 `TroubleshootingApiUrl`; frontend appends `/analyze` and `/history` | `amplify.yml` |
 | `NEXT_PUBLIC_COGNITO_USER_POOL_ID` | Amplify environment variable | Cognito User Pool ID from Phase 1 output | `amplify.yml` |
 | `NEXT_PUBLIC_COGNITO_CLIENT_ID` | Amplify environment variable | Cognito User Pool Client ID from Phase 1 output | `amplify.yml` |
 

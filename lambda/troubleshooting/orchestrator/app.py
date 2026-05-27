@@ -21,7 +21,7 @@ logger.setLevel(logging.INFO)
 AGENT_ID = os.environ.get("AGENT_ID", "")
 AGENT_ALIAS_ID = os.environ.get("AGENT_ALIAS_ID", "TSTALIASID")
 DOCUMENTS_BUCKET = os.environ.get("DOCUMENTS_BUCKET", "")
-SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "troubleshooting-sessions")
+SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "sessions-dev")
 
 ALLOWED_MODELS = ["KE-LG", "KM-LD", "CM-MA", "ME-CH"]
 TTL_30_DAYS = 30 * 24 * 3600

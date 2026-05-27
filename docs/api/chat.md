@@ -9,7 +9,7 @@ related-code: lambda/chat/
 
 > spec.md §7.3 から切り出し。Phase 2 のチャットセッション管理エンドポイントを記載する。
 
-**Base URL:** `https://zzzzz.execute-api.us-east-1.amazonaws.com/prod`
+**Base URL:** Phase 2 `ChatApiUrl` output, e.g. `https://{api-id}.execute-api.{region}.amazonaws.com/{env}`
 
 ## GET /chat/sessions
 セッション一覧取得

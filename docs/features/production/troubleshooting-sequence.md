@@ -25,9 +25,9 @@ sequenceDiagram
     participant Orch as Orchestrator Lambda
     participant Agent as Bedrock Agent<br/>(D6FAGLJPPO)
     participant DBSearch as db-search Lambda<br/>(① GetSiteInfo)
-    participant KB1 as kb-search1 Lambda<br/>(② searchTroubleCases)
-    participant KB2 as kb-search2 Lambda<br/>(③ searchTroubleshootManuals)
-    participant KB3 as kb-search3 Lambda<br/>(④ searchCMaterialDocs)
+    participant KB1 as kb-search-cases-{env} Lambda<br/>(② searchTroubleCases)
+    participant KB2 as kb-search-manuals-{env} Lambda<br/>(③ searchTroubleshootManuals)
+    participant KB3 as kb-search-materials-{env} Lambda<br/>(④ searchCMaterialDocs)
     participant DDB as DynamoDB<br/>(sessions / sites)
     participant KB as Bedrock<br/>Knowledge Base
     participant S3 as S3<br/>(ドキュメント)
@@ -45,7 +45,7 @@ sequenceDiagram
     %% ─── Orchestrator 前処理 ───
     APIGW->>Orch: invoke（userId が context に付与済み）
     Orch->>Orch: validate_input()<br/>・不具合内容 (5〜2000文字) は必須<br/>・工事番号・機種・エラーコードは任意
-    Orch->>DDB: init_session()<br/>troubleshooting-sessions に空レコード作成（TTL: 30日）
+    Orch->>DDB: init_session()<br/>sessions-{env} に空レコード作成（TTL: 30日）
     Orch->>Orch: format_agent_input()<br/>各入力値の有無を明示した日本語プロンプトを整形
 
     %% ─── Bedrock Agent 呼び出し ───
@@ -133,9 +133,9 @@ sequenceDiagram
 
 | source_action | UI バッジ | 取得元 |
 |---|---|---|
-| `trouble_cases` | ② | kb-search1 Lambda |
-| `manual` | ③ | kb-search2 Lambda（★ write_citations を新規追加） |
-| `c_material` | ④ | kb-search3 Lambda |
+| `trouble_cases` | ② | `kb-search-cases-{env}` Lambda |
+| `manual` | ③ | `kb-search-manuals-{env}` Lambda（★ write_citations を新規追加） |
+| `c_material` | ④ | `kb-search-materials-{env}` Lambda |
 
 > サイト情報（①）はドキュメント引用ではなく DB テキストのため、バッジ対象外。回答本文の「サイト情報」セクションに表示する。
 

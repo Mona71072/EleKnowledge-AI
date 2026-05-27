@@ -1,17 +1,20 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
-Description: 'Phase 3 - Troubleshooting Agent Lambda Functions Only'
+Description: 'Legacy Phase 3 - Troubleshooting Agent Lambda Functions Only'
 
 Parameters:
   Environment:
     Type: String
-    Default: development
+    Default: dev
+    AllowedValues:
+      - dev
+      - prd
     Description: Environment name
 
 Globals:
   Function:
-    Runtime: python3.11
+    Runtime: python3.13
     Timeout: 60
     MemorySize: 512
     Tracing: Active
@@ -21,14 +24,14 @@ Globals:
         AGENT_ID: PLACEHOLDER_AGENT_ID
         AGENT_ALIAS_ID: PLACEHOLDER_AGENT_ALIAS_ID
         KnowledgeBaseId: PLACEHOLDER_KB_ID
-        SitesTableName: sites
-        BEDROCK_REGION: us-east-1
+        SitesTableName: !Ref SitesTable
+        BEDROCK_REGION: ap-northeast-1
 
 Resources:
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: troubleshooting-lambda-role
+      RoleName: !Sub troubleshooting-lambda-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -65,7 +68,7 @@ Resources:
   SitesTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: sites
+      TableName: !Sub sites-${Environment}
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: constructionNumber
@@ -77,7 +80,7 @@ Resources:
   OrchestratorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: troubleshooting-orchestrator
+      FunctionName: !Sub orchestrator-${Environment}
       CodeUri: ../../lambda/troubleshooting/orchestrator/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
@@ -85,7 +88,7 @@ Resources:
   DBSearchFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: troubleshooting-db-search
+      FunctionName: !Sub db-search-${Environment}
       CodeUri: ../../lambda/troubleshooting/db-search/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
@@ -93,7 +96,7 @@ Resources:
   KBSearch1Function:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: troubleshooting-kb-search1
+      FunctionName: !Sub kb-search-cases-${Environment}
       CodeUri: ../../lambda/troubleshooting/kb-search1/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
@@ -101,7 +104,7 @@ Resources:
   KBSearch2Function:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: troubleshooting-kb-search2
+      FunctionName: !Sub kb-search-manuals-${Environment}
       CodeUri: ../../lambda/troubleshooting/kb-search2/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
@@ -109,7 +112,7 @@ Resources:
   KBSearch3Function:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: troubleshooting-kb-search3
+      FunctionName: !Sub kb-search-materials-${Environment}
       CodeUri: ../../lambda/troubleshooting/kb-search3/
       Handler: app.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
