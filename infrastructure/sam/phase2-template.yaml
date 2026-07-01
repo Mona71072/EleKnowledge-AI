@@ -37,8 +37,11 @@ Parameters:
   
   BedrockModelId:
     Type: String
-    Default: anthropic.claude-sonnet-4-20250514-v1:0
-    Description: Bedrock LLM Model ID
+    Default: jp.anthropic.claude-haiku-4-5-20251001-v1:0
+    Description: >-
+      Bedrock LLM Model ID. Must be an inference profile ID (jp.* / apac.* / global.*),
+      not a bare foundation model ID — anthropic.claude-sonnet-4-20250514-v1:0 is LEGACY
+      and only supports INFERENCE_PROFILE invocation in ap-northeast-1.
   
   RagLambdaTimeout:
     Type: Number

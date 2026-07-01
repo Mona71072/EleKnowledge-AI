@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-05-27
+last-verified: 2026-07-01
 related-code: infrastructure/sam/, amplify.yml, docs/aws-resource-map.md
 ---
 
@@ -119,6 +119,8 @@ Required outputs:
 
 Create or configure Bedrock Knowledge Bases and Bedrock Agent in `ap-northeast-1` using the Phase 1 document bucket and Phase 2 OpenSearch/IAM outputs.
 
+Create brand-new Knowledge Bases for this environment. Do not reuse or repoint any Knowledge Base, OpenSearch Serverless collection, or S3 bucket already owned by other departments (for example the GenU environment's Knowledge Bases) — those serve a different purpose and must not be modified.
+
 At minimum, collect these IDs:
 
 - General RAG Knowledge Base ID
@@ -199,7 +201,38 @@ Required output:
 
 - `TroubleshootingApiUrl`: base URL ending in `/{env}/troubleshooting`; the frontend appends `/analyze` and `/history`.
 
-## 6. Configure Amplify Environment Variables
+## 6. Create Amplify App
+
+This account has no existing Amplify app for EleKnowledge, so the app must be created before environment variables can be configured. Skip this step if an app was already created in a previous run.
+
+```powershell
+aws amplify list-apps --region $Region --profile $Profile --query "apps[].{Name:name,AppId:appId,DefaultDomain:defaultDomain}" --output table
+```
+
+If no matching app exists, create one and connect the `develop` branch (or the branch designated for this environment):
+
+```powershell
+aws amplify create-app `
+  --name "eleknowledge-$Env" `
+  --region $Region `
+  --profile $Profile `
+  --platform WEB
+
+aws amplify create-branch `
+  --app-id "<app-id-from-create-app-output>" `
+  --branch-name "develop" `
+  --region $Region `
+  --profile $Profile
+```
+
+Amplify Hosting needs a connection to the source repository (GitHub) to build automatically. Either:
+
+- Connect the repository via the Amplify Console (one-time OAuth authorization), or
+- Use `aws amplify create-webhook` for manual/CI-triggered builds without a direct repository connection.
+
+Confirm `amplify.yml` at the repository root is picked up as the build spec; it already defines the `frontend/` monorepo build path and output directory.
+
+## 7. Configure Amplify Environment Variables
 
 Set these in Amplify Hosting for the new app/branch:
 
@@ -235,7 +268,7 @@ aws amplify update-branch `
 
 Trigger a new Amplify build after updating variables.
 
-## 7. Smoke Test
+## 8. Smoke Test
 
 Run these checks before handing the environment to users:
 
@@ -254,7 +287,7 @@ aws dynamodb list-tables --region $Region --profile $Profile --output table
 aws ssm get-parameters-by-path --path "/eleknowledge/$Env" --region $Region --profile $Profile --output table
 ```
 
-## 8. Do Not Use Legacy Assets
+## 9. Do Not Use Legacy Assets
 
 Do not recreate these unless a later dependency review explicitly requires them:
 
