@@ -4,10 +4,10 @@
 
 | 項目 | 内容 |
 |------|------|
-| **バージョン** | **1.1** |
+| **バージョン** | **1.2** |
 | **ステータス** | 実装仕様 |
 | **対象** | Phase 3 トラブルシューティング機能 |
-| **最終更新** | 2026-05-26 |
+| **最終更新** | 2026-07-01 |
 
 ---
 
@@ -17,7 +17,8 @@
 |-----|------|----------|
 | 1.0.0 | 2026-01-23 | 初版（PoC設計） |
 | 1.0.1 | 2026-01-26 | PoC実装ガイド追記 |
-| **1.1** | **2026-05-26** | **条件分岐フロー・機種優先順位・source_action タグ・UIバッジ対応を追加（詳細は §9 参照）** |
+| 1.1 | 2026-05-26 | 条件分岐フロー・機種優先順位・source_action タグ・UIバッジ対応を追加（詳細は §9 参照） |
+| **1.2** | **2026-07-01** | **§4.2/4.3/4.4・§7・§8を修正: KBを単一共有+documentフィルターと誤記していたのを、実装（`phase3-template.yaml`）通りカテゴリごとの独立KB設計に訂正** |
 
 ---
 
@@ -179,11 +180,12 @@ interface TroubleshootingResult {
 | `controlSystem` | string | — | 暫定固定値 `VFGLF`。未指定でも Lambda 側で `VFGLF` を使用 |
 | `errorCode` | string | — | ★ Ver 1.1 追加。半角英数字3文字のエラーコード。なければ省略 |
 
+**検索対象 KB:** トラブル事例・報告書専用の Knowledge Base（`TroubleCasesKnowledgeBaseId`）。他アクションのKBとは別のデータソース・別のOpenSearchインデックスを持つ独立KBであり、`document` フィールドによるKB内フィルタリングは行わない。
+
 **KB メタデータフィルター:**
 
 ```python
 andAll([
-    equals("document", "Trouble-Cases"),   # または Trouble-Reports
     equals("model", model),                # model が確定している場合のみ
     equals("error-code", errorCode),       # errorCode がある場合のみ（Ver 1.1）
 ])
@@ -210,6 +212,8 @@ andAll([
 | `query` | string | ✓ | 不具合内容（ユーザ入力） |
 | `controlSystem` | string | — | 暫定固定値 `VFGLF`。未指定でも Lambda 側で `VFGLF` を使用 |
 | `errorCode` | string | — | ★ Ver 1.1 追加。半角英数字3文字のエラーコード。なければ省略 |
+
+**検索対象 KB:** トラブルシュートマニュアル専用の Knowledge Base（`TroubleshootingManualKnowledgeBaseId`）。他アクションのKBとは別のデータソース・別のOpenSearchインデックスを持つ独立KB。
 
 **KB メタデータフィルター（Ver 1.1 変更）:**
 
@@ -243,11 +247,12 @@ andAll([
 | `query` | string | ✓ | ★ Ver 1.1 変更: ②③の結果テキストから Agent が抽出したキーワード（不具合内容そのものではない） |
 | `model` | string | — | 確定済み機種。なければ省略 |
 
+**検索対象 KB:** C資料専用の Knowledge Base（`CMaterialKnowledgeBaseId`）。他アクションのKBとは別のデータソース・別のOpenSearchインデックスを持つ独立KB。
+
 **KB メタデータフィルター:**
 
 ```python
 andAll([
-    equals("document", "C資料"),
     equals("model", model),  # model が確定している場合のみ
 ])
 ```
@@ -363,7 +368,10 @@ def format_agent_input(body: dict) -> str:
 | Bedrock Agent ID | `D6FAGLJPPO` |
 | Agent Alias | `TSTALIASID`（DRAFT）|
 | Foundation Model | `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
-| Knowledge Base ID | `OCLVRJDMAH` |
+| Knowledge Base（General RAG） | `KnowledgeBaseId` — Phase 2 のチャットRAG機能（`rag-dev`）と共用。トラブルシューティングの検索アクションからは直接参照しない |
+| Knowledge Base（トラブル事例） | `TroubleCasesKnowledgeBaseId` — Action 2 (`searchTroubleCases` / `kb-search-cases-dev`) 専用の独立KB |
+| Knowledge Base（マニュアル） | `TroubleshootingManualKnowledgeBaseId` — Action 3 (`searchTroubleshootManuals` / `kb-search-manuals-dev`) 専用の独立KB |
+| Knowledge Base（C資料） | `CMaterialKnowledgeBaseId` — Action 4 (`searchCMaterialDocs` / `kb-search-materials-dev`) 専用の独立KB |
 | DynamoDB: sessions | `sessions-dev` / `sessions-prd`（TTL: 30日） |
 | DynamoDB: sites | `sites`（PK: constructionNumber） |
 | API Gateway | `troubleshooting-api`（専用 Gateway） |
@@ -373,15 +381,17 @@ def format_agent_input(body: dict) -> str:
 
 ## 8. Lambda 構成
 
-| Lambda 関数名 | 役割 | 呼び出し形式 |
-|---|---|---|
-| `orchestrator-dev` / `orchestrator-prd` | エントリーポイント・セッション管理・後処理 | API Gateway → 直接 |
-| `db-search-dev` / `db-search-prd` | DynamoDB から現場情報取得 | apiSchema (POST /site-info) |
-| `kb-search-cases-dev` / `kb-search-cases-prd` | トラブル事例・報告書 KB 検索 | functionSchema (`searchTroubleCases`) |
-| `kb-search-manuals-dev` / `kb-search-manuals-prd` | マニュアル KB 検索 | functionSchema (`searchTroubleshootManuals`) |
-| `kb-search-materials-dev` / `kb-search-materials-prd` | C資料 KB 検索 | functionSchema (`searchCMaterialDocs`) |
-| `history-dev` / `history-prd` | 履歴一覧・詳細取得 | API Gateway → 直接 |
-| Cognito Authorizer | Cognito JWT 検証・`claims.sub` 抽出 | API Gateway managed authorizer |
+| Lambda 関数名 | 役割 | 呼び出し形式 | 参照する Knowledge Base |
+|---|---|---|---|
+| `orchestrator-dev` / `orchestrator-prd` | エントリーポイント・セッション管理・後処理 | API Gateway → 直接 | なし |
+| `db-search-dev` / `db-search-prd` | DynamoDB から現場情報取得 | apiSchema (POST /site-info) | なし |
+| `kb-search-cases-dev` / `kb-search-cases-prd` | トラブル事例・報告書 KB 検索 | functionSchema (`searchTroubleCases`) | `TroubleCasesKnowledgeBaseId`（専用） |
+| `kb-search-manuals-dev` / `kb-search-manuals-prd` | マニュアル KB 検索 | functionSchema (`searchTroubleshootManuals`) | `TroubleshootingManualKnowledgeBaseId`（専用） |
+| `kb-search-materials-dev` / `kb-search-materials-prd` | C資料 KB 検索 | functionSchema (`searchCMaterialDocs`) | `CMaterialKnowledgeBaseId`（専用） |
+| `history-dev` / `history-prd` | 履歴一覧・詳細取得 | API Gateway → 直接 | なし |
+| Cognito Authorizer | Cognito JWT 検証・`claims.sub` 抽出 | API Gateway managed authorizer | なし |
+
+**設計原則:** 各検索アクションは共有KBを`document`フィールドで絞り込むのではなく、**カテゴリごとに独立したKnowledge Baseとデータソースを持つ**。これにより資料・ノウハウの管理をKB単位で分離できる。
 
 ---
 
