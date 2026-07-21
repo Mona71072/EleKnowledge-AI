@@ -42,7 +42,10 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
         response = chatlogs_table.query(
             IndexName='userId-timestamp-index',
             KeyConditionExpression='userId = :uid',
-            ExpressionAttributeValues={':uid': user_id},
+            # Hide logically-deleted messages (deleted flag null/false only)
+            FilterExpression='attribute_not_exists(#del) OR #del = :false',
+            ExpressionAttributeNames={'#del': 'deleted'},
+            ExpressionAttributeValues={':uid': user_id, ':false': False},
             ScanIndexForward=False,
             Limit=limit * 10  # Get more messages to find unique sessions
         )
@@ -88,7 +91,10 @@ def get_session_messages(session_id: str, limit: int = 100) -> list:
     try:
         response = chatlogs_table.query(
             KeyConditionExpression='sessionId = :sid',
-            ExpressionAttributeValues={':sid': session_id},
+            # Hide logically-deleted messages (deleted flag null/false only)
+            FilterExpression='attribute_not_exists(#del) OR #del = :false',
+            ExpressionAttributeNames={'#del': 'deleted'},
+            ExpressionAttributeValues={':sid': session_id, ':false': False},
             ScanIndexForward=True,  # Oldest first
             Limit=limit
         )
@@ -108,24 +114,33 @@ def get_session_messages(session_id: str, limit: int = 100) -> list:
 
 
 def delete_session(session_id: str) -> int:
-    """Delete all messages in a session"""
+    """Logically delete all messages in a session (soft delete).
+
+    Sets a `deleted` flag instead of removing the item, so the conversation is
+    hidden from the user (and cannot be restored via the UI) while the data is
+    retained for internal analysis. Physical removal is handled by TTL, and the
+    DynamoDB stream archives every change (including this flag) to S3.
+    """
     try:
-        # Get all messages
+        # Only the currently-visible (not-yet-deleted) messages
         messages = get_session_messages(session_id)
-        
-        # Delete each message
+
+        now_iso = datetime.utcnow().isoformat() + 'Z'
         deleted_count = 0
         for msg in messages:
-            chatlogs_table.delete_item(
+            chatlogs_table.update_item(
                 Key={
                     'sessionId': session_id,
                     'messageId': msg['messageId']
-                }
+                },
+                UpdateExpression='SET #del = :true, deletedAt = :ts',
+                ExpressionAttributeNames={'#del': 'deleted'},
+                ExpressionAttributeValues={':true': True, ':ts': now_iso}
             )
             deleted_count += 1
-        
+
         return deleted_count
-        
+
     except ClientError as e:
         print(f"Error deleting session: {e}")
         raise

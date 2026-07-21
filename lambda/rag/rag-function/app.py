@@ -139,7 +139,7 @@ def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: 
                              citations: list = None, source_documents: list = None):
     """Save message to DynamoDB with TTL"""
     message_id = generate_message_id()
-    ttl_timestamp = int(time.time()) + (30 * 24 * 60 * 60)  # 30 days
+    ttl_timestamp = int(time.time()) + (60 * 24 * 60 * 60)  # 60 days (hot window; full history archived to S3 via stream)
     
     item = {
         'sessionId': session_id,
