@@ -35,7 +35,7 @@ Parameters:
     Default: DF9XUCSPDM
     AllowedPattern: '^[A-Z0-9]{10}$'
     Description: >-
-      Existing Bedrock Knowledge Base ID to REUSE. This stack does NOT create it —
+      Existing Bedrock Knowledge Base ID to REUSE. This stack does NOT create it -
       it is owned by RagKnowledgeBaseStackINSTD and is used read-only.
       DF9XUCSPDM = generative-ai-use-cases-jp-inst-fmp (multimodal FMP; retrieve()
       returns a mix of TEXT and IMAGE chunks, so the RAG Lambda must handle both).
@@ -59,7 +59,7 @@ Parameters:
     Default: jp.anthropic.claude-haiku-4-5-20251001-v1:0
     Description: >-
       Bedrock LLM Model ID. Must be an inference profile ID (jp.* / apac.* / global.*),
-      not a bare foundation model ID — anthropic.claude-sonnet-4-20250514-v1:0 is LEGACY
+      not a bare foundation model ID - anthropic.claude-sonnet-4-20250514-v1:0 is LEGACY
       and only supports INFERENCE_PROFILE invocation in ap-northeast-1.
   
   RagLambdaTimeout:
@@ -142,6 +142,11 @@ Parameters:
       - 365
     Description: CloudWatch Logs retention period (days)
 
+  AllowedIPList:
+    Type: CommaDelimitedList
+    Description: Office egress /32 CIDRs allowed to reach the APIs (same as GenU / WAF)
+    Default: "203.178.81.200/32,210.172.233.198/32,210.172.233.219/32,210.172.233.220/32,192.218.140.236/32,192.218.140.237/32,192.218.140.238/32,192.218.140.239/32,192.218.140.240/32,192.218.140.241/32"
+
 Globals:
   Function:
     Timeout: 300
@@ -161,13 +166,13 @@ Globals:
 
 Resources:
   # ============================================================================
-  # Bedrock Knowledge Base (REUSED — not created by this stack)
+  # Bedrock Knowledge Base (REUSED - not created by this stack)
   # ============================================================================
-  # このスタックはベクターストアを持たない。KnowledgeBaseId で指定した既存 KB を
-  # 読み取り専用で再利用する (所有スタック: RagKnowledgeBaseStackINSTD)。
-  # 以前存在した KnowledgeBaseCollection / *EncryptionPolicy / *NetworkPolicy /
-  # KnowledgeBaseRole は削除済み。空の OpenSearch Serverless コレクションは
-  # 最小 OCU で常時課金されるため、放置せず削除している。
+  # KnowledgeBaseId  KB
+  #  (: RagKnowledgeBaseStackINSTD)
+  #  KnowledgeBaseCollection / *EncryptionPolicy / *NetworkPolicy /
+  # KnowledgeBaseRole  OpenSearch Serverless
+  #  OCU
   KnowledgeBaseIdParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -202,14 +207,14 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              # 再利用する KB のみに限定する (他部門の共有資産のため範囲を最小化)
+              #  KB  ()
               - Effect: Allow
                 Action:
                   - bedrock:Retrieve
                 Resource:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
-              # jp.* 推論プロファイルはプロファイル ARN と、その配下リージョンの
-              # foundation-model ARN の両方に権限が要る。片方だけだと AccessDeniedException。
+              # jp.*  ARN
+              # foundation-model ARN  AccessDeniedException
               - Effect: Allow
                 Action:
                   - bedrock:InvokeModel
@@ -251,9 +256,9 @@ Resources:
                     - arn:aws:s3:::${BucketName}/*
                     - BucketName:
                         Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
-              # 再利用 KB のデータソースバケット (外部スタック所有)。
-              # 引用のプリサイン URL 生成にのみ使うため GetObject だけを付与し、
-              # PutObject は意図的に与えない (共有資産を書き換えないことを IAM で担保する)。
+              #  KB  ()
+              #  URL  GetObject
+              # PutObject  ( IAM )
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -357,6 +362,8 @@ Resources:
           CognitoAuthorizer:
             UserPoolArn:
               Fn::ImportValue: !Sub ${ProjectName}-${Environment}-CognitoUserPoolArn
+        ResourcePolicy:
+          IpRangeWhitelist: !Ref AllowedIPList
       GatewayResponses:
         DEFAULT_4XX:
           ResponseParameters:
@@ -396,6 +403,8 @@ Resources:
           CognitoAuthorizer:
             UserPoolArn:
               Fn::ImportValue: !Sub ${ProjectName}-${Environment}-CognitoUserPoolArn
+        ResourcePolicy:
+          IpRangeWhitelist: !Ref AllowedIPList
       GatewayResponses:
         DEFAULT_4XX:
           ResponseParameters:
@@ -460,8 +469,8 @@ Outputs:
     Export:
       Name: !Sub ${ProjectName}-${Environment}-ChatManagementFunctionArn
   
-  # NOTE: KnowledgeBaseCollectionArn / KnowledgeBaseCollectionEndpoint / KnowledgeBaseRoleArn は
-  # 削除済み。Phase 2 は既存の Knowledge Base を再利用するため、自前のベクターストアを持たない。
+  # NOTE: KnowledgeBaseCollectionArn / KnowledgeBaseCollectionEndpoint / KnowledgeBaseRoleArn
+  # Phase 2  Knowledge Base
 
   KnowledgeBaseIdParameterName:
     Description: SSM parameter that stores the Bedrock Knowledge Base ID

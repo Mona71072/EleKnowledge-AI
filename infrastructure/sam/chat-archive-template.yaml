@@ -101,6 +101,34 @@ Resources:
             MaximumBatchingWindowInSeconds: 30
             MaximumRetryAttempts: 3
 
+  AthenaResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub eleknowledge-athena-results-${Environment}-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-query-results
+            Status: Enabled
+            ExpirationInDays: 30
+
+  AnalyticsWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub eleknowledge-analytics-${Environment}
+      Description: EleKnowledge chat analytics workgroup
+      State: ENABLED
+      WorkGroupConfiguration:
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: true
+        ResultConfiguration:
+          OutputLocation: !Sub s3://${AthenaResultsBucket}/query-results/
+          EncryptionConfiguration:
+            EncryptionOption: SSE_S3
+
   AnalyticsDatabase:
     Type: AWS::Glue::Database
     Properties:
@@ -151,3 +179,7 @@ Outputs:
     Value: !Ref ArchiveBucket
   AthenaTable:
     Value: !Sub ${AnalyticsDatabase}.chatlogs_archive
+  AthenaWorkGroup:
+    Value: !Ref AnalyticsWorkGroup
+  AthenaResultsBucket:
+    Value: !Ref AthenaResultsBucket

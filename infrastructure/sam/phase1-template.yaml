@@ -115,6 +115,11 @@ Parameters:
       - "false"
     Description: Enable DynamoDB Point-in-Time Recovery
 
+  AllowedIPList:
+    Type: CommaDelimitedList
+    Description: Office egress /32 CIDRs allowed to reach the auth API (same as GenU / WAF)
+    Default: "203.178.81.200/32,210.172.233.198/32,210.172.233.219/32,210.172.233.220/32,192.218.140.236/32,192.218.140.237/32,192.218.140.238/32,192.218.140.239/32,192.218.140.240/32,192.218.140.241/32"
+
 Globals:
   Function:
     Timeout: 30
@@ -144,6 +149,9 @@ Resources:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: !Sub users-${Environment}
+      LambdaConfig:
+        PreSignUp: !GetAtt DomainGuardFunction.Arn
+        PreAuthentication: !GetAtt DomainGuardFunction.Arn
       UsernameAttributes:
         - email
       UsernameConfiguration:
@@ -539,11 +547,42 @@ Resources:
   # ============================================================================
   # Amazon API Gateway Configuration
   # ============================================================================
+  # Cognito email-domain allowlist (PreSignUp / PreAuthentication).
+  # No explicit FunctionName so CloudFormation auto-names it, avoiding a clash
+  # with the pre-existing out-of-band function during reconciliation.
+  DomainGuardFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../../lambda/cognito-domain-guard/
+      Handler: domain_guard.handler
+      Runtime: python3.13
+      Timeout: 10
+      MemorySize: 128
+      Description: Cognito PreSignUp/PreAuth email-domain allowlist meltec/mitsubishielectric
+      # Override the Globals env vars that !Ref CognitoUserPool / Client, otherwise
+      # this function would depend on the pool while the pool's LambdaConfig depends
+      # on this function (circular dependency). This function reads none of them.
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: unused
+          COGNITO_CLIENT_ID: unused
+
+  DomainGuardInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DomainGuardFunction
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt CognitoUserPool.Arn
+
   AuthApi:
     Type: AWS::Serverless::Api
     Properties:
       Name: !Sub auth-api-${Environment}
       StageName: !Ref Environment
+      Auth:
+        ResourcePolicy:
+          IpRangeWhitelist: !Ref AllowedIPList
       Cors:
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,Authorization'"

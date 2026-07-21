@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  EleKnowledge dev WAF - allow only the office IP ranges (same set as GenU),
+  block everything else. Associated with the auth / rag / chat / troubleshooting
+  API Gateway stages. Reflects resources created out-of-band on 2026-07-21.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+  AllowedIPList:
+    Type: CommaDelimitedList
+    Description: Office egress /32 CIDRs allowed to reach the APIs (same as GenU)
+    Default: "203.178.81.200/32,210.172.233.198/32,210.172.233.219/32,210.172.233.220/32,192.218.140.236/32,192.218.140.237/32,192.218.140.238/32,192.218.140.239/32,192.218.140.240/32,192.218.140.241/32"
+  AuthApiId:
+    Type: String
+    Default: mqsyka1v9j
+  RagApiId:
+    Type: String
+    Default: lwi9g3kzik
+  ChatApiId:
+    Type: String
+    Default: 92pdw6k1o4
+  TroubleshootingApiId:
+    Type: String
+    Default: zh4kbz8bb1
+
+Resources:
+  AllowedIPSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name: EleKnowledge-dev-AllowedIPv4
+      Description: EleKnowledge dev allowed office IPs same as GenU
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses: !Ref AllowedIPList
+
+  RegionalWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: EleKnowledge-dev-RegionalWebAcl
+      Description: EleKnowledge dev allow only office IPs GenU equivalent
+      Scope: REGIONAL
+      DefaultAction:
+        Block: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: EleKnowledgeDevRegionalWebAcl
+      Rules:
+        - Name: IpV4SetRuleRegionalWaf
+          Priority: 1
+          Action:
+            Allow: {}
+          Statement:
+            IPSetReferenceStatement:
+              Arn: !GetAtt AllowedIPSet.Arn
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: EleKnowledgeAllowIPv4
+
+  AuthApiAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${AuthApiId}/stages/${Environment}
+      WebACLArn: !GetAtt RegionalWebAcl.Arn
+
+  RagApiAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${RagApiId}/stages/${Environment}
+      WebACLArn: !GetAtt RegionalWebAcl.Arn
+
+  ChatApiAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${ChatApiId}/stages/${Environment}
+      WebACLArn: !GetAtt RegionalWebAcl.Arn
+
+  TroubleshootingApiAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${TroubleshootingApiId}/stages/${Environment}
+      WebACLArn: !GetAtt RegionalWebAcl.Arn
+
+Outputs:
+  WebAclArn:
+    Value: !GetAtt RegionalWebAcl.Arn
+  IPSetId:
+    Value: !GetAtt AllowedIPSet.Id

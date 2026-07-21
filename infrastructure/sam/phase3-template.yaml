@@ -59,6 +59,11 @@ Parameters:
       - ap-northeast-1
     Description: AWS Region for Bedrock API calls
 
+  AllowedIPList:
+    Type: CommaDelimitedList
+    Description: Office egress /32 CIDRs allowed to reach the API (same as GenU / WAF)
+    Default: "203.178.81.200/32,210.172.233.198/32,210.172.233.219/32,210.172.233.220/32,192.218.140.236/32,192.218.140.237/32,192.218.140.238/32,192.218.140.239/32,192.218.140.240/32,192.218.140.241/32"
+
 Globals:
   Function:
     Runtime: python3.13
@@ -82,9 +87,9 @@ Globals:
       Phase: "3"
 
 Resources:
-  # ──────────────────────────────────────────
+  #
   # IAM
-  # ──────────────────────────────────────────
+  #
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -153,9 +158,9 @@ Resources:
         - Key: Phase
           Value: "3"
 
-  # ──────────────────────────────────────────
+  #
   # DynamoDB
-  # ──────────────────────────────────────────
+  #
   SitesTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -218,9 +223,9 @@ Resources:
         - Key: Phase
           Value: "3"
 
-  # ──────────────────────────────────────────
+  #
   # Lambda Functions
-  # ──────────────────────────────────────────
+  #
   OrchestratorFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -324,9 +329,9 @@ Resources:
         ManagedBy: SAM
         Phase: "3"
 
-  # ──────────────────────────────────────────
+  #
   # API Gateway
-  # ──────────────────────────────────────────
+  #
   TroubleshootingApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -338,6 +343,8 @@ Resources:
           CognitoAuthorizer:
             UserPoolArn:
               Fn::ImportValue: !Sub ${ProjectName}-${Environment}-CognitoUserPoolArn
+        ResourcePolicy:
+          IpRangeWhitelist: !Ref AllowedIPList
       Cors:
         AllowOrigin: "'*'"
         AllowHeaders: "'Content-Type,Authorization'"
@@ -346,11 +353,11 @@ Resources:
         UNAUTHORIZED:
           StatusCode: 401
           ResponseTemplates:
-            application/json: '{"error": "認証が必要です"}'
+            application/json: '{"error": "Authentication required"}'
         ACCESS_DENIED:
           StatusCode: 403
           ResponseTemplates:
-            application/json: '{"error": "アクセスが拒否されました"}'
+            application/json: '{"error": "Access denied"}'
 
 Outputs:
   TroubleshootingApiUrl:
