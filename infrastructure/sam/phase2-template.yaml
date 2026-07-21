@@ -32,9 +32,28 @@ Parameters:
 
   KnowledgeBaseId:
     Type: String
-    Default: pending
-    Description: Bedrock Knowledge Base ID to expose to Lambda and SSM after KB creation
-  
+    Default: DF9XUCSPDM
+    AllowedPattern: '^[A-Z0-9]{10}$'
+    Description: >-
+      Existing Bedrock Knowledge Base ID to REUSE. This stack does NOT create it —
+      it is owned by RagKnowledgeBaseStackINSTD and is used read-only.
+      DF9XUCSPDM = generative-ai-use-cases-jp-inst-fmp (multimodal FMP; retrieve()
+      returns a mix of TEXT and IMAGE chunks, so the RAG Lambda must handle both).
+      VQV81CNYU4 = generative-ai-use-cases-jpinstd (TEXT only, but its web-crawler
+      data source injects unrelated GenU documentation into results).
+
+  KnowledgeBaseDataSourceBucket:
+    Type: String
+    Default: ragknowledgebasestackinst-datasourcebucket9fa93e04-ybbhm1efhyzb
+    Description: >-
+      S3 bucket backing the reused Knowledge Base. Owned by an EXTERNAL stack.
+      The RAG Lambda needs read access to it to presign citation links.
+
+  KnowledgeBaseSourcePrefix:
+    Type: String
+    Default: docs/
+    Description: Key prefix within KnowledgeBaseDataSourceBucket that holds the documents
+
   BedrockModelId:
     Type: String
     Default: jp.anthropic.claude-haiku-4-5-20251001-v1:0
@@ -142,116 +161,13 @@ Globals:
 
 Resources:
   # ============================================================================
-  # OpenSearch Serverless Collection (Vector Database)
+  # Bedrock Knowledge Base (REUSED — not created by this stack)
   # ============================================================================
-  KnowledgeBaseCollection:
-    Type: AWS::OpenSearchServerless::Collection
-    Properties:
-      Name: !Sub kb-${Environment}
-      Type: VECTORSEARCH
-      Description: Vector database for EleKnowledge Knowledge Base
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: SAM
-        - Key: Phase
-          Value: "2"
-    DependsOn: KnowledgeBaseEncryptionPolicy
-  
-  # OpenSearch Serverless Security Policy
-  KnowledgeBaseEncryptionPolicy:
-    Type: AWS::OpenSearchServerless::SecurityPolicy
-    Properties:
-      Name: !Sub kb-${Environment}-enc
-      Type: encryption
-      Policy: !Sub |
-        {
-          "Rules": [
-            {
-              "ResourceType": "collection",
-              "Resource": [
-                "collection/kb-${Environment}"
-              ]
-            }
-          ],
-          "AWSOwnedKey": true
-        }
-  
-  KnowledgeBaseNetworkPolicy:
-    Type: AWS::OpenSearchServerless::SecurityPolicy
-    Properties:
-      Name: !Sub kb-${Environment}-net
-      Type: network
-      Policy: !Sub |
-        [
-          {
-            "Rules": [
-              {
-                "ResourceType": "collection",
-                "Resource": [
-                  "collection/kb-${Environment}"
-                ]
-              },
-              {
-                "ResourceType": "dashboard",
-                "Resource": [
-                  "collection/kb-${Environment}"
-                ]
-              }
-            ],
-            "AllowFromPublic": true
-          }
-        ]
-  
-  # ============================================================================
-  # Bedrock Knowledge Base
-  # ============================================================================
-  KnowledgeBaseRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub kb-${Environment}
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: bedrock.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
-      Policies:
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !Sub 
-                    - arn:aws:s3:::${BucketName}
-                    - BucketName:
-                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
-                  - !Sub 
-                    - arn:aws:s3:::${BucketName}/*
-                    - BucketName:
-                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
-        - PolicyName: OpenSearchAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - aoss:APIAccessAll
-                  - aoss:CreateCollectionItems
-                  - aoss:UpdateCollectionItems
-                  - aoss:DescribeCollectionItems
-                Resource: '*'
-
+  # このスタックはベクターストアを持たない。KnowledgeBaseId で指定した既存 KB を
+  # 読み取り専用で再利用する (所有スタック: RagKnowledgeBaseStackINSTD)。
+  # 以前存在した KnowledgeBaseCollection / *EncryptionPolicy / *NetworkPolicy /
+  # KnowledgeBaseRole は削除済み。空の OpenSearch Serverless コレクションは
+  # 最小 OCU で常時課金されるため、放置せず削除している。
   KnowledgeBaseIdParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -286,12 +202,20 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              # 再利用する KB のみに限定する (他部門の共有資産のため範囲を最小化)
+              - Effect: Allow
+                Action:
+                  - bedrock:Retrieve
+                Resource:
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
+              # jp.* 推論プロファイルはプロファイル ARN と、その配下リージョンの
+              # foundation-model ARN の両方に権限が要る。片方だけだと AccessDeniedException。
               - Effect: Allow
                 Action:
                   - bedrock:InvokeModel
-                  - bedrock:Retrieve
-                  - bedrock:RetrieveAndGenerate
-                Resource: '*'
+                Resource:
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                  - !Sub arn:aws:bedrock:*::foundation-model/*
         - PolicyName: DynamoDBAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -323,10 +247,18 @@ Resources:
                     - arn:aws:s3:::${BucketName}
                     - BucketName:
                         Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
-                  - !Sub 
+                  - !Sub
                     - arn:aws:s3:::${BucketName}/*
                     - BucketName:
                         Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
+              # 再利用 KB のデータソースバケット (外部スタック所有)。
+              # 引用のプリサイン URL 生成にのみ使うため GetObject だけを付与し、
+              # PutObject は意図的に与えない (共有資産を書き換えないことを IAM で担保する)。
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::${KnowledgeBaseDataSourceBucket}/${KnowledgeBaseSourcePrefix}*
 
   # ============================================================================
   # Lambda Functions - RAG
@@ -345,6 +277,8 @@ Resources:
         Variables:
           KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          KB_SOURCE_BUCKET: !Ref KnowledgeBaseDataSourceBucket
+          KB_SOURCE_PREFIX: !Ref KnowledgeBaseSourcePrefix
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
           DOCUMENTS_BUCKET:
@@ -526,25 +460,8 @@ Outputs:
     Export:
       Name: !Sub ${ProjectName}-${Environment}-ChatManagementFunctionArn
   
-  # OpenSearch Serverless
-  KnowledgeBaseCollectionArn:
-    Description: OpenSearch Serverless Collection ARN
-    Value: !GetAtt KnowledgeBaseCollection.Arn
-    Export:
-      Name: !Sub ${ProjectName}-${Environment}-KnowledgeBaseCollectionArn
-  
-  KnowledgeBaseCollectionEndpoint:
-    Description: OpenSearch Serverless Collection Endpoint
-    Value: !GetAtt KnowledgeBaseCollection.CollectionEndpoint
-    Export:
-      Name: !Sub ${ProjectName}-${Environment}-KnowledgeBaseCollectionEndpoint
-  
-  # IAM Roles
-  KnowledgeBaseRoleArn:
-    Description: Knowledge Base IAM Role ARN
-    Value: !GetAtt KnowledgeBaseRole.Arn
-    Export:
-      Name: !Sub ${ProjectName}-${Environment}-KnowledgeBaseRoleArn
+  # NOTE: KnowledgeBaseCollectionArn / KnowledgeBaseCollectionEndpoint / KnowledgeBaseRoleArn は
+  # 削除済み。Phase 2 は既存の Knowledge Base を再利用するため、自前のベクターストアを持たない。
 
   KnowledgeBaseIdParameterName:
     Description: SSM parameter that stores the Bedrock Knowledge Base ID

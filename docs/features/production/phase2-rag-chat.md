@@ -7,6 +7,15 @@ related-code: frontend/src/app/, lambda/rag/, lambda/chat/
 
 # Phase 2: RAGチャット機能（2ヶ月）
 
+> [!WARNING]
+> **本書の「Knowledge Base設定」「メタデータスキーマ」「RAG処理フロー」「プロンプトテンプレート」
+> および `SearchFilters` / `SourceDocument` の定義は、現在の実装と乖離している**（2026-07-17 確認）。
+> 記載の `KB_ELEKNOWLEDGE_001` / `eleknowledge-documents` / Titan Embeddings G1、および
+> `documentType` / `product` / `model` というメタデータキーは**いずれも実在しない**。
+> 実態は Phase 2 で既存 KB `DF9XUCSPDM` を再利用する構成に変わっている。
+> **正となる情報**: `MAI-BOX-INST-dev/phase2-kb-reuse-report.md`、API 契約は `docs/api/rag.md`。
+> 本書の全面改訂は RAG 仕様の見直し時に別途行う。
+
 > 本ドキュメントは [spec.md](../../../spec.md) §3.2 から切り出された Phase 2 の機能仕様です。
 > 全体索引は [spec.md](../../../spec.md) を参照してください。
 

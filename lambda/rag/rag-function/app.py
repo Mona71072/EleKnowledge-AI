@@ -11,15 +11,29 @@ import unicodedata
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from urllib.parse import urlparse
 from botocore.exceptions import ClientError
 
 
 # Environment variables
 KNOWLEDGE_BASE_ID = os.environ.get('KNOWLEDGE_BASE_ID', 'PLACEHOLDER')
 BEDROCK_MODEL_ID = os.environ.get('BEDROCK_MODEL_ID')
-CHATLOGS_TABLE_NAME = os.environ.get('DYNAMODB_CHATLOGS_TABLE')
+CHATLOGS_TABLE_NAME = os.environ.get('CHATLOGS_TABLE')
 DOCUMENTS_BUCKET = os.environ.get('DOCUMENTS_BUCKET')
 AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-1')
+
+if not CHATLOGS_TABLE_NAME:
+    raise RuntimeError('CHATLOGS_TABLE environment variable is required')
+
+# 再利用中の Knowledge Base のデータソース (他スタック所有・読み取り専用)。
+# 引用のプリサイン URL 生成は DOCUMENTS_BUCKET ではなくこちらを指すため、
+# バケット名は URI からパースする (presign_source_uri を参照)。
+KB_SOURCE_BUCKET = os.environ.get('KB_SOURCE_BUCKET', '')
+KB_SOURCE_PREFIX = os.environ.get('KB_SOURCE_PREFIX', 'docs/')
+
+# Claude に渡す画像チャンクの上限。IMAGE チャンクは 1 件あたり最大 1.3MB あるため、
+# 無制限に積むと Lambda/API Gateway の 6MB 応答上限とトークン上限を破る。
+MAX_IMAGE_BLOCKS = 3
 
 # Initialize AWS clients with region from environment
 bedrock_agent = boto3.client('bedrock-agent-runtime', region_name=AWS_REGION)
@@ -28,6 +42,43 @@ dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 
 # DynamoDB table
 chatlogs_table = dynamodb.Table(CHATLOGS_TABLE_NAME)
+
+
+# フロントの安定キー → Knowledge Base の実メタデータ `category` 値。
+# 日本語表記はフロントの表示層に置き、API 契約はこのキーで固定する。
+CATEGORY_MAP = {
+    'drawing': '据付場用図',
+    'spec': 'C資料',
+    'tech_info': 'テクニカルインフォメーション',
+    'incident': '災害事例集',
+    'qsheet': 'Qシート',
+    'std': '据付基準',
+    'note': '据付ノート',
+}
+
+# spec モードで参照する資料カテゴリ。
+# 旧実装は 'D資料' を強制していたが、この KB に D資料 は存在せず必ず 0 件になっていた。
+SPEC_CATEGORIES = ['C資料', 'テクニカルインフォメーション']
+
+
+def chunk_text(result: dict) -> str:
+    """Extract chunk text. IMAGE chunks (multimodal FMP) have no content.text."""
+    content = result.get('content', {}) or {}
+    if content.get('type') == 'IMAGE':
+        return ''
+    return content.get('text', '') or ''
+
+
+def chunk_image_b64(result: dict):
+    """Return the raw base64 payload of an IMAGE chunk, or None."""
+    content = result.get('content', {}) or {}
+    if content.get('type') != 'IMAGE':
+        return None
+    raw = content.get('byteContent') or ''
+    if not raw:
+        return None
+    # "data:image/png;base64,XXXX" -> "XXXX"
+    return raw.split(',', 1)[1] if ',' in raw else raw
 
 
 def generate_message_id():
@@ -110,17 +161,60 @@ def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: 
     return message_id
 
 
-def query_knowledge_base(query: str, filters: dict = None, number_of_results: int = 10) -> dict:
+def build_kb_filter(filters: dict = None, categories: list = None) -> dict:
+    """
+    Build a Bedrock retrievalConfiguration filter from frontend filters.
+
+    実 KB のメタデータキーは category / model_type / filename / file_path のみ。
+    旧実装が使っていた document / product / model は存在しないため、指定しても常に0件になる。
+
+    Args:
+        filters: {'category': <stable key>, 'modelType': <model name>}
+        categories: 実 category 値の直接指定 (spec モード用。filters['category'] より優先)
+
+    Returns:
+        dict or None
+    """
+    filters = filters or {}
+    clauses = []
+
+    if categories:
+        cats = list(categories)
+    else:
+        raw = filters.get('category')
+        values = [raw] if isinstance(raw, str) and raw else (raw or [])
+        cats = [CATEGORY_MAP[v] for v in values if v in CATEGORY_MAP]
+
+    if len(cats) == 1:
+        clauses.append({'equals': {'key': 'category', 'value': cats[0]}})
+    elif len(cats) > 1:
+        clauses.append({'in': {'key': 'category', 'value': cats}})
+
+    # model_type は "AXIEZ,NEXCUBE,メルワイド" のようなカンマ連結の多値文字列なので
+    # equals では多値レコードに一致しない。stringContains が必須。
+    # 副作用として 'AXIEZ' は 'AXIEZ-LINKs' にも一致する (上位集合になる)。
+    model_type = filters.get('modelType')
+    if model_type:
+        clauses.append({'stringContains': {'key': 'model_type', 'value': model_type}})
+
+    if not clauses:
+        return None
+    # Bedrock APIはandAllに最低2つの要素が必要なため、1つの場合は直接その条件を使用
+    if len(clauses) == 1:
+        return clauses[0]
+    return {'andAll': clauses}
+
+
+def query_knowledge_base(query: str, filters: dict = None, number_of_results: int = 10,
+                         categories: list = None) -> dict:
     """
     Query Knowledge Base with optional metadata filters
-    
+
     Args:
         query: User query
-        filters: Optional metadata filters
-            - documentType: 'manual' | 'policy' | 'report' | 'specification'
-            - product: Product name
-            - model: Model name
-    
+        filters: Optional metadata filters ('category' stable key, 'modelType')
+        categories: Explicit 実 category 値のリスト (spec モード用)
+
     Returns:
         dict: Search results with citations
     """
@@ -130,37 +224,11 @@ def query_knowledge_base(query: str, filters: dict = None, number_of_results: in
                 'numberOfResults': number_of_results
             }
         }
-        
-        # Add metadata filters if provided
-        if filters:
-            filter_list = []
-            # フロントエンドのキー名 → Knowledge Baseのメタデータキー名のマッピング
-            key_mapping = {
-                'documentType': 'document',  # documentType → document に変換
-                'product': 'product',        # そのまま
-                'model': 'model'             # そのまま
-            }
-            
-            for key, value in filters.items():
-                if value:
-                    # 実際のメタデータキー名に変換
-                    metadata_key = key_mapping.get(key, key)
-                    filter_list.append({
-                        'equals': {
-                            'key': metadata_key,
-                            'value': value
-                        }
-                    })
-            
-            if filter_list:
-                # Bedrock APIはandAllに最低2つの要素が必要なため、1つの場合は直接equalsを使用
-                if len(filter_list) == 1:
-                    retrieval_config['vectorSearchConfiguration']['filter'] = filter_list[0]
-                else:
-                    retrieval_config['vectorSearchConfiguration']['filter'] = {
-                        'andAll': filter_list
-                    }
-        
+
+        kb_filter = build_kb_filter(filters, categories)
+        if kb_filter:
+            retrieval_config['vectorSearchConfiguration']['filter'] = kb_filter
+
         response = bedrock_agent.retrieve(
             knowledgeBaseId=KNOWLEDGE_BASE_ID,
             retrievalQuery={'text': query},
@@ -184,8 +252,11 @@ def merge_retrieval_results(*result_lists: list) -> list:
         for r in results or []:
             metadata = r.get("metadata", {}) or {}
             source_uri = metadata.get("x-amz-bedrock-kb-source-uri", "") or ""
-            text = (r.get("content", {}) or {}).get("text", "") or ""
-            key = (source_uri, text)
+            text = chunk_text(r)
+            # IMAGE チャンクは text が空になるため、URI だけでは同一文書の別ページが
+            # 潰れてしまう。チャンク ID を混ぜて一意性を保つ。
+            chunk_id = metadata.get("x-amz-bedrock-kb-chunk-id", "") or ""
+            key = (source_uri, text, chunk_id)
             prev = best.get(key)
             if not prev or (r.get("score", 0.0) or 0.0) > (prev.get("score", 0.0) or 0.0):
                 best[key] = r
@@ -210,7 +281,8 @@ def is_weak_retrieval(retrieval_results: list, mode: str = "normal") -> bool:
     return False
 
 
-def generate_response_with_claude(query: str, kb_results: dict, chat_history: list = None, mode: str = "normal") -> str:
+def generate_response_with_claude(query: str, kb_results: dict, chat_history: list = None,
+                                  mode: str = "normal", spec_fallback_used: bool = False) -> str:
     """
     Generate response using Claude 4 with Knowledge Base results
     
@@ -232,7 +304,7 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
         
         # Build system prompt (rules only, no documents or history)
         if mode == "spec":
-            system_prompt = """あなたはエレベーター仕様（D資料）に基づく「仕様確認」アシスタントです。参照資料に書かれている内容だけで回答してください。
+            system_prompt = """あなたはエレベーター仕様資料（C資料・テクニカルインフォメーション）に基づく「仕様確認」アシスタントです。参照資料に書かれている内容だけで回答してください。
 
 【最優先】
 - 参照資料をすべて確認し、関連箇所を探す。見つからない場合のみ「資料に記載がありません」とする。
@@ -250,7 +322,12 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
 
 
 """
-      
+            if spec_fallback_used:
+                system_prompt += """
+【重要】仕様資料に限定した検索では該当が見つからなかったため、全資料から検索した結果を参照しています。
+回答の冒頭で「仕様資料に限定した検索では見つからなかったため、全資料から検索しました」と必ず明示してください。
+"""
+
         else:
             system_prompt = """あなたはEleKnowledgeの技術サポートアシスタントです。
 電気設備・昇降機に関する専門知識を持ち、与えられた質問に対して正確かつ丁寧に回答します。
@@ -282,9 +359,23 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
         else:
             # normal/spec共通: 0件時は「検索漏れの可能性」も含めて明示
             references_block = "<references>\n[検索結果] 検索結果が0件でした（検索漏れの可能性があります）。\n</references>"
+
+        # マルチモーダル KB は図面を IMAGE チャンクで返す。据付場用図が最大カテゴリで
+        # 図面は本質的に視覚情報のため、上位 MAX_IMAGE_BLOCKS 件だけ画像として渡す。
+        reference_content = [{"type": "text", "text": references_block}]
+        for r in selected_results:
+            if len(reference_content) > MAX_IMAGE_BLOCKS:
+                break
+            b64 = chunk_image_b64(r)
+            if b64:
+                reference_content.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": b64},
+                })
+
         messages.append({
             "role": "user",
-            "content": references_block
+            "content": reference_content
         })
 
         if chat_history:
@@ -368,8 +459,9 @@ def select_retrieval_results(retrieval_results: list, mode: str = "normal") -> l
         if per_doc_counts.get(doc_key, 0) >= max_chunks_per_doc:
             continue
 
-        text = (r.get("content", {}) or {}).get("text", "") or ""
-        text_key = (doc_key, text)
+        text = chunk_text(r)
+        chunk_id = metadata.get("x-amz-bedrock-kb-chunk-id", "") or ""
+        text_key = (doc_key, text, chunk_id)
         if text_key in seen_text:
             continue
         seen_text.add(text_key)
@@ -397,12 +489,10 @@ def build_references_block(selected_results: list) -> str:
         doc_uri = metadata.get("x-amz-bedrock-kb-source-uri", "") or ""
         doc_name = doc_uri.split("/")[-1] if doc_uri else "Unknown"
         title = metadata.get("title") or ""
-        doc_type = metadata.get("document", "") or ""
-        product = metadata.get("product", "") or ""
-        model = metadata.get("model", "") or ""
+        category = metadata.get("category", "") or ""
+        model_type = metadata.get("model_type", "") or ""
 
-        text = (r.get("content", {}) or {}).get("text", "") or ""
-        text = text.strip()
+        text = chunk_text(r).strip()
         if len(text) > max_chars_per_chunk:
             text = text[:max_chars_per_chunk].rstrip() + "…"
 
@@ -413,15 +503,15 @@ def build_references_block(selected_results: list) -> str:
         ]
         if title:
             header_parts.append(f"title={title}")
-        if doc_type:
-            header_parts.append(f"document={doc_type}")
-        if product:
-            header_parts.append(f"product={product}")
-        if model:
-            header_parts.append(f"model={model}")
+        if category:
+            header_parts.append(f"category={category}")
+        if model_type:
+            header_parts.append(f"model_type={model_type}")
 
         lines.append(" ".join(header_parts))
-        lines.append(text)
+        # IMAGE チャンクは本文を持たない。画像そのものは別途 image ブロックとして
+        # Claude に渡すため、ここでは所在だけ知らせる。
+        lines.append(text if text else "[図表] この資料の該当箇所は画像です。添付画像を参照してください。")
         lines.append("")  # blank line between entries
 
     return "\n".join(lines).strip()
@@ -435,6 +525,28 @@ def extract_citations(kb_results: dict, mode: str = "normal") -> tuple:
     retrieval_results = kb_results.get("retrievalResults", []) or []
     selected_results = select_retrieval_results(retrieval_results, mode=mode)
     return extract_citations_from_selected(selected_results)
+
+
+def presign_source_uri(s3_client, doc_uri: str) -> str:
+    """
+    Convert an s3:// source URI into a presigned HTTPS URL.
+
+    再利用中の KB のデータソースは他スタック所有のバケットを指すため、
+    バケット名は URI からパースする (DOCUMENTS_BUCKET で置換すると一致せず壊れる)。
+    """
+    if not doc_uri.startswith('s3://'):
+        return doc_uri
+    parsed = urlparse(doc_uri)
+    bucket, key = parsed.netloc, parsed.path.lstrip('/')
+    if not bucket or not key:
+        return doc_uri
+    # SigV4 のプリサイン URL は最長7日。ただし Lambda は role の一時認証情報で
+    # 署名するため、実効期限はそのセッション期限 (最長12時間) で切れる。
+    return s3_client.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': bucket, 'Key': key},
+        ExpiresIn=604800
+    )
 
 
 def extract_citations_from_selected(selected_results: list) -> tuple:
@@ -460,23 +572,19 @@ def extract_citations_from_selected(selected_results: list) -> tuple:
         # S3 URIをHTTPS署名付きURLに変換
         signed_url = doc_uri
         try:
-            if DOCUMENTS_BUCKET and doc_uri.startswith('s3://'):
-                key = doc_uri.replace(f's3://{DOCUMENTS_BUCKET}/', '')
-                signed_url = s3_client.generate_presigned_url(
-                    'get_object',
-                    Params={'Bucket': DOCUMENTS_BUCKET, 'Key': key},
-                    ExpiresIn=2592000  # 30日間（秒）
-                )
+            signed_url = presign_source_uri(s3_client, doc_uri)
         except Exception as e:
-            print(f"Error generating signed URL: {e}")
+            print(f"Error generating signed URL for {doc_uri}: {e}")
 
+        # byteContent は絶対に含めない。IMAGE チャンクは 1 件で最大 1.3MB あり、
+        # DynamoDB の item 上限 400KB と API Gateway の応答上限 6MB を即座に破る。
         source_doc = {
             'documentName': doc_name,
             'title': metadata.get('title'),
             'sourceUri': signed_url,
-            'documentType': metadata.get('document', 'unknown'),
-            'product': metadata.get('product', ''),
-            'model': metadata.get('model', ''),
+            'category': metadata.get('category', ''),
+            'modelType': metadata.get('model_type', ''),
+            'hasImage': chunk_image_b64(result) is not None,
             'relevance': Decimal(str(result.get('score', 0.0)))
         }
         source_documents.append(source_doc)
@@ -512,10 +620,10 @@ def lambda_handler(event, context):
         "sessionId": "session_xxxxx" or null (for new session),
         "userId": "user_xxxxx",
         "query": "User question",
+        "mode": "normal" | "spec",
         "filters": {
-            "documentType": "manual",
-            "product": "ProductA",
-            "model": "v2.0"
+            "category": "spec",        # CATEGORY_MAP の安定キー
+            "modelType": "AXIEZ"       # 部分一致 (AXIEZ は AXIEZ-LINKs にも一致する)
         }
     }
     """
@@ -568,16 +676,19 @@ def lambda_handler(event, context):
         # Get chat history for context
         chat_history = get_chat_history(session_id, limit=5)
         
-        # Enforce D資料 when in spec (specification) mode
+        # spec (仕様確認) モードは仕様資料カテゴリに限定する。
+        # 旧実装は存在しない 'D資料' を強制していたため常に0件だった。
+        spec_fallback_used = False
         if mode == 'spec':
-            # Ignore product/model to avoid over-filtering; focus on D資料のみ
-            spec_filters = {
-                'documentType': 'D資料'
-            }
-            # Try with expanded results; fallback with larger k if empty
-            kb_results = query_knowledge_base(query, spec_filters, number_of_results=30)
+            # model_type はユーザー指定があれば尊重するが、category は SPEC_CATEGORIES で固定
+            spec_filters = {'modelType': filters.get('modelType')} if filters else {}
+            kb_results = query_knowledge_base(
+                query, spec_filters, number_of_results=30, categories=SPEC_CATEGORIES
+            )
+            # カテゴリ由来の0件は k を増やしても解消しないため、フィルタを外して再検索する
             if not kb_results.get('retrievalResults'):
-                kb_results = query_knowledge_base(query, spec_filters, number_of_results=50)
+                kb_results = query_knowledge_base(query, spec_filters, number_of_results=30)
+                spec_fallback_used = True
         else:
             # Normal mode: improve recall with query normalization + optional fallback retrieval
             original_query = query
@@ -607,7 +718,9 @@ def lambda_handler(event, context):
             }
         
         # Generate response with Claude 4
-        ai_response = generate_response_with_claude(query, kb_results, chat_history, mode)
+        ai_response = generate_response_with_claude(
+            query, kb_results, chat_history, mode, spec_fallback_used
+        )
         
         # Extract citations
         citations, source_documents = extract_citations(kb_results, mode)

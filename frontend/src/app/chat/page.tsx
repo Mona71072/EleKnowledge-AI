@@ -19,9 +19,9 @@ interface Message {
     documentName: string;
     title?: string;  // メタデータタイトル（オプション）
     sourceUri: string;
-    documentType: string;
-    product: string;
-    model: string;
+    category: string;    // Knowledge Base の実メタデータ category（例: C資料 / 据付場用図）
+    modelType: string;   // 同 model_type（カンマ連結の多値文字列）
+    hasImage?: boolean;  // 該当チャンクが図面などの画像だった場合 true
     relevance: number;
   }>;
   feedback?: 'good' | 'bad' | null;
@@ -57,41 +57,34 @@ export default function ChatPage() {
   const [showAllCitations, setShowAllCitations] = useState<Record<string, boolean>>({});
   const [mode, setMode] = useState<'normal' | 'spec'>('normal');
   const [selectedFilters, setSelectedFilters] = useState({
-    documentType: '',
-    product: '',
-    model: ''
+    category: '',
+    modelType: ''
   });
 
-  const documentTypeOptions = [
-    '',
-    'C資料',
-    'D資料',
-    'S資料',
-    'EAマニュアル',
-    '業務マニュアル',
-    '据付ノート',
-    '据付基準',
-    'イエローブック'
+  // value は Knowledge Base の実 category 値に対応する安定キー (バックエンドの CATEGORY_MAP と対)。
+  // 表示用の日本語はこの層だけに置き、資料フォルダ名が変わっても API 契約が壊れないようにする。
+  const categoryOptions = [
+    { value: '', label: 'すべての資料' },
+    { value: 'drawing', label: '据付図面' },
+    { value: 'spec', label: '仕様資料' },
+    { value: 'tech_info', label: '技術情報' },
+    { value: 'incident', label: '災害・ヒヤリハット事例' },
+    { value: 'qsheet', label: '品質チェックシート' },
+    { value: 'std', label: '据付基準' },
+    { value: 'note', label: '据付ノート' }
   ];
 
-  const productOptions = [
-    '',
-    'エレベーター'
-  ];
-
-  const modelOptions = [
-    '',
-    'KE-LG',
-    'KM-LD',
-    'CM-MA',
-    'CM-LB',
-    'ME-CM',
-    'ME-CH',
-    'KE-PF',
-    'KE-RF',
-    'KE-SA',
-    'KE-HF',
-    'KM-SA'
+  // model_type はカンマ連結の多値文字列を部分一致で絞り込むため、
+  // 'AXIEZ' は 'AXIEZ-LINKs' 等にも一致する (上位集合になる)。ラベルで明示している。
+  const modelTypeOptions = [
+    { value: '', label: 'すべての機種' },
+    { value: 'AXIEZ', label: 'AXIEZ 系（AXIEZ-LINKs を含む）' },
+    { value: 'AXIEZ-LINKs', label: 'AXIEZ-LINKs' },
+    { value: 'NEXCUBE', label: 'NEXCUBE' },
+    { value: 'NEXIEZ-MRL', label: 'NEXIEZ-MRL' },
+    { value: 'メルワイド', label: 'メルワイド' },
+    { value: 'メルシティ', label: 'メルシティ' },
+    { value: 'ELENESSA', label: 'ELENESSA' }
   ];
 
   const API_URL = process.env.NEXT_PUBLIC_RAG_API_URL || '';
@@ -410,13 +403,13 @@ const normalizeTableMarkdown = (text: string): string => {
 
     try {
       const token = await getAuthToken();
-      // 仕様確認モード(spec)ではD資料に固定
+      // 仕様確認モード(spec)での資料カテゴリ限定はサーバー側 (SPEC_CATEGORIES) の責務。
+      // ここで category を送っても無視されるため、機種のみを渡す。
       const effectiveFilters = mode === 'spec'
-        ? { documentType: 'D資料', product: selectedFilters.product || undefined, model: selectedFilters.model || undefined }
+        ? { modelType: selectedFilters.modelType || undefined }
         : {
-            documentType: selectedFilters.documentType || undefined,
-            product: selectedFilters.product || undefined,
-            model: selectedFilters.model || undefined
+            category: selectedFilters.category || undefined,
+            modelType: selectedFilters.modelType || undefined
           };
 
       const payload = {
@@ -713,12 +706,12 @@ const normalizeTableMarkdown = (text: string): string => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">資料タイプ</label>
+                  <label className="block text-xs text-gray-600 mb-1">資料カテゴリ</label>
                   <select
-                    value={mode === 'spec' ? 'D資料' : selectedFilters.documentType}
+                    value={mode === 'spec' ? '' : selectedFilters.category}
                     onChange={(e) => setSelectedFilters({
                       ...selectedFilters,
-                      documentType: e.target.value
+                      category: e.target.value
                     })}
                     disabled={mode === 'spec'}
                     className={`w-full px-3 py-1.5 text-sm border rounded-lg focus:outline-none transition-all bg-white text-gray-900 ${
@@ -727,55 +720,36 @@ const normalizeTableMarkdown = (text: string): string => {
                         : 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 hover:border-gray-400'
                     }`}
                   >
-                    {documentTypeOptions.map((opt) => (
-                      <option key={opt || 'all'} value={opt}>
-                        {opt || '指定しない'}
+                    {categoryOptions.map((opt) => (
+                      <option key={opt.value || 'all'} value={opt.value}>
+                        {opt.label}
                       </option>
                     ))}
                   </select>
                   {mode === 'spec' && (
-                    <p className="text-[11px] text-gray-500 mt-1">仕様確認モードでは資料タイプは固定です。</p>
+                    <p className="text-[11px] text-gray-500 mt-1">仕様確認モードでは仕様資料・技術情報に固定されます。</p>
                   )}
                 </div>
-                <div className="flex gap-2">
-                  <div className="w-1/2">
-                    <label className="block text-xs text-gray-600 mb-1">製品</label>
-                    <select
-                      value={selectedFilters.product}
-                      onChange={(e) => setSelectedFilters({
-                        ...selectedFilters,
-                        product: e.target.value
-                      })}
-                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-gray-400 text-gray-900"
-                    >
-                      {productOptions.map((opt) => (
-                        <option key={opt || 'all'} value={opt}>
-                          {opt || '指定しない'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="w-1/2">
-                    <label className="block text-xs text-gray-600 mb-1">モデル</label>
-                    <select
-                      value={selectedFilters.model}
-                      onChange={(e) => setSelectedFilters({
-                        ...selectedFilters,
-                        model: e.target.value
-                      })}
-                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-gray-400 text-gray-900"
-                    >
-                      {modelOptions.map((opt) => (
-                        <option key={opt || 'all'} value={opt}>
-                          {opt || '指定しない'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">機種</label>
+                  <select
+                    value={selectedFilters.modelType}
+                    onChange={(e) => setSelectedFilters({
+                      ...selectedFilters,
+                      modelType: e.target.value
+                    })}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-gray-400 text-gray-900"
+                  >
+                    {modelTypeOptions.map((opt) => (
+                      <option key={opt.value || 'all'} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                {(selectedFilters.documentType || selectedFilters.product || selectedFilters.model) && (
+                {(selectedFilters.category || selectedFilters.modelType) && (
                   <button
-                    onClick={() => setSelectedFilters({ documentType: '', product: '', model: '' })}
+                    onClick={() => setSelectedFilters({ category: '', modelType: '' })}
                     className="w-full mt-1 px-3 py-1.5 text-xs text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-100 transition-all hover:shadow-sm flex items-center justify-center gap-1"
                   >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1128,7 +1102,7 @@ const normalizeTableMarkdown = (text: string): string => {
                   )}
                 </button>
               </div>
-              {(selectedFilters.documentType || selectedFilters.product || selectedFilters.model || mode === 'spec') && (
+              {(selectedFilters.category || selectedFilters.modelType || mode === 'spec') && (
                 <div className="mt-2 flex flex-wrap gap-2 items-center animate-fade-in">
                   <span className="text-xs text-gray-500 font-medium">適用中のフィルター:</span>
                   {mode === 'spec' && (
@@ -1139,28 +1113,20 @@ const normalizeTableMarkdown = (text: string): string => {
                       仕様確認モード
                     </span>
                   )}
-                  {selectedFilters.documentType && mode !== 'spec' && (
+                  {selectedFilters.category && mode !== 'spec' && (
                     <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 rounded-full border border-blue-200 shadow-sm">
                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      資料タイプ: {selectedFilters.documentType}
+                      資料カテゴリ: {categoryOptions.find((o) => o.value === selectedFilters.category)?.label}
                     </span>
                   )}
-                  {selectedFilters.product && (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 rounded-full border border-blue-200 shadow-sm">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                      </svg>
-                      製品: {selectedFilters.product}
-                    </span>
-                  )}
-                  {selectedFilters.model && (
+                  {selectedFilters.modelType && (
                     <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 rounded-full border border-blue-200 shadow-sm">
                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
                       </svg>
-                      モデル: {selectedFilters.model}
+                      機種: {modelTypeOptions.find((o) => o.value === selectedFilters.modelType)?.label}
                     </span>
                   )}
                 </div>
