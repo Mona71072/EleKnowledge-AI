@@ -1,0 +1,394 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  EleKnowledge - Announcements & Operations Monitoring
+  (Home announcements feed + admin publishing pipeline + auto-aggregated metrics dashboard).
+  Additive stack; does not modify phase1/2/3 resources.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prd]
+    Description: Environment name
+
+  ProjectName:
+    Type: String
+    Default: EleKnowledge
+    Description: Project name for resource tagging
+
+  AdminGroupName:
+    Type: String
+    Default: admin
+    Description: Cognito group name that grants admin privileges (server-side enforced)
+
+  MetricTtlDays:
+    Type: Number
+    Default: 400
+    Description: Retention (days) for metric snapshots (~13 months for YoY comparison)
+
+  AllowedIPList:
+    Type: CommaDelimitedList
+    Description: Office egress /32 CIDRs allowed to reach the API (same as GenU / WAF)
+    Default: "203.178.81.200/32,210.172.233.198/32,210.172.233.219/32,210.172.233.220/32,192.218.140.236/32,192.218.140.237/32,192.218.140.238/32,192.218.140.239/32,192.218.140.240/32,192.218.140.241/32"
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 30
+    MemorySize: 256
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        ADMIN_GROUP_NAME: !Ref AdminGroupName
+    Tags:
+      Project: !Ref ProjectName
+      Env: !Ref Environment
+      ManagedBy: SAM
+      Feature: announcements-monitoring
+
+Resources:
+  # ==========================================================================
+  # DynamoDB
+  # ==========================================================================
+  AnnouncementsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub announcements-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      AttributeDefinitions:
+        - AttributeName: announcementId
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: publishAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: announcementId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: status-publishAt-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: publishAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Env, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: SAM }
+        - { Key: Feature, Value: announcements-monitoring }
+
+  MetricsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub metrics-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      AttributeDefinitions:
+        - AttributeName: metricDate
+          AttributeType: S
+        - AttributeName: scope
+          AttributeType: S
+      KeySchema:
+        - AttributeName: metricDate
+          KeyType: HASH
+        - AttributeName: scope
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: scope-metricDate-index
+          KeySchema:
+            - AttributeName: scope
+              KeyType: HASH
+            - AttributeName: metricDate
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Env, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: SAM }
+        - { Key: Feature, Value: announcements-monitoring }
+
+  # ==========================================================================
+  # IAM Roles (least privilege, one per function)
+  # ==========================================================================
+  AnnouncementsReadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub announcements-read-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: ReadAnnouncements
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:Query]
+                Resource:
+                  - !GetAtt AnnouncementsTable.Arn
+                  - !Sub ${AnnouncementsTable.Arn}/index/*
+
+  AnnouncementsWriteRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub announcements-write-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: WriteAnnouncements
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Scan]
+                Resource: !GetAtt AnnouncementsTable.Arn
+
+  MetricsReadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub metrics-read-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: ReadMetrics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:Query]
+                Resource:
+                  - !GetAtt MetricsTable.Arn
+                  - !Sub ${MetricsTable.Arn}/index/*
+
+  MetricsAggregatorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub metrics-aggregator-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: AggregateMetrics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:Scan, dynamodb:Query]
+                Resource:
+                  - !Sub
+                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}
+                    - TableName:
+                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+                  - !Sub
+                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/*
+                    - TableName:
+                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+              - Effect: Allow
+                Action: [dynamodb:PutItem]
+                Resource: !GetAtt MetricsTable.Arn
+              - Effect: Allow
+                Action: [cloudwatch:GetMetricStatistics, cloudwatch:GetMetricData]
+                Resource: '*'
+
+  # ==========================================================================
+  # Lambda Functions
+  # ==========================================================================
+  AnnouncementsReadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub announcements-read-${Environment}
+      CodeUri: ../../lambda/announcements/read/
+      Handler: app.lambda_handler
+      Role: !GetAtt AnnouncementsReadRole.Arn
+      Environment:
+        Variables:
+          ANNOUNCEMENTS_TABLE: !Ref AnnouncementsTable
+      Events:
+        List:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /announcements
+            Method: GET
+
+  AnnouncementsWriteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub announcements-write-${Environment}
+      CodeUri: ../../lambda/announcements/write/
+      Handler: app.lambda_handler
+      Role: !GetAtt AnnouncementsWriteRole.Arn
+      Environment:
+        Variables:
+          ANNOUNCEMENTS_TABLE: !Ref AnnouncementsTable
+      Events:
+        ListAll:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/announcements
+            Method: GET
+        Create:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/announcements
+            Method: POST
+        Update:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/announcements/{id}
+            Method: PUT
+        Delete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/announcements/{id}
+            Method: DELETE
+
+  MetricsReadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub metrics-read-${Environment}
+      CodeUri: ../../lambda/metrics/read/
+      Handler: app.lambda_handler
+      Role: !GetAtt MetricsReadRole.Arn
+      Environment:
+        Variables:
+          METRICS_TABLE: !Ref MetricsTable
+      Events:
+        Get:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/metrics
+            Method: GET
+
+  MetricsAggregatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub metrics-aggregator-${Environment}
+      CodeUri: ../../lambda/metrics/aggregator/
+      Handler: app.lambda_handler
+      Role: !GetAtt MetricsAggregatorRole.Arn
+      Timeout: 120
+      MemorySize: 512
+      Environment:
+        Variables:
+          METRICS_TABLE: !Ref MetricsTable
+          METRIC_TTL_DAYS: !Ref MetricTtlDays
+          CHATLOGS_TABLE:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          RAG_FUNCTION_NAME: !Sub rag-${Environment}
+          CHAT_FUNCTION_NAME: !Sub chat-${Environment}
+          RAG_API_NAME: !Sub rag-api-${Environment}
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            # 02:00 JST == 17:00 UTC, aggregates the previous UTC day
+            Schedule: cron(0 17 * * ? *)
+            Name: !Sub metrics-daily-agg-${Environment}
+            Description: Daily metrics aggregation for EleKnowledge dashboard
+
+  # ==========================================================================
+  # API Gateway (Cognito authorizer + office IP whitelist, mirrors phase2)
+  # ==========================================================================
+  AppApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub announcements-monitoring-api-${Environment}
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+        MaxAge: "'3600'"
+      Auth:
+        AddDefaultAuthorizerToCorsPreflight: false
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn:
+              Fn::ImportValue: !Sub ${ProjectName}-${Environment}-CognitoUserPoolArn
+        ResourcePolicy:
+          IpRangeWhitelist: !Ref AllowedIPList
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+          MetricsEnabled: true
+      Tags:
+        Project: !Ref ProjectName
+        Env: !Ref Environment
+        Feature: announcements-monitoring
+
+Outputs:
+  AppApiUrl:
+    Description: Base URL for announcements & metrics API
+    Value: !Sub https://${AppApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-AppApiUrl
+
+  AnnouncementsTableName:
+    Value: !Ref AnnouncementsTable
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-AnnouncementsTableName
+
+  MetricsTableName:
+    Value: !Ref MetricsTable
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-MetricsTableName

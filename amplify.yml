@@ -40,5 +40,8 @@ env:
     NEXT_PUBLIC_RAG_API_URL: "https://lwi9g3kzik.execute-api.ap-northeast-1.amazonaws.com/dev"
     NEXT_PUBLIC_CHAT_API_URL: "https://92pdw6k1o4.execute-api.ap-northeast-1.amazonaws.com/dev"
     NEXT_PUBLIC_TROUBLESHOOTING_API_URL: "https://zh4kbz8bb1.execute-api.ap-northeast-1.amazonaws.com/dev/troubleshooting"
+    # Announcements & monitoring API (announcements-monitoring-dev スタック出力 AppApiUrl より設定)
+    NEXT_PUBLIC_APP_API_URL: "https://REPLACE_WITH_APP_API_ID.execute-api.ap-northeast-1.amazonaws.com/dev"
+    NEXT_PUBLIC_ADMIN_GROUP: "admin"
     NEXT_PUBLIC_COGNITO_USER_POOL_ID: "ap-northeast-1_DN17ekXik"
     NEXT_PUBLIC_COGNITO_CLIENT_ID: "doa4arfmc7shs8u0mb91u70mq"
