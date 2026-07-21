@@ -4,7 +4,10 @@ version = 0.1
 [default.deploy.parameters]
 stack_name = "announcements-monitoring-dev"
 template_file = "announcements-monitoring-template.yaml"
-resolve_s3 = true
+# Org SCP denies s3:PutBucketPublicAccessBlock, so resolve_s3 (managed-bucket
+# creation) cannot be used. Point at the existing deployment artifacts bucket.
+s3_bucket = "eleknowledge-sam-artifacts-dev-730972069979-ap-northeast-1"
+s3_prefix = "announcements-monitoring"
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
 region = "ap-northeast-1"
 confirm_changeset = true
