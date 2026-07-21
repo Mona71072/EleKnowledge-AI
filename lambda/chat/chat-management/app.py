@@ -15,9 +15,36 @@ dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', '
 
 # Environment variables
 CHATLOGS_TABLE_NAME = os.environ.get('CHATLOGS_TABLE')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
+FEEDBACK_METRIC_NAMESPACE = os.environ.get('FEEDBACK_METRIC_NAMESPACE', 'EleKnowledge/Feedback')
 
 # DynamoDB table
 chatlogs_table = dynamodb.Table(CHATLOGS_TABLE_NAME)
+
+
+def emit_feedback_metric(feedback: str) -> None:
+    """Emit an Embedded Metric Format (EMF) log so CloudWatch counts feedback in
+    real time. Both FeedbackGood and FeedbackBad are always emitted (one 1, one 0)
+    so the like-rate metric-math (Good / (Good + Bad)) always has data points and
+    no table scan is needed for live dashboards.
+    """
+    try:
+        emf = {
+            '_aws': {
+                'Timestamp': int(time.time() * 1000),
+                'CloudWatchMetrics': [{
+                    'Namespace': FEEDBACK_METRIC_NAMESPACE,
+                    'Dimensions': [['Environment']],
+                    'Metrics': [{'Name': 'FeedbackGood'}, {'Name': 'FeedbackBad'}],
+                }],
+            },
+            'Environment': ENVIRONMENT,
+            'FeedbackGood': 1 if feedback == 'good' else 0,
+            'FeedbackBad': 1 if feedback == 'bad' else 0,
+        }
+        print(json.dumps(emf))
+    except Exception as e:  # noqa: BLE001 - metrics must never break the request
+        print(f"[chat] Failed to emit feedback EMF: {e}")
 
 
 # Custom JSON encoder for Decimal
@@ -287,7 +314,8 @@ def lambda_handler(event, context):
                 }
             
             update_message_feedback(session_id, message_id, feedback)
-            
+            emit_feedback_metric(feedback)
+
             return {
                 'statusCode': 200,
                 'headers': headers,

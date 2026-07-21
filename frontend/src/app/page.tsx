@@ -7,6 +7,11 @@ import { getCurrentUser, fetchUserAttributes, signOut } from 'aws-amplify/auth';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
+import { getUserInfo } from '@/lib/auth-helpers';
+import { getAnnouncements, Announcement } from '@/lib/announcements';
+import { AnnouncementsSection } from '@/components/announcements/AnnouncementsSection';
+import { MaintenanceBanner } from '@/components/announcements/MaintenanceBanner';
+import { AdminViewToggle } from '@/components/admin/AdminViewToggle';
 
 export default function HomePage() {
   const router = useRouter();
@@ -14,6 +19,10 @@ export default function HomePage() {
   const [userAttributes, setUserAttributes] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isDevBypass, setIsDevBypass] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [annLoading, setAnnLoading] = useState(true);
+  const [annError, setAnnError] = useState<string | null>(null);
   const [infoModal, setInfoModal] = useState<null | {
     title: string;
     description: string;
@@ -22,6 +31,18 @@ export default function HomePage() {
 
   useEffect(() => {
     checkUser();
+  }, []);
+
+  // Admin membership + announcements feed (independent of the auth-attribute path)
+  useEffect(() => {
+    (async () => {
+      const info = await getUserInfo();
+      if (info) setIsAdmin(info.isAdmin);
+    })();
+    getAnnouncements(5)
+      .then((res) => setAnnouncements(res.announcements))
+      .catch((e) => setAnnError((e as Error).message))
+      .finally(() => setAnnLoading(false));
   }, []);
 
   useEffect(() => {
@@ -89,12 +110,17 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Active-maintenance banner (critical cannot be dismissed) */}
+      <MaintenanceBanner announcements={announcements} />
+
       {/* Header */}
       <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center gap-4">
           <h1 className="text-2xl font-bold text-gray-900">
             EleKnowledge
           </h1>
+          {/* Admin-only view toggle (home <-> admin console) */}
+          {isAdmin && <AdminViewToggle current="home" />}
           <div className="flex items-center gap-3">
             <div className="hidden sm:block text-right leading-tight">
               <div className="text-sm font-semibold text-gray-900">
@@ -226,6 +252,13 @@ export default function HomePage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* 運営からのお知らせ */}
+        <AnnouncementsSection
+          announcements={announcements}
+          loading={annLoading}
+          error={annError}
+        />
 
         {/* Feature Cards */}
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">

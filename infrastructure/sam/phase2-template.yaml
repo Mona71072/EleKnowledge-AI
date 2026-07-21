@@ -310,6 +310,8 @@ Resources:
         Variables:
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          ENVIRONMENT: !Ref Environment
+          FEEDBACK_METRIC_NAMESPACE: EleKnowledge/Feedback
       Events:
         ListSessions:
           Type: Api
