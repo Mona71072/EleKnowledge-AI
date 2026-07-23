@@ -8,6 +8,7 @@ import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
+import { Chip, SegmentedControl } from '@/components/ui';
 
 interface Message {
   id: string;
@@ -52,14 +53,13 @@ export default function ChatPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showFilters, setShowFilters] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showAllCitations, setShowAllCitations] = useState<Record<string, boolean>>({});
   const [mode, setMode] = useState<'normal' | 'spec'>('normal');
-  const [selectedFilters, setSelectedFilters] = useState({
-    category: '',
-    modelType: ''
-  });
+  // 資料カテゴリは複数選択 (バックエンド build_kb_filter が in 句に対応)。値は CATEGORY_MAP の安定キー。
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  // 機種は model_type の stringContains 単一値のため単一選択。
+  const [selectedModel, setSelectedModel] = useState('');
 
   // value は Knowledge Base の実 category 値に対応する安定キー (バックエンドの CATEGORY_MAP と対)。
   // 表示用の日本語はこの層だけに置き、資料フォルダ名が変わっても API 契約が壊れないようにする。
@@ -406,10 +406,10 @@ const normalizeTableMarkdown = (text: string): string => {
       // 仕様確認モード(spec)での資料カテゴリ限定はサーバー側 (SPEC_CATEGORIES) の責務。
       // ここで category を送っても無視されるため、機種のみを渡す。
       const effectiveFilters = mode === 'spec'
-        ? { modelType: selectedFilters.modelType || undefined }
+        ? { modelType: selectedModel || undefined }
         : {
-            category: selectedFilters.category || undefined,
-            modelType: selectedFilters.modelType || undefined
+            category: selectedCategories.length > 0 ? selectedCategories : undefined,
+            modelType: selectedModel || undefined
           };
 
       const payload = {
@@ -609,14 +609,7 @@ const normalizeTableMarkdown = (text: string): string => {
           </div>
 
           {/* Session List */}
-          <div 
-            className="flex-1 overflow-y-auto min-h-0 max-h-full scroll-smooth" 
-            style={{ 
-              maxHeight: showFilters 
-                ? 'calc(100vh - 310px)' 
-                : 'calc(100vh - 180px)' 
-            }}
-          >
+          <div className="flex-1 overflow-y-auto min-h-0 max-h-full scroll-smooth">
             {isLoadingSessions ? (
               <div className="p-4 text-center text-gray-500">
                 読み込み中...
@@ -672,95 +665,6 @@ const normalizeTableMarkdown = (text: string): string => {
             )}
           </div>
 
-          {/* Filters Section - Fixed at bottom with accordion */}
-          <div className="border-t border-gray-200 bg-gradient-to-b from-gray-50 to-white flex-shrink-0 shadow-inner mt-auto">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="w-full flex items-center justify-between text-sm font-semibold text-gray-700 p-2.5"
-              aria-expanded={showFilters}
-            >
-              <span className="flex items-center gap-1.5">
-                <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                </svg>
-                フィルター
-              </span>
-              <svg className={`w-4 h-4 text-gray-500 transition-transform ${showFilters ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {showFilters && (
-              <div className="px-2.5 pb-2.5 space-y-2">
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1 flex items-center gap-2">
-                    <span>モード</span>
-                  </label>
-                  <select
-                    value={mode}
-                    onChange={(e) => setMode(e.target.value as 'normal' | 'spec')}
-                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-gray-400 text-gray-900"
-                  >
-                    <option value="normal">通常モード</option>
-                    <option value="spec">仕様確認モード</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">資料カテゴリ</label>
-                  <select
-                    value={mode === 'spec' ? '' : selectedFilters.category}
-                    onChange={(e) => setSelectedFilters({
-                      ...selectedFilters,
-                      category: e.target.value
-                    })}
-                    disabled={mode === 'spec'}
-                    className={`w-full px-3 py-1.5 text-sm border rounded-lg focus:outline-none transition-all bg-white text-gray-900 ${
-                      mode === 'spec'
-                        ? 'border-gray-200 text-gray-400 cursor-not-allowed'
-                        : 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 hover:border-gray-400'
-                    }`}
-                  >
-                    {categoryOptions.map((opt) => (
-                      <option key={opt.value || 'all'} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                  {mode === 'spec' && (
-                    <p className="text-[11px] text-gray-500 mt-1">仕様確認モードでは仕様資料・技術情報に固定されます。</p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">機種</label>
-                  <select
-                    value={selectedFilters.modelType}
-                    onChange={(e) => setSelectedFilters({
-                      ...selectedFilters,
-                      modelType: e.target.value
-                    })}
-                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-gray-400 text-gray-900"
-                  >
-                    {modelTypeOptions.map((opt) => (
-                      <option key={opt.value || 'all'} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {(selectedFilters.category || selectedFilters.modelType) && (
-                  <button
-                    onClick={() => setSelectedFilters({ category: '', modelType: '' })}
-                    className="w-full mt-1 px-3 py-1.5 text-xs text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-100 transition-all hover:shadow-sm flex items-center justify-center gap-1"
-                  >
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                    フィルターをクリア
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Main Chat Area */}
@@ -1040,6 +944,80 @@ const normalizeTableMarkdown = (text: string): string => {
           {/* Input Area - Fixed at bottom */}
           <div className="border-t border-gray-200 bg-white/95 backdrop-blur-sm sticky bottom-0 z-10 flex-shrink-0 shadow-lg">
             <div className="p-3 sm:p-4">
+              {/* Filter bar - always visible above the input for discoverability */}
+              <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-gray-500">モード</span>
+                  <SegmentedControl
+                    aria-label="検索モード"
+                    value={mode}
+                    onChange={(v) => setMode(v as 'normal' | 'spec')}
+                    options={[
+                      { value: 'normal', label: '通常' },
+                      { value: 'spec', label: '仕様確認' },
+                    ]}
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="flex-shrink-0 text-xs font-medium text-gray-500">資料</span>
+                  {mode === 'spec' ? (
+                    <span className="inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs text-purple-700">
+                      仕様資料・技術情報に自動限定
+                    </span>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {categoryOptions.filter((opt) => opt.value).map((opt) => (
+                        <Chip
+                          key={opt.value}
+                          active={selectedCategories.includes(opt.value)}
+                          onClick={() =>
+                            setSelectedCategories((prev) =>
+                              prev.includes(opt.value)
+                                ? prev.filter((v) => v !== opt.value)
+                                : [...prev, opt.value]
+                            )
+                          }
+                        >
+                          {opt.label}
+                        </Chip>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-gray-500">機種</span>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-900 transition-colors hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {modelTypeOptions.map((opt) => (
+                      <option key={opt.value || 'all'} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {(selectedCategories.length > 0 || selectedModel || mode === 'spec') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategories([]);
+                      setSelectedModel('');
+                      setMode('normal');
+                    }}
+                    className="inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700"
+                  >
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    クリア
+                  </button>
+                )}
+              </div>
               <div className="flex gap-2 sm:gap-3 items-end">
                 <div className="flex-1 relative">
                   <textarea
@@ -1102,35 +1080,6 @@ const normalizeTableMarkdown = (text: string): string => {
                   )}
                 </button>
               </div>
-              {(selectedFilters.category || selectedFilters.modelType || mode === 'spec') && (
-                <div className="mt-2 flex flex-wrap gap-2 items-center animate-fade-in">
-                  <span className="text-xs text-gray-500 font-medium">適用中のフィルター:</span>
-                  {mode === 'spec' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gradient-to-r from-purple-100 to-purple-50 text-purple-700 rounded-full border border-purple-200 shadow-sm">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      仕様確認モード
-                    </span>
-                  )}
-                  {selectedFilters.category && mode !== 'spec' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 rounded-full border border-blue-200 shadow-sm">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      資料カテゴリ: {categoryOptions.find((o) => o.value === selectedFilters.category)?.label}
-                    </span>
-                  )}
-                  {selectedFilters.modelType && (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 rounded-full border border-blue-200 shadow-sm">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                      </svg>
-                      機種: {modelTypeOptions.find((o) => o.value === selectedFilters.modelType)?.label}
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
           </div>
         </div>
