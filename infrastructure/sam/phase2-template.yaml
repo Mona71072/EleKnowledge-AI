@@ -62,6 +62,16 @@ Parameters:
       not a bare foundation model ID - anthropic.claude-sonnet-4-20250514-v1:0 is LEGACY
       and only supports INFERENCE_PROFILE invocation in ap-northeast-1.
   
+  RagSearchType:
+    Type: String
+    Default: HYBRID
+    AllowedValues:
+      - HYBRID
+      - SEMANTIC
+    Description: >-
+      Knowledge Base retrieve search type. HYBRID (vector + keyword) improves exact-term
+      matching (model codes, error codes). SEMANTIC is vector-only. Wired to RAG_SEARCH_TYPE.
+
   RagLambdaTimeout:
     Type: Number
     Default: 300
@@ -282,6 +292,7 @@ Resources:
         Variables:
           KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          RAG_SEARCH_TYPE: !Ref RagSearchType
           KB_SOURCE_BUCKET: !Ref KnowledgeBaseDataSourceBucket
           KB_SOURCE_PREFIX: !Ref KnowledgeBaseSourcePrefix
           CHATLOGS_TABLE:

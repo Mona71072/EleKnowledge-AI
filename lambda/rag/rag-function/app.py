@@ -31,6 +31,13 @@ if not CHATLOGS_TABLE_NAME:
 KB_SOURCE_BUCKET = os.environ.get('KB_SOURCE_BUCKET', '')
 KB_SOURCE_PREFIX = os.environ.get('KB_SOURCE_PREFIX', 'docs/')
 
+# Knowledge Base の検索方式。HYBRID はベクトル類似に加えてキーワード/全文一致を併用するため、
+# 型式コード (AXIEZ-LINKs 等) やエラーコードのような完全一致寄りの語の取りこぼしを減らせる。
+# 既定 HYBRID。運用で戻したい場合は env で SEMANTIC に切替可能 (不正値は HYBRID にフォールバック)。
+RAG_SEARCH_TYPE = os.environ.get('RAG_SEARCH_TYPE', 'HYBRID')
+if RAG_SEARCH_TYPE not in ('HYBRID', 'SEMANTIC'):
+    RAG_SEARCH_TYPE = 'HYBRID'
+
 # Claude に渡す画像チャンクの上限。IMAGE チャンクは 1 件あたり最大 1.3MB あるため、
 # 無制限に積むと Lambda/API Gateway の 6MB 応答上限とトークン上限を破る。
 MAX_IMAGE_BLOCKS = 3
@@ -221,7 +228,8 @@ def query_knowledge_base(query: str, filters: dict = None, number_of_results: in
     try:
         retrieval_config = {
             'vectorSearchConfiguration': {
-                'numberOfResults': number_of_results
+                'numberOfResults': number_of_results,
+                'overrideSearchType': RAG_SEARCH_TYPE
             }
         }
 
