@@ -1,5 +1,5 @@
 """
-EleKnowledge-AI Chat Management Lambda Function
+EleKnowledge Chat Management Lambda Function
 Session and Message Management
 """
 import json
@@ -11,13 +11,40 @@ from botocore.exceptions import ClientError
 from decimal import Decimal
 
 # Initialize AWS clients
-dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'ap-northeast-1'))
 
 # Environment variables
 CHATLOGS_TABLE_NAME = os.environ.get('CHATLOGS_TABLE')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
+FEEDBACK_METRIC_NAMESPACE = os.environ.get('FEEDBACK_METRIC_NAMESPACE', 'EleKnowledge/Feedback')
 
 # DynamoDB table
 chatlogs_table = dynamodb.Table(CHATLOGS_TABLE_NAME)
+
+
+def emit_feedback_metric(feedback: str) -> None:
+    """Emit an Embedded Metric Format (EMF) log so CloudWatch counts feedback in
+    real time. Both FeedbackGood and FeedbackBad are always emitted (one 1, one 0)
+    so the like-rate metric-math (Good / (Good + Bad)) always has data points and
+    no table scan is needed for live dashboards.
+    """
+    try:
+        emf = {
+            '_aws': {
+                'Timestamp': int(time.time() * 1000),
+                'CloudWatchMetrics': [{
+                    'Namespace': FEEDBACK_METRIC_NAMESPACE,
+                    'Dimensions': [['Environment']],
+                    'Metrics': [{'Name': 'FeedbackGood'}, {'Name': 'FeedbackBad'}],
+                }],
+            },
+            'Environment': ENVIRONMENT,
+            'FeedbackGood': 1 if feedback == 'good' else 0,
+            'FeedbackBad': 1 if feedback == 'bad' else 0,
+        }
+        print(json.dumps(emf))
+    except Exception as e:  # noqa: BLE001 - metrics must never break the request
+        print(f"[chat] Failed to emit feedback EMF: {e}")
 
 
 # Custom JSON encoder for Decimal
@@ -42,7 +69,10 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
         response = chatlogs_table.query(
             IndexName='userId-timestamp-index',
             KeyConditionExpression='userId = :uid',
-            ExpressionAttributeValues={':uid': user_id},
+            # Hide logically-deleted messages (deleted flag null/false only)
+            FilterExpression='attribute_not_exists(#del) OR #del = :false',
+            ExpressionAttributeNames={'#del': 'deleted'},
+            ExpressionAttributeValues={':uid': user_id, ':false': False},
             ScanIndexForward=False,
             Limit=limit * 10  # Get more messages to find unique sessions
         )
@@ -88,7 +118,10 @@ def get_session_messages(session_id: str, limit: int = 100) -> list:
     try:
         response = chatlogs_table.query(
             KeyConditionExpression='sessionId = :sid',
-            ExpressionAttributeValues={':sid': session_id},
+            # Hide logically-deleted messages (deleted flag null/false only)
+            FilterExpression='attribute_not_exists(#del) OR #del = :false',
+            ExpressionAttributeNames={'#del': 'deleted'},
+            ExpressionAttributeValues={':sid': session_id, ':false': False},
             ScanIndexForward=True,  # Oldest first
             Limit=limit
         )
@@ -108,24 +141,33 @@ def get_session_messages(session_id: str, limit: int = 100) -> list:
 
 
 def delete_session(session_id: str) -> int:
-    """Delete all messages in a session"""
+    """Logically delete all messages in a session (soft delete).
+
+    Sets a `deleted` flag instead of removing the item, so the conversation is
+    hidden from the user (and cannot be restored via the UI) while the data is
+    retained for internal analysis. Physical removal is handled by TTL, and the
+    DynamoDB stream archives every change (including this flag) to S3.
+    """
     try:
-        # Get all messages
+        # Only the currently-visible (not-yet-deleted) messages
         messages = get_session_messages(session_id)
-        
-        # Delete each message
+
+        now_iso = datetime.utcnow().isoformat() + 'Z'
         deleted_count = 0
         for msg in messages:
-            chatlogs_table.delete_item(
+            chatlogs_table.update_item(
                 Key={
                     'sessionId': session_id,
                     'messageId': msg['messageId']
-                }
+                },
+                UpdateExpression='SET #del = :true, deletedAt = :ts',
+                ExpressionAttributeNames={'#del': 'deleted'},
+                ExpressionAttributeValues={':true': True, ':ts': now_iso}
             )
             deleted_count += 1
-        
+
         return deleted_count
-        
+
     except ClientError as e:
         print(f"Error deleting session: {e}")
         raise
@@ -272,7 +314,8 @@ def lambda_handler(event, context):
                 }
             
             update_message_feedback(session_id, message_id, feedback)
-            
+            emit_feedback_metric(feedback)
+
             return {
                 'statusCode': 200,
                 'headers': headers,

@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  EleKnowledge chat archive - streams chatlogs DynamoDB changes to S3 for
+  long-term retention and Athena analysis. Reflects the resources created
+  out-of-band on 2026-07-21 (Step 2 of the soft-delete / analytics work).
+
+# ---------------------------------------------------------------------------
+# NOTE: The live resources were first created via the AWS API on 2026-07-21.
+# To manage them with this template you must reconcile first, e.g. either:
+#   (a) delete the API-created resources, then `sam deploy` this template, or
+#   (b) CloudFormation resource import.
+# Deploying as-is into a fresh account/stack just works.
+# ---------------------------------------------------------------------------
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+  ProjectName:
+    Type: String
+    Default: EleKnowledge
+  ChatLogsStreamArn:
+    Type: String
+    Description: LatestStreamArn of the chatlogs table (NEW_AND_OLD_IMAGES)
+    Default: arn:aws:dynamodb:ap-northeast-1:730972069979:table/chatlogs-dev/stream/2026-07-01T09:17:54.718
+
+Resources:
+
+  ArchiveBucket:
+    Type: AWS::S3::Bucket
+    # PublicAccessBlock is enforced org-wide by SCP; do not set it here.
+    Properties:
+      BucketName: !Sub eleknowledge-chat-archive-${Environment}-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: transition-cold
+            Status: Enabled
+            Prefix: chatlogs/
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 60
+              - StorageClass: GLACIER
+                TransitionInDays: 180
+
+  ArchiveFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub eleknowledge-chat-archive-${Environment}-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ArchiveAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: StreamRead
+                Effect: Allow
+                Action:
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:DescribeStream
+                  - dynamodb:ListStreams
+                Resource: !Ref ChatLogsStreamArn
+              - Sid: S3Write
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub arn:aws:s3:::${ArchiveBucket}/*
+
+  ArchiveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub eleknowledge-chat-archive-${Environment}
+      Runtime: python3.13
+      Handler: app.handler
+      CodeUri: ../../lambda/chat-archive/
+      Timeout: 60
+      MemorySize: 256
+      Role: !GetAtt ArchiveFunctionRole.Arn
+      Environment:
+        Variables:
+          ARCHIVE_BUCKET: !Ref ArchiveBucket
+          ARCHIVE_PREFIX: chatlogs
+      Events:
+        ChatLogsStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !Ref ChatLogsStreamArn
+            StartingPosition: LATEST
+            BatchSize: 100
+            MaximumBatchingWindowInSeconds: 30
+            MaximumRetryAttempts: 3
+
+  AthenaResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub eleknowledge-athena-results-${Environment}-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-query-results
+            Status: Enabled
+            ExpirationInDays: 30
+
+  AnalyticsWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub eleknowledge-analytics-${Environment}
+      Description: EleKnowledge chat analytics workgroup
+      State: ENABLED
+      WorkGroupConfiguration:
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: true
+        ResultConfiguration:
+          OutputLocation: !Sub s3://${AthenaResultsBucket}/query-results/
+          EncryptionConfiguration:
+            EncryptionOption: SSE_S3
+
+  AnalyticsDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: eleknowledge_analytics
+        Description: EleKnowledge chat analytics
+
+  ChatLogsArchiveTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref AnalyticsDatabase
+      TableInput:
+        Name: chatlogs_archive
+        TableType: EXTERNAL_TABLE
+        PartitionKeys:
+          - { Name: dt, Type: string }
+        Parameters:
+          classification: json
+          projection.enabled: 'true'
+          projection.dt.type: date
+          projection.dt.range: 2026-07-01,NOW
+          projection.dt.format: yyyy-MM-dd
+          projection.dt.interval: '1'
+          projection.dt.interval.unit: DAYS
+          storage.location.template: !Sub s3://${ArchiveBucket}/chatlogs/dt=${!dt}/
+        StorageDescriptor:
+          Location: !Sub s3://${ArchiveBucket}/chatlogs/
+          InputFormat: org.apache.hadoop.mapred.TextInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.openx.data.jsonserde.JsonSerDe
+            Parameters:
+              case.insensitive: 'true'
+              ignore.malformed.json: 'true'
+          Columns:
+            - { Name: eventname, Type: string }
+            - { Name: eventid, Type: string }
+            - { Name: approximatecreationdatetime, Type: double }
+            - { Name: keys, Type: 'struct<sessionid:string,messageid:string>' }
+            - { Name: newimage, Type: 'struct<sessionid:string,messageid:string,userid:string,timestamp:string,content:string,role:string,deleted:boolean,deletedat:string,ttl:bigint,feedback:string>' }
+            - { Name: oldimage, Type: 'struct<sessionid:string,messageid:string,userid:string,timestamp:string,content:string,role:string,deleted:boolean,deletedat:string,ttl:bigint,feedback:string>' }
+            - { Name: useridentity, Type: 'struct<principalid:string,type:string>' }
+
+Outputs:
+  ArchiveBucketName:
+    Value: !Ref ArchiveBucket
+  AthenaTable:
+    Value: !Sub ${AnalyticsDatabase}.chatlogs_archive
+  AthenaWorkGroup:
+    Value: !Ref AnalyticsWorkGroup
+  AthenaResultsBucket:
+    Value: !Ref AthenaResultsBucket

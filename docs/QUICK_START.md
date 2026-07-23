@@ -1,3 +1,8 @@
+> [!WARNING]
+> Legacy quick start. Do not use this document for the new AWS account migration to `ap-northeast-1`.
+> Use [AWS Migration Runbook](aws-migration-runbook.md) instead.
+> This file may still contain old `us-east-1`, `development`, and `EleKnowledge-AI-*` assumptions.
+
 # 🚀 クイックスタートガイド
 
 ## AWS CLI & SAM CLI インストール（Windows）
@@ -243,7 +248,7 @@ aws configure list --profile eleknowledge-dev
 詳細は以下のドキュメントを参照：
 - `docs/aws-cli-setup.md` - 詳細なセットアップガイド
 - `docs/deployment-guide.md` - デプロイ手順
-- `roadmap.md` - 開発ロードマップ
+- `spec.md` - システム仕様書（進捗・ロードマップを含む）
 
 ---
 

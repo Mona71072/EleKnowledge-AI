@@ -1,5 +1,5 @@
 """
-EleKnowledge-AI PDF Splitter Lambda
+EleKnowledge PDF Splitter Lambda
 Automatically split large PDFs (>45MB) into smaller chunks
 Triggered by S3 upload events
 """

@@ -1,0 +1,12 @@
+{
+  "httpMethod": "GET",
+  "path": "/history",
+  "queryStringParameters": {
+    "sessionId": "5ed6e306-c2dd-49fd-81c5-7ff056dca257"
+  },
+  "requestContext": {
+    "authorizer": {
+      "userId": "test-user-sub-001"
+    }
+  }
+}

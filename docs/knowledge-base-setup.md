@@ -1,3 +1,8 @@
+> [!WARNING]
+> Legacy Knowledge Base setup guide. Do not use this document for the new AWS account migration to `ap-northeast-1`.
+> Use [AWS Migration Runbook](aws-migration-runbook.md), especially the Bedrock configuration section, instead.
+> This file may still contain old bucket names, SSM paths, and `us-east-1` commands.
+
 # 📚 Knowledge Base セットアップガイド
 
 ## 概要

@@ -1,0 +1,10 @@
+{
+  "httpMethod": "GET",
+  "path": "/history",
+  "queryStringParameters": null,
+  "requestContext": {
+    "authorizer": {
+      "userId": "test-user-sub-001"
+    }
+  }
+}

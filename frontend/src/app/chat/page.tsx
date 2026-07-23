@@ -6,7 +6,9 @@ import Link from 'next/link';
 import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
+import { Chip, SegmentedControl } from '@/components/ui';
 
 interface Message {
   id: string;
@@ -18,9 +20,9 @@ interface Message {
     documentName: string;
     title?: string;  // メタデータタイトル（オプション）
     sourceUri: string;
-    documentType: string;
-    product: string;
-    model: string;
+    category: string;    // Knowledge Base の実メタデータ category（例: C資料 / 据付場用図）
+    modelType: string;   // 同 model_type（カンマ連結の多値文字列）
+    hasImage?: boolean;  // 該当チャンクが図面などの画像だった場合 true
     relevance: number;
   }>;
   feedback?: 'good' | 'bad' | null;
@@ -39,6 +41,7 @@ export default function ChatPage() {
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSession, setCurrentSession] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -50,45 +53,38 @@ export default function ChatPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showFilters, setShowFilters] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showAllCitations, setShowAllCitations] = useState<Record<string, boolean>>({});
-  const [selectedFilters, setSelectedFilters] = useState({
-    documentType: '',
-    product: '',
-    model: ''
-  });
+  const [mode, setMode] = useState<'normal' | 'spec'>('normal');
+  // 資料カテゴリは複数選択 (バックエンド build_kb_filter が in 句に対応)。値は CATEGORY_MAP の安定キー。
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  // 機種は model_type の stringContains 単一値のため単一選択。
+  const [selectedModel, setSelectedModel] = useState('');
 
-  const documentTypeOptions = [
-    '',
-    'C資料',
-    'D資料',
-    'S資料',
-    'EAマニュアル',
-    '業務マニュアル',
-    '据付ノート',
-    '据付基準',
-    'イエローブック'
+  // value は Knowledge Base の実 category 値に対応する安定キー (バックエンドの CATEGORY_MAP と対)。
+  // 表示用の日本語はこの層だけに置き、資料フォルダ名が変わっても API 契約が壊れないようにする。
+  const categoryOptions = [
+    { value: '', label: 'すべての資料' },
+    { value: 'drawing', label: '据付図面' },
+    { value: 'spec', label: '仕様資料' },
+    { value: 'tech_info', label: '技術情報' },
+    { value: 'incident', label: '災害・ヒヤリハット事例' },
+    { value: 'qsheet', label: '品質チェックシート' },
+    { value: 'std', label: '据付基準' },
+    { value: 'note', label: '据付ノート' }
   ];
 
-  const productOptions = [
-    '',
-    'エレベーター'
-  ];
-
-  const modelOptions = [
-    '',
-    'KE-LG',
-    'KM-LD',
-    'CM-MA',
-    'CM-LB',
-    'ME-CM',
-    'ME-CH',
-    'KE-PF',
-    'KE-RF',
-    'KE-SA',
-    'KE-HF',
-    'KM-SA'
+  // model_type はカンマ連結の多値文字列を部分一致で絞り込むため、
+  // 'AXIEZ' は 'AXIEZ-LINKs' 等にも一致する (上位集合になる)。ラベルで明示している。
+  const modelTypeOptions = [
+    { value: '', label: 'すべての機種' },
+    { value: 'AXIEZ', label: 'AXIEZ 系（AXIEZ-LINKs を含む）' },
+    { value: 'AXIEZ-LINKs', label: 'AXIEZ-LINKs' },
+    { value: 'NEXCUBE', label: 'NEXCUBE' },
+    { value: 'NEXIEZ-MRL', label: 'NEXIEZ-MRL' },
+    { value: 'メルワイド', label: 'メルワイド' },
+    { value: 'メルシティ', label: 'メルシティ' },
+    { value: 'ELENESSA', label: 'ELENESSA' }
   ];
 
   const API_URL = process.env.NEXT_PUBLIC_RAG_API_URL || '';
@@ -131,7 +127,76 @@ export default function ChatPage() {
     a: ({ href, children }: any) => <a href={href} className="text-blue-600 hover:text-blue-700 underline" target="_blank" rel="noopener noreferrer">{children}</a>,
     strong: ({ children }: any) => <strong className="font-semibold">{children}</strong>,
     em: ({ children }: any) => <em className="italic">{children}</em>,
+    // テーブル関連コンポーネント（グラフ・図表を綺麗に表示）
+    table: ({ children }: any) => (
+      <div className="overflow-x-auto my-6 rounded-xl border border-gray-200 shadow-lg bg-white">
+        <table className="min-w-full border-collapse">
+          {children}
+        </table>
+      </div>
+    ),
+    thead: ({ children }: any) => (
+      <thead className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200">{children}</thead>
+    ),
+    tbody: ({ children }: any) => (
+      <tbody className="bg-white [&>tr:nth-child(even)]:bg-gray-50">{children}</tbody>
+    ),
+    tr: ({ children }: any) => (
+      <tr className="hover:bg-blue-100 hover:shadow-sm transition-all duration-150 border-b border-gray-200 last:border-b-0">{children}</tr>
+    ),
+    th: ({ children }: any) => (
+      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-800 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50 border-r border-blue-200 last:border-r-0 whitespace-nowrap">{children}</th>
+    ),
+    td: ({ children }: any) => (
+      <td className="px-6 py-4 text-sm text-gray-700 border-r border-gray-200 last:border-r-0 align-top leading-relaxed">{children}</td>
+    ),
+    // 画像コンポーネント
+    img: ({ src, alt, ...props }: any) => (
+      <img 
+        src={src} 
+        alt={alt || ''} 
+        className="max-w-full h-auto rounded-lg shadow-md my-4 border border-gray-200" 
+        {...props} 
+      />
+    ),
   };
+
+// Markdownテーブルの崩れを自動補正するユーティリティ
+const normalizeTableMarkdown = (text: string): string => {
+  if (!text) return text;
+
+  let normalized = text;
+
+  // パターン1: ヘッダー行と区切り行が同一行にある場合
+  // 例: | A | B | C | |---|---| -> | A | B | C |\n|---|---|---|
+  normalized = normalized.replace(
+    /(\|(?:[^\n|]+\|)+)\s*\|\s*(-{2,}[^|]*\|(?:\s*-{2,}[^|]*\|)*)/g,
+    (_match, header) => {
+      const cols = header.split("|").filter((c: string) => c.trim()).length;
+      const separator = Array(cols).fill("---").join(" | ");
+      return `${header.trim()}\n| ${separator} |`;
+    }
+  );
+
+  // パターン2: 区切り行とデータ行が同一行にある場合
+  // 例: |---|---| | データ1 | 値1 | 値2 | -> |---|---|\n| データ1 | 値1 | 値2 |
+  normalized = normalized.replace(
+    /(\|\s*-{2,}[^|]*\|(?:\s*-{2,}[^|]*\|)*)\s+(\|(?:[^\n|]+\|)+)/g,
+    (_match, sep, dataRow) => `${sep.trim()}\n${dataRow.trim()}`
+  );
+
+  // パターン3: データ行が同一行に詰まっている場合
+  // 例: | A | B | C | | D | E | F | -> | A | B | C |\n| D | E | F |
+  normalized = normalized.replace(
+    /(\|(?:[^\n|]+\|)+)\s+(?=\|(?:[^\n|]+\|)+)/g,
+    (_match, row) => `${row.trim()}\n`
+  );
+
+  // 余分な連続改行を整理
+  normalized = normalized.replace(/\n{3,}/g, "\n\n");
+
+  return normalized;
+};
 
   // 認可トークン取得関数
   const getAuthToken = async (): Promise<string | null> => {
@@ -328,20 +393,31 @@ export default function ChatPage() {
     // ローカル UI 更新
     setMessages([...messages, userMessage]);
     setInput('');
+    // textareaの高さをリセット
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = '42px';
+    }
     setLoading(true);
     setError('');
 
     try {
       const token = await getAuthToken();
+      // 仕様確認モード(spec)での資料カテゴリ限定はサーバー側 (SPEC_CATEGORIES) の責務。
+      // ここで category を送っても無視されるため、機種のみを渡す。
+      const effectiveFilters = mode === 'spec'
+        ? { modelType: selectedModel || undefined }
+        : {
+            category: selectedCategories.length > 0 ? selectedCategories : undefined,
+            modelType: selectedModel || undefined
+          };
+
       const payload = {
         sessionId: currentSession,
         userId: userId,
         query: input,
-        filters: {
-          documentType: selectedFilters.documentType || undefined,
-          product: selectedFilters.product || undefined,
-          model: selectedFilters.model || undefined
-        }
+        mode,
+        filters: effectiveFilters
       };
       
       console.log('Sending RAG query:', {
@@ -472,7 +548,7 @@ export default function ChatPage() {
               </svg>
             </div>
             <div>
-              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">EleKnowledge-AI</h1>
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">EleKnowledge</h1>
               <span className="hidden sm:inline-block text-[10px] text-gray-500 mt-0 leading-tight">RAGチャット</span>
             </div>
           </div>
@@ -533,14 +609,7 @@ export default function ChatPage() {
           </div>
 
           {/* Session List */}
-          <div 
-            className="flex-1 overflow-y-auto min-h-0 max-h-full scroll-smooth" 
-            style={{ 
-              maxHeight: showFilters 
-                ? 'calc(100vh - 310px)' 
-                : 'calc(100vh - 180px)' 
-            }}
-          >
+          <div className="flex-1 overflow-y-auto min-h-0 max-h-full scroll-smooth">
             {isLoadingSessions ? (
               <div className="p-4 text-center text-gray-500">
                 読み込み中...
@@ -596,93 +665,6 @@ export default function ChatPage() {
             )}
           </div>
 
-          {/* Filters Section - Fixed at bottom with accordion */}
-          <div className="border-t border-gray-200 bg-gradient-to-b from-gray-50 to-white flex-shrink-0 shadow-inner mt-auto">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="w-full flex items-center justify-between text-sm font-semibold text-gray-700 p-2.5"
-              aria-expanded={showFilters}
-            >
-              <span className="flex items-center gap-1.5">
-                <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                </svg>
-                フィルター
-              </span>
-              <svg className={`w-4 h-4 text-gray-500 transition-transform ${showFilters ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {showFilters && (
-              <div className="px-2.5 pb-2.5 space-y-2">
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">資料タイプ</label>
-                  <select
-                    value={selectedFilters.documentType}
-                    onChange={(e) => setSelectedFilters({
-                      ...selectedFilters,
-                      documentType: e.target.value
-                    })}
-                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-gray-400 text-gray-900"
-                  >
-                    {documentTypeOptions.map((opt) => (
-                      <option key={opt || 'all'} value={opt}>
-                        {opt || '指定しない'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex gap-2">
-                  <div className="w-1/2">
-                    <label className="block text-xs text-gray-600 mb-1">製品</label>
-                    <select
-                      value={selectedFilters.product}
-                      onChange={(e) => setSelectedFilters({
-                        ...selectedFilters,
-                        product: e.target.value
-                      })}
-                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-gray-400 text-gray-900"
-                    >
-                      {productOptions.map((opt) => (
-                        <option key={opt || 'all'} value={opt}>
-                          {opt || '指定しない'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="w-1/2">
-                    <label className="block text-xs text-gray-600 mb-1">モデル</label>
-                    <select
-                      value={selectedFilters.model}
-                      onChange={(e) => setSelectedFilters({
-                        ...selectedFilters,
-                        model: e.target.value
-                      })}
-                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-gray-400 text-gray-900"
-                    >
-                      {modelOptions.map((opt) => (
-                        <option key={opt || 'all'} value={opt}>
-                          {opt || '指定しない'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                {(selectedFilters.documentType || selectedFilters.product || selectedFilters.model) && (
-                  <button
-                    onClick={() => setSelectedFilters({ documentType: '', product: '', model: '' })}
-                    className="w-full mt-1 px-3 py-1.5 text-xs text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-100 transition-all hover:shadow-sm flex items-center justify-center gap-1"
-                  >
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                    フィルターをクリア
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Main Chat Area */}
@@ -704,7 +686,7 @@ export default function ChatPage() {
                     </div>
                   </div>
                   <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 whitespace-nowrap leading-tight" style={{ writingMode: 'horizontal-tb', textOrientation: 'mixed' }}>
-                    EleKnowledge-AIへようこそ！
+                    EleKnowledgeへようこそ！
                   </h2>
                   <p className="text-gray-600 text-base sm:text-lg mb-6 break-words whitespace-normal leading-relaxed" style={{ writingMode: 'horizontal-tb', textOrientation: 'mixed' }}>
                     技術資料を検索して質問にお答えします
@@ -759,14 +741,14 @@ export default function ChatPage() {
                           <div className="chat-markdown text-gray-800 text-[13px] sm:text-[14px]">
                             {streamingMessageId === message.id ? (
                               <>
-                                <ReactMarkdown components={markdownComponents}>
-                                  {streamingMessages[message.id] || ''}
+                                <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+                                  {normalizeTableMarkdown(streamingMessages[message.id] || '')}
                                 </ReactMarkdown>
                                 <span className="inline-block w-2 h-5 bg-blue-500 ml-1 animate-pulse" />
                               </>
                             ) : (
-                              <ReactMarkdown components={markdownComponents}>
-                                {streamingMessages[message.id] || message.content}
+                              <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+                                {normalizeTableMarkdown(streamingMessages[message.id] || message.content)}
                               </ReactMarkdown>
                             )}
                           </div>
@@ -962,26 +944,111 @@ export default function ChatPage() {
           {/* Input Area - Fixed at bottom */}
           <div className="border-t border-gray-200 bg-white/95 backdrop-blur-sm sticky bottom-0 z-10 flex-shrink-0 shadow-lg">
             <div className="p-3 sm:p-4">
+              {/* Filter bar - always visible above the input for discoverability */}
+              <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-gray-500">モード</span>
+                  <SegmentedControl
+                    aria-label="検索モード"
+                    value={mode}
+                    onChange={(v) => setMode(v as 'normal' | 'spec')}
+                    options={[
+                      { value: 'normal', label: '通常' },
+                      { value: 'spec', label: '仕様確認' },
+                    ]}
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="flex-shrink-0 text-xs font-medium text-gray-500">資料</span>
+                  {mode === 'spec' ? (
+                    <span className="inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs text-purple-700">
+                      仕様資料・技術情報に自動限定
+                    </span>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {categoryOptions.filter((opt) => opt.value).map((opt) => (
+                        <Chip
+                          key={opt.value}
+                          active={selectedCategories.includes(opt.value)}
+                          onClick={() =>
+                            setSelectedCategories((prev) =>
+                              prev.includes(opt.value)
+                                ? prev.filter((v) => v !== opt.value)
+                                : [...prev, opt.value]
+                            )
+                          }
+                        >
+                          {opt.label}
+                        </Chip>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-gray-500">機種</span>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-900 transition-colors hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {modelTypeOptions.map((opt) => (
+                      <option key={opt.value || 'all'} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {(selectedCategories.length > 0 || selectedModel || mode === 'spec') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategories([]);
+                      setSelectedModel('');
+                      setMode('normal');
+                    }}
+                    className="inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700"
+                  >
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    クリア
+                  </button>
+                )}
+              </div>
               <div className="flex gap-2 sm:gap-3 items-end">
                 <div className="flex-1 relative">
-                  <input
-                    type="text"
+                  <textarea
+                    ref={textareaRef}
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyPress={(e) => {
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      // 高さを自動調整
+                      const target = e.target as HTMLTextAreaElement;
+                      target.style.height = 'auto';
+                      target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
+                    }}
+                    onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         handleSendMessage();
                       }
                     }}
-                    placeholder="質問を入力してください... (Enterで送信)"
+                    placeholder="質問を入力してください... (Shift+Enterで改行、Enterで送信)"
                     disabled={loading}
-                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 text-sm transition-all placeholder:text-gray-500 placeholder:opacity-100 shadow-sm hover:border-gray-400 bg-white text-gray-900"
+                    rows={1}
+                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 text-sm transition-all placeholder:text-gray-500 placeholder:opacity-100 shadow-sm hover:border-gray-400 bg-white text-gray-900 resize-none min-h-[42px] max-h-[200px] overflow-y-auto"
+                    style={{
+                      height: 'auto',
+                      minHeight: '42px',
+                    }}
                   />
                   {input.trim() && (
                     <button
                       onClick={() => setInput('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600 transition-colors"
                       aria-label="入力をクリア"
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1013,35 +1080,6 @@ export default function ChatPage() {
                   )}
                 </button>
               </div>
-              {(selectedFilters.documentType || selectedFilters.product || selectedFilters.model) && (
-                <div className="mt-2 flex flex-wrap gap-2 items-center animate-fade-in">
-                  <span className="text-xs text-gray-500 font-medium">適用中のフィルター:</span>
-                  {selectedFilters.documentType && (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 rounded-full border border-blue-200 shadow-sm">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      資料タイプ: {selectedFilters.documentType}
-                    </span>
-                  )}
-                  {selectedFilters.product && (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 rounded-full border border-blue-200 shadow-sm">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                      </svg>
-                      製品: {selectedFilters.product}
-                    </span>
-                  )}
-                  {selectedFilters.model && (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 rounded-full border border-blue-200 shadow-sm">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                      </svg>
-                      モデル: {selectedFilters.model}
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
           </div>
         </div>

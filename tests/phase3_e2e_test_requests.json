@@ -1,0 +1,13 @@
+{
+  "test_cases": [
+    {
+      "name": "正常系テスト",
+      "request": {
+        "constructionNumber": "12345678",
+        "troubleDescription": "システムが起動しない場合の原因調査",
+        "model": "XXXXXX",
+        "errorCode": "E34"
+      }
+    }
+  ]
+}

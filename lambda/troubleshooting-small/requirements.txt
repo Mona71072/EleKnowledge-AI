@@ -1,0 +1,8 @@
+boto3
+boto3
+
+# 開発用ツール
+pytest
+pytest-mock
+
+# セキュリティスキャン

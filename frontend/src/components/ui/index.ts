@@ -7,3 +7,5 @@ export { ErrorMessage, type ErrorMessageProps } from './ErrorMessage';
 export { PasswordStrength, type PasswordStrengthProps } from './PasswordStrength';
 export { VerificationCodeInput, type VerificationCodeInputProps } from './VerificationCodeInput';
 export { StepIndicator, type StepIndicatorProps } from './StepIndicator';
+export { Chip, type ChipProps } from './Chip';
+export { SegmentedControl, type SegmentedControlProps, type SegmentedOption } from './SegmentedControl';

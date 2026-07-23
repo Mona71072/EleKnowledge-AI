@@ -1,0 +1,36 @@
+[
+  {
+    "constructionNumber": "EIK54801",
+    "siteName": "テスト現場（品川ビル）",
+    "address": "東京都品川区大崎1-1-1",
+    "installedEquipment": [
+      {
+        "model": "KE-LG",
+        "controlSystem": "VFGLF",
+        "installationDate": "2024-01-15",
+        "lastMaintenanceDate": "2026-01-20"
+      }
+    ],
+    "contactPerson": {
+      "name": "山田太郎",
+      "phone": "090-0000-0000"
+    }
+  },
+  {
+    "constructionNumber": "SITE0001",
+    "siteName": "テスト現場（新宿タワー）",
+    "address": "東京都新宿区西新宿2-8-1",
+    "installedEquipment": [
+      {
+        "model": "CM-MA",
+        "controlSystem": "VFGH",
+        "installationDate": "2023-06-01",
+        "lastMaintenanceDate": "2025-12-10"
+      }
+    ],
+    "contactPerson": {
+      "name": "鈴木花子",
+      "phone": "090-1111-1111"
+    }
+  }
+]

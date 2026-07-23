@@ -1,0 +1,14 @@
+{
+  "body": "{\"constructionNumber\": \"EIK54801\", \"troubleDescription\": \"昇降機が途中で停止してしまい復旧できない状態です\", \"model\": \"KE-LG\", \"errorCode\": \"E34\"}",
+  "headers": {
+    "Authorization": "Bearer dummy-token-for-local-test",
+    "Content-Type": "application/json"
+  },
+  "httpMethod": "POST",
+  "path": "/analyze",
+  "requestContext": {
+    "authorizer": {
+      "userId": "test-user-sub-001"
+    }
+  }
+}

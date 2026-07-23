@@ -1,3 +1,8 @@
+> [!WARNING]
+> Legacy deployment guide. Do not use this document for the new AWS account migration to `ap-northeast-1`.
+> Use [AWS Migration Runbook](aws-migration-runbook.md) and [AWS Resource Map](aws-resource-map.md) instead.
+> This file may still contain old `us-east-1`, `development`, and `EleKnowledge-AI-*` resource names.
+
 # 🚀 EleKnowledge-AI デプロイ手順書
 
 ## 目次

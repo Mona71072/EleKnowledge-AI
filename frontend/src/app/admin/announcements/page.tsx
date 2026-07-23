@@ -1,0 +1,431 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  Announcement,
+  AnnouncementInput,
+  AnnouncementType,
+  Severity,
+  AnnouncementStatus,
+  TYPE_META,
+  listAllAnnouncements,
+  createAnnouncement,
+  updateAnnouncement,
+  deleteAnnouncement,
+  absoluteTime,
+} from '@/lib/announcements';
+import { Button } from '@/components/ui/Button';
+import { Loading } from '@/components/ui/Loading';
+
+const STATUS_BADGE: Record<AnnouncementStatus, { label: string; className: string; dot: string }> = {
+  published: { label: '公開', className: 'text-green-700 bg-green-50 border-green-200', dot: '🟢' },
+  scheduled: { label: '予約', className: 'text-amber-800 bg-amber-50 border-amber-300', dot: '🟡' },
+  draft: { label: '下書き', className: 'text-gray-600 bg-gray-50 border-gray-200', dot: '⚪' },
+};
+
+const TITLE_MAX = 120;
+
+const emptyForm: AnnouncementInput = {
+  type: 'notice',
+  title: '',
+  body: '',
+  severity: 'info',
+  status: 'draft',
+  pinned: false,
+};
+
+// datetime-local <-> ISO helpers
+function toLocalInput(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const off = d.getTimezoneOffset();
+  return new Date(d.getTime() - off * 60000).toISOString().slice(0, 16);
+}
+function fromLocalInput(v: string): string | undefined {
+  return v ? new Date(v).toISOString() : undefined;
+}
+
+export default function AdminAnnouncementsPage() {
+  const [list, setList] = useState<Announcement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<AnnouncementInput>(emptyForm);
+  const [publishMode, setPublishMode] = useState<'now' | 'schedule'>('now');
+  const [scheduleAt, setScheduleAt] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<Announcement | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'all' | AnnouncementStatus>('all');
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await listAllAnnouncements();
+      setList(res.announcements);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const resetForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+    setPublishMode('now');
+    setScheduleAt('');
+  };
+
+  const startEdit = (a: Announcement) => {
+    setEditingId(a.announcementId);
+    setForm({
+      type: a.type,
+      title: a.title,
+      body: a.body,
+      severity: a.severity,
+      status: a.status,
+      pinned: a.pinned,
+      startAt: a.startAt,
+      endAt: a.endAt,
+      publishAt: a.publishAt,
+    });
+    if (a.status === 'scheduled' && a.publishAt) {
+      setPublishMode('schedule');
+      setScheduleAt(toLocalInput(a.publishAt));
+    } else {
+      setPublishMode('now');
+      setScheduleAt('');
+    }
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  };
+
+  const submit = async (status: AnnouncementStatus) => {
+    if (!form.title.trim()) {
+      setError('タイトルを入力してください');
+      return;
+    }
+    if (form.type === 'maintenance' && (!form.startAt || !form.endAt)) {
+      setError('メンテナンスは開始・終了日時が必要です');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const payload: AnnouncementInput = { ...form, status };
+      if (status === 'published' && publishMode === 'schedule' && scheduleAt) {
+        payload.publishAt = fromLocalInput(scheduleAt);
+        payload.status = 'scheduled';
+      } else if (status === 'published') {
+        payload.publishAt = new Date().toISOString();
+      }
+      if (editingId) {
+        await updateAnnouncement(editingId, payload);
+      } else {
+        await createAnnouncement(payload);
+      }
+      resetForm();
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const doDelete = async () => {
+    if (!confirmDelete) return;
+    try {
+      await deleteAnnouncement(confirmDelete.announcementId);
+      setConfirmDelete(null);
+      if (editingId === confirmDelete.announcementId) resetForm();
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const filtered = list.filter((a) => statusFilter === 'all' || a.status === statusFilter);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl font-bold text-gray-900">お知らせ管理</h2>
+        <div className="flex items-center gap-3">
+          <label className="text-sm text-gray-600">
+            状態:
+            <select
+              className="ml-2 border border-gray-300 rounded px-2 py-1 text-sm"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            >
+              <option value="all">すべて</option>
+              <option value="published">公開</option>
+              <option value="scheduled">予約</option>
+              <option value="draft">下書き</option>
+            </select>
+          </label>
+          <Button variant="primary" size="sm" onClick={resetForm}>
+            + 新規作成
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 rounded border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+
+      {/* List */}
+      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden mb-10">
+        {loading ? (
+          <div className="p-8 flex justify-center">
+            <Loading text="読み込み中..." />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-8 text-center text-sm text-gray-500">お知らせがありません。</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-500 text-xs">
+              <tr>
+                <th className="text-left font-medium px-4 py-2">状態</th>
+                <th className="text-left font-medium px-4 py-2">種別</th>
+                <th className="text-left font-medium px-4 py-2">タイトル</th>
+                <th className="text-left font-medium px-4 py-2">公開日時</th>
+                <th className="text-right font-medium px-4 py-2">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filtered.map((a) => {
+                const badge = STATUS_BADGE[a.status];
+                return (
+                  <tr key={a.announcementId} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs border ${badge.className}`}>
+                        <span aria-hidden>{badge.dot}</span> {badge.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {TYPE_META[a.type].icon} {TYPE_META[a.type].label}
+                    </td>
+                    <td className="px-4 py-2 max-w-xs truncate">
+                      {a.pinned && '📌 '}
+                      {a.title}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-gray-500 text-xs">
+                      {a.status === 'draft' ? '—' : absoluteTime(a.publishAt)}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-right">
+                      <button
+                        className="text-blue-600 hover:text-blue-800 px-2"
+                        onClick={() => startEdit(a)}
+                        aria-label="編集"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        className="text-red-600 hover:text-red-800 px-2"
+                        onClick={() => setConfirmDelete(a)}
+                        aria-label="削除"
+                      >
+                        🗑
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Form */}
+      <div className="rounded-lg border border-gray-200 bg-white p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+          {editingId ? 'お知らせを編集' : '新規作成'}
+        </h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          <label className="text-sm">
+            <span className="block text-gray-600 mb-1">種別</span>
+            <select
+              className="w-full border border-gray-300 rounded px-2 py-1.5"
+              value={form.type}
+              onChange={(e) => setForm({ ...form, type: e.target.value as AnnouncementType })}
+            >
+              <option value="notice">お知らせ</option>
+              <option value="update">アップデート</option>
+              <option value="maintenance">メンテナンス</option>
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="block text-gray-600 mb-1">重要度</span>
+            <select
+              className="w-full border border-gray-300 rounded px-2 py-1.5"
+              value={form.severity}
+              onChange={(e) => setForm({ ...form, severity: e.target.value as Severity })}
+            >
+              <option value="info">情報 (info)</option>
+              <option value="warning">注意 (warning)</option>
+              <option value="critical">重要 (critical)</option>
+            </select>
+          </label>
+          <label className="text-sm flex items-end gap-2 pb-1.5">
+            <input
+              type="checkbox"
+              checked={!!form.pinned}
+              onChange={(e) => setForm({ ...form, pinned: e.target.checked })}
+            />
+            <span className="text-gray-700">上部に固定 (pinned)</span>
+          </label>
+        </div>
+
+        <label className="block text-sm mb-4">
+          <span className="flex justify-between text-gray-600 mb-1">
+            <span>タイトル</span>
+            <span className={form.title.length > TITLE_MAX ? 'text-red-600' : 'text-gray-400'}>
+              残り {TITLE_MAX - form.title.length}字
+            </span>
+          </span>
+          <input
+            className="w-full border border-gray-300 rounded px-3 py-2"
+            maxLength={TITLE_MAX}
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            placeholder="お知らせのタイトル"
+          />
+        </label>
+
+        {form.type === 'maintenance' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <label className="text-sm">
+              <span className="block text-gray-600 mb-1">メンテ開始</span>
+              <input
+                type="datetime-local"
+                className="w-full border border-gray-300 rounded px-2 py-1.5"
+                value={toLocalInput(form.startAt)}
+                onChange={(e) => setForm({ ...form, startAt: fromLocalInput(e.target.value) })}
+              />
+            </label>
+            <label className="text-sm">
+              <span className="block text-gray-600 mb-1">メンテ終了</span>
+              <input
+                type="datetime-local"
+                className="w-full border border-gray-300 rounded px-2 py-1.5"
+                value={toLocalInput(form.endAt)}
+                onChange={(e) => setForm({ ...form, endAt: fromLocalInput(e.target.value) })}
+              />
+            </label>
+          </div>
+        )}
+
+        {/* Body + live preview */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+          <label className="text-sm">
+            <span className="block text-gray-600 mb-1">本文 (Markdown)</span>
+            <textarea
+              className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm h-56 resize-y"
+              value={form.body}
+              onChange={(e) => setForm({ ...form, body: e.target.value })}
+              placeholder={'## 見出し\n- 箇条書き\n本文を Markdown で記述できます。'}
+            />
+          </label>
+          <div className="text-sm">
+            <span className="block text-gray-600 mb-1">プレビュー</span>
+            <div className="border border-gray-200 rounded px-3 py-2 h-56 overflow-y-auto bg-gray-50 prose prose-sm max-w-none">
+              {form.body ? (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{form.body}</ReactMarkdown>
+              ) : (
+                <span className="text-gray-400">プレビューがここに表示されます</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Publish timing */}
+        <div className="mb-6">
+          <span className="block text-sm text-gray-600 mb-1">公開タイミング</span>
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <label className="flex items-center gap-1.5">
+              <input
+                type="radio"
+                name="publishMode"
+                checked={publishMode === 'now'}
+                onChange={() => setPublishMode('now')}
+              />
+              即時公開
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="radio"
+                name="publishMode"
+                checked={publishMode === 'schedule'}
+                onChange={() => setPublishMode('schedule')}
+              />
+              予約公開
+            </label>
+            {publishMode === 'schedule' && (
+              <input
+                type="datetime-local"
+                className="border border-gray-300 rounded px-2 py-1"
+                value={scheduleAt}
+                onChange={(e) => setScheduleAt(e.target.value)}
+              />
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" onClick={() => submit('draft')} disabled={saving}>
+            下書き保存
+          </Button>
+          <Button variant="primary" onClick={() => submit('published')} disabled={saving}>
+            {publishMode === 'schedule' ? '予約する' : '公開する'}
+          </Button>
+          {editingId && (
+            <Button variant="ghost" onClick={resetForm} disabled={saving}>
+              キャンセル
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="削除の確認"
+          onClick={() => setConfirmDelete(null)}
+        >
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="relative w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-gray-900 mb-2">お知らせを削除しますか？</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              「{confirmDelete.title}」を削除します。この操作は取り消せません。
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
+                キャンセル
+              </Button>
+              <Button variant="danger" onClick={doDelete}>
+                削除する
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

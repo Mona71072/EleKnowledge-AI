@@ -1,0 +1,12 @@
+{
+  "actionGroup": "kb-search-3",
+  "function": "searchCMaterialDocs",
+  "parameters": [
+    {"name": "query", "value": "過電流エラー E34 対処"},
+    {"name": "model", "value": "KE-LG"},
+    {"name": "controlSystem", "value": "VFGLF"}
+  ],
+  "sessionAttributes": {
+    "session_id": "test-session-id-001"
+  }
+}

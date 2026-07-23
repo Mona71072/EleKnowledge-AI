@@ -1,5 +1,5 @@
 """
-EleKnowledge-AI Forgot Password Lambda Function
+EleKnowledge Forgot Password Lambda Function
 Cognito Forgot Password Request
 """
 import json

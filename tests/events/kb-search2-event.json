@@ -1,0 +1,11 @@
+{
+  "actionGroup": "kb-search-2",
+  "apiPath": "/troubleshoot-manual",
+  "httpMethod": "GET",
+  "actionInvocation": {
+    "parameters": [
+      {"name": "query", "value": "昇降機が途中で停止する"},
+      {"name": "errorCode", "value": "E34"}
+    ]
+  }
+}
