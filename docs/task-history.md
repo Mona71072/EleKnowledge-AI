@@ -11,6 +11,31 @@ related-code: lambda/rag/, frontend/src/app/
 
 ---
 
+## 2026-07-27 (2) 到達不能カテゴリ追加・検索モード廃止・PR/デプロイ
+
+| 項目 | 内容 |
+|---|---|
+| **Who** | YUKI ITAI / Claude Code |
+| **When** | 2026-07-27 |
+| **Where** | `frontend/src/app/chat/page.tsx` / `lambda/rag/rag-function/app.py`（CATEGORY_MAP） |
+
+**What**
+1. 資料カテゴリに `site_agent`=現場代理人業務マニュアル / `quality_mgmt`=品質管理業務マニュアル / `w_doc`=W資料 を追加（CATEGORY_MAP＋categoryOptions）。到達不能だった43件が絞り込み可能に。`TEST`(1件) はゴミデータのためUI非追加（データ側で除去予定）。
+2. 検索モード（通常/仕様確認）UIを廃止。`SegmentedControl`・`mode` state・`spec` 分岐を削除し、サーバーへは `mode=normal` 固定送信。資料カテゴリの複数選択で代替。
+
+**Why**
+モード選択は資料カテゴリの二重軸で混乱要因だったため撤去。到達不能カテゴリは KB 実測で判明した被覆漏れの是正。
+
+**How**
+フロント編集 → `tsc --noEmit` パス → `py_compile` パス → コミット `4166f4a`。branch `feature/rag-filter-labels-fix` を push、**PR #26**（base `develop`）作成。
+
+**リリース状況**
+- フロント：Amplify が `develop` ブランチ連動。**PR #26 を develop にマージした時点で自動ビルド・反映**される。
+- バックエンド（`rag-dev` Lambda, stack `EleKnowledge-dev-phase2`, acct `730972069979`, ap-northeast-1）：`lambda update-function-code` で**コード反映済**（2026-07-27, profile `datautl-bple-mebs`）。CodeSha256 `rBX4mlLxUG45msPO8DrKM6LvNs6xjASqD3XKUC93iOU=` → `zKryouXl9y2T6FWxzKnqQ+LkE9zdLLaI702cAgB/FJk=`、LastUpdateStatus=Successful。**CFnドリフト注意**：SAM管理関数へのコード直接更新のため次回 full `sam deploy` で整合を取ること。
+- **注意（要確認）**：ドキュメントは KB を `DF9XUCSPDM` と記載するが、稼働中の `rag-dev` は `KNOWLEDGE_BASE_ID=VQV81CNYU4` を参照（同一データソース S3 バケットを共有）。full `sam deploy` する場合は `KnowledgeBaseId=VQV81CNYU4` を渡さないと KB を付け替えてしまう（runbook の例 `DF9XUCSPDM` は古い）。
+
+---
+
 ## 2026-07-27 RAG 絞り込みの是正 と ホーム画面ステータス表記の修正
 
 | 項目 | 内容 |
