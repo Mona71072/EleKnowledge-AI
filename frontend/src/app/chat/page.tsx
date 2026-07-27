@@ -8,7 +8,7 @@ import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
-import { Chip, SegmentedControl } from '@/components/ui';
+import { Chip } from '@/components/ui';
 
 interface Message {
   id: string;
@@ -55,7 +55,6 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showAllCitations, setShowAllCitations] = useState<Record<string, boolean>>({});
-  const [mode, setMode] = useState<'normal' | 'spec'>('normal');
   // 資料カテゴリは複数選択 (バックエンド build_kb_filter が in 句に対応)。値は CATEGORY_MAP の安定キー。
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   // 機種は model_type の stringContains 単一値のため単一選択。
@@ -73,7 +72,10 @@ export default function ChatPage() {
     { value: 'incident', label: '災害事例集' },
     { value: 'qsheet', label: 'Qシート' },
     { value: 'std', label: '据付基準' },
-    { value: 'note', label: '据付ノート' }
+    { value: 'note', label: '据付ノート' },
+    { value: 'site_agent', label: '現場代理人業務マニュアル' },
+    { value: 'quality_mgmt', label: '品質管理業務マニュアル' },
+    { value: 'w_doc', label: 'W資料' }
   ];
 
   // model_type はカンマ連結の多値文字列を部分一致で絞り込むため、
@@ -405,20 +407,18 @@ const normalizeTableMarkdown = (text: string): string => {
 
     try {
       const token = await getAuthToken();
-      // 仕様確認モード(spec)での資料カテゴリ限定はサーバー側 (SPEC_CATEGORIES) の責務。
-      // ここで category を送っても無視されるため、機種のみを渡す。
-      const effectiveFilters = mode === 'spec'
-        ? { modelType: selectedModel || undefined }
-        : {
-            category: selectedCategories.length > 0 ? selectedCategories : undefined,
-            modelType: selectedModel || undefined
-          };
+      const effectiveFilters = {
+        category: selectedCategories.length > 0 ? selectedCategories : undefined,
+        modelType: selectedModel || undefined
+      };
 
       const payload = {
         sessionId: currentSession,
         userId: userId,
         query: input,
-        mode,
+        // モード選択UIは廃止。資料カテゴリを複数選択できるため spec モードは不要。
+        // サーバー互換のため normal を固定送信する。
+        mode: 'normal',
         filters: effectiveFilters
       };
       
@@ -948,44 +948,25 @@ const normalizeTableMarkdown = (text: string): string => {
             <div className="p-3 sm:p-4">
               {/* Filter bar - always visible above the input for discoverability */}
               <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium text-gray-500">モード</span>
-                  <SegmentedControl
-                    aria-label="検索モード"
-                    value={mode}
-                    onChange={(v) => setMode(v as 'normal' | 'spec')}
-                    options={[
-                      { value: 'normal', label: '通常' },
-                      { value: 'spec', label: '仕様確認' },
-                    ]}
-                  />
-                </div>
-
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className="flex-shrink-0 text-xs font-medium text-gray-500">資料</span>
-                  {mode === 'spec' ? (
-                    <span className="inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs text-purple-700">
-                      仕様資料・技術情報に自動限定
-                    </span>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {categoryOptions.filter((opt) => opt.value).map((opt) => (
-                        <Chip
-                          key={opt.value}
-                          active={selectedCategories.includes(opt.value)}
-                          onClick={() =>
-                            setSelectedCategories((prev) =>
-                              prev.includes(opt.value)
-                                ? prev.filter((v) => v !== opt.value)
-                                : [...prev, opt.value]
-                            )
-                          }
-                        >
-                          {opt.label}
-                        </Chip>
-                      ))}
-                    </div>
-                  )}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {categoryOptions.filter((opt) => opt.value).map((opt) => (
+                      <Chip
+                        key={opt.value}
+                        active={selectedCategories.includes(opt.value)}
+                        onClick={() =>
+                          setSelectedCategories((prev) =>
+                            prev.includes(opt.value)
+                              ? prev.filter((v) => v !== opt.value)
+                              : [...prev, opt.value]
+                          )
+                        }
+                      >
+                        {opt.label}
+                      </Chip>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-1.5">
@@ -1003,13 +984,12 @@ const normalizeTableMarkdown = (text: string): string => {
                   </select>
                 </div>
 
-                {(selectedCategories.length > 0 || selectedModel || mode === 'spec') && (
+                {(selectedCategories.length > 0 || selectedModel) && (
                   <button
                     type="button"
                     onClick={() => {
                       setSelectedCategories([]);
                       setSelectedModel('');
-                      setMode('normal');
                     }}
                     className="inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700"
                   >

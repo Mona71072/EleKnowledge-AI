@@ -61,6 +61,9 @@ CATEGORY_MAP = {
     'qsheet': 'Qシート',
     'std': '据付基準',
     'note': '据付ノート',
+    'site_agent': '現場代理人業務マニュアル',
+    'quality_mgmt': '品質管理業務マニュアル',
+    'w_doc': 'W資料',
 }
 
 # spec モードで参照する資料カテゴリ。
