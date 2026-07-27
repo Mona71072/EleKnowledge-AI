@@ -197,12 +197,22 @@ def build_kb_filter(filters: dict = None, categories: list = None) -> dict:
     elif len(cats) > 1:
         clauses.append({'in': {'key': 'category', 'value': cats}})
 
-    # model_type は "AXIEZ,NEXCUBE,メルワイド" のようなカンマ連結の多値文字列なので
+    # model_type は ["AXIEZ", "NEXCUBE"] のような多値 (配列/カンマ連結文字列) なので
     # equals では多値レコードに一致しない。stringContains が必須。
     # 副作用として 'AXIEZ' は 'AXIEZ-LINKs' にも一致する (上位集合になる)。
+    #
+    # さらに model_type が '*' / 'general' の文書は「全機種共通」を意味する (据付基準など)。
+    # 特定機種で stringContains だけを掛けると、これら共通文書 (KB 実測で約 819 件) が
+    # 一律で除外されてしまうため、選択機種に加えて '*' / 'general' も OR で常に含める。
     model_type = filters.get('modelType')
     if model_type:
-        clauses.append({'stringContains': {'key': 'model_type', 'value': model_type}})
+        clauses.append({
+            'orAll': [
+                {'stringContains': {'key': 'model_type', 'value': model_type}},
+                {'stringContains': {'key': 'model_type', 'value': '*'}},
+                {'stringContains': {'key': 'model_type', 'value': 'general'}},
+            ]
+        })
 
     if not clauses:
         return None

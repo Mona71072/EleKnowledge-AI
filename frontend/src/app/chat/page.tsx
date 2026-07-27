@@ -63,13 +63,15 @@ export default function ChatPage() {
 
   // value は Knowledge Base の実 category 値に対応する安定キー (バックエンドの CATEGORY_MAP と対)。
   // 表示用の日本語はこの層だけに置き、資料フォルダ名が変わっても API 契約が壊れないようにする。
+  // ラベルは KB の実 category 名に合わせる (テクニカルインフォメーションのみ通称 TI を使用)。
+  // value キー(安定キー)は変更しないため API 契約は不変。
   const categoryOptions = [
     { value: '', label: 'すべての資料' },
-    { value: 'drawing', label: '据付図面' },
-    { value: 'spec', label: '仕様資料' },
-    { value: 'tech_info', label: '技術情報' },
-    { value: 'incident', label: '災害・ヒヤリハット事例' },
-    { value: 'qsheet', label: '品質チェックシート' },
+    { value: 'drawing', label: '据付場用図' },
+    { value: 'spec', label: 'C資料' },
+    { value: 'tech_info', label: 'TI' },
+    { value: 'incident', label: '災害事例集' },
+    { value: 'qsheet', label: 'Qシート' },
     { value: 'std', label: '据付基準' },
     { value: 'note', label: '据付ノート' }
   ];
