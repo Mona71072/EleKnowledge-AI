@@ -43,6 +43,7 @@
 | A-3 | Read: `scheduled` かつ期限到来分もフィードに含める | `lambda/announcements/read/app.py` |
 | A-4 | Publisher Lambda（rate 5 min）で `scheduled` → `published` 昇格 | `lambda/announcements/publisher/app.py` + テンプレ |
 | A-5 | 未来日時の `relativeTime` が「たった今」になる不具合を修正 | `frontend/src/lib/announcements.ts` |
+| A-6 | 時刻をサーバ側で UTC `YYYY-MM-DDTHH:MM:SS.sssZ` に正規化（JS/Python/オフセット混在による文字列比較ずれを防止） | `lambda/announcements/*/timeutil.py` + write/read/publisher |
 
 ---
 
@@ -123,3 +124,4 @@ aws cloudformation describe-stack-events \
 - phase1/2/3・他スタックは今回の対象外。
 - changeset で **ResourcePolicy 差し替え**・**publisher 新規**・**`DataTraceEnabled: false`** を目視確認すること（`true` に戻っていないか）。
 - CORS の OPTIONS 全開放は preflight 専用。GET/POST 等のデータ API は引き続き IP + Cognito。
+- 既存行の `publishAt` は、管理画面で再保存するか publisher 昇格時に正規化される。新規作成は常に正規化済み。

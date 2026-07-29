@@ -9,11 +9,12 @@ Pinned first then publishAt descending. Expired items (endAt < now) are excluded
 """
 import json
 import os
-from datetime import datetime, timezone
 
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
+
+from timeutil import normalize_utc_iso, now_utc_iso
 
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'ap-northeast-1'))
 
@@ -29,7 +30,15 @@ CORS_HEADERS = {
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    return now_utc_iso()
+
+
+def _ts_key(value) -> str:
+    """Comparable UTC key; empty/invalid sorts as empty string."""
+    try:
+        return normalize_utc_iso(value) or ''
+    except (TypeError, ValueError):
+        return str(value or '')
 
 
 def _response(status: int, body: dict) -> dict:
@@ -58,28 +67,36 @@ def get_published(limit: int, now_iso: str) -> list:
     - status=scheduled with publishAt<=now (due; publisher Lambda flips status async)
 
     Excludes items whose endAt has passed. Pinned first, then publishAt desc.
+    Legacy rows with non-canonical timestamps are filtered with normalized compares.
     """
+    now_iso = normalize_utc_iso(now_iso) or now_iso
     fetch = max(limit * 3, 30)
     items = _query_by_status('published', now_iso, fetch)
     # Due scheduled items must appear even before the 5-min publisher runs.
     items.extend(_query_by_status('scheduled', now_iso, fetch))
 
-    # Drop items whose display window has ended (endAt < now); dedupe by id
+    # Drop items whose display window has ended (endAt < now); dedupe by id.
+    # Also drop legacy rows whose publishAt is still in the future after normalize
+    # (GSI string compare can disagree with mixed formats).
     by_id = {}
     for it in items:
-        if it.get('endAt') and it['endAt'] < now_iso:
+        pub = _ts_key(it.get('publishAt'))
+        if pub and pub > now_iso:
+            continue
+        end = _ts_key(it.get('endAt')) if it.get('endAt') else ''
+        if end and end < now_iso:
             continue
         by_id[it['announcementId']] = it
 
     visible = list(by_id.values())
     pinned = sorted(
         [x for x in visible if x.get('pinned')],
-        key=lambda x: x.get('publishAt', ''),
+        key=lambda x: _ts_key(x.get('publishAt')),
         reverse=True,
     )
     rest = sorted(
         [x for x in visible if not x.get('pinned')],
-        key=lambda x: x.get('publishAt', ''),
+        key=lambda x: _ts_key(x.get('publishAt')),
         reverse=True,
     )
     return (pinned + rest)[:limit]
