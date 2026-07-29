@@ -111,6 +111,10 @@ export default function HomePage() {
     });
   };
 
+  const scrollToHero = () => {
+    document.getElementById('home-hero')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const displayName = userAttributes?.name || userAttributes?.email || 'ユーザー';
 
   if (loading) {
@@ -174,8 +178,9 @@ export default function HomePage() {
 
         {/* Hero: greeting + quick-ask */}
         <section
+          id="home-hero"
           aria-labelledby="hero-heading"
-          className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-indigo-700 px-6 py-8 sm:px-10 sm:py-10 mb-8 shadow-lg"
+          className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-indigo-700 px-6 py-8 sm:px-10 sm:py-10 mb-8 shadow-lg scroll-mt-24"
         >
           {/* Decorative circles */}
           <div aria-hidden className="pointer-events-none absolute -top-16 -right-16 h-56 w-56 rounded-full bg-white/10" />
@@ -332,33 +337,26 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* 運営からのお知らせ */}
-        <AnnouncementsSection
-          announcements={announcements}
-          loading={annLoading}
-          error={annError}
-        />
-
-        {/* はじめてガイド（折りたたみ・状態を記憶） */}
+        {/* はじめてガイド（折りたたみ・状態を記憶） — 機能の直後に配置 */}
         <section aria-labelledby="guide-heading" className="mb-8">
-          <div className="rounded-lg border border-gray-200 bg-white">
+          <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
             <button
               type="button"
               onClick={toggleGuide}
               aria-expanded={guideOpen}
               aria-controls="guide-body"
-              className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left hover:bg-gray-50 transition-colors rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
             >
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <svg className="w-5 h-5 text-blue-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                 </svg>
-                <h2 id="guide-heading" className="text-base font-semibold text-gray-900">
+                <h2 id="guide-heading" className="text-base font-semibold text-gray-900 leading-snug">
                   はじめての方へ — 使い方ガイド
                 </h2>
               </div>
               <svg
-                className={`w-5 h-5 text-gray-400 transition-transform ${guideOpen ? 'rotate-180' : ''}`}
+                className={`w-5 h-5 text-gray-400 flex-shrink-0 transition-transform ${guideOpen ? 'rotate-180' : ''}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -369,23 +367,30 @@ export default function HomePage() {
             </button>
 
             {guideOpen && (
-              <div id="guide-body" className="px-5 pb-5 border-t border-gray-100">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <div className="text-xs font-bold text-blue-600">STEP 1</div>
-                    <div className="mt-1 font-semibold text-gray-900">質問する</div>
-                    <p className="mt-1 text-sm text-gray-600">
-                      困りごとをそのまま入力します。上の検索ボックスからも始められます。
+              <div id="guide-body" className="px-5 pb-5 border-t border-gray-100 bg-gray-50/50">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 items-stretch">
+                  <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-4 h-full">
+                    <div className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-blue-600 text-white text-xs font-bold mb-2">1</div>
+                    <div className="font-semibold text-gray-900">質問する</div>
+                    <p className="mt-1.5 text-sm text-gray-600 leading-relaxed flex-1">
+                      困りごとをそのまま入力します。ページ上部の検索ボックスや RAGチャットから始められます。
                     </p>
+                    <button
+                      type="button"
+                      onClick={scrollToHero}
+                      className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2 text-left"
+                    >
+                      検索ボックスへ移動
+                    </button>
                   </div>
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <div className="text-xs font-bold text-blue-600">STEP 2</div>
-                    <div className="mt-1 font-semibold text-gray-900">根拠を確認する</div>
-                    <p className="mt-1 text-sm text-gray-600">
+                  <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-4 h-full">
+                    <div className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-blue-600 text-white text-xs font-bold mb-2">2</div>
+                    <div className="font-semibold text-gray-900">根拠を確認する</div>
+                    <p className="mt-1.5 text-sm text-gray-600 leading-relaxed flex-1">
                       回答に表示される参考資料（引用）を確認し、現場判断に活用します。
                     </p>
                     <button
-                      className="mt-2 text-sm font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2"
+                      className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2 text-left"
                       type="button"
                       onClick={() =>
                         setInfoModal({
@@ -402,14 +407,14 @@ export default function HomePage() {
                       参考資料の見方
                     </button>
                   </div>
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <div className="text-xs font-bold text-blue-600">STEP 3</div>
-                    <div className="mt-1 font-semibold text-gray-900">絞り込む</div>
-                    <p className="mt-1 text-sm text-gray-600">
+                  <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-4 h-full">
+                    <div className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-blue-600 text-white text-xs font-bold mb-2">3</div>
+                    <div className="font-semibold text-gray-900">絞り込む</div>
+                    <p className="mt-1.5 text-sm text-gray-600 leading-relaxed flex-1">
                       資料タイプや機種のフィルターを指定すると、回答の精度が上がります。
                     </p>
                     <button
-                      className="mt-2 text-sm font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2"
+                      className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2 text-left"
                       type="button"
                       onClick={() =>
                         setInfoModal({
@@ -431,6 +436,13 @@ export default function HomePage() {
             )}
           </div>
         </section>
+
+        {/* 運営からのお知らせ */}
+        <AnnouncementsSection
+          announcements={announcements}
+          loading={annLoading}
+          error={annError}
+        />
       </main>
 
       {/* Info Modal */}
