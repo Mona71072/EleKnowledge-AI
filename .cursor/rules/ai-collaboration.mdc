@@ -34,20 +34,9 @@ alwaysApply: true
 | 毎回守る運用 | `.cursor/rules/*.mdc` |
 | 繰り返し手順 | `.cursor/skills/` の該当スキル |
 | **微妙な前提・訂正**（誤解しやすい合意） | `docs/decisions-*.md` に残し、必要なら `.cursor/rules` にも短く書く |
-| **AI 駆動の共同運用（mona↔itai）** | `docs/ops-ai-driven-dev.md`（人間・相手エージェント向け正本） |
 
 更新時は「確定」と書かず、未確定ならドラフトのまま残す。  
 **同じ議論を繰り返さない**ため、ユーザーが訂正したポイントは実装より先にメモ／ルールへ反映してよい。
-
-## コードとドキュメントを一致させる
-
-挙動・API・評価・運用を変えたら、**同じ作業単位で正本ドキュメントも更新する**。  
-詳細・正本マップ・完了前チェックリスト: `docs/ops-ai-driven-dev.md`  
-毎回の短い強制: `.cursor/rules/docs-code-sync.mdc`
-
-- 「実装済」はコードと突合できるときだけ
-- 古い機能仕様は正本にしない（WARNING＋正本への誘導）
-- mona / itai どちらも同じ運用（相手側エージェントも `ops-ai-driven-dev.md` を読む）
 
 ## 根本変更は PR で共同確認
 
@@ -66,6 +55,5 @@ alwaysApply: true
 3. `develop` 向け **専用 PR** を作成し、先頭で `@yukiworkspace`（itai）をメンション
 4. itai 側の変更も同様に PR で mona に見える形にし、双方で確認する
 
-**意図共有・運用ルールだけの変更は、原則として機能実装やデプロイ依頼の PR と混ぜない**（別 PR）。  
-ただし `mona` に既に open な同一デリバリの PR がある／ユーザーが相乗りを明示した場合は、その PR に載せてよい（`.cursor/rules/working-branch.mdc`）。  
+**意図共有・運用ルールだけの共同確認は、機能実装やデプロイ依頼の PR と混ぜない**（別 PR）。  
 詳細手順はスキル `joint-pr-review` を使う。

@@ -25,21 +25,15 @@ description: >-
 
 通常のバグ修正・UI 微調整は、既存のデプロイ用 PR 運用（`working-branch.mdc`）でよい。迷ったら共同確認にする。
 
-## 別 PR にする（原則）／相乗り（例外）
+## 別 PR にする（必須）
 
-次は **原則として** 機能実装・セキュリティ修正・デプロイ依頼の PR と混ぜない。共同確認専用の PR を切る。
+次は **機能実装・セキュリティ修正・デプロイ依頼の PR と混ぜない**。共同確認専用の PR を切る。
 
 - 製品意図・ビジョン共有（例: `docs/PRODUCT_INTENT.md`）
 - Cursor 運用ルール・スキル（`.cursor/rules` / `.cursor/skills`）
 - ブランチ／デプロイ運用方針だけの変更
 
-**相乗りしてよい場合**（`.cursor/rules/working-branch.mdc` と同旨）:
-
-- `mona` → `develop` に **既に open な PR** があり、今回の変更が同じデリバリ／同じレビュー単位に属する
-- ユーザーが既存 PR への相乗りを明示した
-- その場合は新規の薄い「意図だけ」PR を無理に切らず、既存 PR 本文に共同確認ブロックを足す
-
-同じ `mona` に載っていても、レビュー用には feature ブランチから **意図・運用だけの PR** を `develop` 向けに作るのが原則。例外で相乗りするときは、本文で「運用合意」と「デプロイ対象」を分ける。
+同じ `mona` に載っていても、レビュー用には feature ブランチから **意図・運用だけの PR** を `develop` 向けに作る。既存のデプロイ用 PR の本文に相乗りしない。
 
 ## 登場人物
 
@@ -158,7 +152,5 @@ cc: mona 共同確認依頼（根本変更）
 ## 関連
 
 - 意図メモ: `docs/PRODUCT_INTENT.md`
-- **AI 駆動の共同運用（コード↔docs 同期）:** `docs/ops-ai-driven-dev.md`
 - 確認してから変更: `.cursor/rules/ai-collaboration.mdc`
-- コード↔docs 同期（短則）: `.cursor/rules/docs-code-sync.mdc`
 - ブランチ・デプロイ PR: `.cursor/rules/working-branch.mdc`
