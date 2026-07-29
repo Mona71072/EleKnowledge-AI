@@ -118,5 +118,8 @@ aws cloudformation describe-stack-events \
 
 ## 5. 補足（mona 側で分かっていること）
 
-- ローカル `NEXT_PUBLIC_SKIP_AUTH=true` の偽トークンでは本番 API は呼べない（想定どおり）。動作確認はログイン済み + オフィス IP、または上記 curl。
+- **デプロイ前は本番 OPTIONS はまだ 403**（この修正は `sam deploy` 後に効く）。マージだけでは直らない。
+- ローカル `NEXT_PUBLIC_SKIP_AUTH=true` の偽トークンでは本番 API は呼べない（想定どおり）。動作確認はログイン済み + オフィス IP、または依頼書の curl。
 - phase1/2/3・他スタックは今回の対象外。
+- changeset で **ResourcePolicy 差し替え**・**publisher 新規**・**`DataTraceEnabled: false`** を目視確認すること（`true` に戻っていないか）。
+- CORS の OPTIONS 全開放は preflight 専用。GET/POST 等のデータ API は引き続き IP + Cognito。
