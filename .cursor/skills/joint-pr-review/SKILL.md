@@ -52,8 +52,8 @@ description: >-
 1. 変更内容をユーザーに提案し、合意を得る（`ai-collaboration` ルール）
 2. **意図共有・運用ルールだけ**なら feature ブランチを切り、デプロイ用 PR と分離する
 3. コミット → `Mona-mebs` で push
-4. base `develop` 向けに **専用 PR** を作成（既存のセキュリティ／UI／デプロイ PR に相乗りしない）
-5. PR 本文の先頭に共同確認ブロックを置く（下記テンプレ）
+4. base `develop` 向けに **専用 PR** を作成（既存のセキュリティ／UI／デプロイ PR に相乗りしない）。同種の共同確認が open なら相乗りを検討
+5. PR 本文はテンプレに加え **`.cursor/rules/pr-clarity.mdc` の合格線**を満たす（目的一文・Yes/No・読む順）
 6. `@yukiworkspace` をメンションし、何を確認してほしいかを具体的に書く
 7. itai の Approve / コメント待ち。合意前に勝手にマージ方針を断定しない
 
@@ -152,13 +152,15 @@ cc: mona 共同確認依頼（根本変更）
 - 根本変更をローカルだけのコミットや口頭合意で終わらせない
 - **デプロイ依頼と共同確認が両方必要なら、PR を分ける**（同じ PR に両方のチェックリストを載せない）
 - 共同確認同士なら既存の意図・運用 open PR への相乗りを検討する
+- PR を送る前に `.cursor/rules/pr-clarity.mdc` の合格線を満たす（テンプレ埋めだけでは不十分）
 - ユーザーが「PR にして itai に共有して」と言ったら、このスキルのテンプレで **共同確認 PR** を作成する
 - itai 側から飛んできた PR をレビューするときは、意図メモ（`docs/PRODUCT_INTENT.md`）とのずれを優先して指摘する
 
 ## 関連
 
 - 意図メモ: `docs/PRODUCT_INTENT.md`
-- AI 駆動の共同運用（コード↔docs・PR 分け）: `docs/ops-ai-driven-dev.md`
+- AI 駆動の共同運用: `docs/ops-ai-driven-dev.md`
+- PR わかりやすさ: `.cursor/rules/pr-clarity.mdc`
 - 確認してから変更: `.cursor/rules/ai-collaboration.mdc`
-- コード↔docs 同期（短則）: `.cursor/rules/docs-code-sync.mdc`
+- コード↔docs 同期: `.cursor/rules/docs-code-sync.mdc`
 - ブランチ・デプロイ PR: `.cursor/rules/working-branch.mdc`
