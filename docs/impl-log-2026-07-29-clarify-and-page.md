@@ -2,7 +2,8 @@
 
 > **目的:** 「なぜこう直したか」を後から辿れるようにする。  
 > **設計:** [design-2026-07-29-clarify-and-page.md](./design-2026-07-29-clarify-and-page.md)  
-> **前提合意:** [decisions-2026-07-29-rag-nuance.md](./decisions-2026-07-29-rag-nuance.md)
+> **前提合意:** [decisions-2026-07-29-rag-nuance.md](./decisions-2026-07-29-rag-nuance.md)（共同確認ブランチ）  
+> **成功定義（訂正）:** 該当**資料**到達＋疑問解決。頁は副次（共同確認側 `decisions-2026-07-29-success-document-reach.md`）
 
 ---
 
@@ -14,7 +15,7 @@
 | `compose_search_query` で聞き返し後の追記を直前質問と結合 | 追記だけだと症状語が落ちて検索が外れる（design §4） |
 | `is_weak_retrieval` をゲートとして使用（旧: 死コード） | 弱い根拠で長文を埋めない |
 | `responseType` = `clarify` / `pages` / `not_found` | UI が候補・聞き返し・停止を分岐表示できる |
-| `pageCandidates[]`（ページ無ければキー省略） | 成功定義＝該当頁到達。無いときは「ページ不明」と嘘をつかない |
+| `pageCandidates[]`（ページ無ければキー省略） | **資料候補が本体**。頁はメタがあれば付与（捏造しない）。成功必須ではない |
 | カテゴリ未指定時だけ本命（C/TI/据付基準）を先に retrieve、弱ければ全資料へ | 図が半分で埋もれやすい。**UI の全検索合意は維持**（ユーザー選択カテゴリは尊重）。メタは絞り込みであり本文 HYBRID は残る |
 | Claude プロンプトを短い整理向けに変更 | 候補リストが本体、作文は補助 |
 | DynamoDB に `responseType` / `pageCandidates` / `clarifyQuestions` を保存 | 履歴から意図を遡れる |
@@ -44,7 +45,7 @@
 
 - フロント: `develop` マージ後 Amplify
 - バックエンド: **RAG Lambda の `sam deploy` が必要**（push だけでは反映されない）
-- ページ番号メタが KB に無い場合は候補に `pageNumber` が付かない（verify-checklist 参照）
+- ページ番号メタが KB に無い場合は候補に `pageNumber` が付かない（verify-checklist 参照）。**資料到達の成功判定には頁メタは必須ではない**
 
 ## やっていない（意図的）
 
@@ -52,3 +53,4 @@
 - トラブル画面
 - GraphRAG / マルチエージェント
 - カテゴリ未指定を UI 既定で本命固定（全検索のまま）
+- `#page` ジャンプ／アプリ内 PDF ビューア（成功必須ではないため当面やらない）

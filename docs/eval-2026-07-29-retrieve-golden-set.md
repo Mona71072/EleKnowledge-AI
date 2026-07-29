@@ -3,7 +3,7 @@
 > **状態: 第1層は実装済み / 第2層は方針合意のみ（未実装）**  
 > 高速 PDCA の Check を「デプロイして人が触る」から「スクリプト1本」へ置き換えるための仕組み。  
 > **運用の落とし穴・是正:** [decisions-2026-07-29-layer1-eval-ops.md](./decisions-2026-07-29-layer1-eval-ops.md)（必読）  
-> 関連: `docs/PRODUCT_INTENT.md`／`docs/survey-2026-07-29-hard-to-retrieve-counts.md`
+> 関連: 成功定義は **該当資料到達＋疑問解決**（頁は副次。共同確認側 `docs/decisions-2026-07-29-success-document-reach.md`／`PRODUCT_INTENT.md`）／`docs/survey-2026-07-29-hard-to-retrieve-counts.md`
 
 ## 合意した方針（2026-07-29 会話）
 
@@ -14,16 +14,16 @@
 | 第1層（主指標） | **機械採点**。期待資料への到達・ゲート判定 | retrieve 結果 | ほぼゼロ。日常のチューニングごとに回す |
 | 第2層（補助指標） | **LLM-as-a-judge**（Amazon Bedrock Evaluations） | Context relevance / coverage、Faithfulness 等 | ジャッジ推論費。節目で回す |
 
-- 主指標が機械採点なのは、成功条件が「該当資料・頁に届いたか」であり作文の上手さではないため
+- 主指標が機械採点なのは、成功条件が「**該当資料に届き疑問を解決できるか**」であり作文の上手さでも頁ジャンプでもないため
 - 第2層は **BYOI**。KB 直指定だと `rag-function` のフィルタ・ゲートを通らず実アプリ評価にならない
 
 ### 出荷判断に使う数字（是正後）
 
 | 優先 | 指標 | 使い方 |
 |---|---|---|
-| 主 | `hit_in_candidates`（ラベル済みのみ） | 悪化していなければ変更可。可能なら改善 |
+| 主 | `hit_in_candidates`（ラベル済みのみ） | **資料到達**の代理。悪化していなければ変更可。可能なら改善 |
 | 必須確認 | タグ `hard` 付きの到達 | 全体平均だけ見ない |
-| 副 | `page_hit`（`expected_pages` がある問） | 資料は当たるが頁違いを検知 |
+| 副 | `page_hit`（`expected_pages` がある問） | あれば見る。**成功必須ではない**（資料は当たるが頁違いの診断用） |
 | 回帰防止 | `gate_accuracy` | **単独で出荷判断しない** |
 | 参考 | `hit@k` / `mrr` | 検索側の診断用 |
 
