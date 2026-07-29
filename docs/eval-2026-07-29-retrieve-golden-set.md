@@ -27,7 +27,18 @@
 | 回帰防止 | `gate_accuracy` | **単独で出荷判断しない** |
 | 参考 | `hit@k` / `mrr` | 検索側の診断用 |
 
+## ゴールデンラベリング手順（失敗一覧から）
+
+1. `/admin/failures` で 👎 / not_found を確認する
+2. 「ゴールデン候補をコピー」で jsonl 1行を取得する
+3. 質問文の固有名・工事番号を一般化する
+4. `expected_documents` に期待資料名（ファイル名または部分一致）を入れる
+5. 必要なら `chat_history`（聞き返し後の追記評価用）を足す
+6. `tests/eval/golden_set.jsonl` に追記し、第1層 eval を回す
+
 **ラベル済み N&lt;10 のときは率を意思決定に使わない**（ラベリング作業フェーズ）。
+
+チャットで会話を確認するときは失敗行の「チャットで開く」（`/chat?session=...`）を使う。
 
 ## 第1層の使い方
 
@@ -46,9 +57,9 @@ python3 scripts/eval/run_retrieve_eval.py --only G001,G103
 
 - スクリプトは `lambda/rag/rag-function/app.py` を import し、**本番と同系統路**
   （正規化 → 聞き返しゲート → 本命優先 retrieve → 略語展開 → 弱い検索ゲート）で検索する
-- **通さないもの:** Claude 本文・多ターン追記結合後・フロント UX・prd KB 差分  
+- **通さないもの:** Claude 本文・フロント UX・prd KB 差分  
   → 詳細は [layer1-eval-ops](./decisions-2026-07-29-layer1-eval-ops.md) §D
-  （`compose_search_query` は `chat_history=[]` のため第1層では未評価。ゲート単体と人手確認で補う）
+  （golden 行に `chat_history` を置けば `compose_search_query` 経由で追記結合も評価する。省略時は単発）
 - 出力: `eval-results/retrieve-eval-<時刻>.json` と `*-byoi.jsonl`（gitignore 済み）
 - DynamoDB 非書き込み。権限: `bedrock:Retrieve` + `ssm:GetParameter`
 

@@ -43,6 +43,9 @@ RAGクエリ実行
 | `qsheet` | Qシート | Qシート |
 | `std` | 据付基準 | 据付基準 |
 | `note` | 据付ノート | 据付ノート |
+| `w_doc` | W資料 | W資料 |
+
+`site_agent` / `quality_mgmt` は API `CATEGORY_MAP` に残すが、現行 KB カタログ 0 件のため **チャット UI には出さない**（`UI_CATEGORY_KEYS`）。
 
 **Response:**
 ```json
@@ -81,11 +84,11 @@ RAGクエリ実行
 ```
 
 - `responseType`: `clarify`（検索せず聞き返し）/ `pages`（候補あり）/ `not_found`（弱い検索で作文停止）。実装理由は [impl-log-2026-07-29-clarify-and-page.md](../impl-log-2026-07-29-clarify-and-page.md)。
-- `pageCandidates`: UI 上部用。`pageNumber` は KB メタにあるときだけ付与（無ければキー省略＝ページ不明）。
+- `pageCandidates`: UI 上部用。`pageNumber` は KB メタにあるときだけ付与（無ければキー省略＝ページ不明）。`not_found` 時は最大2件の参考候補に `lowConfidence: true` を付ける（作文はしない）。
 - `clarifyQuestions`: `clarify` 時の追加質問リスト。
 - カテゴリ未指定時は内部で本命（C/TI/据付基準）を先に retrieve し、弱ければ全資料へ拡大（`priorityExpanded`）。ユーザーが category を選んでいる場合はそれを尊重。
 - 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。
 - `priorityExpanded`: 本命→全資料へ拡大したとき `true`。診断用フィールド（チャット UI では未表示）。
-- `mode`: API 上は `normal` \| `spec` を受け付ける。現行チャット UI は常に `normal` を送る（カテゴリ複数選択で spec モード UI は廃止）。
+- `mode`: API 上は `normal` \| `spec` を受け付ける。現行チャット UI は常に `normal`。`spec` は **非推奨**で、サーバ側で `normal` に正規化し、カテゴリ未指定時は本命（`spec`/`tech_info`/`std`）を強制する。
 - `sourceUri` は `s3://` ではなく**プリサイン HTTPS URL**。
 - `sourceDocuments[].category` / `modelType` は実 KB メタデータ由来、`hasImage` は当該チャンクに IMAGE が含まれるか。

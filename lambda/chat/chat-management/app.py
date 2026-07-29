@@ -170,31 +170,53 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
         raise
 
 
-def get_session_messages(session_id: str, limit: int = 100) -> list:
-    """Get all messages in a session"""
+def get_session_messages(session_id: str, limit: int = 100, fetch_all: bool = False) -> list:
+    """Get messages in a session (excludes logically deleted).
+
+    DynamoDB Limit applies before FilterExpression, so we page until we have
+    enough visible rows (or the query is exhausted when fetch_all=True).
+    """
     try:
-        response = chatlogs_table.query(
-            KeyConditionExpression='sessionId = :sid',
-            # Hide logically-deleted messages (deleted flag null/false only)
-            FilterExpression='attribute_not_exists(#del) OR #del = :false',
-            ExpressionAttributeNames={'#del': 'deleted'},
-            ExpressionAttributeValues={':sid': session_id, ':false': False},
-            ScanIndexForward=True,  # Oldest first
-            Limit=limit
-        )
-        
-        messages = response.get('Items', [])
-        
-        # Calculate days until deletion for each message
+        collected = []
+        exclusive_start = None
+        target = None if fetch_all else max(1, int(limit))
+
+        while True:
+            page_limit = 100
+            if target is not None:
+                page_limit = min(100, max(20, (target - len(collected)) * 2))
+            kwargs = {
+                'KeyConditionExpression': 'sessionId = :sid',
+                'FilterExpression': 'attribute_not_exists(#del) OR #del = :false',
+                'ExpressionAttributeNames': {'#del': 'deleted'},
+                'ExpressionAttributeValues': {':sid': session_id, ':false': False},
+                'ScanIndexForward': True,
+                'Limit': page_limit,
+            }
+            if exclusive_start:
+                kwargs['ExclusiveStartKey'] = exclusive_start
+
+            response = chatlogs_table.query(**kwargs)
+            collected.extend(response.get('Items') or [])
+            exclusive_start = response.get('LastEvaluatedKey')
+
+            if not exclusive_start:
+                break
+            if target is not None and len(collected) >= target:
+                break
+
+        messages = collected if fetch_all else collected[:target]
+
         for msg in messages:
             if 'ttl' in msg:
                 msg['daysUntilDeletion'] = calculate_days_until_deletion(msg['ttl'])
-        
+
         return messages
-        
+
     except ClientError as e:
         print(f"Error getting messages: {e}")
         raise
+
 
 
 def delete_session(session_id: str) -> int:
@@ -207,7 +229,7 @@ def delete_session(session_id: str) -> int:
     """
     try:
         # Only the currently-visible (not-yet-deleted) messages
-        messages = get_session_messages(session_id)
+        messages = get_session_messages(session_id, fetch_all=True)
 
         now_iso = datetime.utcnow().isoformat() + 'Z'
         deleted_count = 0
@@ -241,12 +263,20 @@ def update_message_feedback(
 
     bad のとき任意で reason / comment を付ける（ワンタップ分類用）。
     good のときは理由フィールドを消して残滓を残さない。
+    存在しない / assistant 以外の messageId は ConditionalCheckFailed → False。
     """
     try:
-        names = {}
-        values = {':feedback': feedback}
+        names = {'#role': 'role'}
+        values = {
+            ':feedback': feedback,
+            ':assistant': 'assistant',
+        }
         parts = ['feedback = :feedback', 'feedbackAt = :at']
         values[':at'] = datetime.utcnow().isoformat() + 'Z'
+        condition = (
+            'attribute_exists(sessionId) AND attribute_exists(messageId) '
+            'AND #role = :assistant'
+        )
 
         if feedback == 'bad':
             if reason:
@@ -255,30 +285,31 @@ def update_message_feedback(
             if comment:
                 parts.append('feedbackComment = :comment')
                 values[':comment'] = comment[:FEEDBACK_COMMENT_MAX]
-        else:
-            # good: 以前の bad 理由をクリア
-            names['#fr'] = 'feedbackReason'
-            names['#fc'] = 'feedbackComment'
-            remove = ' REMOVE #fr, #fc'
-            expr = 'SET ' + ', '.join(parts) + remove
             kwargs = {
                 'Key': {'sessionId': session_id, 'messageId': message_id},
-                'UpdateExpression': expr,
+                'UpdateExpression': 'SET ' + ', '.join(parts),
+                'ConditionExpression': condition,
                 'ExpressionAttributeValues': values,
                 'ExpressionAttributeNames': names,
             }
-            chatlogs_table.update_item(**kwargs)
-            return True
+        else:
+            names['#fr'] = 'feedbackReason'
+            names['#fc'] = 'feedbackComment'
+            expr = 'SET ' + ', '.join(parts) + ' REMOVE #fr, #fc'
+            kwargs = {
+                'Key': {'sessionId': session_id, 'messageId': message_id},
+                'UpdateExpression': expr,
+                'ConditionExpression': condition,
+                'ExpressionAttributeValues': values,
+                'ExpressionAttributeNames': names,
+            }
 
-        kwargs = {
-            'Key': {'sessionId': session_id, 'messageId': message_id},
-            'UpdateExpression': 'SET ' + ', '.join(parts),
-            'ExpressionAttributeValues': values,
-        }
         chatlogs_table.update_item(**kwargs)
         return True
 
     except ClientError as e:
+        if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+            return False
         print(f"Error updating feedback: {e}")
         raise
 
@@ -337,7 +368,7 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
     pages = 0
     scanned_count = 0
 
-    while pages < FAILURES_SCAN_MAX_PAGES and len(collected) < limit:
+    while pages < FAILURES_SCAN_MAX_PAGES:
         kwargs = {
             'FilterExpression': ' AND '.join(filter_parts),
             'ExpressionAttributeNames': names,
@@ -354,6 +385,7 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
         if not exclusive_start:
             break
 
+    incomplete = bool(exclusive_start)
     collected.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
     collected = collected[:limit]
 
@@ -400,8 +432,12 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
         'failures': failures,
         'count': len(failures),
         'scannedCount': scanned_count,
-        'truncated': kind,
-        'note': 'hot window (TTL〜60日)。Scan ベースのため件数増で遅くなる場合は Athena へ移行。',
+        'incomplete': incomplete,
+        'kind': kind,
+        'note': (
+            'hot window (TTL〜60日)。Scan ベースのため件数増で遅くなる場合は Athena へ移行。'
+            + (' Scan 打ち切りのため最新が欠けている可能性があります。' if incomplete else '')
+        ),
     }
 
 
@@ -582,9 +618,18 @@ def lambda_handler(event, context):
             if not owns_session(session_id, caller_id):
                 return not_found
 
-            update_message_feedback(
+            updated = update_message_feedback(
                 session_id, message_id, feedback, reason=reason, comment=comment
             )
+            if not updated:
+                return {
+                    'statusCode': 404,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'NotFound',
+                        'message': 'Message not found'
+                    })
+                }
             emit_feedback_metric(feedback)
 
             return {

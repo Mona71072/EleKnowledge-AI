@@ -70,6 +70,28 @@ def test_feedback_bad_with_reason(monkeypatch):
     kwargs = table.update_item.call_args.kwargs
     assert kwargs["ExpressionAttributeValues"][":feedback"] == "bad"
     assert kwargs["ExpressionAttributeValues"][":reason"] == "wrong_page"
+    assert "ConditionExpression" in kwargs
+    assert "#role" in kwargs["ExpressionAttributeNames"]
+
+
+def test_feedback_missing_message_returns_404():
+    from botocore.exceptions import ClientError
+
+    mod, table = load_app()
+    table.query.return_value = {"Items": [{"userId": "user-1", "sessionId": "s1"}]}
+    table.update_item.side_effect = ClientError(
+        {"Error": {"Code": "ConditionalCheckFailedException", "Message": "x"}},
+        "UpdateItem",
+    )
+    event = _event(
+        "PUT",
+        "/chat/messages/missing/feedback",
+        body={"sessionId": "s1", "feedback": "good"},
+        path_params={"messageId": "missing"},
+        groups="user",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 404
 
 
 def test_feedback_rejects_invalid_reason():
@@ -123,6 +145,7 @@ def test_list_failure_messages_joins_user_query():
 
     out = mod.list_failure_messages(kind="bad", limit=10)
     assert out["count"] == 1
+    assert out["incomplete"] is False
     assert out["failures"][0]["userQuery"] == "火災管制の解除条件は？"
     assert out["failures"][0]["feedbackReason"] == "wrong_doc"
     assert out["failures"][0]["topDocuments"] == ["C-123.pdf"]

@@ -19,6 +19,18 @@
 | Claude プロンプトを短い整理向けに変更 | 候補リストが本体、作文は補助 |
 | DynamoDB に `responseType` / `pageCandidates` / `clarifyQuestions` を保存 | 履歴から意図を遡れる |
 | フロントで候補を本文より上、clarify リスト表示 | 設計 §5 |
+| Claude messages の role 交互保証（refs+質問を最終 user に結合） | 連続 user で Bedrock ValidationException になるのを防ぐ |
+| 追記結合クエリを Claude にも渡す | retrieve だけ結合だと整理が薄い |
+| UI から到達不能カテゴリ（site_agent / quality_mgmt）を除外 | 選択すると常時弱／not_found |
+| not_found 時にカテゴリ解除の誘導 | ユーザー指定カテゴリ過絞りの逃げ道 |
+| feedback UpdateItem に Condition / 失敗一覧 Scan 後ソート / 履歴・お知らせのページング | 幽霊 message・取りこぼし・欠落を防ぐ |
+| 予約公開は日時必須（UI+サーバ） | 空欄で即時公開に落ちる事故防止 |
+| 弱ゲートでも低信頼 pageCandidates 最大2件 | 作文せず手がかりだけ残す（design §7） |
+| needs_clarify: 症状語彙拡充・機種ありでも部位/状況不足時は聞き返し | design §4 の「手がかりが薄い」 |
+| ABBREV_MAP 拡充・chat の debug console.log 削除 | 検索 recall / ノイズ削減 |
+| `/chat?session=` でセッションを開く | failures → 会話確認の導線 |
+| `useAdminGate` で admin 判定を共有 | layout と AdminOnlyGuard のずれ防止 |
+| `mode=spec` を normal+本命カテゴリへ正規化 | UI 廃止後のデッドパス整理 |
 
 ## 触ったファイル
 

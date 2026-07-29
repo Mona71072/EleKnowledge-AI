@@ -151,6 +151,7 @@ def run_normal_retrieve(mod, query: str, filters: dict):
 def score_item(mod, item: dict) -> dict:
     query = item["query"]
     filters = item.get("filters") or {}
+    chat_history = item.get("chat_history") or []
     expected_docs = [e for e in (item.get("expected_documents") or []) if e]
     expected_pages = item.get("expected_pages") or []
     expected_gate = item.get("expected_gate")
@@ -166,7 +167,7 @@ def score_item(mod, item: dict) -> dict:
     }
 
     # --- 聞き返しゲート（本番同様、clarify なら検索しない） ---
-    should_clarify, _ = mod.needs_clarify(query, filters, chat_history=[])
+    should_clarify, _ = mod.needs_clarify(query, filters, chat_history=chat_history)
     if should_clarify:
         row.update({
             "predicted_gate": "clarify",
@@ -177,10 +178,15 @@ def score_item(mod, item: dict) -> dict:
             "page_hit": None,
             "top_docs": [],
             "selected_results": [],
+            "search_query": query,
         })
         return row
 
-    merged, priority_expanded, used_expansion = run_normal_retrieve(mod, query, filters)
+    # 聞き返し後の追記は本番同様に結合してから retrieve（design §4）
+    search_query = mod.compose_search_query(query, chat_history)
+    row["search_query"] = search_query
+
+    merged, priority_expanded, used_expansion = run_normal_retrieve(mod, search_query, filters)
     weak = mod.is_weak_retrieval(merged, mode="normal")
     predicted_gate = "not_found" if weak else "pages"
 

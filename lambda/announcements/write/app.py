@@ -120,6 +120,17 @@ def validate(body: dict, partial: bool = False) -> Optional[str]:
     if body.get('body') and len(body['body']) > BODY_MAX:
         return f"body must be <= {BODY_MAX} chars"
 
+    # scheduled は未来の publishAt 必須（空欄で即時公開に落ちない）
+    if (not partial or 'status' in body) and body.get('status') == 'scheduled':
+        try:
+            pub = _norm_ts(body.get('publishAt'))
+        except ValueError:
+            return "publishAt must be a valid ISO-8601 timestamp"
+        if not pub:
+            return "scheduled status requires publishAt"
+        if pub <= now_utc_iso():
+            return "scheduled publishAt must be in the future"
+
     # Maintenance requires a valid time window
     if body.get('type') == 'maintenance':
         start, end = body.get('startAt'), body.get('endAt')

@@ -27,9 +27,26 @@ def test_needs_clarify_symptom_without_model(rag):
     assert len(qs) >= 2
 
 
-def test_no_clarify_when_model_selected(rag):
-    ok, _ = rag.needs_clarify("振動がする", {"modelType": "AXIEZ"})
+def test_no_clarify_when_model_part_and_situation(rag):
+    ok, _ = rag.needs_clarify(
+        "かごが走行中に振動がする",
+        {"modelType": "AXIEZ"},
+    )
     assert ok is False
+
+
+def test_clarify_when_model_but_missing_part_or_situation(rag):
+    ok, qs = rag.needs_clarify("振動がする", {"modelType": "AXIEZ"})
+    assert ok is True
+    assert any('部位' in q for q in qs)
+    assert any('いつ' in q or '発生' in q for q in qs)
+    assert not any('機種' in q for q in qs)
+
+
+def test_clarify_for_error_symptom_without_model(rag):
+    ok, qs = rag.needs_clarify("エラーが出る", {})
+    assert ok is True
+    assert len(qs) >= 2
 
 
 def test_no_clarify_for_spec_style_question(rag):
@@ -86,3 +103,64 @@ def test_extract_page_number(rag):
 
 def test_priority_categories_match_spec(rag):
     assert rag.PRIORITY_CATEGORIES == rag.SPEC_CATEGORIES
+
+
+def test_build_claude_messages_alternating_on_first_turn(rag):
+    msgs = rag.build_claude_messages('振動がする', [], chat_history=None)
+    roles = [m['role'] for m in msgs]
+    assert roles == ['user']
+    assert all(roles[i] != roles[i + 1] for i in range(len(roles) - 1))
+
+
+def test_build_claude_messages_alternating_after_clarify(rag):
+    hist = [
+        {'role': 'user', 'content': 'エレベーターから異音がする'},
+        {'role': 'assistant', 'content': rag.CLARIFY_MARKER + '\n1. 機種'},
+    ]
+    msgs = rag.build_claude_messages(
+        'かご、走行中です',
+        [],
+        chat_history=hist,
+        search_query='エレベーターから異音がする\nかご、走行中です',
+    )
+    roles = [m['role'] for m in msgs]
+    assert roles[0] == 'user'
+    assert all(roles[i] != roles[i + 1] for i in range(len(roles) - 1))
+    # final user content includes references + composed question
+    final = msgs[-1]['content']
+    assert isinstance(final, list)
+    texts = ' '.join(b.get('text', '') for b in final if isinstance(b, dict))
+    assert '異音' in texts and 'かご' in texts
+
+
+def test_build_question_text_includes_composed_search(rag):
+    text = rag.build_question_text_for_claude('かご', '異音がする\nかご')
+    assert '【検索クエリ】' in text
+    assert '異音' in text
+
+
+def test_build_not_found_mentions_category(rag):
+    plain = rag.build_not_found_content({})
+    assert '絞り込み' not in plain
+    with_cat = rag.build_not_found_content({'category': 'drawing'})
+    assert '資料カテゴリ' in with_cat
+
+
+def test_expand_abbrev_includes_domain_terms(rag):
+    assert '火災管制' in rag.expand_query_abbreviations('火管の動作')
+    assert '地震管制' in rag.expand_query_abbreviations('震管')
+
+
+def test_normalize_mode_spec_forces_priority_categories(rag):
+    mode, filters = rag.normalize_mode_and_filters('spec', {})
+    assert mode == 'normal'
+    assert filters['category'] == ['spec', 'tech_info', 'std']
+    mode2, filters2 = rag.normalize_mode_and_filters('spec', {'category': 'drawing'})
+    assert mode2 == 'normal'
+    assert filters2['category'] == 'drawing'
+
+
+def test_ui_category_keys_exclude_unreachable(rag):
+    assert 'site_agent' not in rag.UI_CATEGORY_KEYS
+    assert 'quality_mgmt' not in rag.UI_CATEGORY_KEYS
+    assert 'site_agent' in rag.CATEGORY_MAP

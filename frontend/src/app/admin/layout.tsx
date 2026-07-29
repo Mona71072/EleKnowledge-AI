@@ -5,38 +5,32 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signOut } from 'aws-amplify/auth';
 import { getUserInfo } from '@/lib/auth-helpers';
+import { useAdminGate } from '@/hooks/useAdminGate';
 import { AdminViewToggle } from '@/components/admin/AdminViewToggle';
 import { Loading } from '@/components/ui/Loading';
 import { Button } from '@/components/ui/Button';
 
 /**
- * Admin console shell (A-18): guards admin access (client-side redirect; the API
- * enforces 403 server-side too), renders the home<->admin toggle and the console
- * sub-nav (dashboard / announcements).
+ * Admin console shell (A-18): guards admin access (client-side; API enforces 403),
+ * renders the home<->admin toggle and the console sub-nav.
+ * Gate check is shared with AdminOnlyGuard via useAdminGate.
  */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [state, setState] = useState<'loading' | 'ok' | 'denied'>('loading');
+  const gate = useAdminGate();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
 
   useEffect(() => {
+    if (gate !== 'ok') return;
     (async () => {
       const info = await getUserInfo();
-      if (!info) {
-        router.replace('/login');
-        return;
-      }
-      if (!info.isAdmin) {
-        setState('denied');
-        return;
-      }
+      if (!info) return;
       setName(info.name);
       setEmail(info.email);
-      setState('ok');
     })();
-  }, [router]);
+  }, [gate]);
 
   const handleSignOut = async () => {
     try {
@@ -47,7 +41,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
   };
 
-  if (state === 'loading') {
+  if (gate === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <Loading size="lg" text="読み込み中..." />
@@ -55,7 +49,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  if (state === 'denied') {
+  if (gate === 'denied') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
         <div className="max-w-md text-center">

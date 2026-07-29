@@ -7,6 +7,7 @@ import {
   FailureItem,
   FailureKind,
   FeedbackReason,
+  formatCategoryKey,
   getChatFailures,
   toGoldenCandidateLine,
 } from '@/lib/chat-failures';
@@ -36,8 +37,10 @@ function filtersLabel(item: FailureItem): string {
   const parts: string[] = [];
   if (qf.modelType) parts.push(`機種:${qf.modelType}`);
   const cat = qf.category;
-  if (Array.isArray(cat) && cat.length) parts.push(`カテゴリ:${cat.join(',')}`);
-  else if (typeof cat === 'string' && cat) parts.push(`カテゴリ:${cat}`);
+  const cats = Array.isArray(cat) ? cat : cat ? [cat] : [];
+  if (cats.length) {
+    parts.push(`カテゴリ:${cats.map(formatCategoryKey).join(',')}`);
+  }
   return parts.length ? parts.join(' / ') : 'フィルタなし';
 }
 
@@ -46,6 +49,7 @@ export default function AdminFailuresPage() {
   const [items, setItems] = useState<FailureItem[]>([]);
   const [note, setNote] = useState<string | null>(null);
   const [scannedCount, setScannedCount] = useState(0);
+  const [incomplete, setIncomplete] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -58,9 +62,11 @@ export default function AdminFailuresPage() {
       setItems(res.failures || []);
       setNote(res.note || null);
       setScannedCount(res.scannedCount || 0);
+      setIncomplete(Boolean(res.incomplete));
     } catch (e) {
       setError((e as Error).message);
       setItems([]);
+      setIncomplete(false);
     } finally {
       setLoading(false);
     }
@@ -140,6 +146,12 @@ export default function AdminFailuresPage() {
         </div>
       </div>
 
+      {incomplete && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          Scan が打ち切られたため、最新の失敗が一覧に含まれていない可能性があります。Athena 移行前は再読込や kind 絞り込みで補完してください。
+        </div>
+      )}
+
       {note && (
         <p className="mb-4 text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">
           {note}
@@ -203,6 +215,17 @@ export default function AdminFailuresPage() {
                 {item.userQuery || '（直前の質問を取得できませんでした）'}
               </p>
               <p className="mt-1 text-xs text-gray-500">{filtersLabel(item)}</p>
+              {item.sessionId && (
+                <p className="mt-1 text-xs text-gray-500">
+                  <a
+                    href={`/chat?session=${encodeURIComponent(item.sessionId)}`}
+                    className="text-blue-700 underline underline-offset-2"
+                  >
+                    チャットで開く
+                  </a>
+                  <span className="ml-2 font-mono text-gray-400 break-all">{item.sessionId}</span>
+                </p>
+              )}
 
               {item.topDocuments?.length > 0 && (
                 <p className="mt-2 text-xs text-gray-600">

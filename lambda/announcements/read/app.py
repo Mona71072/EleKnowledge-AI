@@ -50,13 +50,24 @@ def _response(status: int, body: dict) -> dict:
 
 
 def _query_by_status(status: str, now_iso: str, fetch_limit: int) -> list:
-    resp = table.query(
-        IndexName='status-publishAt-index',
-        KeyConditionExpression=Key('status').eq(status) & Key('publishAt').lte(now_iso),
-        ScanIndexForward=False,  # newest first
-        Limit=fetch_limit,
-    )
-    return resp.get('Items', [])
+    """Page until we collect fetch_limit items or the GSI is exhausted."""
+    items = []
+    kwargs = {
+        'IndexName': 'status-publishAt-index',
+        'KeyConditionExpression': Key('status').eq(status) & Key('publishAt').lte(now_iso),
+        'ScanIndexForward': False,  # newest first
+        'Limit': min(50, max(1, fetch_limit)),
+    }
+    while len(items) < fetch_limit:
+        resp = table.query(**kwargs)
+        batch = resp.get('Items') or []
+        items.extend(batch)
+        lek = resp.get('LastEvaluatedKey')
+        if not lek or not batch:
+            break
+        kwargs['ExclusiveStartKey'] = lek
+        kwargs['Limit'] = min(50, fetch_limit - len(items))
+    return items[:fetch_limit]
 
 
 def get_published(limit: int, now_iso: str) -> list:
@@ -70,7 +81,7 @@ def get_published(limit: int, now_iso: str) -> list:
     Legacy rows with non-canonical timestamps are filtered with normalized compares.
     """
     now_iso = normalize_utc_iso(now_iso) or now_iso
-    fetch = max(limit * 3, 30)
+    fetch = max(limit * 5, 50)
     items = _query_by_status('published', now_iso, fetch)
     # Due scheduled items must appear even before the 5-min publisher runs.
     items.extend(_query_by_status('scheduled', now_iso, fetch))

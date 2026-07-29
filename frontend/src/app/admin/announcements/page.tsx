@@ -127,6 +127,10 @@ export default function AdminAnnouncementsPage() {
       setError('メンテナンスは開始・終了日時が必要です');
       return;
     }
+    if (status === 'published' && publishMode === 'schedule' && !scheduleAt) {
+      setError('予約公開するには日時を指定してください');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {

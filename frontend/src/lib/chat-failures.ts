@@ -27,6 +27,7 @@ export interface FailuresResponse {
   failures: FailureItem[];
   count: number;
   scannedCount: number;
+  incomplete?: boolean;
   kind: string;
   note?: string;
 }
@@ -37,6 +38,22 @@ export const FEEDBACK_REASON_LABELS: Record<FeedbackReason, string> = {
   bad_answer: '回答がおかしい',
   other: 'その他',
 };
+
+/** API 安定キー → 表示ラベル（チャット categoryOptions と揃える） */
+export const CATEGORY_LABELS: Record<string, string> = {
+  spec: 'C資料',
+  tech_info: 'TI',
+  std: '据付基準',
+  drawing: '据付場用図',
+  incident: '災害事例集',
+  qsheet: 'Qシート',
+  note: '据付ノート',
+  w_doc: 'W資料',
+};
+
+export function formatCategoryKey(key: string): string {
+  return CATEGORY_LABELS[key] || key;
+}
 
 export async function getChatFailures(
   kind: FailureKind = 'all',

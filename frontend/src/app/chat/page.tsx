@@ -27,6 +27,7 @@ interface Message {
     sourceUri: string;
     relevance: number;
     snippet?: string | null;
+    lowConfidence?: boolean;
   }>;
   sourceDocuments?: Array<{
     documentName: string;
@@ -99,8 +100,6 @@ export default function ChatPage() {
     { value: 'qsheet', label: 'Qシート' },
     { value: 'note', label: '据付ノート' },
     { value: 'w_doc', label: 'W資料' },
-    { value: 'site_agent', label: '現場代理人業務マニュアル' },
-    { value: 'quality_mgmt', label: '品質管理業務マニュアル' },
   ];
 
   const normalizedModelQuery = modelQuery.trim().toLowerCase();
@@ -280,17 +279,30 @@ const normalizeTableMarkdown = (text: string): string => {
     initializeChat();
   }, [router]);
 
-  // ホームのクイック質問 (?q=...) を入力欄へプリフィルする
+  // ホームのクイック質問 (?q=...) と失敗一覧からのセッション (?session=...)
   useEffect(() => {
+    if (!userId) return;
     const params = new URLSearchParams(window.location.search);
     const q = params.get('q');
+    const sessionId = params.get('session');
+    let dirty = false;
     if (q) {
       setInput(q);
-      // URL からクエリを除去してリロード時の再プリフィルを防ぐ
-      window.history.replaceState({}, '', window.location.pathname);
+      dirty = true;
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
-  }, []);
+    if (sessionId) {
+      dirty = true;
+      fetchSessionMessages(sessionId).catch((err) => {
+        console.error('Failed to open session from URL:', err);
+        setError('指定されたセッションを開けませんでした');
+      });
+    }
+    if (dirty) {
+      // URL からクエリを除去してリロード時の再適用を防ぐ
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [userId]);
 
   // タイプライター効果の実装
   useEffect(() => {
@@ -374,7 +386,6 @@ const normalizeTableMarkdown = (text: string): string => {
           'Content-Type': 'application/json'
         }
       });
-      console.log('Sessions fetched successfully:', response.data);
       setSessions(response.data.sessions || []);
     } catch (err: any) {
       // err.config は headers.Authorization（ID トークン）を含むためログに出さない
@@ -461,18 +472,12 @@ const normalizeTableMarkdown = (text: string): string => {
         filters: effectiveFilters
       };
       
-      console.log('Sending RAG query:', {
-        url: `${API_URL}/rag/query`,
-        payload: payload
-      });
-
       const response = await axios.post(`${API_URL}/rag/query`, payload, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
-      console.log('RAG query response:', response.data);
 
       const aiId = response.data.aiMessageId || response.data.messageId || `msg-ai-${Date.now()}`;
       const aiMessage: Message = {
@@ -589,7 +594,7 @@ const normalizeTableMarkdown = (text: string): string => {
         }
       });
 
-      setMessages(messages.map(m =>
+      setMessages((prev) => prev.map((m) =>
         m.id === messageId
           ? {
               ...m,
@@ -609,6 +614,7 @@ const normalizeTableMarkdown = (text: string): string => {
       }
     } catch (err) {
       console.error('Error submitting feedback:', err);
+      setError('フィードバックの送信に失敗しました。もう一度お試しください。');
     }
   };
 
@@ -842,8 +848,20 @@ const normalizeTableMarkdown = (text: string): string => {
                           <div className="space-y-3">
                             {/* WHY: 成功定義は該当頁到達。候補を本文より上に出す（design-2026-07-29） */}
                             {message.pageCandidates && message.pageCandidates.length > 0 && (
-                              <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 space-y-2">
-                                <p className="text-xs font-semibold text-blue-900">該当頁候補</p>
+                              <div className={`rounded-lg border p-3 space-y-2 ${
+                                message.responseType === 'not_found' || message.pageCandidates.some((c) => c.lowConfidence)
+                                  ? 'border-amber-200 bg-amber-50/60'
+                                  : 'border-blue-200 bg-blue-50/60'
+                              }`}>
+                                <p className={`text-xs font-semibold ${
+                                  message.responseType === 'not_found' || message.pageCandidates.some((c) => c.lowConfidence)
+                                    ? 'text-amber-900'
+                                    : 'text-blue-900'
+                                }`}>
+                                  {message.responseType === 'not_found' || message.pageCandidates.some((c) => c.lowConfidence)
+                                    ? '参考候補（低信頼）'
+                                    : '該当頁候補'}
+                                </p>
                                 <ul className="space-y-2">
                                   {message.pageCandidates.map((c, idx) => (
                                     <li key={`${c.sourceUri}-${idx}`} className="text-sm">
@@ -859,6 +877,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                         {c.category ? `${c.category} · ` : ''}
                                         {typeof c.pageNumber === 'number' ? `p.${c.pageNumber}` : 'ページ不明'}
                                         {typeof c.relevance === 'number' ? ` · ${Math.round(c.relevance * 100)}%` : ''}
+                                        {c.lowConfidence ? ' · 低信頼' : ''}
                                       </span>
                                       {c.snippet ? (
                                         <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{c.snippet}</p>
@@ -872,17 +891,39 @@ const normalizeTableMarkdown = (text: string): string => {
                             {message.responseType === 'clarify' && message.clarifyQuestions && message.clarifyQuestions.length > 0 && (
                               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                                 <p className="text-xs font-semibold text-amber-900 mb-1.5">追加で教えてください</p>
-                                <ol className="list-decimal list-inside text-sm text-amber-950 space-y-1">
+                                <div className="flex flex-col gap-1.5">
                                   {message.clarifyQuestions.map((q) => (
-                                    <li key={q}>{q}</li>
+                                    <button
+                                      key={q}
+                                      type="button"
+                                      onClick={() => {
+                                        setInput((prev) => (prev.trim() ? `${prev.trim()}\n${q}` : q));
+                                        setTimeout(() => textareaRef.current?.focus(), 50);
+                                      }}
+                                      className="text-left text-sm text-amber-950 rounded-md px-2 py-1.5 bg-white/70 hover:bg-white border border-amber-100"
+                                    >
+                                      {q}
+                                    </button>
                                   ))}
-                                </ol>
+                                </div>
                               </div>
                             )}
 
                             {message.responseType === 'not_found' && (
-                              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                                検索が弱いため断定回答はしていません
+                              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 space-y-2">
+                                <p>検索が弱いため断定回答はしていません</p>
+                                {selectedCategories.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedCategories([]);
+                                      setFiltersOpen(true);
+                                    }}
+                                    className="text-blue-700 underline underline-offset-2"
+                                  >
+                                    資料カテゴリの絞り込みを外す
+                                  </button>
+                                )}
                               </div>
                             )}
 

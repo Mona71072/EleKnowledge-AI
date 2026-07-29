@@ -86,6 +86,31 @@ def test_validate_ok():
     ) is None
 
 
+def test_validate_scheduled_requires_future_publish_at():
+    err = write.validate(
+        {
+            "type": "notice",
+            "title": "x",
+            "severity": "info",
+            "status": "scheduled",
+        },
+        partial=False,
+    )
+    assert err and "publishAt" in err
+
+    past = write.validate(
+        {
+            "type": "notice",
+            "title": "x",
+            "severity": "info",
+            "status": "scheduled",
+            "publishAt": "2020-01-01T00:00:00.000Z",
+        },
+        partial=False,
+    )
+    assert past and "future" in past
+
+
 # ----------------------------------------------------------------- UTC normalize
 def test_normalize_utc_iso_unifies_js_and_python_and_offsets():
     js = "2026-07-29T10:00:00.123Z"
