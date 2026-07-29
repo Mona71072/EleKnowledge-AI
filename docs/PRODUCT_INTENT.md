@@ -117,4 +117,5 @@ Markdown への「守れ」は強制機構ではない。安全条件・必須�
 - 元資料: ユーザー共有 PDF「無題のドキュメント」（開発設計レポート要約）
 - AI 駆動の共同運用: [ops-ai-driven-dev.md](./ops-ai-driven-dev.md)
 - RAG 前提: [decisions-2026-07-29-rag-nuance.md](./decisions-2026-07-29-rag-nuance.md)
+- 当面の製品方針（頁ファースト）: [joint-review-2026-07-29-product-direction.md](./joint-review-2026-07-29-product-direction.md)
 - 詳細ブループリント一式のリポジトリ投入は、合意後に別途行う
