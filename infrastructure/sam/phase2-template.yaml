@@ -361,6 +361,18 @@ Resources:
             RestApiId: !Ref ChatApi
             Path: /chat/admin/failures
             Method: GET
+        SubmitSuggestion:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /chat/suggestions
+            Method: POST
+        ListAdminSuggestions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /chat/admin/suggestions
+            Method: GET
 
   # ============================================================================
   # API Gateway

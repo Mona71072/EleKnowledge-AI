@@ -140,8 +140,10 @@ python3 scripts/eval/run_retrieve_eval.py --only G001,G103
 ## Plan の入力源（優先順）— 是正後
 
 1. **管理コンソール「失敗一覧」**（`/admin/failures`）  
+   - **改善提案パネル（v0）:** 失敗信号をクライアント集計し、件数≥3 で定型 Act を表示（[design-2026-07-29-improvement-proposals.md](./design-2026-07-29-improvement-proposals.md)）  
    - `feedback=bad` と `responseType=not_found` を一覧  
-   - 👎 理由（資料違い／頁違い／回答おかしい）も表示  
+   - 👎 理由（`wrong_doc` / `unresolved` / `bad_answer` / `other`。旧 `wrong_page` は履歴表示のみ）も表示  
+   - **`unresolved`（疑問が解けない）** は「資料が悪い」決め打ちにしない。候補・snippet・作文・聞き返し・KB欠落を failures で人手振り分け  
    - 「ゴールデン候補をコピー」で `golden_set.jsonl` 1行を取得  
 2. 現場メモ／Slack（一覧に無い・口頭の補足）  
 3. survey 難問枠の合成問（補助）
@@ -150,8 +152,9 @@ python3 scripts/eval/run_retrieve_eval.py --only G001,G103
 
 | 片方だけだと足りない | 理由 |
 |---|---|
-| 一覧だけ（理由なし 👎） | 資料ミス・頁ミス・作文ミスが混ざり、直す場所が分からない |
+| 一覧だけ（理由なし 👎） | 資料ミス・解決失敗・作文ミスが混ざり、直す場所が分からない |
 | 理由付き 👎 だけ | **not_found は自動で付くがクリックされない** → 一覧が無いと収穫できない |
+| `unresolved` を KB 欠陥と即断 | 複合信号。failures で振り分けてから手を打つ |
 | DynamoDB 手探り | 「ワンクリックで得る」に反する。回らない |
 
 制約（守ること）:

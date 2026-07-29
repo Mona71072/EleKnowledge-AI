@@ -22,14 +22,18 @@ ADMIN_GROUP_NAME = os.environ.get('ADMIN_GROUP_NAME', 'admin')
 # DynamoDB table
 chatlogs_table = dynamodb.Table(CHATLOGS_TABLE_NAME)
 
-# 👎 理由コード（PRODUCT_INTENT: 資料・頁到達 vs 作文品質を分ける）
+# 👎 理由コード（成功＝資料到達＋疑問解決。何がダメかを採取）
+# unresolved は「直す場所の入口」であり KB が悪いと決め打ちしない → failures で人手振り分け
 FEEDBACK_REASONS = frozenset({
-    'wrong_doc',    # 資料が違う
-    'wrong_page',   # 頁が違う
-    'bad_answer',   # 回答がおかしい
+    'wrong_doc',    # 資料が違う → 検索・フィルタ・KB
+    'unresolved',   # 疑問が解けない → failures で検索／snippet／作文／聞き返し等に振り分け
+    'bad_answer',   # 回答がおかしい → プロンプト・弱ゲート
     'other',        # その他
 })
+# 旧データに残る値（新規 PUT では FEEDBACK_REASONS 外＝400。一覧表示はそのまま）
+# wrong_page: 頁が違う（廃止・頁誘導仕様ではないため）
 FEEDBACK_COMMENT_MAX = 200
+WISH_TEXT_MAX = 1000
 FAILURES_SCAN_MAX_PAGES = 25
 FAILURES_DEFAULT_LIMIT = 50
 FAILURES_HARD_LIMIT = 100
@@ -140,6 +144,9 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
         sessions_dict = {}
         for msg in messages:
             session_id = msg['sessionId']
+            # 改善要望（product_wish）はチャット履歴一覧に出さない
+            if str(session_id).startswith('wish-'):
+                continue
             if session_id not in sessions_dict:
                 sessions_dict[session_id] = {
                     'sessionId': session_id,
@@ -187,9 +194,16 @@ def get_session_messages(session_id: str, limit: int = 100, fetch_all: bool = Fa
                 page_limit = min(100, max(20, (target - len(collected)) * 2))
             kwargs = {
                 'KeyConditionExpression': 'sessionId = :sid',
-                'FilterExpression': 'attribute_not_exists(#del) OR #del = :false',
-                'ExpressionAttributeNames': {'#del': 'deleted'},
-                'ExpressionAttributeValues': {':sid': session_id, ':false': False},
+                'FilterExpression': (
+                    '(attribute_not_exists(#del) OR #del = :false) '
+                    'AND (attribute_not_exists(#role) OR #role <> :wish)'
+                ),
+                'ExpressionAttributeNames': {'#del': 'deleted', '#role': 'role'},
+                'ExpressionAttributeValues': {
+                    ':sid': session_id,
+                    ':false': False,
+                    ':wish': 'product_wish',
+                },
                 'ScanIndexForward': True,
                 'Limit': page_limit,
             }
@@ -441,6 +455,87 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
     }
 
 
+def save_product_wish(user_id: str, text: str, context_session_id: str = None) -> dict:
+    """利用者の「こうなってほしい」自由記述を chatlogs に保存（role=product_wish）。"""
+    text = (text or '').strip()
+    if not text:
+        raise ValueError('text is required')
+    if len(text) > WISH_TEXT_MAX:
+        raise ValueError(f'text must be at most {WISH_TEXT_MAX} characters')
+
+    now = datetime.utcnow().isoformat() + 'Z'
+    ttl = int(time.time()) + (60 * 24 * 60 * 60)
+    message_id = f'wish-{int(time.time() * 1000)}'
+    session_id = f'wish-{user_id}'
+
+    item = {
+        'sessionId': session_id,
+        'messageId': message_id,
+        'userId': user_id,
+        'role': 'product_wish',
+        'content': text,
+        'timestamp': now,
+        'ttl': ttl,
+    }
+    if context_session_id:
+        item['contextSessionId'] = context_session_id
+
+    chatlogs_table.put_item(Item=item)
+    return {'messageId': message_id, 'timestamp': now}
+
+
+def list_product_wishes(limit: int = FAILURES_DEFAULT_LIMIT) -> dict:
+    """admin 用: product_wish を新しい順に返す（Scan + Filter）。"""
+    limit = max(1, min(int(limit or FAILURES_DEFAULT_LIMIT), FAILURES_HARD_LIMIT))
+    filter_expr = '#role = :wish AND (attribute_not_exists(#del) OR #del = :false)'
+    names = {'#role': 'role', '#del': 'deleted'}
+    values = {':wish': 'product_wish', ':false': False}
+
+    collected = []
+    exclusive_start = None
+    pages = 0
+    scanned_count = 0
+
+    while pages < FAILURES_SCAN_MAX_PAGES:
+        kwargs = {
+            'FilterExpression': filter_expr,
+            'ExpressionAttributeNames': names,
+            'ExpressionAttributeValues': values,
+            'Limit': 100,
+        }
+        if exclusive_start:
+            kwargs['ExclusiveStartKey'] = exclusive_start
+        resp = chatlogs_table.scan(**kwargs)
+        pages += 1
+        scanned_count += int(resp.get('ScannedCount') or 0)
+        collected.extend(resp.get('Items') or [])
+        exclusive_start = resp.get('LastEvaluatedKey')
+        if not exclusive_start:
+            break
+
+    incomplete = bool(exclusive_start)
+    collected.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
+    collected = collected[:limit]
+
+    wishes = []
+    for item in collected:
+        wishes.append({
+            'messageId': item.get('messageId'),
+            'userId': item.get('userId'),
+            'text': item.get('content') or '',
+            'timestamp': item.get('timestamp'),
+            'contextSessionId': item.get('contextSessionId'),
+        })
+
+    return {
+        'wishes': wishes,
+        'count': len(wishes),
+        'scannedCount': scanned_count,
+        'incomplete': incomplete,
+        'note': 'hot window (TTL〜60日)。Scan ベース。',
+    }
+
+
 def lambda_handler(event, context):
     """
     Handle chat management operations
@@ -452,6 +547,8 @@ def lambda_handler(event, context):
     - GET /chat/sessions/{sessionId}/messages - Get session messages
     - PUT /chat/messages/{messageId}/feedback - Update message feedback
     - GET /chat/admin/failures - List bad / not_found (admin only)
+    - POST /chat/suggestions - Submit product wish (authenticated user)
+    - GET /chat/admin/suggestions - List product wishes (admin only)
     """
     
     # CORS headers
@@ -661,6 +758,54 @@ def lambda_handler(event, context):
                 'statusCode': 200,
                 'headers': headers,
                 'body': json.dumps(payload, cls=DecimalEncoder, ensure_ascii=False)
+            }
+
+        # Route: POST /chat/suggestions - 利用者の「こうなってほしい」
+        elif http_method == 'POST' and path.rstrip('/').endswith('/chat/suggestions'):
+            text = (body.get('text') or body.get('content') or '').strip()
+            context_session_id = body.get('sessionId') or body.get('contextSessionId')
+            if context_session_id and not owns_session(context_session_id, caller_id):
+                context_session_id = None
+            try:
+                saved = save_product_wish(caller_id, text, context_session_id)
+            except ValueError as ve:
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'ValidationError',
+                        'message': str(ve),
+                    }),
+                }
+            return {
+                'statusCode': 201,
+                'headers': headers,
+                'body': json.dumps({
+                    'message': 'Suggestion received',
+                    **saved,
+                }, ensure_ascii=False),
+            }
+
+        # Route: GET /chat/admin/suggestions - admin の改善要望一覧
+        elif http_method == 'GET' and path.rstrip('/').endswith('/chat/admin/suggestions'):
+            if not is_admin(event):
+                return {
+                    'statusCode': 403,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'Forbidden',
+                        'message': 'Admin privileges required',
+                    }),
+                }
+            try:
+                limit = int(query_parameters.get('limit') or FAILURES_DEFAULT_LIMIT)
+            except (TypeError, ValueError):
+                limit = FAILURES_DEFAULT_LIMIT
+            payload = list_product_wishes(limit=limit)
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': json.dumps(payload, cls=DecimalEncoder, ensure_ascii=False),
             }
         
         else:

@@ -23,14 +23,15 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 論理削除（`deleted` フラグ。TTL と Stream→S3 アーカイブで保全）
 
 ## PUT /chat/messages/{messageId}/feedback
-👍 / 👎。セッション所有者のみ。
+👍 / 👎。セッション所有者のみ。  
+成功定義に合わせ、UI の 👍＝「疑問が解けた」、👎理由で **何がダメだったか** を採取する。
 
 **Request:**
 ```json
 {
   "sessionId": "session_xxxxx",
   "feedback": "bad",
-  "reason": "wrong_page",
+  "reason": "unresolved",
   "comment": "（任意・最大200文字）"
 }
 ```
@@ -39,9 +40,19 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 |---|---|---|
 | `sessionId` | yes | 対象セッション |
 | `feedback` | yes | `good` \| `bad` |
-| `reason` | no | `bad` のときのみ。`wrong_doc` \| `wrong_page` \| `bad_answer` \| `other` |
+| `reason` | no | `bad` のときのみ。下記のいずれか |
 | `comment` | no | 自由記述（任意） |
 
+**`reason`（新規）**
+
+| 値 | UI 文言 | 意味 | 直す場所の目安 |
+|---|---|---|---|
+| `wrong_doc` | 資料が違う | 候補が別物 | 検索・フィルタ・KB |
+| `unresolved` | 疑問が解けない | 資料は出た／見たが判断材料にならなかった | **決め打ちしない**。failures で人手振り分け（検索／snippet／作文／聞き返し／KB欠落） |
+| `bad_answer` | 回答がおかしい | 断定・誤要約など作文の問題 | プロンプト・弱ゲート |
+| `other` | その他 | 上記以外 | 人が見る |
+
+- `wrong_page`（頁が違う）は **新規 400**（頁誘導仕様ではない）。旧データは failures で「頁が違う（旧）」表示可
 - `good` のときは既存の `feedbackReason` / `feedbackComment` をクリアする
 - `reason` なしの `bad` も有効（ワンタップ後に理由を選ばなくても信号は残る）
 - CloudWatch EMF（`EleKnowledge/Feedback`）へ件数を送出
@@ -79,3 +90,46 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 ```
 
 実装メモ: chatlogs に失敗専用 GSI は無いため Scan + Filter。試用初期向け。`queryFilters` は RAG Lambda が assistant 行に保存する（2026-07-29〜）。
+
+**改善提案パネル（v0）:** `/admin/failures` 上部で failures レスポンスをクライアント集計し定型提案を表示。`GET /chat/admin/improvement-summary` は**未実装**（後続）。設計: [design-2026-07-29-improvement-proposals.md](./design-2026-07-29-improvement-proposals.md)
+
+## POST /chat/suggestions
+利用者の「こうなってほしい」自由記述（認証必須）。👎 とは別系統。
+
+**Request:**
+```json
+{
+  "text": "候補資料をもっと上に出してほしい",
+  "sessionId": "session_xxxxx"
+}
+```
+
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `text` | yes | 1〜1000 文字 |
+| `sessionId` | no | 関連チャットセッション（所有する場合のみ保存） |
+
+- chatlogs に `role=product_wish` として保存（`sessionId=wish-{sub}`）
+- チャット履歴一覧には出さない
+
+## GET /chat/admin/suggestions
+改善要望一覧（**admin のみ**）
+
+**Query:** `limit` = 1〜100（既定 50）
+
+**Response（抜粋）:**
+```json
+{
+  "wishes": [
+    {
+      "messageId": "wish-1730...",
+      "userId": "sub-...",
+      "text": "機種なしでも検索してほしい",
+      "timestamp": "2026-07-29T12:00:00",
+      "contextSessionId": "session_xxxxx"
+    }
+  ],
+  "count": 1
+}
+```
+

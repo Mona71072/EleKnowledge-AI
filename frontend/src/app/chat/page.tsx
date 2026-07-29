@@ -9,7 +9,16 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 import { Chip } from '@/components/ui';
+import { Toast } from '@/components/ui/Toast';
+import { ChatMessageFeedback } from '@/components/chat/ChatMessageFeedback';
+import { ProductWishModal } from '@/components/chat/ProductWishModal';
 import { ALL_MODEL_TYPES, POPULAR_MODEL_TYPES } from '@/data/kbModelTypes';
+import {
+  BadFeedbackReasonId,
+  FEEDBACK_COMMENT_MAX,
+  PRODUCT_WISH_TEXT_MAX,
+  submitProductWish,
+} from '@/lib/chat-failures';
 
 interface Message {
   id: string;
@@ -40,16 +49,15 @@ interface Message {
     relevance: number;
   }>;
   feedback?: 'good' | 'bad' | null;
-  feedbackReason?: 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other' | null;
+  /** 新規: wrong_doc | unresolved | bad_answer | other。wrong_page は旧データ表示用 */
+  feedbackReason?: 'wrong_doc' | 'unresolved' | 'bad_answer' | 'other' | 'wrong_page' | null;
   feedbackComment?: string | null;
 }
 
-const BAD_FEEDBACK_REASONS: { id: 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other'; label: string }[] = [
-  { id: 'wrong_doc', label: '資料が違う' },
-  { id: 'wrong_page', label: '頁が違う' },
-  { id: 'bad_answer', label: '回答がおかしい' },
-  { id: 'other', label: 'その他' },
-];
+interface ToastState {
+  message: string;
+  variant: 'success' | 'error' | 'info';
+}
 
 interface Session {
   sessionId: string;
@@ -88,8 +96,16 @@ export default function ChatPage() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   // 👎 直後に理由ワンタップを出す対象（必須にしない＝スキップ可）
   const [pendingBadMessageId, setPendingBadMessageId] = useState<string | null>(null);
+  const [pendingBadComment, setPendingBadComment] = useState('');
+  const [feedbackBusyIds, setFeedbackBusyIds] = useState<Record<string, true>>({});
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [wishOpen, setWishOpen] = useState(false);
+  const [wishText, setWishText] = useState('');
+  const [wishSubmitting, setWishSubmitting] = useState(false);
+  const [wishSent, setWishSent] = useState(false);
+  const [wishError, setWishError] = useState<string | null>(null);
 
-  // value は Knowledge Base の実 category 値に対応する安定キー (バックエンドの CATEGORY_MAP と対)。
+  // value は Knowledge Base の実 category 値に対応する安定キー
   // 並び: 本命（C / TI / 据付基準）を先に、その他は後。
   const categoryOptions = [
     { value: 'spec', label: 'C資料' },
@@ -574,9 +590,41 @@ const normalizeTableMarkdown = (text: string): string => {
   const handleFeedback = async (
     messageId: string,
     feedback: 'good' | 'bad',
-    reason?: 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other',
+    reason?: BadFeedbackReasonId,
+    comment?: string,
   ) => {
-    if (!currentSession) return;
+    if (!currentSession || feedbackBusyIds[messageId]) return;
+
+    const previous = messages.find((m) => m.id === messageId);
+    const trimmedComment = comment?.trim().slice(0, FEEDBACK_COMMENT_MAX);
+
+    setFeedbackBusyIds((prev) => ({ ...prev, [messageId]: true }));
+    setMessages((prev) => prev.map((m) =>
+      m.id === messageId
+        ? {
+            ...m,
+            feedback,
+            feedbackReason: feedback === 'bad' ? (reason || m.feedbackReason || null) : null,
+            feedbackComment:
+              feedback === 'good'
+                ? null
+                : trimmedComment
+                  ? trimmedComment
+                  : m.feedbackComment,
+          }
+        : m
+    ));
+
+    if (feedback === 'good') {
+      setPendingBadMessageId(null);
+      setPendingBadComment('');
+    } else if (!reason && !trimmedComment) {
+      setPendingBadMessageId(messageId);
+      setPendingBadComment('');
+    } else if (trimmedComment) {
+      setPendingBadMessageId(null);
+      setPendingBadComment('');
+    }
 
     try {
       const token = await getAuthToken();
@@ -587,6 +635,9 @@ const normalizeTableMarkdown = (text: string): string => {
       if (feedback === 'bad' && reason) {
         body.reason = reason;
       }
+      if (feedback === 'bad' && trimmedComment) {
+        body.comment = trimmedComment;
+      }
       await axios.put(`${CHAT_API_URL}/chat/messages/${messageId}/feedback`, body, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -594,35 +645,76 @@ const normalizeTableMarkdown = (text: string): string => {
         }
       });
 
-      setMessages((prev) => prev.map((m) =>
-        m.id === messageId
-          ? {
-              ...m,
-              feedback,
-              feedbackReason: feedback === 'bad' ? (reason || null) : null,
-              feedbackComment: feedback === 'good' ? null : m.feedbackComment,
-            }
-          : m
-      ));
+      // 👎 初回タップはパネル誘導だけでトーストしない（うるささ防止）
       if (feedback === 'good') {
-        setPendingBadMessageId(null);
-      } else if (!reason) {
-        // 👎 直後は理由チップを出す（選ばなくても bad は既に保存済み）
-        setPendingBadMessageId(messageId);
-      } else {
-        setPendingBadMessageId(null);
+        setToast({ message: 'ありがとうございます。評価を記録しました。', variant: 'success' });
+      } else if (trimmedComment) {
+        setToast({ message: '補足を記録しました。', variant: 'success' });
+      } else if (reason) {
+        setToast({ message: '理由を記録しました。補足があれば続けて書けます。', variant: 'info' });
       }
     } catch (err) {
       console.error('Error submitting feedback:', err);
-      setError('フィードバックの送信に失敗しました。もう一度お試しください。');
+      if (previous) {
+        setMessages((prev) => prev.map((m) => (m.id === messageId ? previous : m)));
+      }
+      if (feedback === 'bad' && !reason && !trimmedComment) {
+        setPendingBadMessageId(null);
+      }
+      setToast({ message: '評価の送信に失敗しました。もう一度お試しください。', variant: 'error' });
+    } finally {
+      setFeedbackBusyIds((prev) => {
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
     }
   };
 
-  const handleBadReason = async (
-    messageId: string,
-    reason: 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other',
-  ) => {
-    await handleFeedback(messageId, 'bad', reason);
+  const handleBadReason = async (messageId: string, reason: BadFeedbackReasonId) => {
+    await handleFeedback(messageId, 'bad', reason, pendingBadComment);
+  };
+
+  const handleBadCommentOnly = async (messageId: string) => {
+    if (!pendingBadComment.trim()) return;
+    await handleFeedback(messageId, 'bad', undefined, pendingBadComment);
+  };
+
+  const openBadReasonPanel = (messageId: string, existingComment?: string | null) => {
+    setPendingBadMessageId(messageId);
+    setPendingBadComment(existingComment || '');
+  };
+
+  const handleSubmitWish = async () => {
+    const text = wishText.trim();
+    if (!text || wishSubmitting) return;
+    if (text.length > PRODUCT_WISH_TEXT_MAX) {
+      setWishError(`要望は ${PRODUCT_WISH_TEXT_MAX} 文字以内で入力してください`);
+      return;
+    }
+    setWishSubmitting(true);
+    setWishError(null);
+    try {
+      await submitProductWish(text, currentSession);
+      setWishText('');
+      setWishSent(true);
+      setToast({ message: '要望を送信しました。ありがとうございます。', variant: 'success' });
+      window.setTimeout(() => {
+        setWishOpen(false);
+        setWishSent(false);
+      }, 1800);
+    } catch (err) {
+      console.error('wish submit failed', err);
+      setWishError('要望の送信に失敗しました。もう一度お試しください。');
+    } finally {
+      setWishSubmitting(false);
+    }
+  };
+
+  const openWishModal = () => {
+    setWishError(null);
+    setWishSent(false);
+    setWishOpen(true);
   };
 
   return (
@@ -652,17 +744,49 @@ const normalizeTableMarkdown = (text: string): string => {
             </div>
           </div>
         </div>
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 border border-gray-300 rounded-lg text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-        >
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={openWishModal}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-violet-200 rounded-lg text-xs sm:text-sm font-medium text-violet-800 bg-violet-50 hover:bg-violet-100 transition-colors"
+          >
+            こうなってほしい
+          </button>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 border border-gray-300 rounded-lg text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
           </svg>
           <span className="hidden sm:inline">ホームへ戻る</span>
           <span className="sm:hidden">ホーム</span>
         </Link>
+        </div>
       </div>
+
+      <ProductWishModal
+        open={wishOpen}
+        text={wishText}
+        submitting={wishSubmitting}
+        sent={wishSent}
+        error={wishError}
+        onTextChange={setWishText}
+        onSubmit={handleSubmitWish}
+        onClose={() => {
+          setWishOpen(false);
+          setWishError(null);
+          setWishSent(false);
+        }}
+      />
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          variant={toast.variant}
+          onDismiss={() => setToast(null)}
+        />
+      )}
 
       <div className="flex flex-1 overflow-hidden relative h-full">
         {/* Mobile Sidebar Overlay */}
@@ -808,8 +932,10 @@ const normalizeTableMarkdown = (text: string): string => {
                       </button>
                     ))}
                   </div>
-                  <p className="mt-5 text-xs text-gray-400">
-                    下の「絞り込み」から資料タイプ・機種を指定すると精度が上がります
+                  <p className="mt-5 text-xs text-gray-400 leading-relaxed">
+                    下の「絞り込み」から資料タイプ・機種を指定すると精度が上がります。
+                    <br />
+                    回答の下で「解けた / 解けない」を押すと改善に活かせます（理由・補足は任意）。
                   </p>
                 </div>
               </div>
@@ -1025,96 +1151,29 @@ const normalizeTableMarkdown = (text: string): string => {
                         );
                       })()}
 
-                      {/* Action row: copy / feedback (assistant, after streaming completes) */}
-                      {message.role === 'assistant' &&
-                       (!streamingMessageId || streamingMessageId !== message.id || (streamingMessages[message.id] || '').length >= message.content.length) && (
-                        <div className="mt-3 pt-2 border-t border-gray-100 flex items-center gap-1">
-                          <button
-                            onClick={() => handleCopyMessage(message.id, message.content)}
-                            className={`p-1.5 rounded-md transition-colors ${
-                              copiedMessageId === message.id
-                                ? 'text-green-600 bg-green-50'
-                                : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
-                            }`}
-                            aria-label="回答をコピー"
-                            title={copiedMessageId === message.id ? 'コピーしました' : 'コピー'}
-                          >
-                            {copiedMessageId === message.id ? (
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                              </svg>
-                            ) : (
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                              </svg>
-                            )}
-                          </button>
-                          <button
-                            onClick={() => handleFeedback(message.id, 'good')}
-                            className={`p-1.5 rounded-md transition-colors ${
-                              message.feedback === 'good'
-                                ? 'text-green-600 bg-green-50'
-                                : 'text-gray-400 hover:text-green-600 hover:bg-green-50'
-                            }`}
-                            aria-label="役立つ"
-                            title="役立つ"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleFeedback(message.id, 'bad')}
-                            className={`p-1.5 rounded-md transition-colors ${
-                              message.feedback === 'bad'
-                                ? 'text-red-600 bg-red-50'
-                                : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
-                            }`}
-                            aria-label="改善を"
-                            title="改善を"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
-                            </svg>
-                          </button>
-                          <span className="ml-auto text-[11px] text-gray-400">
-                            {new Date(message.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* 👎 理由ワンタップ（任意。スキップしても bad は残る） */}
-                      {message.role === 'assistant' &&
-                       message.feedback === 'bad' &&
-                       pendingBadMessageId === message.id && (
-                        <div className="mt-2 rounded-lg border border-red-100 bg-red-50/60 px-3 py-2">
-                          <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <p className="text-xs text-red-800 font-medium">何が違いましたか？（任意）</p>
-                            <button
-                              type="button"
-                              onClick={() => setPendingBadMessageId(null)}
-                              className="text-[11px] text-red-700/70 hover:text-red-900 underline-offset-2 hover:underline"
-                            >
-                              閉じる
-                            </button>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {BAD_FEEDBACK_REASONS.map((r) => (
-                              <button
-                                key={r.id}
-                                type="button"
-                                onClick={() => handleBadReason(message.id, r.id)}
-                                className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                                  message.feedbackReason === r.id
-                                    ? 'bg-red-600 text-white border-red-600'
-                                    : 'bg-white text-red-800 border-red-200 hover:border-red-400'
-                                }`}
-                              >
-                                {r.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+                      {message.role === 'assistant' && (
+                        <ChatMessageFeedback
+                          messageId={message.id}
+                          timestamp={message.timestamp}
+                          feedback={message.feedback}
+                          feedbackReason={message.feedbackReason}
+                          feedbackComment={message.feedbackComment}
+                          copied={copiedMessageId === message.id}
+                          panelOpen={pendingBadMessageId === message.id}
+                          pendingComment={pendingBadComment}
+                          busy={Boolean(feedbackBusyIds[message.id])}
+                          onCopy={() => handleCopyMessage(message.id, message.content)}
+                          onGood={() => handleFeedback(message.id, 'good')}
+                          onBad={() => handleFeedback(message.id, 'bad')}
+                          onReason={(reason) => handleBadReason(message.id, reason)}
+                          onCommentChange={setPendingBadComment}
+                          onCommentSubmit={() => handleBadCommentOnly(message.id)}
+                          onOpenPanel={() => openBadReasonPanel(message.id, message.feedbackComment)}
+                          onClosePanel={() => {
+                            setPendingBadMessageId(null);
+                            setPendingBadComment('');
+                          }}
+                        />
                       )}
 
                       {/* Timestamp (user) */}

@@ -61,7 +61,7 @@ def test_feedback_bad_with_reason(monkeypatch):
     event = _event(
         "PUT",
         "/chat/messages/msg1/feedback",
-        body={"sessionId": "s1", "feedback": "bad", "reason": "wrong_page"},
+        body={"sessionId": "s1", "feedback": "bad", "reason": "wrong_doc"},
         path_params={"messageId": "msg1"},
         groups="user",
     )
@@ -69,9 +69,84 @@ def test_feedback_bad_with_reason(monkeypatch):
     assert resp["statusCode"] == 200
     kwargs = table.update_item.call_args.kwargs
     assert kwargs["ExpressionAttributeValues"][":feedback"] == "bad"
-    assert kwargs["ExpressionAttributeValues"][":reason"] == "wrong_page"
+    assert kwargs["ExpressionAttributeValues"][":reason"] == "wrong_doc"
     assert "ConditionExpression" in kwargs
     assert "#role" in kwargs["ExpressionAttributeNames"]
+
+
+def test_feedback_bad_with_unresolved():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [{"userId": "user-1", "sessionId": "s1"}]}
+
+    event = _event(
+        "PUT",
+        "/chat/messages/msg1/feedback",
+        body={"sessionId": "s1", "feedback": "bad", "reason": "unresolved"},
+        path_params={"messageId": "msg1"},
+        groups="user",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 200
+    kwargs = table.update_item.call_args.kwargs
+    assert kwargs["ExpressionAttributeValues"][":reason"] == "unresolved"
+
+
+def test_feedback_bad_with_comment():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [{"userId": "user-1", "sessionId": "s1"}]}
+
+    event = _event(
+        "PUT",
+        "/chat/messages/msg1/feedback",
+        body={
+            "sessionId": "s1",
+            "feedback": "bad",
+            "comment": "手順の順番が違う",
+        },
+        path_params={"messageId": "msg1"},
+        groups="user",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 200
+    kwargs = table.update_item.call_args.kwargs
+    assert kwargs["ExpressionAttributeValues"][":comment"] == "手順の順番が違う"
+
+
+def test_get_session_messages_excludes_product_wish():
+    mod, table = load_app()
+
+    def _query(**kwargs):
+        assert "FilterExpression" in kwargs
+        assert kwargs["ExpressionAttributeValues"][":wish"] == "product_wish"
+        # DynamoDB が FilterExpression を適用した結果を模倣
+        return {
+            "Items": [
+                {"sessionId": "s1", "messageId": "u1", "role": "user", "content": "q"},
+                {"sessionId": "s1", "messageId": "a1", "role": "assistant", "content": "a"},
+            ],
+        }
+
+    table.query.side_effect = _query
+    msgs = mod.get_session_messages("s1", fetch_all=True)
+    roles = [m.get("role") for m in msgs]
+    assert "product_wish" not in roles
+    assert roles == ["user", "assistant"]
+
+
+def test_feedback_rejects_legacy_wrong_page():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [{"userId": "user-1", "sessionId": "s1"}]}
+
+    event = _event(
+        "PUT",
+        "/chat/messages/msg1/feedback",
+        body={"sessionId": "s1", "feedback": "bad", "reason": "wrong_page"},
+        path_params={"messageId": "msg1"},
+        groups="user",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 400
+    table.update_item.assert_not_called()
 
 
 def test_feedback_missing_message_returns_404():
@@ -149,3 +224,61 @@ def test_list_failure_messages_joins_user_query():
     assert out["failures"][0]["userQuery"] == "火災管制の解除条件は？"
     assert out["failures"][0]["feedbackReason"] == "wrong_doc"
     assert out["failures"][0]["topDocuments"] == ["C-123.pdf"]
+
+
+def test_submit_product_wish():
+    mod, table = load_app()
+    saved = mod.save_product_wish("user-1", "候補をもっと上に", "session-abc")
+    table.put_item.assert_called_once()
+    item = table.put_item.call_args.kwargs["Item"]
+    assert item["role"] == "product_wish"
+    assert item["content"] == "候補をもっと上に"
+    assert item["contextSessionId"] == "session-abc"
+    assert item["sessionId"] == "wish-user-1"
+    assert saved["messageId"].startswith("wish-")
+
+
+def test_submit_product_wish_rejects_empty():
+    mod, _ = load_app()
+    with pytest.raises(ValueError):
+        mod.save_product_wish("user-1", "   ")
+
+
+def test_post_suggestions_route():
+    mod, table = load_app()
+    event = _event(
+        "POST",
+        "/chat/suggestions",
+        body={"text": "機種なしでも検索してほしい"},
+        groups="user",
+        sub="user-42",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 201
+    table.put_item.assert_called_once()
+
+
+def test_admin_suggestions_forbidden():
+    mod, _ = load_app()
+    event = _event("GET", "/chat/admin/suggestions", groups="user")
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 403
+
+
+def test_list_product_wishes():
+    mod, table = load_app()
+    table.scan.return_value = {
+        "Items": [
+            {
+                "messageId": "wish-1",
+                "userId": "u1",
+                "content": "こうしてほしい",
+                "timestamp": "2026-07-29T13:00:00",
+                "role": "product_wish",
+            }
+        ],
+        "ScannedCount": 1,
+    }
+    out = mod.list_product_wishes(limit=10)
+    assert out["count"] == 1
+    assert out["wishes"][0]["text"] == "こうしてほしい"

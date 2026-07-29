@@ -3,7 +3,13 @@ import { getIdToken, authHeaders } from './auth-helpers';
 const CHAT_API_URL = process.env.NEXT_PUBLIC_CHAT_API_URL || '';
 
 export type FailureKind = 'all' | 'bad' | 'not_found';
-export type FeedbackReason = 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other';
+/** 履歴に残る旧 reason（wrong_page）も含む。新規 UI では送らない */
+export type FeedbackReason =
+  | 'wrong_doc'
+  | 'unresolved'
+  | 'bad_answer'
+  | 'other'
+  | 'wrong_page';
 
 export interface FailureItem {
   sessionId: string;
@@ -34,10 +40,29 @@ export interface FailuresResponse {
 
 export const FEEDBACK_REASON_LABELS: Record<FeedbackReason, string> = {
   wrong_doc: '資料が違う',
-  wrong_page: '頁が違う',
+  unresolved: '疑問が解けない',
   bad_answer: '回答がおかしい',
   other: 'その他',
+  wrong_page: '頁が違う（旧）',
 };
+
+/** チャット 👎 理由（新規 UI が送る値のみ） */
+export type BadFeedbackReasonId = 'wrong_doc' | 'unresolved' | 'bad_answer' | 'other';
+
+export const BAD_FEEDBACK_REASONS: { id: BadFeedbackReasonId; label: string; hint?: string }[] = [
+  { id: 'wrong_doc', label: '資料が違う', hint: '別の資料・機種が出た' },
+  { id: 'unresolved', label: '疑問が解けない', hint: '読んでも判断できない' },
+  { id: 'bad_answer', label: '回答がおかしい', hint: '要約や断定が違う' },
+  { id: 'other', label: 'その他' },
+];
+
+export const FEEDBACK_COMMENT_MAX = 200;
+export const PRODUCT_WISH_TEXT_MAX = 1000;
+
+export function getFeedbackReasonLabel(reason?: FeedbackReason | null): string | null {
+  if (!reason) return null;
+  return FEEDBACK_REASON_LABELS[reason] || reason;
+}
 
 /** API 安定キー → 表示ラベル（チャット categoryOptions と揃える） */
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -77,6 +102,71 @@ export async function getChatFailures(
     const err = new Error(message) as Error & { status?: number };
     err.status = res.status;
     throw err;
+  }
+  return res.json();
+}
+
+export interface ProductWish {
+  messageId: string;
+  userId: string;
+  text: string;
+  timestamp: string;
+  contextSessionId?: string;
+}
+
+export interface SuggestionsResponse {
+  wishes: ProductWish[];
+  count: number;
+  scannedCount: number;
+  incomplete?: boolean;
+  note?: string;
+}
+
+/** 利用者: 「こうなってほしい」を送信 */
+export async function submitProductWish(
+  text: string,
+  sessionId?: string | null,
+): Promise<{ message: string; messageId: string; timestamp: string }> {
+  const token = await getIdToken();
+  const body: Record<string, string> = { text: text.trim() };
+  if (sessionId) body.sessionId = sessionId;
+
+  const res = await fetch(`${CHAT_API_URL}/chat/suggestions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const data = await res.json();
+      message = data.message || data.error || message;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+/** admin: 改善要望一覧 */
+export async function getAdminSuggestions(limit = 30): Promise<SuggestionsResponse> {
+  const token = await getIdToken();
+  const res = await fetch(
+    `${CHAT_API_URL}/chat/admin/suggestions?limit=${limit}`,
+    {
+      headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+    },
+  );
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const data = await res.json();
+      message = data.message || data.error || message;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
   }
   return res.json();
 }

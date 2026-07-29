@@ -32,7 +32,7 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/
   sessionId: string;        // Partition Key
   messageId: string;        // Sort Key (ULID)
   userId: string;           // ユーザーID（GSI）
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'product_wish';
   content: string;          // メッセージ内容
   timestamp: string;        // タイムスタンプ
   citations?: string[];     // 引用（AIのみ・レガシー）
@@ -44,7 +44,8 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/
   queryFilters?: object;    // 当時の機種・カテゴリ等
   // --- フィードバック ---
   feedback?: 'good' | 'bad';
-  feedbackReason?: 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other';
+  feedbackReason?: 'wrong_doc' | 'unresolved' | 'bad_answer' | 'other' | 'wrong_page';
+  // wrong_page は旧データのみ（新規 PUT 拒否）。unresolved は「資料が悪い」決め打ちではなく failures で振り分け
   feedbackComment?: string;
   feedbackAt?: string;
   deleted?: boolean;        // 論理削除
