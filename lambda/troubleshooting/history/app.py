@@ -15,6 +15,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "sessions-dev")
+ADMIN_GROUP_NAME = os.environ.get("ADMIN_GROUP_NAME", "admin")
 dynamodb_resource = boto3.resource("dynamodb")
 
 
@@ -36,7 +37,20 @@ def _response(status: int, body: dict) -> dict:
     }
 
 
+def is_admin(event) -> bool:
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}) or {}
+    groups = claims.get("cognito:groups", "")
+    if isinstance(groups, list):
+        group_list = groups
+    else:
+        group_list = [g.strip() for g in str(groups).split(",") if g.strip()]
+    return ADMIN_GROUP_NAME in group_list
+
+
 def lambda_handler(event, context):
+    if not is_admin(event):
+        return _response(403, {"error": "管理者権限が必要です"})
+
     authorizer = event.get("requestContext", {}).get("authorizer", {})
     user_id = authorizer.get("userId") or authorizer.get("claims", {}).get("sub") or ""
     if not user_id:

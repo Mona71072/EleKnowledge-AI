@@ -22,6 +22,7 @@ AGENT_ID = os.environ.get("AGENT_ID", "")
 AGENT_ALIAS_ID = os.environ.get("AGENT_ALIAS_ID", "TSTALIASID")
 DOCUMENTS_BUCKET = os.environ.get("DOCUMENTS_BUCKET", "")
 SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "sessions-dev")
+ADMIN_GROUP_NAME = os.environ.get("ADMIN_GROUP_NAME", "admin")
 
 ALLOWED_MODELS = ["KE-LG", "KM-LD", "CM-MA", "ME-CH"]
 TTL_30_DAYS = 30 * 24 * 3600
@@ -92,6 +93,16 @@ def format_agent_input(validated_data: Dict[str, Any]) -> str:
 def extract_user_id(event: Dict[str, Any]) -> str:
     authorizer = event.get("requestContext", {}).get("authorizer", {})
     return authorizer.get("userId") or authorizer.get("claims", {}).get("sub") or "anonymous"
+
+
+def is_admin(event: Dict[str, Any]) -> bool:
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}) or {}
+    groups = claims.get("cognito:groups", "")
+    if isinstance(groups, list):
+        group_list = groups
+    else:
+        group_list = [g.strip() for g in str(groups).split(",") if g.strip()]
+    return ADMIN_GROUP_NAME in group_list
 
 
 def init_session(session_id: str, validated: Dict[str, Any], user_id: str):
@@ -268,6 +279,8 @@ def format_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
+        if not is_admin(event):
+            return format_response(403, {"error": "管理者権限が必要です"})
         user_id = extract_user_id(event)
         body = json.loads(event["body"])
         validated = validate_input(body)
