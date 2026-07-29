@@ -369,7 +369,8 @@ Resources:
         - ResourcePath: "/*"
           HttpMethod: "*"
           LoggingLevel: INFO
-          DataTraceEnabled: true
+          # DataTrace はボディ全文を実行ログに書き出すため false。
+          DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
         Project: !Ref ProjectName

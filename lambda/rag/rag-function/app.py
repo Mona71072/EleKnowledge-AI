@@ -613,6 +613,38 @@ def extract_citations_from_selected(selected_results: list) -> tuple:
     return citations, source_documents
 
 
+def get_caller_id(event) -> str:
+    """検証済み Cognito クレームから呼び出し元の sub を返す。
+
+    API Gateway の Cognito Authorizer が保証するのは「誰かがログイン済みである」
+    ことだけ。「どのユーザーか」はここで確定させる。ボディの userId は
+    クライアントが自由に詐称できるため使わない。
+    """
+    claims = (event.get('requestContext', {}) or {}).get('authorizer', {}).get('claims', {}) or {}
+    return claims.get('sub') or ''
+
+
+def owns_session(session_id: str, user_id: str) -> bool:
+    """session_id が user_id のものであるかを判定する。
+
+    他人の sessionId を指定すると、その会話履歴がプロンプトに載って回答に
+    反映されてしまう（間接的な内容漏洩）ため、履歴取得前に必ず検証する。
+    """
+    if not session_id or not user_id:
+        return False
+    try:
+        response = chatlogs_table.query(
+            KeyConditionExpression='sessionId = :sid',
+            ExpressionAttributeValues={':sid': session_id},
+            Limit=1
+        )
+    except ClientError as e:
+        print(f"Error verifying session ownership: {e}")
+        return False
+    items = response.get('Items', [])
+    return bool(items) and items[0].get('userId') == user_id
+
+
 def get_chat_history(session_id: str, limit: int = 10) -> list:
     """Get recent chat history for context"""
     try:
@@ -674,26 +706,49 @@ def lambda_handler(event, context):
             body = event.get('body', {})
         
         session_id = body.get('sessionId')
-        user_id = body.get('userId')
+        # userId はボディではなく検証済みクレームから取る（body の userId は無視する）
+        user_id = get_caller_id(event)
         query = body.get('query')
         mode = body.get('mode', 'normal')
         filters = body.get('filters', {})
-        
+
+        if not user_id:
+            return {
+                'statusCode': 401,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'Unauthorized',
+                    'message': 'Authentication required'
+                })
+            }
+
         # Validate input
-        if not query or not user_id:
+        if not query:
             return {
                 'statusCode': 400,
                 'headers': headers,
                 'body': json.dumps({
                     'error': 'ValidationError',
-                    'message': 'Query and userId are required'
+                    'message': 'Query is required'
                 })
             }
-        
+
         # Generate new session ID if not provided
         if not session_id:
             session_id = generate_session_id()
-        
+        else:
+            # 既存セッション指定時は所有者を検証する。
+            # 存在有無を漏らさないよう、他人のものも存在しないものも 404 に丸める。
+            if not owns_session(session_id, user_id):
+                return {
+                    'statusCode': 404,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'NotFound',
+                        'message': 'Session not found'
+                    })
+                }
+
         # Get chat history for context
         chat_history = get_chat_history(session_id, limit=5)
         

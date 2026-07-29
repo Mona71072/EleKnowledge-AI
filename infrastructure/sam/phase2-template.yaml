@@ -392,7 +392,9 @@ Resources:
           ThrottlingBurstLimit: !Ref RagApiThrottleBurst
           ThrottlingRateLimit: !Ref RagApiThrottleRate
           LoggingLevel: INFO
-          DataTraceEnabled: true
+          # DataTrace はボディ全文を実行ログに書き出す。RAG API では利用者の質問文・
+          # AI 回答全文・引用文書の署名付き URL がそのまま CloudWatch Logs に残るため false。
+          DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
         Project: !Ref ProjectName
@@ -433,7 +435,9 @@ Resources:
           ThrottlingBurstLimit: !Ref ChatApiThrottleBurst
           ThrottlingRateLimit: !Ref ChatApiThrottleRate
           LoggingLevel: INFO
-          DataTraceEnabled: true
+          # DataTrace はボディ全文を実行ログに書き出す。Chat API では会話履歴が
+          # そのまま CloudWatch Logs に残るため false。
+          DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
         Project: !Ref ProjectName

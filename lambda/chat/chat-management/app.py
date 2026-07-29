@@ -47,6 +47,39 @@ def emit_feedback_metric(feedback: str) -> None:
         print(f"[chat] Failed to emit feedback EMF: {e}")
 
 
+def get_caller_id(event) -> str:
+    """検証済み Cognito クレームから呼び出し元の sub を返す。
+
+    API Gateway の Cognito Authorizer が保証するのは「誰かがログイン済みである」
+    ことだけで、「どのユーザーか」はここで確定させる必要がある。
+    クエリ文字列やボディの userId はクライアントが自由に詐称できるため使わない。
+    """
+    claims = (event.get('requestContext', {}) or {}).get('authorizer', {}).get('claims', {}) or {}
+    return claims.get('sub') or ''
+
+
+def owns_session(session_id: str, user_id: str) -> bool:
+    """session_id が user_id のものであるかを判定する。
+
+    chatlogs テーブルは PK=sessionId / SK=messageId で、各アイテムが userId を
+    持つ。同一セッション内の userId は同じなので先頭 1 件で判定できる。
+    存在しないセッションは False（呼び出し側で 404 に丸める）。
+    """
+    if not session_id or not user_id:
+        return False
+    try:
+        response = chatlogs_table.query(
+            KeyConditionExpression='sessionId = :sid',
+            ExpressionAttributeValues={':sid': session_id},
+            Limit=1
+        )
+    except ClientError as e:
+        print(f"Error verifying session ownership: {e}")
+        return False
+    items = response.get('Items', [])
+    return bool(items) and items[0].get('userId') == user_id
+
+
 # Custom JSON encoder for Decimal
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -227,22 +260,33 @@ def lambda_handler(event, context):
                 body = json.loads(event['body'])
             else:
                 body = event['body']
-        
+
+        # 呼び出し元は必ず検証済みクレームから決める（クライアント申告値は使わない）
+        caller_id = get_caller_id(event)
+        if not caller_id:
+            return {
+                'statusCode': 401,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'Unauthorized',
+                    'message': 'Authentication required'
+                })
+            }
+
+        # 他人のセッションを指す要求は、存在有無を漏らさないよう一律 404 に丸める
+        not_found = {
+            'statusCode': 404,
+            'headers': headers,
+            'body': json.dumps({
+                'error': 'NotFound',
+                'message': 'Session not found'
+            })
+        }
+
         # Route: GET /chat/sessions - List user sessions
         if http_method == 'GET' and path == '/chat/sessions':
-            user_id = query_parameters.get('userId')
-            
-            if not user_id:
-                return {
-                    'statusCode': 400,
-                    'headers': headers,
-                    'body': json.dumps({
-                        'error': 'ValidationError',
-                        'message': 'userId is required'
-                    })
-                }
-            
-            sessions = get_sessions_by_user(user_id)
+            # userId クエリパラメータは廃止。自分のセッションのみ返す。
+            sessions = get_sessions_by_user(caller_id)
             
             return {
                 'statusCode': 200,
@@ -263,7 +307,10 @@ def lambda_handler(event, context):
                         'message': 'sessionId is required'
                     })
                 }
-            
+
+            if not owns_session(session_id, caller_id):
+                return not_found
+
             messages = get_session_messages(session_id)
             
             return {
@@ -275,7 +322,10 @@ def lambda_handler(event, context):
         # Route: DELETE /chat/sessions/{sessionId} - Delete session
         elif http_method == 'DELETE' and path_parameters.get('sessionId'):
             session_id = path_parameters.get('sessionId')
-            
+
+            if not owns_session(session_id, caller_id):
+                return not_found
+
             deleted_count = delete_session(session_id)
             
             return {
@@ -312,7 +362,10 @@ def lambda_handler(event, context):
                         'message': 'feedback must be "good" or "bad"'
                     })
                 }
-            
+
+            if not owns_session(session_id, caller_id):
+                return not_found
+
             update_message_feedback(session_id, message_id, feedback)
             emit_feedback_metric(feedback)
 

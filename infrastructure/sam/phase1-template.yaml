@@ -603,7 +603,11 @@ Resources:
           ThrottlingBurstLimit: 50
           ThrottlingRateLimit: 10
           LoggingLevel: INFO
-          DataTraceEnabled: true
+          # DataTrace はリクエスト/レスポンスのボディ全文を実行ログに書き出す。
+          # この API は /auth/login /auth/signup /auth/confirm-password-reset を
+          # 持つため、有効にすると平文パスワードが CloudWatch Logs に残る。
+          # 本番・開発を問わず常に false。
+          DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
         Project: !Ref ProjectName

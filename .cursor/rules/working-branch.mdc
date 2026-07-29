@@ -1,12 +1,59 @@
 ---
-description: 作業ブランチは mona を基本とする
+description: 作業ブランチ・push・デプロイ用PRの運用（mona → develop、@yukiworkspace メンション）
 alwaysApply: true
 ---
 
-# 作業ブランチ
+# 作業ブランチとデプロイ PR
 
-このリポジトリでは **`mona`** ブランチを基本の作業ブランチとする。
+## 作業ブランチ
 
-- 機能追加・修正・コミット・push / PR の対象は原則 `mona`
-- `develop` や他ブランチを直接いじらない（明示依頼がある場合のみ）
+- このリポジトリでは **`mona`** を基本の作業ブランチとする
+- 機能追加・修正・コミットの対象は原則 `mona`
+- `develop` や `main` を直接編集しない（明示依頼がある場合のみ）
 - 作業開始時は `git checkout mona` でいることを確認する
+
+## push の流れ（必須）
+
+コード修正が完了したら、次の順で進める。
+
+1. **`mona` にコミット**
+2. **`mona` に push**（`Mona-mebs` アカウントで。`.cursor/rules/github-account.mdc` 参照）
+3. **デプロイ用 PR を `develop` 向けに作成する**
+   - base: `develop`
+   - head: `mona`（または `mona` から切った feature ブランチを merge 済みの `mona`）
+4. PR 本文の先頭で **デプロイ担当者 `@yukiworkspace`（itai）をメンション**する
+
+`mona` への push だけでは **AWS バックエンド（Lambda / API Gateway）は反映されない**。フロント（Amplify）だけが `develop` マージ後に自動反映される。バックエンド変更がある PR では、itai 向けに SAM デプロイ手順を必ず書く。
+
+## デプロイ用 PR に書くこと
+
+| 変更の種類 | 誰が・何をするか | develop マージ後 |
+|---|---|---|
+| `frontend/**` のみ | **自動** — Amplify が `develop` 連動でビルド・デプロイ | git push（マージ）だけで反映 |
+| `lambda/**` | **手動** — デプロイ担当（itai）が `sam deploy` | マージだけでは反映されない |
+| `infrastructure/sam/**` | **手動** — 同上（テンプレート変更はスタック更新） | マージだけでは反映されない |
+| 上記混在 | フロントは自動、バックエンドは itai が SAM 3 本などを実行 | PR に両方の手順を明記 |
+
+PR 本文テンプレ（先頭）:
+
+```markdown
+@yukiworkspace cc: デプロイ依頼
+
+## デプロイ担当（itai）向け
+- [ ] 内容確認（セキュリティ・認可・破壊的変更の有無）
+- [ ] **Amplify**: 本 PR を `develop` にマージすれば `frontend/**` は自動反映（追加作業不要）
+- [ ] **AWS バックエンド**: 以下の SAM デプロイが必要（git push では反映されない）
+  - 手順: `docs/deploy-request-YYYYMMDD-*.md` または PR 内コマンドを参照
+
+## 変更サマリ
+（ここに要約）
+```
+
+バックエンド変更がある場合は、依頼書（例: `docs/deploy-request-*.md`）へのリンクか、実行コマンド・ログ削除・確認項目を PR に含める。
+
+## 禁止・注意
+
+- `develop` / `main` へ直接 push しない（デプロイ PR 経由）
+- デプロイ PR に `@yukiworkspace` メンションを忘れない
+- 「push したからデプロイ完了」と誤解しない — Lambda / API Gateway は itai の `sam deploy` 待ち
+- AWS コンソールで Lambda を直接編集しない（CloudFormation ドリフトの原因）

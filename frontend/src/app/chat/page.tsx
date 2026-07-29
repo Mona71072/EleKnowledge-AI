@@ -240,7 +240,7 @@ const normalizeTableMarkdown = (text: string): string => {
         setUserId(subId);
 
         // セッション一覧を取得
-        await fetchSessions(subId);
+        await fetchSessions();
       } catch (err) {
         console.error('Initialize error:', err);
         router.push('/login');
@@ -320,16 +320,13 @@ const normalizeTableMarkdown = (text: string): string => {
     setShowScrollButton(false);
   };
 
-  const fetchSessions = async (subId: string) => {
+  const fetchSessions = async () => {
     try {
       setIsLoadingSessions(true);
       const token = await getAuthToken();
       
-      console.log('Fetching sessions with URL:', `${CHAT_API_URL}/chat/sessions?userId=${subId}`);
-      console.log('API_URL:', CHAT_API_URL);
-      console.log('Token available:', !!token);
-      
-      const response = await axios.get(`${CHAT_API_URL}/chat/sessions?userId=${subId}`, {
+      // userId はサーバー側で ID トークンのクレームから決まるため送らない
+      const response = await axios.get(`${CHAT_API_URL}/chat/sessions`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -338,12 +335,12 @@ const normalizeTableMarkdown = (text: string): string => {
       console.log('Sessions fetched successfully:', response.data);
       setSessions(response.data.sessions || []);
     } catch (err: any) {
-      console.error('Error fetching sessions - Full error:', {
+      // err.config は headers.Authorization（ID トークン）を含むためログに出さない
+      console.error('Error fetching sessions:', {
         message: err.message,
         status: err.response?.status,
         statusText: err.response?.statusText,
-        data: err.response?.data,
-        config: err.config
+        data: err.response?.data
       });
       setError(`セッション取得に失敗しました: ${err.response?.status || err.message}`);
     } finally {
@@ -457,16 +454,16 @@ const normalizeTableMarkdown = (text: string): string => {
       // 新規セッションの場合はセッション一覧を更新
       if (!currentSession && response.data.sessionId) {
         setCurrentSession(response.data.sessionId);
-        await fetchSessions(userId);
+        await fetchSessions();
         await fetchSessionMessages(response.data.sessionId);
       }
     } catch (err: any) {
-      console.error('Error sending RAG query - Full error:', {
+      // err.config は headers.Authorization（ID トークン）を含むためログに出さない
+      console.error('Error sending RAG query:', {
         message: err.message,
         status: err.response?.status,
         statusText: err.response?.statusText,
         data: err.response?.data,
-        config: err.config,
         url: err.config?.url
       });
       setError(`エラーが発生しました: ${err.response?.data?.message || err.message || 'Unknown error'}`);
