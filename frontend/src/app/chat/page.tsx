@@ -9,6 +9,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 import { Chip } from '@/components/ui';
+import { ALL_MODEL_TYPES, POPULAR_MODEL_TYPES } from '@/data/kbModelTypes';
 
 interface Message {
   id: string;
@@ -16,6 +17,17 @@ interface Message {
   content: string;
   timestamp: string;
   citations?: string[];
+  responseType?: 'clarify' | 'pages' | 'not_found';
+  clarifyQuestions?: string[];
+  pageCandidates?: Array<{
+    documentName: string;
+    category?: string;
+    modelType?: string;
+    pageNumber?: number;
+    sourceUri: string;
+    relevance: number;
+    snippet?: string | null;
+  }>;
   sourceDocuments?: Array<{
     documentName: string;
     title?: string;  // メタデータタイトル（オプション）
@@ -23,6 +35,7 @@ interface Message {
     category: string;    // Knowledge Base の実メタデータ category（例: C資料 / 据付場用図）
     modelType: string;   // 同 model_type（カンマ連結の多値文字列）
     hasImage?: boolean;  // 該当チャンクが図面などの画像だった場合 true
+    pageNumber?: number;
     relevance: number;
   }>;
   feedback?: 'good' | 'bad' | null;
@@ -55,43 +68,40 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showAllCitations, setShowAllCitations] = useState<Record<string, boolean>>({});
-  // 資料カテゴリは複数選択 (バックエンド build_kb_filter が in 句に対応)。値は CATEGORY_MAP の安定キー。
+  // 資料カテゴリは複数選択。未選択＝全資料検索。
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   // 機種は model_type の stringContains 単一値のため単一選択。
   const [selectedModel, setSelectedModel] = useState('');
+  const [modelQuery, setModelQuery] = useState('');
+  const [modelListOpen, setModelListOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // value は Knowledge Base の実 category 値に対応する安定キー (バックエンドの CATEGORY_MAP と対)。
-  // 表示用の日本語はこの層だけに置き、資料フォルダ名が変わっても API 契約が壊れないようにする。
-  // ラベルは KB の実 category 名に合わせる (テクニカルインフォメーションのみ通称 TI を使用)。
-  // value キー(安定キー)は変更しないため API 契約は不変。
+  // 並び: 本命（C / TI / 据付基準）を先に、その他は後。
   const categoryOptions = [
-    { value: '', label: 'すべての資料' },
-    { value: 'drawing', label: '据付場用図' },
     { value: 'spec', label: 'C資料' },
     { value: 'tech_info', label: 'TI' },
+    { value: 'std', label: '据付基準' },
+    { value: 'drawing', label: '据付場用図' },
     { value: 'incident', label: '災害事例集' },
     { value: 'qsheet', label: 'Qシート' },
-    { value: 'std', label: '据付基準' },
     { value: 'note', label: '据付ノート' },
+    { value: 'w_doc', label: 'W資料' },
     { value: 'site_agent', label: '現場代理人業務マニュアル' },
     { value: 'quality_mgmt', label: '品質管理業務マニュアル' },
-    { value: 'w_doc', label: 'W資料' }
   ];
 
-  // model_type はカンマ連結の多値文字列を部分一致で絞り込むため、
-  // 'AXIEZ' は 'AXIEZ-LINKs' 等にも一致する (上位集合になる)。ラベルで明示している。
-  const modelTypeOptions = [
-    { value: '', label: 'すべての機種' },
-    { value: 'AXIEZ', label: 'AXIEZ 系（AXIEZ-LINKs を含む）' },
-    { value: 'AXIEZ-LINKs', label: 'AXIEZ-LINKs' },
-    { value: 'NEXCUBE', label: 'NEXCUBE' },
-    { value: 'NEXIEZ-MRL', label: 'NEXIEZ-MRL' },
-    { value: 'メルワイド', label: 'メルワイド' },
-    { value: 'メルシティ', label: 'メルシティ' },
-    { value: 'ELENESSA', label: 'ELENESSA' }
-  ];
+  const normalizedModelQuery = modelQuery.trim().toLowerCase();
+  const filteredModelOptions = normalizedModelQuery
+    ? ALL_MODEL_TYPES.filter((opt) =>
+        opt.label.toLowerCase().includes(normalizedModelQuery)
+          || opt.value.toLowerCase().includes(normalizedModelQuery)
+      ).slice(0, 40)
+    : ALL_MODEL_TYPES.slice(0, 30);
+
+  const selectedModelLabel =
+    ALL_MODEL_TYPES.find((o) => o.value === selectedModel)?.label || selectedModel;
 
   const API_URL = process.env.NEXT_PUBLIC_RAG_API_URL || '';
   const CHAT_API_URL = process.env.NEXT_PUBLIC_CHAT_API_URL || '';
@@ -460,17 +470,24 @@ const normalizeTableMarkdown = (text: string): string => {
         content: response.data.content,
         timestamp: response.data.timestamp,
         citations: response.data.citations,
+        responseType: response.data.responseType,
+        clarifyQuestions: response.data.clarifyQuestions,
+        pageCandidates: response.data.pageCandidates,
         sourceDocuments: response.data.sourceDocuments
       };
 
       setMessages(prev => [...prev, aiMessage]);
-      
-      // タイプライター効果を開始
-      setStreamingMessageId(aiId);
-      setStreamingMessages(prev => ({
-        ...prev,
-        [aiId]: ''
-      }));
+
+      // clarify / not_found は定型文なのでタイプライター不要（意図: 候補・聞き返しをすぐ読ませる）
+      if (response.data.responseType === 'clarify' || response.data.responseType === 'not_found') {
+        setStreamingMessageId(null);
+      } else {
+        setStreamingMessageId(aiId);
+        setStreamingMessages(prev => ({
+          ...prev,
+          [aiId]: ''
+        }));
+      }
 
       // 新規セッションの場合はセッション一覧を更新
       if (!currentSession && response.data.sessionId) {
@@ -781,19 +798,67 @@ const normalizeTableMarkdown = (text: string): string => {
 
                       <div className="w-full">
                         {message.role === 'assistant' ? (
-                          <div className="chat-markdown text-gray-800 text-[13px] sm:text-[14px]">
-                            {streamingMessageId === message.id ? (
-                              <>
-                                <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-                                  {normalizeTableMarkdown(streamingMessages[message.id] || '')}
-                                </ReactMarkdown>
-                                <span className="inline-block w-2 h-5 bg-blue-500 ml-1 animate-pulse" />
-                              </>
-                            ) : (
-                              <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-                                {normalizeTableMarkdown(streamingMessages[message.id] || message.content)}
-                              </ReactMarkdown>
+                          <div className="space-y-3">
+                            {/* WHY: 成功定義は該当頁到達。候補を本文より上に出す（design-2026-07-29） */}
+                            {message.pageCandidates && message.pageCandidates.length > 0 && (
+                              <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 space-y-2">
+                                <p className="text-xs font-semibold text-blue-900">該当頁候補</p>
+                                <ul className="space-y-2">
+                                  {message.pageCandidates.map((c, idx) => (
+                                    <li key={`${c.sourceUri}-${idx}`} className="text-sm">
+                                      <a
+                                        href={c.sourceUri}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-medium text-blue-700 hover:underline"
+                                      >
+                                        {c.documentName}
+                                      </a>
+                                      <span className="text-gray-600 text-xs ml-2">
+                                        {c.category ? `${c.category} · ` : ''}
+                                        {typeof c.pageNumber === 'number' ? `p.${c.pageNumber}` : 'ページ不明'}
+                                        {typeof c.relevance === 'number' ? ` · ${Math.round(c.relevance * 100)}%` : ''}
+                                      </span>
+                                      {c.snippet ? (
+                                        <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{c.snippet}</p>
+                                      ) : null}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
                             )}
+
+                            {message.responseType === 'clarify' && message.clarifyQuestions && message.clarifyQuestions.length > 0 && (
+                              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                                <p className="text-xs font-semibold text-amber-900 mb-1.5">追加で教えてください</p>
+                                <ol className="list-decimal list-inside text-sm text-amber-950 space-y-1">
+                                  {message.clarifyQuestions.map((q) => (
+                                    <li key={q}>{q}</li>
+                                  ))}
+                                </ol>
+                              </div>
+                            )}
+
+                            {message.responseType === 'not_found' && (
+                              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                                検索が弱いため断定回答はしていません
+                              </div>
+                            )}
+
+                            <div className="chat-markdown text-gray-800 text-[13px] sm:text-[14px]">
+                              {streamingMessageId === message.id ? (
+                                <>
+                                  <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+                                    {normalizeTableMarkdown(streamingMessages[message.id] || '')}
+                                  </ReactMarkdown>
+                                  <span className="inline-block w-2 h-5 bg-blue-500 ml-1 animate-pulse" />
+                                </>
+                              ) : (
+                                <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+                                  {normalizeTableMarkdown(streamingMessages[message.id] || message.content)}
+                                </ReactMarkdown>
+                              )}
+                            </div>
                           </div>
                         ) : (
                           <p className={`whitespace-pre-wrap break-words text-[13px] leading-relaxed font-normal text-white`}>
@@ -1060,7 +1125,7 @@ const normalizeTableMarkdown = (text: string): string => {
                       className="inline-flex items-center gap-1 rounded-full bg-indigo-100 text-indigo-800 text-xs px-2.5 py-1 hover:bg-indigo-200 transition-colors"
                       title="クリックで解除"
                     >
-                      {modelTypeOptions.find((o) => o.value === selectedModel)?.label || selectedModel}
+                      {selectedModelLabel}
                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                       </svg>
@@ -1073,6 +1138,7 @@ const normalizeTableMarkdown = (text: string): string => {
                       onClick={() => {
                         setSelectedCategories([]);
                         setSelectedModel('');
+                        setModelQuery('');
                       }}
                       className="inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700"
                     >
@@ -1089,7 +1155,7 @@ const normalizeTableMarkdown = (text: string): string => {
                     <div className="flex items-start gap-2">
                       <span className="flex-shrink-0 text-xs font-medium text-gray-500 mt-1">資料</span>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {categoryOptions.filter((opt) => opt.value).map((opt) => (
+                        {categoryOptions.map((opt) => (
                           <Chip
                             key={opt.value}
                             active={selectedCategories.includes(opt.value)}
@@ -1107,19 +1173,100 @@ const normalizeTableMarkdown = (text: string): string => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-gray-500">機種</span>
-                      <select
-                        value={selectedModel}
-                        onChange={(e) => setSelectedModel(e.target.value)}
-                        className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-900 transition-colors hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        {modelTypeOptions.map((opt) => (
-                          <option key={opt.value || 'all'} value={opt.value}>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-gray-500">機種</span>
+                        {selectedModel && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedModel('');
+                              setModelQuery('');
+                            }}
+                            className="text-[11px] text-gray-500 hover:text-gray-700"
+                          >
+                            すべての機種に戻す
+                          </button>
+                        )}
+                      </div>
+
+                      {selectedModel && (
+                        <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-md px-2 py-1">
+                          選択中: <span className="font-medium">{selectedModelLabel}</span>
+                          <span className="text-indigo-500 ml-1">（部分一致。AXIEZ は LINKs 等も含みます）</span>
+                        </p>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] text-gray-400 w-full sm:w-auto">よく使う</span>
+                        {POPULAR_MODEL_TYPES.map((opt) => (
+                          <Chip
+                            key={opt.value}
+                            active={selectedModel === opt.value}
+                            onClick={() => {
+                              setSelectedModel(opt.value);
+                              setModelQuery('');
+                              setModelListOpen(false);
+                            }}
+                          >
                             {opt.label}
-                          </option>
+                          </Chip>
                         ))}
-                      </select>
+                      </div>
+
+                      <div className="relative">
+                        <input
+                          type="search"
+                          value={modelQuery}
+                          onChange={(e) => {
+                            setModelQuery(e.target.value);
+                            setModelListOpen(true);
+                          }}
+                          onFocus={() => setModelListOpen(true)}
+                          placeholder="機種名で検索（例: AXIEZ / NEX / メル）"
+                          className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          aria-label="機種名検索"
+                          autoComplete="off"
+                        />
+                        {modelListOpen && (
+                          <div className="absolute z-30 mt-1 w-full max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                            <button
+                              type="button"
+                              className="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 border-b border-gray-100"
+                              onClick={() => {
+                                setSelectedModel('');
+                                setModelQuery('');
+                                setModelListOpen(false);
+                              }}
+                            >
+                              すべての機種
+                            </button>
+                            {filteredModelOptions.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-gray-400">一致する機種がありません</p>
+                            ) : (
+                              filteredModelOptions.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 ${
+                                    selectedModel === opt.value ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-800'
+                                  }`}
+                                  onClick={() => {
+                                    setSelectedModel(opt.value);
+                                    setModelQuery('');
+                                    setModelListOpen(false);
+                                  }}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-400">
+                        カタログ全 {ALL_MODEL_TYPES.length} 機種から検索できます
+                      </p>
                     </div>
                   </div>
                 )}
