@@ -17,9 +17,22 @@ dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', '
 CHATLOGS_TABLE_NAME = os.environ.get('CHATLOGS_TABLE')
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
 FEEDBACK_METRIC_NAMESPACE = os.environ.get('FEEDBACK_METRIC_NAMESPACE', 'EleKnowledge/Feedback')
+ADMIN_GROUP_NAME = os.environ.get('ADMIN_GROUP_NAME', 'admin')
 
 # DynamoDB table
 chatlogs_table = dynamodb.Table(CHATLOGS_TABLE_NAME)
+
+# 👎 理由コード（PRODUCT_INTENT: 資料・頁到達 vs 作文品質を分ける）
+FEEDBACK_REASONS = frozenset({
+    'wrong_doc',    # 資料が違う
+    'wrong_page',   # 頁が違う
+    'bad_answer',   # 回答がおかしい
+    'other',        # その他
+})
+FEEDBACK_COMMENT_MAX = 200
+FAILURES_SCAN_MAX_PAGES = 25
+FAILURES_DEFAULT_LIMIT = 50
+FAILURES_HARD_LIMIT = 100
 
 
 def emit_feedback_metric(feedback: str) -> None:
@@ -56,6 +69,17 @@ def get_caller_id(event) -> str:
     """
     claims = (event.get('requestContext', {}) or {}).get('authorizer', {}).get('claims', {}) or {}
     return claims.get('sub') or ''
+
+
+def is_admin(event) -> bool:
+    """Cognito グループに admin が含まれるか（サーバー側必須。UI ガードだけでは不十分）。"""
+    claims = (event.get('requestContext', {}) or {}).get('authorizer', {}).get('claims', {}) or {}
+    groups = claims.get('cognito:groups', '')
+    if isinstance(groups, list):
+        group_list = [str(g).strip() for g in groups if str(g).strip()]
+    else:
+        group_list = [g.strip() for g in str(groups).split(',') if g.strip()]
+    return ADMIN_GROUP_NAME in group_list
 
 
 def owns_session(session_id: str, user_id: str) -> bool:
@@ -206,24 +230,179 @@ def delete_session(session_id: str) -> int:
         raise
 
 
-def update_message_feedback(session_id: str, message_id: str, feedback: str) -> bool:
-    """Update message feedback (thumbs up/down)"""
+def update_message_feedback(
+    session_id: str,
+    message_id: str,
+    feedback: str,
+    reason: str = None,
+    comment: str = None,
+) -> bool:
+    """Update message feedback (thumbs up/down).
+
+    bad のとき任意で reason / comment を付ける（ワンタップ分類用）。
+    good のときは理由フィールドを消して残滓を残さない。
+    """
     try:
-        chatlogs_table.update_item(
-            Key={
-                'sessionId': session_id,
-                'messageId': message_id
-            },
-            UpdateExpression='SET feedback = :feedback',
-            ExpressionAttributeValues={
-                ':feedback': feedback
+        names = {}
+        values = {':feedback': feedback}
+        parts = ['feedback = :feedback', 'feedbackAt = :at']
+        values[':at'] = datetime.utcnow().isoformat() + 'Z'
+
+        if feedback == 'bad':
+            if reason:
+                parts.append('feedbackReason = :reason')
+                values[':reason'] = reason
+            if comment:
+                parts.append('feedbackComment = :comment')
+                values[':comment'] = comment[:FEEDBACK_COMMENT_MAX]
+        else:
+            # good: 以前の bad 理由をクリア
+            names['#fr'] = 'feedbackReason'
+            names['#fc'] = 'feedbackComment'
+            remove = ' REMOVE #fr, #fc'
+            expr = 'SET ' + ', '.join(parts) + remove
+            kwargs = {
+                'Key': {'sessionId': session_id, 'messageId': message_id},
+                'UpdateExpression': expr,
+                'ExpressionAttributeValues': values,
+                'ExpressionAttributeNames': names,
             }
-        )
+            chatlogs_table.update_item(**kwargs)
+            return True
+
+        kwargs = {
+            'Key': {'sessionId': session_id, 'messageId': message_id},
+            'UpdateExpression': 'SET ' + ', '.join(parts),
+            'ExpressionAttributeValues': values,
+        }
+        chatlogs_table.update_item(**kwargs)
         return True
-        
+
     except ClientError as e:
         print(f"Error updating feedback: {e}")
         raise
+
+
+def _session_user_query_before(session_id: str, assistant_ts: str, cache: dict) -> str:
+    """同一セッションで、assistant の直前 user 文を返す（失敗一覧用）。"""
+    if session_id not in cache:
+        try:
+            msgs = get_session_messages(session_id, limit=200)
+        except ClientError:
+            msgs = []
+        cache[session_id] = msgs
+    prev = ''
+    for msg in cache[session_id]:
+        ts = msg.get('timestamp') or ''
+        if ts >= assistant_ts:
+            break
+        if msg.get('role') == 'user':
+            prev = (msg.get('content') or '').strip()
+    return prev
+
+
+def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT) -> dict:
+    """admin 用: bad フィードバックと not_found を新しい順に返す。
+
+    chatlogs は GSI が失敗専用ではないため Scan + Filter。
+    試用初期のホットウィンドウ（TTL 約60日）向け。大規模化したら Athena へ移す。
+    """
+    limit = max(1, min(int(limit or FAILURES_DEFAULT_LIMIT), FAILURES_HARD_LIMIT))
+    kind = (kind or 'all').lower()
+    if kind not in ('all', 'bad', 'not_found'):
+        kind = 'all'
+
+    # role=assistant かつ (feedback=bad OR responseType=not_found)、未削除
+    filter_parts = [
+        '#role = :assistant',
+        '(attribute_not_exists(#del) OR #del = :false)',
+    ]
+    values = {
+        ':assistant': 'assistant',
+        ':false': False,
+        ':bad': 'bad',
+        ':not_found': 'not_found',
+    }
+    names = {'#role': 'role', '#del': 'deleted', '#rt': 'responseType'}
+
+    if kind == 'bad':
+        filter_parts.append('feedback = :bad')
+    elif kind == 'not_found':
+        filter_parts.append('#rt = :not_found')
+    else:
+        filter_parts.append('(feedback = :bad OR #rt = :not_found)')
+
+    collected = []
+    exclusive_start = None
+    pages = 0
+    scanned_count = 0
+
+    while pages < FAILURES_SCAN_MAX_PAGES and len(collected) < limit:
+        kwargs = {
+            'FilterExpression': ' AND '.join(filter_parts),
+            'ExpressionAttributeNames': names,
+            'ExpressionAttributeValues': values,
+            'Limit': 100,
+        }
+        if exclusive_start:
+            kwargs['ExclusiveStartKey'] = exclusive_start
+        resp = chatlogs_table.scan(**kwargs)
+        pages += 1
+        scanned_count += int(resp.get('ScannedCount') or 0)
+        collected.extend(resp.get('Items') or [])
+        exclusive_start = resp.get('LastEvaluatedKey')
+        if not exclusive_start:
+            break
+
+    collected.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
+    collected = collected[:limit]
+
+    session_cache = {}
+    failures = []
+    for item in collected:
+        ts = item.get('timestamp') or ''
+        session_id = item.get('sessionId') or ''
+        user_query = _session_user_query_before(session_id, ts, session_cache)
+        candidates = item.get('pageCandidates') or []
+        top_docs = []
+        for c in candidates[:5]:
+            name = c.get('documentName') or c.get('name') or ''
+            if name:
+                top_docs.append(name)
+        if not top_docs:
+            for d in (item.get('sourceDocuments') or [])[:5]:
+                name = d.get('documentName') or ''
+                if name:
+                    top_docs.append(name)
+
+        signal = []
+        if item.get('feedback') == 'bad':
+            signal.append('bad')
+        if item.get('responseType') == 'not_found':
+            signal.append('not_found')
+
+        failures.append({
+            'sessionId': session_id,
+            'messageId': item.get('messageId'),
+            'timestamp': ts,
+            'signals': signal,
+            'responseType': item.get('responseType'),
+            'feedback': item.get('feedback'),
+            'feedbackReason': item.get('feedbackReason'),
+            'feedbackComment': item.get('feedbackComment'),
+            'userQuery': user_query,
+            'queryFilters': item.get('queryFilters') or {},
+            'topDocuments': top_docs,
+            'assistantPreview': ((item.get('content') or '')[:120]),
+        })
+
+    return {
+        'failures': failures,
+        'count': len(failures),
+        'scannedCount': scanned_count,
+        'truncated': kind,
+        'note': 'hot window (TTL〜60日)。Scan ベースのため件数増で遅くなる場合は Athena へ移行。',
+    }
 
 
 def lambda_handler(event, context):
@@ -236,6 +415,7 @@ def lambda_handler(event, context):
     - DELETE /chat/sessions/{sessionId} - Delete session
     - GET /chat/sessions/{sessionId}/messages - Get session messages
     - PUT /chat/messages/{messageId}/feedback - Update message feedback
+    - GET /chat/admin/failures - List bad / not_found (admin only)
     """
     
     # CORS headers
@@ -342,6 +522,8 @@ def lambda_handler(event, context):
             message_id = path_parameters.get('messageId')
             session_id = body.get('sessionId')
             feedback = body.get('feedback')
+            reason = body.get('reason') or body.get('feedbackReason')
+            comment = body.get('comment') or body.get('feedbackComment')
             
             if not all([message_id, session_id, feedback]):
                 return {
@@ -363,10 +545,46 @@ def lambda_handler(event, context):
                     })
                 }
 
+            if reason is not None and reason != '':
+                if feedback != 'bad':
+                    return {
+                        'statusCode': 400,
+                        'headers': headers,
+                        'body': json.dumps({
+                            'error': 'ValidationError',
+                            'message': 'reason is only allowed with feedback=bad'
+                        })
+                    }
+                if reason not in FEEDBACK_REASONS:
+                    return {
+                        'statusCode': 400,
+                        'headers': headers,
+                        'body': json.dumps({
+                            'error': 'ValidationError',
+                            'message': f'reason must be one of: {", ".join(sorted(FEEDBACK_REASONS))}'
+                        })
+                    }
+            else:
+                reason = None
+
+            if comment is not None and not isinstance(comment, str):
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'ValidationError',
+                        'message': 'comment must be a string'
+                    })
+                }
+            if isinstance(comment, str):
+                comment = comment.strip() or None
+
             if not owns_session(session_id, caller_id):
                 return not_found
 
-            update_message_feedback(session_id, message_id, feedback)
+            update_message_feedback(
+                session_id, message_id, feedback, reason=reason, comment=comment
+            )
             emit_feedback_metric(feedback)
 
             return {
@@ -375,6 +593,29 @@ def lambda_handler(event, context):
                 'body': json.dumps({
                     'message': 'Feedback updated successfully'
                 })
+            }
+
+        # Route: GET /chat/admin/failures - bad / not_found 一覧（admin のみ）
+        elif http_method == 'GET' and path.rstrip('/').endswith('/chat/admin/failures'):
+            if not is_admin(event):
+                return {
+                    'statusCode': 403,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'Forbidden',
+                        'message': 'Admin privileges required'
+                    })
+                }
+            kind = query_parameters.get('kind') or 'all'
+            try:
+                limit = int(query_parameters.get('limit') or FAILURES_DEFAULT_LIMIT)
+            except (TypeError, ValueError):
+                limit = FAILURES_DEFAULT_LIMIT
+            payload = list_failure_messages(kind=kind, limit=limit)
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': json.dumps(payload, cls=DecimalEncoder, ensure_ascii=False)
             }
         
         else:

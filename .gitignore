@@ -48,6 +48,9 @@ yarn-error.log*
 *.tmp
 *.temp
 
+# Retrieve eval outputs (scripts/eval/run_retrieve_eval.py)
+eval-results/
+
 # Local metadata configuration (contains confidential information)
 docs/metadata-schema-local.md
 docs/*-local.md

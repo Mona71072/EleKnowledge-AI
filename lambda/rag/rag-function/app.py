@@ -167,10 +167,11 @@ def generate_session_title(query: str) -> str:
 def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: str, 
                              citations: list = None, source_documents: list = None,
                              response_type: str = None, page_candidates: list = None,
-                             clarify_questions: list = None):
+                             clarify_questions: list = None, query_filters: dict = None):
     """Save message to DynamoDB with TTL.
 
-    responseType / pageCandidates / clarifyQuestions も保存し、履歴から意図を遡れるようにする。
+    responseType / pageCandidates / clarifyQuestions / queryFilters も保存し、
+    履歴と失敗一覧から意図・条件を遡れるようにする。
     """
     message_id = generate_message_id()
     ttl_timestamp = int(time.time()) + (60 * 24 * 60 * 60)  # 60 days (hot window; full history archived to S3 via stream)
@@ -204,6 +205,9 @@ def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: 
         item['pageCandidates'] = normalized
     if clarify_questions:
         item['clarifyQuestions'] = clarify_questions
+    if query_filters is not None:
+        # 失敗一覧・ゴールデン候補用（空 filters も「未指定」として残す）
+        item['queryFilters'] = query_filters
     
     chatlogs_table.put_item(Item=item)
     return message_id
@@ -966,6 +970,7 @@ def lambda_handler(event, context):
                     session_id=session_id, user_id=user_id, role='assistant',
                     content=ai_response, response_type=response_type,
                     clarify_questions=clarify_questions,
+                    query_filters=filters or {},
                 )
                 session_title = generate_session_title(query) if not chat_history else None
                 return {
@@ -1042,6 +1047,7 @@ def lambda_handler(event, context):
                 session_id=session_id, user_id=user_id, role='assistant',
                 content=ai_response, citations=citations, source_documents=source_documents,
                 response_type=response_type, page_candidates=page_candidates,
+                query_filters=filters or {},
             )
             session_title = generate_session_title(query) if not chat_history else None
             for doc in source_documents:
@@ -1099,6 +1105,7 @@ def lambda_handler(event, context):
             source_documents=source_documents,
             response_type=response_type,
             page_candidates=page_candidates,
+            query_filters=filters or {},
         )
 
         session_title = None

@@ -323,6 +323,7 @@ Resources:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
           ENVIRONMENT: !Ref Environment
           FEEDBACK_METRIC_NAMESPACE: EleKnowledge/Feedback
+          ADMIN_GROUP_NAME: admin
       Events:
         ListSessions:
           Type: Api
@@ -354,6 +355,12 @@ Resources:
             RestApiId: !Ref ChatApi
             Path: /chat/messages/{messageId}/feedback
             Method: PUT
+        ListAdminFailures:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /chat/admin/failures
+            Method: GET
 
   # ============================================================================
   # API Gateway

@@ -39,7 +39,16 @@ interface Message {
     relevance: number;
   }>;
   feedback?: 'good' | 'bad' | null;
+  feedbackReason?: 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other' | null;
+  feedbackComment?: string | null;
 }
+
+const BAD_FEEDBACK_REASONS: { id: 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other'; label: string }[] = [
+  { id: 'wrong_doc', label: '資料が違う' },
+  { id: 'wrong_page', label: '頁が違う' },
+  { id: 'bad_answer', label: '回答がおかしい' },
+  { id: 'other', label: 'その他' },
+];
 
 interface Session {
   sessionId: string;
@@ -76,6 +85,8 @@ export default function ChatPage() {
   const [modelListOpen, setModelListOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  // 👎 直後に理由ワンタップを出す対象（必須にしない＝スキップ可）
+  const [pendingBadMessageId, setPendingBadMessageId] = useState<string | null>(null);
 
   // value は Knowledge Base の実 category 値に対応する安定キー (バックエンドの CATEGORY_MAP と対)。
   // 並び: 本命（C / TI / 据付基準）を先に、その他は後。
@@ -555,15 +566,23 @@ const normalizeTableMarkdown = (text: string): string => {
     setTimeout(() => textareaRef.current?.focus(), 50);
   };
 
-  const handleFeedback = async (messageId: string, feedback: 'good' | 'bad') => {
+  const handleFeedback = async (
+    messageId: string,
+    feedback: 'good' | 'bad',
+    reason?: 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other',
+  ) => {
     if (!currentSession) return;
 
     try {
       const token = await getAuthToken();
-      await axios.put(`${CHAT_API_URL}/chat/messages/${messageId}/feedback`, {
+      const body: Record<string, string> = {
         sessionId: currentSession,
-        feedback
-      }, {
+        feedback,
+      };
+      if (feedback === 'bad' && reason) {
+        body.reason = reason;
+      }
+      await axios.put(`${CHAT_API_URL}/chat/messages/${messageId}/feedback`, body, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -571,11 +590,33 @@ const normalizeTableMarkdown = (text: string): string => {
       });
 
       setMessages(messages.map(m =>
-        m.id === messageId ? { ...m, feedback } : m
+        m.id === messageId
+          ? {
+              ...m,
+              feedback,
+              feedbackReason: feedback === 'bad' ? (reason || null) : null,
+              feedbackComment: feedback === 'good' ? null : m.feedbackComment,
+            }
+          : m
       ));
+      if (feedback === 'good') {
+        setPendingBadMessageId(null);
+      } else if (!reason) {
+        // 👎 直後は理由チップを出す（選ばなくても bad は既に保存済み）
+        setPendingBadMessageId(messageId);
+      } else {
+        setPendingBadMessageId(null);
+      }
     } catch (err) {
       console.error('Error submitting feedback:', err);
     }
+  };
+
+  const handleBadReason = async (
+    messageId: string,
+    reason: 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other',
+  ) => {
+    await handleFeedback(messageId, 'bad', reason);
   };
 
   return (
@@ -998,6 +1039,40 @@ const normalizeTableMarkdown = (text: string): string => {
                           <span className="ml-auto text-[11px] text-gray-400">
                             {new Date(message.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
                           </span>
+                        </div>
+                      )}
+
+                      {/* 👎 理由ワンタップ（任意。スキップしても bad は残る） */}
+                      {message.role === 'assistant' &&
+                       message.feedback === 'bad' &&
+                       pendingBadMessageId === message.id && (
+                        <div className="mt-2 rounded-lg border border-red-100 bg-red-50/60 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <p className="text-xs text-red-800 font-medium">何が違いましたか？（任意）</p>
+                            <button
+                              type="button"
+                              onClick={() => setPendingBadMessageId(null)}
+                              className="text-[11px] text-red-700/70 hover:text-red-900 underline-offset-2 hover:underline"
+                            >
+                              閉じる
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {BAD_FEEDBACK_REASONS.map((r) => (
+                              <button
+                                key={r.id}
+                                type="button"
+                                onClick={() => handleBadReason(message.id, r.id)}
+                                className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                                  message.feedbackReason === r.id
+                                    ? 'bg-red-600 text-white border-red-600'
+                                    : 'bg-white text-red-800 border-red-200 hover:border-red-400'
+                                }`}
+                              >
+                                {r.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       )}
 

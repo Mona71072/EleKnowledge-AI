@@ -35,6 +35,7 @@ alwaysApply: true
 
 - 実装ログ（なぜ変えたか）: `docs/impl-log-2026-07-29-clarify-and-page.md`
 - 設計: `docs/design-2026-07-29-clarify-and-page.md`
+- 検索評価（ゴールデンセット + 機械採点 + Bedrock Evaluations 方針）: `docs/eval-2026-07-29-retrieve-golden-set.md` / `scripts/eval/run_retrieve_eval.py` / `tests/eval/golden_set.jsonl`
 
 - `docs/kb-metadata-catalog.tsv` / `docs/kb-metadata-catalog-2026-07-29.md`
 - 件数・引っ掛けにくさ: `docs/survey-2026-07-29-hard-to-retrieve-counts.md`
