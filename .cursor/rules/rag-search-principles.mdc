@@ -1,11 +1,12 @@
 ---
-description: RAG／KB検索で会話済みの前提（番号検索化禁止・メタは絞り込み・空欄機種など）
+description: RAG／KB検索で会話済みの前提（番号検索化禁止・メタは絞り込み・空欄機種・成功＝資料到達など）
 alwaysApply: true
 ---
 
 # RAG・KB 検索の前提（繰り返し防止）
 
-会話で訂正済みのポイント。提案・実装時に逆行しない。詳細は `docs/decisions-2026-07-29-rag-nuance.md`。
+会話で訂正済みのポイント。提案・実装時に逆行しない。  
+詳細: `docs/decisions-2026-07-29-rag-nuance.md`／成功定義: `docs/decisions-2026-07-29-success-document-reach.md`
 
 ## やってはいけない（再提案しない）
 
@@ -17,6 +18,8 @@ alwaysApply: true
   → **空欄＝全機種共通**（意図的）。C の `*` と同趣旨の別表記。
 - **カテゴリ未指定を勝手に C/TI/据付基準だけに固定すること**（合意なしで）  
   → 現状合意: 未指定＝**全資料対象**。本命寄せは「内部の優先 retrieve」等で別途設計する。
+- **成功定義を「頁到達必須」にすること**／`#page`・アプリ内ビューアを成功の必須条件として急ぐこと  
+  → 成功＝**該当資料に到達し疑問を解決できること**。頁は副次（当面必須化しない）。
 
 ## 正しい理解（短く）
 
@@ -24,17 +27,18 @@ alwaysApply: true
 自然文クエリ
   →（任意）metadata filter で母集団を切る
   → 残ったチャンク本文に対して HYBRID 検索  ← RAG 本体
-  → 上位を Claude へ / 引用表示
+  → 上位を Claude へ / 引用・資料候補表示
 ```
 
 - 機種フィルタ時は **選択機種 OR `*` OR `general` OR 空文字**。キー欠落は `equals ""` で拾えない可能性 → `docs/verify-checklist-2026-07-29-kb-filter.md`
 - 曖昧症状は聞いてから検索。弱い検索で作文で埋めない（設計: `docs/design-2026-07-29-clarify-and-page.md`）
-- 評価の主眼は該当資料・頁への到達。作文の上手さではない
+- 評価の主眼は **該当資料への到達**（作文の上手さではない）。頁ヒットは副指標
 
 ## 実装参照（2026-07-29）
 
 - 実装ログ（なぜ変えたか）: `docs/impl-log-2026-07-29-clarify-and-page.md`
 - 設計: `docs/design-2026-07-29-clarify-and-page.md`
+- 成功定義訂正: `docs/decisions-2026-07-29-success-document-reach.md`
 
 - `docs/kb-metadata-catalog.tsv` / `docs/kb-metadata-catalog-2026-07-29.md`
 - 件数・引っ掛けにくさ: `docs/survey-2026-07-29-hard-to-retrieve-counts.md`

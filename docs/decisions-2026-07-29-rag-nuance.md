@@ -24,7 +24,7 @@
 |---|---|
 | 分かる C/TI/SUE 番号を入力させる | **主導線にしてはいけない** |
 | 理由 | 番号が分かるなら図書検索で足り、RAG の意味がない |
-| 本体 | 現場の自然文（症状・仕様確認）＋機種・状況 → 本文検索で資料・頁へ |
+| 本体 | 現場の自然文（症状・仕様確認）＋機種・状況 → 本文検索で**該当資料**へ（頁は副次。成功定義: [success-document-reach](./decisions-2026-07-29-success-document-reach.md)） |
 
 番号が質問にたまたま含まれる場合のブーストやデバッグ用途は可。メイン UX にしない。
 
@@ -64,11 +64,12 @@
 
 1. 曖昧なら聞き返し（機種・対象。**資料番号は聞かない**） — **実装済 v0**
 2. 弱い検索で作文停止 — **実装済 v0**
-3. 候補頁を本文より上に出す — **実装済 v0**
+3. **資料候補**を本文より上に出す（頁番号はメタがあれば表示。必須ではない） — **実装済 v0**
 4. 内部で本命カテゴリを先に retrieveし、弱ければ拡大 — **実装済 v0**
 
-実装ログ（変更理由の追跡）: [impl-log-2026-07-29-clarify-and-page.md](./impl-log-2026-07-29-clarify-and-page.md)  
-設計: [design-2026-07-29-clarify-and-page.md](./design-2026-07-29-clarify-and-page.md)
+成功定義の訂正（頁必須ではない）: [decisions-2026-07-29-success-document-reach.md](./decisions-2026-07-29-success-document-reach.md)  
+実装ログ（変更理由の追跡）: [impl-log-2026-07-29-clarify-and-page.md](./impl-log-2026-07-29-clarify-and-page.md)（実装ブランチ側）  
+設計: [design-2026-07-29-clarify-and-page.md](./design-2026-07-29-clarify-and-page.md)（実装ブランチ側）
 
 ---
 

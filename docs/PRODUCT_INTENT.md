@@ -4,14 +4,15 @@
 > 会話や資料から拾った「やりたいこと」だけを共有する。仕様確定ではない。  
 > 実装方針・詳細設計は別途決める。ここを見て勝手にアプリへ全部落とし込まない。
 
-最終更新: 2026-07-29（現場向け成功条件・RAG前提・AI駆動運用への参照を追記）
+最終更新: 2026-07-29（成功定義を「資料到達＋疑問解決」に訂正。頁は副次）
 
 ---
 
 ## 一言でいうと
 
 Ele-Knowledge は **「答えを代行する AI」ではなく、「根拠を集め、違いを示し、判断を支える AI」** である。  
-当面の成功イメージは、現場の自然な質問から **該当資料・頁へ辿れること**（図書番号を利用者に覚えさせない）。
+当面の成功イメージは、現場の自然な質問から **該当資料に到達し、疑問を解決できること**（図書番号を利用者に覚えさせない）。  
+**頁番号までの到達は必須成功条件ではない**（あると便利な補助）。経緯: [decisions-2026-07-29-success-document-reach.md](./decisions-2026-07-29-success-document-reach.md)
 
 ---
 
@@ -117,5 +118,6 @@ Markdown への「守れ」は強制機構ではない。安全条件・必須�
 - 元資料: ユーザー共有 PDF「無題のドキュメント」（開発設計レポート要約）
 - AI 駆動の共同運用: [ops-ai-driven-dev.md](./ops-ai-driven-dev.md)
 - RAG 前提: [decisions-2026-07-29-rag-nuance.md](./decisions-2026-07-29-rag-nuance.md)
-- 当面の製品方針（頁ファースト）: [joint-review-2026-07-29-product-direction.md](./joint-review-2026-07-29-product-direction.md)
+- 当面の製品方針（資料到達ファースト）: [joint-review-2026-07-29-product-direction.md](./joint-review-2026-07-29-product-direction.md)
+- 成功定義の訂正: [decisions-2026-07-29-success-document-reach.md](./decisions-2026-07-29-success-document-reach.md)
 - 詳細ブループリント一式のリポジトリ投入は、合意後に別途行う
