@@ -33,10 +33,11 @@ alwaysApply: true
 | やりたいこと・製品思想 | `docs/PRODUCT_INTENT.md` |
 | 毎回守る運用 | `.cursor/rules/*.mdc` |
 | 繰り返し手順 | `.cursor/skills/` の該当スキル |
-| **微妙な前提・訂正** | `docs/decisions-*.md`（必要なら rules に短く） |
+| **微妙な前提・訂正**（誤解しやすい合意） | `docs/decisions-*.md` に残し、必要なら `.cursor/rules` にも短く書く |
 | **AI 駆動の共同運用（mona↔itai）** | `docs/ops-ai-driven-dev.md` |
 
-更新時は「確定」と書かず、未確定ならドラフトのまま残す。
+更新時は「確定」と書かず、未確定ならドラフトのまま残す。  
+**同じ議論を繰り返さない**ため、ユーザーが訂正したポイントは実装より先にメモ／ルールへ反映してよい。
 
 ## コードとドキュメントを一致させる
 
@@ -60,5 +61,5 @@ alwaysApply: true
 3. `develop` 向け **共同確認専用 PR** を作成し、先頭で `@yukiworkspace`（itai）をメンション
 4. itai 側の変更も同様に PR で mona に見える形にし、双方で確認する
 
-**共同確認とデプロイは別 PR。** 共同確認同士なら既存の意図・運用 open PR に相乗りしてよい。  
+**共同確認とデプロイは別 PR。** 同種の未マージは不都合が無ければまとめる。  
 詳細: `docs/ops-ai-driven-dev.md` §6 ／ スキル `joint-pr-review`
