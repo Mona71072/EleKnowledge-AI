@@ -49,8 +49,9 @@ alwaysApply: true
 流れ:
 
 1. 変更内容を提案し、ユーザー（mona）の合意を得る
-2. `mona` ブランチ（または feature）にコミット → push
-3. `develop` 向け PR を作成し、先頭で `@yukiworkspace`（itai）をメンション
+2. コミット → push（意図・運用だけのときは feature ブランチ推奨）
+3. `develop` 向け **専用 PR** を作成し、先頭で `@yukiworkspace`（itai）をメンション
 4. itai 側の変更も同様に PR で mona に見える形にし、双方で確認する
 
+**意図共有・運用ルールだけの共同確認は、機能実装やデプロイ依頼の PR と混ぜない**（別 PR）。  
 詳細手順はスキル `joint-pr-review` を使う。

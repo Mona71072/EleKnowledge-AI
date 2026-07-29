@@ -25,6 +25,16 @@ description: >-
 
 通常のバグ修正・UI 微調整は、既存のデプロイ用 PR 運用（`working-branch.mdc`）でよい。迷ったら共同確認にする。
 
+## 別 PR にする（必須）
+
+次は **機能実装・セキュリティ修正・デプロイ依頼の PR と混ぜない**。共同確認専用の PR を切る。
+
+- 製品意図・ビジョン共有（例: `docs/PRODUCT_INTENT.md`）
+- Cursor 運用ルール・スキル（`.cursor/rules` / `.cursor/skills`）
+- ブランチ／デプロイ運用方針だけの変更
+
+同じ `mona` に載っていても、レビュー用には feature ブランチから **意図・運用だけの PR** を `develop` 向けに作る。既存のデプロイ用 PR の本文に相乗りしない。
+
 ## 登場人物
 
 | 役割 | GitHub | メンション |
@@ -35,11 +45,12 @@ description: >-
 ## mona → itai（mona 側エージェント）
 
 1. 変更内容をユーザーに提案し、合意を得る（`ai-collaboration` ルール）
-2. `mona`（または feature）にコミット → `Mona-mebs` で push
-3. base `develop` 向けに PR を作成
-4. PR 本文の先頭に共同確認ブロックを置く（下記テンプレ）
-5. `@yukiworkspace` をメンションし、何を確認してほしいかを具体的に書く
-6. itai の Approve / コメント待ち。合意前に勝手にマージ方針を断定しない
+2. **意図共有・運用ルールだけ**なら feature ブランチを切り、デプロイ用 PR と分離する
+3. コミット → `Mona-mebs` で push
+4. base `develop` 向けに **専用 PR** を作成（既存のセキュリティ／UI／デプロイ PR に相乗りしない）
+5. PR 本文の先頭に共同確認ブロックを置く（下記テンプレ）
+6. `@yukiworkspace` をメンションし、何を確認してほしいかを具体的に書く
+7. itai の Approve / コメント待ち。合意前に勝手にマージ方針を断定しない
 
 ## itai → mona（itai 側エージェント）
 

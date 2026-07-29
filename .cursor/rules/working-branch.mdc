@@ -57,6 +57,8 @@ PR 本文テンプレ（先頭）:
 itai 側の根本変更も、同様に PR で mona に飛ばして確認する。  
 手順・テンプレは `.cursor/skills/joint-pr-review/SKILL.md` を使う。
 
+**意図共有（PRODUCT_INTENT など）・運用ルール（`.cursor/rules` / skills）だけの変更は、セキュリティ修正や UI／デプロイ用 PR と別 PR にする。**
+
 ## 禁止・注意
 
 - `develop` / `main` へ直接 push しない（デプロイ PR 経由）
