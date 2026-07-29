@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -19,11 +19,14 @@ import {
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 
-const STATUS_BADGE: Record<AnnouncementStatus, { label: string; className: string; dot: string }> = {
-  published: { label: '公開', className: 'text-green-700 bg-green-50 border-green-200', dot: '🟢' },
-  scheduled: { label: '予約', className: 'text-amber-800 bg-amber-50 border-amber-300', dot: '🟡' },
-  draft: { label: '下書き', className: 'text-gray-600 bg-gray-50 border-gray-200', dot: '⚪' },
+const STATUS_BADGE: Record<AnnouncementStatus, { label: string; className: string; dotClass: string }> = {
+  published: { label: '公開', className: 'text-green-700 bg-green-50 border-green-200', dotClass: 'bg-green-500' },
+  scheduled: { label: '予約', className: 'text-amber-800 bg-amber-50 border-amber-300', dotClass: 'bg-amber-400' },
+  draft: { label: '下書き', className: 'text-gray-600 bg-gray-50 border-gray-200', dotClass: 'bg-gray-400' },
 };
+
+const inputCls =
+  'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors';
 
 const TITLE_MAX = 120;
 
@@ -58,6 +61,15 @@ export default function AdminAnnouncementsPage() {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Announcement | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | AnnouncementStatus>('all');
+  const formRef = useRef<HTMLDivElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  const scrollToForm = () => {
+    setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      titleInputRef.current?.focus();
+    }, 50);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -103,7 +115,7 @@ export default function AdminAnnouncementsPage() {
       setPublishMode('now');
       setScheduleAt('');
     }
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    scrollToForm();
   };
 
   const submit = async (status: AnnouncementStatus) => {
@@ -155,13 +167,16 @@ export default function AdminAnnouncementsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-gray-900">お知らせ管理</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">お知らせ管理</h2>
+          <p className="text-sm text-gray-500 mt-0.5">全 {list.length} 件（表示中 {filtered.length} 件）</p>
+        </div>
         <div className="flex items-center gap-3">
           <label className="text-sm text-gray-600">
             状態:
             <select
-              className="ml-2 border border-gray-300 rounded px-2 py-1 text-sm"
+              className="ml-2 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
             >
@@ -171,8 +186,18 @@ export default function AdminAnnouncementsPage() {
               <option value="draft">下書き</option>
             </select>
           </label>
-          <Button variant="primary" size="sm" onClick={resetForm}>
-            + 新規作成
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              resetForm();
+              scrollToForm();
+            }}
+          >
+            <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            新規作成
           </Button>
         </div>
       </div>
@@ -206,36 +231,46 @@ export default function AdminAnnouncementsPage() {
               {filtered.map((a) => {
                 const badge = STATUS_BADGE[a.status];
                 return (
-                  <tr key={a.announcementId} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs border ${badge.className}`}>
-                        <span aria-hidden>{badge.dot}</span> {badge.label}
+                  <tr
+                    key={a.announcementId}
+                    className={`hover:bg-gray-50 transition-colors ${editingId === a.announcementId ? 'bg-blue-50/60' : ''}`}
+                  >
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium border ${badge.className}`}>
+                        <span aria-hidden className={`w-1.5 h-1.5 rounded-full ${badge.dotClass}`} />
+                        {badge.label}
                       </span>
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap">
+                    <td className="px-4 py-2.5 whitespace-nowrap">
                       {TYPE_META[a.type].icon} {TYPE_META[a.type].label}
                     </td>
-                    <td className="px-4 py-2 max-w-xs truncate">
+                    <td className="px-4 py-2.5 max-w-xs truncate">
                       {a.pinned && '📌 '}
                       {a.title}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-gray-500 text-xs">
+                    <td className="px-4 py-2.5 whitespace-nowrap text-gray-500 text-xs">
                       {a.status === 'draft' ? '—' : absoluteTime(a.publishAt)}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-right">
+                    <td className="px-4 py-2.5 whitespace-nowrap text-right">
                       <button
-                        className="text-blue-600 hover:text-blue-800 px-2"
+                        className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                         onClick={() => startEdit(a)}
                         aria-label="編集"
+                        title="編集"
                       >
-                        ✎
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
                       </button>
                       <button
-                        className="text-red-600 hover:text-red-800 px-2"
+                        className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors ml-1"
                         onClick={() => setConfirmDelete(a)}
                         aria-label="削除"
+                        title="削除"
                       >
-                        🗑
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
                       </button>
                     </td>
                   </tr>
@@ -247,16 +282,28 @@ export default function AdminAnnouncementsPage() {
       </div>
 
       {/* Form */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          {editingId ? 'お知らせを編集' : '新規作成'}
-        </h3>
+      <div
+        ref={formRef}
+        className={`rounded-lg border bg-white p-6 scroll-mt-36 transition-colors ${
+          editingId ? 'border-blue-300 ring-2 ring-blue-100' : 'border-gray-200'
+        }`}
+      >
+        <div className="flex items-center gap-2.5 mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">
+            {editingId ? 'お知らせを編集' : '新規作成'}
+          </h3>
+          {editingId && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold px-2.5 py-0.5">
+              編集中
+            </span>
+          )}
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <label className="text-sm">
             <span className="block text-gray-600 mb-1">種別</span>
             <select
-              className="w-full border border-gray-300 rounded px-2 py-1.5"
+              className={inputCls}
               value={form.type}
               onChange={(e) => setForm({ ...form, type: e.target.value as AnnouncementType })}
             >
@@ -268,7 +315,7 @@ export default function AdminAnnouncementsPage() {
           <label className="text-sm">
             <span className="block text-gray-600 mb-1">重要度</span>
             <select
-              className="w-full border border-gray-300 rounded px-2 py-1.5"
+              className={inputCls}
               value={form.severity}
               onChange={(e) => setForm({ ...form, severity: e.target.value as Severity })}
             >
@@ -295,7 +342,8 @@ export default function AdminAnnouncementsPage() {
             </span>
           </span>
           <input
-            className="w-full border border-gray-300 rounded px-3 py-2"
+            ref={titleInputRef}
+            className={inputCls}
             maxLength={TITLE_MAX}
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
@@ -309,7 +357,7 @@ export default function AdminAnnouncementsPage() {
               <span className="block text-gray-600 mb-1">メンテ開始</span>
               <input
                 type="datetime-local"
-                className="w-full border border-gray-300 rounded px-2 py-1.5"
+                className={inputCls}
                 value={toLocalInput(form.startAt)}
                 onChange={(e) => setForm({ ...form, startAt: fromLocalInput(e.target.value) })}
               />
@@ -318,7 +366,7 @@ export default function AdminAnnouncementsPage() {
               <span className="block text-gray-600 mb-1">メンテ終了</span>
               <input
                 type="datetime-local"
-                className="w-full border border-gray-300 rounded px-2 py-1.5"
+                className={inputCls}
                 value={toLocalInput(form.endAt)}
                 onChange={(e) => setForm({ ...form, endAt: fromLocalInput(e.target.value) })}
               />
@@ -331,7 +379,7 @@ export default function AdminAnnouncementsPage() {
           <label className="text-sm">
             <span className="block text-gray-600 mb-1">本文 (Markdown)</span>
             <textarea
-              className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm h-56 resize-y"
+              className={`${inputCls} font-mono h-56 resize-y`}
               value={form.body}
               onChange={(e) => setForm({ ...form, body: e.target.value })}
               placeholder={'## 見出し\n- 箇条書き\n本文を Markdown で記述できます。'}
@@ -374,7 +422,7 @@ export default function AdminAnnouncementsPage() {
             {publishMode === 'schedule' && (
               <input
                 type="datetime-local"
-                className="border border-gray-300 rounded px-2 py-1"
+                className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 value={scheduleAt}
                 onChange={(e) => setScheduleAt(e.target.value)}
               />

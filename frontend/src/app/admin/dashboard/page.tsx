@@ -44,7 +44,10 @@ export default function DashboardPage() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <h2 className="text-xl font-bold text-gray-900">📊 運用ダッシュボード</h2>
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">運用ダッシュボード</h2>
+          <p className="text-sm text-gray-500 mt-0.5">利用状況とシステム健全性のサマリー</p>
+        </div>
         <div className="flex items-center gap-4">
           <div className="inline-flex rounded-lg bg-gray-100 p-1" role="tablist" aria-label="期間">
             {PERIODS.map((p) => (
@@ -53,8 +56,8 @@ export default function DashboardPage() {
                 role="tab"
                 aria-selected={period === p.key}
                 onClick={() => setPeriod(p.key)}
-                className={`px-3 py-1 text-sm rounded-md ${
-                  period === p.key ? 'bg-white font-semibold text-blue-700 shadow-sm' : 'text-gray-600'
+                className={`px-3 py-1 text-sm rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  period === p.key ? 'bg-white font-semibold text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
                 {p.label}
