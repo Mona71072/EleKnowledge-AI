@@ -10,11 +10,14 @@ Admin is verified server-side from the Cognito authorizer claims
 Markdown body is sanitized before storage (defense in depth; the frontend renders
 Markdown without raw-HTML, so this is a second layer).
 """
+from __future__ import annotations
+
 import json
 import os
 import re
 import time
 from datetime import datetime, timezone
+from typing import Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -83,7 +86,7 @@ def sanitize_markdown(text: str) -> str:
     return text
 
 
-def validate(body: dict, partial: bool = False) -> str | None:
+def validate(body: dict, partial: bool = False) -> Optional[str]:
     """Return an error message, or None if valid."""
     def required(field):
         return field in body and body[field] not in (None, '')

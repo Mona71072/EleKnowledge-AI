@@ -2,12 +2,13 @@
 EleKnowledge Announcements - Read (public to authenticated users)
 
 GET /announcements?limit=10
-Returns currently-published announcements (status=published, publishAt<=now),
-pinned first then publishAt descending. Expired items (endAt < now) are excluded.
+Returns currently-visible announcements:
+  - status=published with publishAt<=now
+  - status=scheduled with publishAt<=now (due; publisher promotes async)
+Pinned first then publishAt descending. Expired items (endAt < now) are excluded.
 """
 import json
 import os
-import time
 from datetime import datetime, timezone
 
 import boto3
@@ -39,22 +40,49 @@ def _response(status: int, body: dict) -> dict:
     }
 
 
-def get_published(limit: int, now_iso: str) -> list:
-    """Query published announcements via GSI, newest first, then filter/sort."""
+def _query_by_status(status: str, now_iso: str, fetch_limit: int) -> list:
     resp = table.query(
         IndexName='status-publishAt-index',
-        KeyConditionExpression=Key('status').eq('published') & Key('publishAt').lte(now_iso),
-        ScanIndexForward=False,   # newest first
-        Limit=max(limit * 3, 30),  # over-fetch to allow expiry filtering
+        KeyConditionExpression=Key('status').eq(status) & Key('publishAt').lte(now_iso),
+        ScanIndexForward=False,  # newest first
+        Limit=fetch_limit,
     )
-    items = resp.get('Items', [])
+    return resp.get('Items', [])
 
-    # Drop items whose display window has ended (endAt < now)
-    visible = [it for it in items if not it.get('endAt') or it['endAt'] >= now_iso]
 
-    # pinned first, then publishAt desc (query already desc; stable sort keeps it)
-    visible.sort(key=lambda x: (0 if x.get('pinned') else 1))
-    return visible[:limit]
+def get_published(limit: int, now_iso: str) -> list:
+    """Return currently-visible announcements.
+
+    Includes:
+    - status=published with publishAt<=now
+    - status=scheduled with publishAt<=now (due; publisher Lambda flips status async)
+
+    Excludes items whose endAt has passed. Pinned first, then publishAt desc.
+    """
+    fetch = max(limit * 3, 30)
+    items = _query_by_status('published', now_iso, fetch)
+    # Due scheduled items must appear even before the 5-min publisher runs.
+    items.extend(_query_by_status('scheduled', now_iso, fetch))
+
+    # Drop items whose display window has ended (endAt < now); dedupe by id
+    by_id = {}
+    for it in items:
+        if it.get('endAt') and it['endAt'] < now_iso:
+            continue
+        by_id[it['announcementId']] = it
+
+    visible = list(by_id.values())
+    pinned = sorted(
+        [x for x in visible if x.get('pinned')],
+        key=lambda x: x.get('publishAt', ''),
+        reverse=True,
+    )
+    rest = sorted(
+        [x for x in visible if not x.get('pinned')],
+        key=lambda x: x.get('publishAt', ''),
+        reverse=True,
+    )
+    return (pinned + rest)[:limit]
 
 
 def lambda_handler(event, context):

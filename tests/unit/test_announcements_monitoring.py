@@ -21,6 +21,8 @@ def _load(name, rel_path):
 
 
 write = _load("ann_write", "lambda/announcements/write/app.py")
+read = _load("ann_read", "lambda/announcements/read/app.py")
+publisher = _load("ann_publisher", "lambda/announcements/publisher/app.py")
 metrics_read = _load("metrics_read", "lambda/metrics/read/app.py")
 aggregator = _load("metrics_aggregator", "lambda/metrics/aggregator/app.py")
 
@@ -74,6 +76,82 @@ def test_validate_ok():
         {"type": "notice", "title": "x", "severity": "info", "status": "draft"},
         partial=False,
     ) is None
+
+
+# ----------------------------------------------------------------- read feed (due scheduled)
+def test_get_published_includes_due_scheduled_and_sorts(monkeypatch):
+    now = "2026-07-29T12:00:00Z"
+
+    def fake_query(status, now_iso, fetch_limit):
+        assert now_iso == now
+        if status == "published":
+            return [
+                {
+                    "announcementId": "a1",
+                    "status": "published",
+                    "publishAt": "2026-07-28T00:00:00Z",
+                    "pinned": False,
+                    "title": "old",
+                },
+                {
+                    "announcementId": "a2",
+                    "status": "published",
+                    "publishAt": "2026-07-29T10:00:00Z",
+                    "pinned": True,
+                    "title": "pinned",
+                },
+            ]
+        if status == "scheduled":
+            return [
+                {
+                    "announcementId": "a3",
+                    "status": "scheduled",
+                    "publishAt": "2026-07-29T11:00:00Z",
+                    "pinned": False,
+                    "title": "due scheduled",
+                },
+                {
+                    "announcementId": "a4",
+                    "status": "scheduled",
+                    "publishAt": "2026-07-20T00:00:00Z",
+                    "endAt": "2026-07-21T00:00:00Z",
+                    "title": "expired",
+                },
+            ]
+        return []
+
+    monkeypatch.setattr(read, "_query_by_status", fake_query)
+    result = read.get_published(10, now)
+    ids = [x["announcementId"] for x in result]
+    assert ids[0] == "a2"  # pinned first
+    assert "a3" in ids  # due scheduled included
+    assert "a4" not in ids  # endAt passed
+    # non-pinned: newer publishAt first
+    non_pinned = [i for i in ids if i != "a2"]
+    assert non_pinned == ["a3", "a1"]
+
+
+def test_promote_due_updates_scheduled(monkeypatch):
+    class FakeTable:
+        def __init__(self):
+            self.updated = []
+
+        def query(self, **kwargs):
+            return {
+                "Items": [
+                    {"announcementId": "anc_1", "status": "scheduled", "publishAt": "2026-07-01T00:00:00Z"},
+                    {"announcementId": "anc_2", "status": "scheduled", "publishAt": "2026-07-02T00:00:00Z"},
+                ]
+            }
+
+        def update_item(self, **kwargs):
+            self.updated.append(kwargs["Key"]["announcementId"])
+
+    fake = FakeTable()
+    monkeypatch.setattr(publisher, "table", fake)
+    result = publisher.promote_due("2026-07-29T00:00:00Z")
+    assert result["count"] == 2
+    assert result["promoted"] == ["anc_1", "anc_2"]
 
 
 # ----------------------------------------------------------------- health status

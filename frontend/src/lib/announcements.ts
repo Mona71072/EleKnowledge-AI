@@ -132,6 +132,8 @@ export const SEVERITY_META: Record<
 export function relativeTime(iso: string, now: Date = new Date()): string {
   const then = new Date(iso);
   const diffMs = now.getTime() - then.getTime();
+  // Future timestamps (e.g. just-scheduled edge): show absolute, not "たった今"
+  if (diffMs < 0) return absoluteTime(iso);
   const min = Math.floor(diffMs / 60000);
   if (min < 1) return 'たった今';
   if (min < 60) return `${min}分前`;

@@ -172,6 +172,30 @@ Resources:
                 Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Scan]
                 Resource: !GetAtt AnnouncementsTable.Arn
 
+  AnnouncementsPublisherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub announcements-publisher-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: PromoteScheduled
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:Query, dynamodb:UpdateItem]
+                Resource:
+                  - !GetAtt AnnouncementsTable.Arn
+                  - !Sub ${AnnouncementsTable.Arn}/index/*
+
   MetricsReadRole:
     Type: AWS::IAM::Role
     Properties:
@@ -289,6 +313,27 @@ Resources:
             Path: /admin/announcements/{id}
             Method: DELETE
 
+  # Promote due scheduled announcements every 5 minutes (admin status accuracy).
+  # Read Lambda also surfaces due scheduled items immediately without waiting for this job.
+  AnnouncementsPublisherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub announcements-publisher-${Environment}
+      CodeUri: ../../lambda/announcements/publisher/
+      Handler: app.lambda_handler
+      Role: !GetAtt AnnouncementsPublisherRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          ANNOUNCEMENTS_TABLE: !Ref AnnouncementsTable
+      Events:
+        EveryFiveMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Name: !Sub announcements-promote-${Environment}
+            Description: Promote due scheduled announcements to published
+
   MetricsReadFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -354,17 +399,34 @@ Resources:
           CognitoAuthorizer:
             UserPoolArn:
               Fn::ImportValue: !Sub ${ProjectName}-${Environment}-CognitoUserPoolArn
+        # OPTIONS must succeed for browser CORS preflight (Authorization header).
+        # Data methods remain office-IP whitelisted (same CIDRs as GenU / other stacks).
         ResourcePolicy:
-          IpRangeWhitelist: !Ref AllowedIPList
+          CustomStatements:
+            - Effect: Allow
+              Principal: '*'
+              Action: execute-api:Invoke
+              Resource: execute-api:/*/OPTIONS/*
+            - Effect: Allow
+              Principal: '*'
+              Action: execute-api:Invoke
+              Resource: execute-api:/*/*/*
+              Condition:
+                IpAddress:
+                  aws:SourceIp: !Ref AllowedIPList
       GatewayResponses:
         DEFAULT_4XX:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+              Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
         DEFAULT_5XX:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+              Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
