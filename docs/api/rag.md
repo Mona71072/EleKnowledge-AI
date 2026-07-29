@@ -84,5 +84,8 @@ RAGクエリ実行
 - `pageCandidates`: UI 上部用。`pageNumber` は KB メタにあるときだけ付与（無ければキー省略＝ページ不明）。
 - `clarifyQuestions`: `clarify` 時の追加質問リスト。
 - カテゴリ未指定時は内部で本命（C/TI/据付基準）を先に retrieve し、弱ければ全資料へ拡大（`priorityExpanded`）。ユーザーが category を選んでいる場合はそれを尊重。
+- 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。
+- `priorityExpanded`: 本命→全資料へ拡大したとき `true`。診断用フィールド（チャット UI では未表示）。
+- `mode`: API 上は `normal` \| `spec` を受け付ける。現行チャット UI は常に `normal` を送る（カテゴリ複数選択で spec モード UI は廃止）。
 - `sourceUri` は `s3://` ではなく**プリサイン HTTPS URL**。
 - `sourceDocuments[].category` / `modelType` は実 KB メタデータ由来、`hasImage` は当該チャンクに IMAGE が含まれるか。

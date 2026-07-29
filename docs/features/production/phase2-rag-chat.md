@@ -9,12 +9,19 @@ related-code: frontend/src/app/, lambda/rag/, lambda/chat/
 
 > [!WARNING]
 > **本書の「Knowledge Base設定」「メタデータスキーマ」「RAG処理フロー」「プロンプトテンプレート」
-> および `SearchFilters` / `SourceDocument` の定義は、現在の実装と乖離している**（2026-07-17 確認）。
+> および `SearchFilters` / `SourceDocument` の定義は、現在の実装と乖離している**（2026-07-17 確認、2026-07-29 再確認）。
 > 記載の `KB_ELEKNOWLEDGE_001` / `eleknowledge-documents` / Titan Embeddings G1、および
 > `documentType` / `product` / `model` というメタデータキーは**いずれも実在しない**。
 > 実態は Phase 2 で既存 KB `DF9XUCSPDM` を再利用する構成に変わっている。
-> **正となる情報**: `MAI-BOX-INST-dev/phase2-kb-reuse-report.md`、API 契約は `docs/api/rag.md`。
-> 本書の全面改訂は RAG 仕様の見直し時に別途行う。
+>
+> **正となる情報（本書を正本にしない）:**
+> - API 契約: [`docs/api/rag.md`](../../api/rag.md) / [`docs/api/chat.md`](../../api/chat.md)
+> - 聞き返し・頁候補・本命優先: [`docs/impl-log-2026-07-29-clarify-and-page.md`](../../impl-log-2026-07-29-clarify-and-page.md)
+> - データモデル（chatlogs）: [`docs/data-model.md`](../../data-model.md)
+> - コード↔docs 運用: [`docs/ops-ai-driven-dev.md`](../../ops-ai-driven-dev.md)
+>
+> 本書の全面改訂は RAG 仕様の見直し時に別途行う。現行の `responseType` / `pageCandidates` /
+> 失敗一覧（`/admin/failures`）などは**ここには書かない**（上記正本を見る）。
 
 > 本ドキュメントは [spec.md](../../../spec.md) §3.2 から切り出された Phase 2 の機能仕様です。
 > 全体索引は [spec.md](../../../spec.md) を参照してください。

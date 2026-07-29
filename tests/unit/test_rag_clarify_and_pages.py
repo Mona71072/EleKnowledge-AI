@@ -43,6 +43,30 @@ def test_followup_after_clarify_skips(rag):
     assert ok is False
 
 
+def test_compose_search_query_joins_prior_symptom(rag):
+    hist = [
+        {"role": "user", "content": "エレベーターから異音がする"},
+        {"role": "assistant", "content": rag.CLARIFY_MARKER + "\n1. 機種"},
+    ]
+    combined = rag.compose_search_query("かご、走行中です", hist)
+    assert "異音" in combined
+    assert "かご" in combined
+
+
+def test_compose_search_query_no_join_without_clarify(rag):
+    hist = [{"role": "user", "content": "火災管制の動作は？"}]
+    assert rag.compose_search_query("追記だけ", hist) == "追記だけ"
+
+
+def test_compose_search_query_avoids_duplicate_prior(rag):
+    hist = [
+        {"role": "user", "content": "振動がする"},
+        {"role": "assistant", "content": rag.CLARIFY_MARKER + "\n1. 機種"},
+    ]
+    full = "振動がする。かご、走行中"
+    assert rag.compose_search_query(full, hist) == full
+
+
 def test_is_weak_uses_max_score(rag):
     assert rag.is_weak_retrieval([]) is True
     weak = [{"score": 0.1, "metadata": {}, "content": {"text": "a"}}]

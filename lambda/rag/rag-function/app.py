@@ -378,6 +378,42 @@ def last_assistant_was_clarify(chat_history: list) -> bool:
     return False
 
 
+def previous_user_query_before_clarify(chat_history: list) -> str:
+    """聞き返し直前のユーザー質問を返す（追記結合用）。履歴は古い順。"""
+    history = chat_history or []
+    for i in range(len(history) - 1, -1, -1):
+        msg = history[i]
+        if msg.get('role') != 'assistant':
+            continue
+        if CLARIFY_MARKER not in (msg.get('content') or ''):
+            continue
+        for j in range(i - 1, -1, -1):
+            if history[j].get('role') == 'user':
+                return (history[j].get('content') or '').strip()
+        return ''
+    return ''
+
+
+def compose_search_query(query: str, chat_history: list = None) -> str:
+    """
+    聞き返し後の追記なら、直前の症状質問と結合して検索する。
+
+    WHY: design §4「追記を結合して再検索」。追記だけ（「かご、走行中」）だと
+    症状語が落ちて HYBRID が当たらない。表示・保存用の原文は呼び出し側で保持する。
+    """
+    q = (query or '').strip()
+    if not last_assistant_was_clarify(chat_history):
+        return q
+    prior = previous_user_query_before_clarify(chat_history)
+    if not prior:
+        return q
+    if not q:
+        return prior
+    if prior in q:
+        return q
+    return f'{prior}\n{q}'
+
+
 def needs_clarify(query: str, filters: dict = None, chat_history: list = None) -> tuple:
     """
     ルールベースの聞き返し判定。
@@ -1005,7 +1041,9 @@ def lambda_handler(event, context):
         else:
             # Normal: 正規化 + 本命優先 retrieve +（必要なら）略語展開
             # WHY 本命優先: docs/decisions-2026-07-29-rag-nuance.md §3（メタは絞り込み、本文検索は残す）
-            original_query = query
+            # 聞き返し後は追記を直前質問と結合（design §4）
+            search_query = compose_search_query(query, chat_history)
+            original_query = search_query
             normalized_query = normalize_query_text(original_query)
             expanded_query = expand_query_abbreviations(normalized_query)
             q1 = normalized_query or original_query

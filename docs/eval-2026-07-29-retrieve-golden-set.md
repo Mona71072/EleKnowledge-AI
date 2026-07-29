@@ -46,8 +46,9 @@ python3 scripts/eval/run_retrieve_eval.py --only G001,G103
 
 - スクリプトは `lambda/rag/rag-function/app.py` を import し、**本番と同系統路**
   （正規化 → 聞き返しゲート → 本命優先 retrieve → 略語展開 → 弱い検索ゲート）で検索する
-- **通さないもの:** Claude 本文・多ターン追記後・フロント UX・prd KB 差分  
+- **通さないもの:** Claude 本文・多ターン追記結合後・フロント UX・prd KB 差分  
   → 詳細は [layer1-eval-ops](./decisions-2026-07-29-layer1-eval-ops.md) §D
+  （`compose_search_query` は `chat_history=[]` のため第1層では未評価。ゲート単体と人手確認で補う）
 - 出力: `eval-results/retrieve-eval-<時刻>.json` と `*-byoi.jsonl`（gitignore 済み）
 - DynamoDB 非書き込み。権限: `bedrock:Retrieve` + `ssm:GetParameter`
 
@@ -58,7 +59,11 @@ python3 scripts/eval/run_retrieve_eval.py --only G001,G103
 | `hit@k` | 期待資料が検索結果の上位 k 資料（ユニーク・.md 除外）に入った割合 |
 | `mrr` | 期待資料の平均逆順位（1位=1.0、2位=0.5…） |
 | `hit_in_candidates` | UI 候補頁（上位5件）に期待資料が出た割合＝**利用者到達の主指標** |
+| `page_hit` | `expected_pages` があるラベル済み問だけ。期待資料かつ期待頁が retrieve に出た割合（副指標） |
+| `hard_hit_in_candidates` | タグ `hard` 付きラベル済みの `hit_in_candidates` |
 | `gate_accuracy` | clarify / not_found / pages の判定が期待どおりだった割合（回帰防止） |
+| `decision_ready` / `warning` | ラベル済み N≥10 なら意思決定可。未満なら警告（率を意思決定に使わない） |
+
 
 ## ゴールデンセットの育て方
 

@@ -263,10 +263,34 @@ def aggregate(rows: list) -> dict:
     else:
         summary["mrr"] = None
         summary["hit_in_candidates"] = None
+
+    page_rows = [r for r in labeled if r.get("page_hit") is not None]
+    if page_rows:
+        summary["page_hit"] = round(
+            sum(1 for r in page_rows if r["page_hit"]) / len(page_rows), 3
+        )
+    else:
+        summary["page_hit"] = None
+    summary["page_hit_total"] = len(page_rows)
+
+    hard = [r for r in labeled if "hard" in (r.get("tags") or [])]
+    summary["hard_labeled"] = len(hard)
+    summary["hard_hit_in_candidates"] = (
+        round(sum(1 for r in hard if r["hit_in_candidates"]) / len(hard), 3) if hard else None
+    )
+
     summary["gate_accuracy"] = (
         round(sum(1 for r in gated if r["gate_ok"]) / len(gated), 3) if gated else None
     )
     summary["gate_total"] = len(gated)
+
+    # 運用是正: N<10 は率を意思決定に使わない（docs/decisions-2026-07-29-layer1-eval-ops.md）
+    summary["decision_ready"] = len(labeled) >= 10
+    summary["warning"] = (
+        None
+        if len(labeled) >= 10
+        else "ラベル済み N<10。率を意思決定に使わない（ラベリング作業フェーズ）"
+    )
     return summary
 
 
@@ -333,7 +357,11 @@ def print_report(rows: list, summary: dict):
     print("=" * 72)
     print("集計")
     print("=" * 72)
+    if summary.get("warning"):
+        print(f"  ⚠ {summary['warning']}")
     for k, v in summary.items():
+        if k == "warning":
+            continue
         print(f"  {k}: {v}")
 
 
@@ -344,7 +372,12 @@ def print_compare(summary: dict, compare_path: str):
     print("=" * 72)
     print(f"比較: {compare_path}")
     print("=" * 72)
-    for key in ["hit@1", "hit@3", "hit@5", "hit@10", "mrr", "hit_in_candidates", "gate_accuracy"]:
+    if summary.get("warning"):
+        print(f"  ⚠ {summary['warning']}")
+    for key in [
+        "hit@1", "hit@3", "hit@5", "hit@10", "mrr",
+        "hit_in_candidates", "page_hit", "hard_hit_in_candidates", "gate_accuracy",
+    ]:
         old, new = prev.get(key), summary.get(key)
         if old is None or new is None:
             continue

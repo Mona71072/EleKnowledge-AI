@@ -28,7 +28,7 @@
 | リスク | 内容 | 是正 |
 |---|---|---|
 | 成功条件のすり替わり | `hit@k` や `gate_accuracy` が良くても、UI 上の候補5件に出ていなければ利用者は届かない | **出荷判断の主指標 = `hit_in_candidates`**（ラベル済み分母） |
-| 「頁」が落ちる | PRODUCT_INTENT は頁到達。現状集計に `page_hit` が入っていない | `expected_pages` がある問だけ **`page_hit` 率を副指標**として見る（スクリプト集計への追加は後続） |
+| 「頁」が落ちる | PRODUCT_INTENT は頁到達。資料だけ当たって頁が違うケースを取りこぼす | `expected_pages` がある問だけ **`page_hit` 率を副指標**として見る（`aggregate` に実装済） |
 | 図書番号への退行 | ラベルが `C-591124` だと「番号検索すれば緑」に寄りやすい | 質問文は **自然文のまま**。番号は正解ラベル側だけ。主導線に番号入力を足さない |
 
 ### B. 統計・サンプルの嘘
@@ -61,7 +61,7 @@
 | 穴 | 影響 | 補完 |
 |---|---|---|
 | Claude 回答本文 | 正しい資料でも作文が誤断定しうる | 第2層（Faithfulness 等）＋ 👍/👎 |
-| 多ターン（clarify 後の追記） | `chat_history=[]` 固定。聞き返し後の再検索は未評価 | 別タグ `multi_turn` を将来追加。当面は人手で1〜2本確認 |
+| 多ターン（clarify 後の追記） | `chat_history=[]` 固定。`compose_search_query` による結合検索は未評価 | 別タグ `multi_turn` を将来追加。当面は人手で1〜2本確認。単体テストで結合ロジックは担保 |
 | フロント擬似ストリーム等 | UX は対象外 | 対象外でよい |
 | prd KB ≠ dev KB | 資料同期遅れで「dev 緑・prd 赤」 | デプロイ前に **dev/prd の同期状態を確認**。重大変更は prd でもスモーク |
 | フィルタなし vs 現場の機種指定 | ゴールデンの `filters` が現場操作と違うと乖離 | 実質問を入れるとき **当時の機種・カテゴリを filters に残す** |
@@ -176,11 +176,12 @@ python3 scripts/eval/run_retrieve_eval.py --only G001,G103
 
 ## 後続（実装タスク）
 
-1. 集計に `page_hit` 率・タグ別 `hit_in_candidates`・**ラベル済み N** の明示  
-2. N&lt;10 のときサマリに警告を出す  
-3. 第2層: BYOI → S3 → `create-evaluation-job`  
-4. （任意）PR 用の第1層実行メモテンプレ  
+1. ~~集計に `page_hit` 率・タグ別 `hit_in_candidates`・**ラベル済み N** の明示~~ → **実装済**（`hard_hit_in_candidates` / `decision_ready` / `warning`）
+2. ~~N&lt;10 のときサマリに警告を出す~~ → **実装済**
+3. 第2層: BYOI → S3 → `create-evaluation-job`
+4. （任意）PR 用の第1層実行メモテンプレ
 5. ~~失敗一覧 UI / 👎 理由~~ → **実装済**（`/admin/failures`・chat feedback reason・`GET /chat/admin/failures`）。反映には phase2 `sam deploy` が必要
+6. （任意）タグ別の細分化報告（`drawing` / `incident` / `qsheet` 個別）。現状は `hard` 枠を必須確認
 
 ---
 

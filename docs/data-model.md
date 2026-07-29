@@ -1,12 +1,14 @@
 ---
 status: production
-last-verified: 2026-04-24
-related-code: infrastructure/, lambda/
+last-verified: 2026-07-29
+related-code: infrastructure/, lambda/rag/, lambda/chat/
 ---
 
 # データモデル
 
-> 出典: 旧 [spec.md](../spec.md) §6（PR #10 で本ファイルに切り出し）
+> 出典: 旧 [spec.md](../spec.md) §6（PR #10 で本ファイルに切り出し）  
+> **正本の補足:** API 契約は [`docs/api/rag.md`](./api/rag.md) / [`docs/api/chat.md`](./api/chat.md)。  
+> 本ページの S3 パス例など古い記述がある場合は API／コードを優先する。
 
 ## DynamoDB テーブル設計
 
@@ -23,7 +25,7 @@ related-code: infrastructure/, lambda/
 }
 ```
 
-### eleknowledge-chatlogs テーブル
+### eleknowledge-chatlogs テーブル（ホットウィンドウ）
 
 ```typescript
 {
@@ -33,84 +35,53 @@ related-code: infrastructure/, lambda/
   role: 'user' | 'assistant';
   content: string;          // メッセージ内容
   timestamp: string;        // タイムスタンプ
-  citations?: string[];     // 引用（AIのみ）
-  sourceDocuments?: object[]; // ソース文書
-  feedback?: string;        // フィードバック
-  ttl: number;              // TTL（30日後削除）
+  citations?: string[];     // 引用（AIのみ・レガシー）
+  sourceDocuments?: object[]; // ソース文書（AI）
+  // --- 2026-07-29 RAG 応答メタ（assistant）---
+  responseType?: 'clarify' | 'pages' | 'not_found';
+  pageCandidates?: object[];
+  clarifyQuestions?: string[];
+  queryFilters?: object;    // 当時の機種・カテゴリ等
+  // --- フィードバック ---
+  feedback?: 'good' | 'bad';
+  feedbackReason?: 'wrong_doc' | 'wrong_page' | 'bad_answer' | 'other';
+  feedbackComment?: string;
+  feedbackAt?: string;
+  deleted?: boolean;        // 論理削除
+  ttl: number;              // TTL（保存時から約60日。Stream→S3 で保全）
 }
 ```
 
 **GSI (Global Secondary Index):**
 - userId-timestamp-index: ユーザーごとの履歴取得
 
+失敗一覧（`GET /chat/admin/failures`）は失敗専用 GSI を持たず Scan + Filter（試用初期向け）。詳細は [`docs/api/chat.md`](./api/chat.md)。
+
 ## S3 バケット構成
 
-### eleknowledge-documents（Knowledge Base用）
+> 実バケット名／プレフィックスは環境の CloudFormation / SSM を正とする。  
+> 下記は概念メモ。KB 再利用構成の詳細は phase2 KB レポート等を参照。
 
-```
-eleknowledge-documents/
-├── manuals/              # マニュアル
-├── policies/             # 規定・ポリシー
-├── reports/              # 報告書
-└── specifications/       # 仕様書
-```
+### Knowledge Base 用ドキュメント
 
-### eleknowledge-uploads（一時アップロード用）
+本番／開発の Knowledge Base が参照するドキュメントバケット（既存 KB 再利用）。
 
-```
-eleknowledge-uploads/
-├── tmp/                  # 一時ファイル（24時間で削除）
-└── processed/            # 処理済みファイル
-```
+### アップロード／アーカイブ
+
+- 一時アップロード用プレフィックス（環境依存）
+- chatlogs Stream → S3 アーカイブ（TTL 物理削除前の保全）
 
 ## データライフサイクル管理
 
 ### チャット履歴の保管期間
 
-**ポリシー:**
-- 保管期間: 最終更新から**30日間**
-- 自動削除: DynamoDB TTL機能で実装
-- UI表示: 各セッションに残り日数を表示
+**ポリシー（現行コード）:**
+- ホットウィンドウ: 保存時から **約60日**（DynamoDB TTL）
+- 物理削除前に Stream → S3 アーカイブで保全
+- UI: 各セッションに残り日数を表示しうる
 
-**実装:**
+**実装（RAG 保存時）:**
 ```python
-# TTL設定（メッセージ保存時）
-ttl_timestamp = int(time.time()) + (30 * 24 * 60 * 60)  # 30日後
-
-item = {
-    'sessionId': session_id,
-    'messageId': message_id,
-    'content': content,
-    'timestamp': datetime.now().isoformat(),
-    'ttl': ttl_timestamp  # TTL属性
-}
+# lambda/rag/rag-function/app.py
+ttl_timestamp = int(time.time()) + (60 * 24 * 60 * 60)  # 60 days
 ```
-
-**UI表示例:**
-```typescript
-// 残り日数の計算と表示
-const daysUntilDeletion = calculateDaysUntilDeletion(session.ttl);
-// "あと15日で削除されます"
-```
-
-### S3 ドキュメントのライフサイクル
-
-**ライフサイクルポリシー:**
-- 30日: Standard → Glacier（アーカイブ）
-- 90日: Glacier → Deep Archive
-- 1年: 削除（ポリシーに基づく）
-
-**一時ファイル:**
-- tmp/ 配下: 24時間で自動削除
-
-### 削除通知
-
-**通知設定:**
-- 削除7日前: メール通知（オプション）
-- 削除1日前: UI内通知バナー表示
-
-## 関連ドキュメント
-
-- [architecture/components.md](architecture/components.md) — データストアのコンポーネント概要
-- [security.md](security.md) — 暗号化・アクセス制御
-- [tech-stack.md](tech-stack.md) — DynamoDB / S3 のサービス諸元
