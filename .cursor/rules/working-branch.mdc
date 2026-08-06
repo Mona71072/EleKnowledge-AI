@@ -17,11 +17,13 @@ alwaysApply: true
 コード修正が完了したら、次の順で進める。
 
 1. **`mona` にコミット**
-2. **`mona` に push**（`Mona-mebs` アカウントで。`.cursor/rules/github-account.mdc` 参照）
-3. **デプロイ用 PR を `develop` 向けに作成する**
+2. **`mona` に push**（`Mona-mebs`。手順の正本は `AGENTS.md`「GitHub アカウント運用【Must】」）
+3. **push / `gh` の直後に `Mona71072` へ戻す**（復帰までが完了条件。同上）
+4. **デプロイ用 PR を `develop` 向けに作成する**
    - base: `develop`
    - head: `mona`（または `mona` から切った feature ブランチを merge 済みの `mona`）
-4. PR 本文の先頭で **デプロイ担当者 `@yukiworkspace`（itai）をメンション**する
+5. PR 本文の先頭で **デプロイ担当者 `@yukiworkspace`（itai）をメンション**する
+   - PR 操作後も再び `Mona71072` へ戻すこと
 
 `mona` への push だけでは **AWS バックエンド（Lambda / API Gateway）は反映されない**。フロント（Amplify）だけが `develop` マージ後に自動反映される。バックエンド変更がある PR では、itai 向けに SAM デプロイ手順を必ず書く。
 

@@ -158,7 +158,8 @@ open の細かい PR が増えると、レビュー・マージ順・メンシ�
 
 ### mona → itai
 
-- push / `gh` は `Mona-mebs`
+- push / `gh` は `Mona-mebs`（正本: `AGENTS.md`「GitHub アカウント運用」）
+- push / `gh` の直後に `Mona71072` へ戻す（復帰まで完了）
 - 共同確認は先頭で `@yukiworkspace`、テンプレは `joint-pr-review`
 
 ### itai → mona

@@ -53,10 +53,10 @@ description: >-
 
 1. 変更内容をユーザーに提案し、合意を得る（`ai-collaboration` ルール）
 2. **意図共有・運用ルールだけ**なら feature ブランチを切り、デプロイ用 PR と分離する
-3. コミット → `Mona-mebs` で push
+3. コミット → `Mona-mebs` で push → **直後に `Mona71072` へ戻す**（正本: `AGENTS.md`「GitHub アカウント運用」）
 4. 同種の共同確認が未マージなら **そこに載せる／統合**（新規 PR を安易に増やさない）。無ければ base `develop` 向けに共同確認専用 PR を作成（デプロイ PR には載せない）
 5. PR 本文はテンプレに加え **`.cursor/rules/pr-clarity.mdc` の合格線**を満たす（目的一文・Yes/No・読む順）
-6. `@yukiworkspace` をメンションし、何を確認してほしいかを具体的に書く
+6. `@yukiworkspace` をメンションし、何を確認してほしいかを具体的に書く（`gh` 操作後も `Mona71072` へ戻す）
 7. itai の Approve / コメント待ち。合意前に勝手にマージ方針を断定しない
 
 ## itai → mona（itai 側エージェント）

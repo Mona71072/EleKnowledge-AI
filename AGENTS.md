@@ -1,4 +1,4 @@
-# 📋 AI開発ルール（v1.3.1）
+# 📋 AI開発ルール（v1.3.2）
 
 本ファイルは、本プロジェクトにおける **設計・実装・運用の共通ガードレール** を定義するものです。
 本ルールに従わないコード・設定・運用は **原則として実施しません**。
@@ -195,6 +195,29 @@
 * spec / roadmap 更新確認
 * ユーザー承認取得
 
+### GitHub アカウント運用【Must】
+
+このリポジトリでの `git push` / PR 作成・更新 / `gh` 操作は **`Mona-mebs`** で行う。マシン全体のデフォルトは **`Mona71072`**。
+
+#### 作業開始時
+
+1. `gh auth status` でアクティブアカウントを確認する
+2. `Mona-mebs` でなければ `gh auth switch --user Mona-mebs`
+3. `gh api user --jq .login` が `Mona-mebs` であることを確認する
+
+#### push / `gh` 操作の直後（必須・完了条件）
+
+`git push`・`gh pr create`・`gh pr comment` など、この PJ 向けの GitHub 操作が終わったら、**同じターン内で必ず**デフォルトへ戻す。
+
+```bash
+gh auth switch --user Mona71072
+gh api user --jq .login   # Mona71072 であること
+```
+
+* push 成功だけでタスク完了としない。**アカウント復帰までが完了条件**
+* `Mona-mebs` のまま放置しない（他プロジェクトの認証に影響する）
+* この PJ の push / PR を `Mona71072` で行わない
+
 ---
 
 ## ⚙️ バックエンド規約
@@ -267,6 +290,11 @@
 ---
 
 ## 📝 変更履歴
+
+* v1.3.2
+
+  * GitHub アカウント運用（作業は `Mona-mebs`、push/`gh` 直後に `Mona71072` へ戻す）を Must 化
+  * アカウント復帰を push 成功後の完了条件として明記
 
 * v1.3.1
 
