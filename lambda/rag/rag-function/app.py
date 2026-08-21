@@ -25,6 +25,9 @@ BEDROCK_MODEL_ID = os.environ.get('BEDROCK_MODEL_ID')
 CHATLOGS_TABLE_NAME = os.environ.get('CHATLOGS_TABLE')
 DOCUMENTS_BUCKET = os.environ.get('DOCUMENTS_BUCKET')
 AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-1')
+# 引用リンクの署名付き URL の有効期限（秒）。URL 自体が DynamoDB にも保存され
+# 残留するため、閲覧に必要な最小限に留める。
+PRESIGNED_URL_EXPIRES_IN = int(os.environ.get('PRESIGNED_URL_EXPIRES_IN', '3600'))
 
 if not CHATLOGS_TABLE_NAME:
     raise RuntimeError('CHATLOGS_TABLE environment variable is required')
@@ -873,12 +876,10 @@ def presign_source_uri(s3_client, doc_uri: str) -> str:
     bucket, key = parsed.netloc, parsed.path.lstrip('/')
     if not bucket or not key:
         return doc_uri
-    # SigV4 のプリサイン URL は最長7日。ただし Lambda は role の一時認証情報で
-    # 署名するため、実効期限はそのセッション期限 (最長12時間) で切れる。
     return s3_client.generate_presigned_url(
         'get_object',
         Params={'Bucket': bucket, 'Key': key},
-        ExpiresIn=604800
+        ExpiresIn=PRESIGNED_URL_EXPIRES_IN
     )
 
 

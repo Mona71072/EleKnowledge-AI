@@ -157,6 +157,13 @@ Parameters:
     Description: Office egress /32 CIDRs allowed to reach the APIs (same as GenU / WAF)
     Default: "203.178.81.200/32,210.172.233.198/32,210.172.233.219/32,210.172.233.220/32,192.218.140.236/32,192.218.140.237/32,192.218.140.238/32,192.218.140.239/32,192.218.140.240/32,192.218.140.241/32"
 
+  PresignedUrlExpiresIn:
+    Type: Number
+    Default: 3600
+    MinValue: 300
+    MaxValue: 43200
+    Description: Citation presigned URL lifetime (seconds). Anyone holding the URL can fetch the document without auth, so keep it short.
+
 Globals:
   Function:
     Timeout: 300
@@ -299,6 +306,7 @@ Resources:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
           DOCUMENTS_BUCKET:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
+          PRESIGNED_URL_EXPIRES_IN: !Ref PresignedUrlExpiresIn
       Events:
         RagApi:
           Type: Api
