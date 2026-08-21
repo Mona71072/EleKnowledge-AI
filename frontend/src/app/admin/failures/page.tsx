@@ -499,7 +499,7 @@ export default function AdminFailuresPage() {
 
       {incomplete && (
         <div className="mb-4 rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-          Scan が打ち切られたため、最新の失敗が一覧に含まれていない可能性があります。
+          Scan が打ち切られたため一覧は不完全です。欠けているのは最新分とは限らず、任意の範囲の失敗が含まれていない可能性があります。
         </div>
       )}
 

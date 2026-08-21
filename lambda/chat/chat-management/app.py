@@ -450,7 +450,8 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
         'kind': kind,
         'note': (
             'hot window (TTL〜60日)。Scan ベースのため件数増で遅くなる場合は Athena へ移行。'
-            + (' Scan 打ち切りのため最新が欠けている可能性があります。' if incomplete else '')
+            + ((' Scan 打ち切りのため一部が欠けています（Scan はハッシュ順のため'
+                '欠けるのは最新分とは限りません）。') if incomplete else '')
         ),
     }
 
