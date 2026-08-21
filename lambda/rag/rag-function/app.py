@@ -670,6 +670,11 @@ def build_claude_messages(query: str, selected_results: list, chat_history: list
                 role = 'user'
             append_claude_message(messages, role, content)
 
+    # Messages must start with user: history fetched with an odd limit can
+    # begin with an assistant turn (Bedrock rejects assistant-first messages)
+    if messages and messages[0]['role'] == 'assistant':
+        messages.pop(0)
+
     # Final user turn must follow an assistant (or be the only turn)
     if messages and messages[-1]['role'] == 'user':
         append_claude_message(

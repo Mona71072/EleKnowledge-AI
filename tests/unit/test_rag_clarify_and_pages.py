@@ -133,6 +133,23 @@ def test_build_claude_messages_alternating_after_clarify(rag):
     assert '異音' in texts and 'かご' in texts
 
 
+def test_build_claude_messages_drops_leading_assistant_history(rag):
+    # get_chat_history(limit=5) は奇数件を返すため、4問目以降は履歴が
+    # assistant 始まりになる（Bedrock は assistant 先頭を拒否する）
+    hist = [
+        {'role': 'assistant', 'content': '1問目の回答です'},
+        {'role': 'user', 'content': '2問目の質問'},
+        {'role': 'assistant', 'content': '2問目の回答です'},
+        {'role': 'user', 'content': '3問目の質問'},
+        {'role': 'assistant', 'content': '3問目の回答です'},
+    ]
+    msgs = rag.build_claude_messages('4問目の質問', [], chat_history=hist)
+    roles = [m['role'] for m in msgs]
+    assert roles[0] == 'user'
+    assert roles[-1] == 'user'
+    assert all(roles[i] != roles[i + 1] for i in range(len(roles) - 1))
+
+
 def test_build_question_text_includes_composed_search(rag):
     text = rag.build_question_text_for_claude('かご', '異音がする\nかご')
     assert '【検索クエリ】' in text
