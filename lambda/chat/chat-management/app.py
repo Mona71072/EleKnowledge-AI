@@ -621,15 +621,21 @@ def lambda_handler(event, context):
                     })
                 }
 
-            if not owns_session(session_id, caller_id):
+            # admin は PDCA（失敗一覧からの照合）のため他ユーザーのセッションも
+            # 「読み取りのみ」許可する。書き込み系（RAG 送信・削除・feedback）は
+            # 従来どおり所有者限定のまま。
+            is_owner = owns_session(session_id, caller_id)
+            if not is_owner and not is_admin(event):
                 return not_found
 
             messages = get_session_messages(session_id)
-            
+
             return {
                 'statusCode': 200,
                 'headers': headers,
-                'body': json.dumps({'messages': messages}, cls=DecimalEncoder, ensure_ascii=False)
+                'body': json.dumps(
+                    {'messages': messages, 'readOnly': not is_owner},
+                    cls=DecimalEncoder, ensure_ascii=False)
             }
         
         # Route: DELETE /chat/sessions/{sessionId} - Delete session
