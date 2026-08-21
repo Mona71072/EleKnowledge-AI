@@ -1,7 +1,7 @@
 ---
 status: production
 phase: 1
-last-verified: 2026-04-24
+last-verified: 2026-08-21
 related-code: frontend/src/app/, lambda/auth/
 ---
 
@@ -13,7 +13,7 @@ related-code: frontend/src/app/, lambda/auth/
 ## 認証システム【完成】
 
 **Phase 1実装機能:**
-- ✅ ユーザー登録（サインアップ）
+- ✅ ユーザー登録（サインアップ）※メール確認完了後は自動ログインしてホーム画面へ遷移（同一ブラウザセッション内のみ。別タブ・リロード後はログイン画面へ）
 - ✅ ログイン・ログアウト
 - ✅ パスワードリセット
 - ✅ MFA（多要素認証）※オプション
