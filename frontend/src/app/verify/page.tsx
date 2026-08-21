@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { confirmSignUp, resendSignUpCode } from 'aws-amplify/auth';
+import { autoSignIn, confirmSignUp, resendSignUpCode } from 'aws-amplify/auth';
 import Link from 'next/link';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -43,11 +43,26 @@ function VerifyContent() {
     setLoading(true);
 
     try {
-      await confirmSignUp({
+      const { nextStep } = await confirmSignUp({
         username: email,
         confirmationCode: code
       });
-      
+
+      // サインアップと同一セッション内なら自動ログイン（signUp の autoSignIn: true とセット）。
+      // 別タブ・リロード後などで自動ログインできない場合はログイン画面へフォールバック。
+      if (nextStep.signUpStep === 'COMPLETE_AUTO_SIGN_IN') {
+        try {
+          await autoSignIn();
+          setSuccess('メールアドレスが確認されました。ホーム画面に移動します...');
+          setTimeout(() => {
+            router.push('/');
+          }, 1500);
+          return;
+        } catch (autoSignInErr) {
+          console.error('Auto sign-in error:', autoSignInErr);
+        }
+      }
+
       setSuccess('メールアドレスが確認されました。ログインページに移動します...');
       setTimeout(() => {
         router.push('/login');

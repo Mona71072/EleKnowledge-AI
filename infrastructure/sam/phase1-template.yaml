@@ -204,11 +204,13 @@ Resources:
         - ALLOW_REFRESH_TOKEN_AUTH
         - ALLOW_USER_SRP_AUTH
       PreventUserExistenceErrors: ENABLED
-      RefreshTokenValidity: 30
+      # セッション有効期限は仕様（phase1-foundation.md セキュリティ要件）どおり24時間。
+      # Access/Id トークンは短命のまま、リフレッシュトークン失効でログインが切れる。
+      RefreshTokenValidity: 24
       AccessTokenValidity: 60
       IdTokenValidity: 60
       TokenValidityUnits:
-        RefreshToken: days
+        RefreshToken: hours
         AccessToken: minutes
         IdToken: minutes
       ReadAttributes:

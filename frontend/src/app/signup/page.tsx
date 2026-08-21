@@ -105,7 +105,8 @@ export default function SignupPage() {
           userAttributes: {
             email: trimmedEmail,
             name: trimmedName
-          }
+          },
+          autoSignIn: true
         }
       });
       
