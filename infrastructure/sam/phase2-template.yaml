@@ -323,6 +323,7 @@ Resources:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
           ENVIRONMENT: !Ref Environment
           FEEDBACK_METRIC_NAMESPACE: EleKnowledge/Feedback
+          ADMIN_GROUP_NAME: admin
       Events:
         ListSessions:
           Type: Api
@@ -354,6 +355,24 @@ Resources:
             RestApiId: !Ref ChatApi
             Path: /chat/messages/{messageId}/feedback
             Method: PUT
+        ListAdminFailures:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /chat/admin/failures
+            Method: GET
+        SubmitSuggestion:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /chat/suggestions
+            Method: POST
+        ListAdminSuggestions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /chat/admin/suggestions
+            Method: GET
 
   # ============================================================================
   # API Gateway
@@ -392,7 +411,9 @@ Resources:
           ThrottlingBurstLimit: !Ref RagApiThrottleBurst
           ThrottlingRateLimit: !Ref RagApiThrottleRate
           LoggingLevel: INFO
-          DataTraceEnabled: true
+          # DataTrace はボディ全文を実行ログに書き出す。RAG API では利用者の質問文・
+          # AI 回答全文・引用文書の署名付き URL がそのまま CloudWatch Logs に残るため false。
+          DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
         Project: !Ref ProjectName
@@ -433,7 +454,9 @@ Resources:
           ThrottlingBurstLimit: !Ref ChatApiThrottleBurst
           ThrottlingRateLimit: !Ref ChatApiThrottleRate
           LoggingLevel: INFO
-          DataTraceEnabled: true
+          # DataTrace はボディ全文を実行ログに書き出す。Chat API では会話履歴が
+          # そのまま CloudWatch Logs に残るため false。
+          DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
         Project: !Ref ProjectName

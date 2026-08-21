@@ -1,6 +1,7 @@
 """Unit tests for announcements & monitoring Lambdas (pure logic, no AWS calls)."""
 import importlib.util
 import os
+import sys
 
 BASE = os.path.join(os.path.dirname(__file__), "../..")
 
@@ -14,13 +15,22 @@ os.environ.setdefault("CHATLOGS_TABLE", "chatlogs-test")
 
 def _load(name, rel_path):
     path = os.path.normpath(os.path.join(BASE, rel_path))
+    # Allow `from timeutil import ...` inside announcement Lambdas
+    mod_dir = os.path.dirname(path)
+    if mod_dir not in sys.path:
+        sys.path.insert(0, mod_dir)
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
+    # Register before exec so sibling imports (timeutil) resolve consistently
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
 
 
 write = _load("ann_write", "lambda/announcements/write/app.py")
+read = _load("ann_read", "lambda/announcements/read/app.py")
+publisher = _load("ann_publisher", "lambda/announcements/publisher/app.py")
+timeutil = _load("ann_timeutil", "lambda/announcements/write/timeutil.py")
 metrics_read = _load("metrics_read", "lambda/metrics/read/app.py")
 aggregator = _load("metrics_aggregator", "lambda/metrics/aggregator/app.py")
 
@@ -74,6 +84,155 @@ def test_validate_ok():
         {"type": "notice", "title": "x", "severity": "info", "status": "draft"},
         partial=False,
     ) is None
+
+
+def test_validate_scheduled_requires_future_publish_at():
+    err = write.validate(
+        {
+            "type": "notice",
+            "title": "x",
+            "severity": "info",
+            "status": "scheduled",
+        },
+        partial=False,
+    )
+    assert err and "publishAt" in err
+
+    past = write.validate(
+        {
+            "type": "notice",
+            "title": "x",
+            "severity": "info",
+            "status": "scheduled",
+            "publishAt": "2020-01-01T00:00:00.000Z",
+        },
+        partial=False,
+    )
+    assert past and "future" in past
+
+
+# ----------------------------------------------------------------- UTC normalize
+def test_normalize_utc_iso_unifies_js_and_python_and_offsets():
+    js = "2026-07-29T10:00:00.123Z"
+    py_us = "2026-07-29T10:00:00.123456Z"
+    offset = "2026-07-29T19:00:00.123+09:00"
+    bare = "2026-07-29T10:00:00Z"
+
+    n_js = timeutil.normalize_utc_iso(js)
+    n_py = timeutil.normalize_utc_iso(py_us)
+    n_off = timeutil.normalize_utc_iso(offset)
+    n_bare = timeutil.normalize_utc_iso(bare)
+
+    assert n_js == "2026-07-29T10:00:00.123Z"
+    assert n_py == "2026-07-29T10:00:00.123Z"  # micros truncated to millis
+    assert n_off == "2026-07-29T10:00:00.123Z"  # +09:00 -> UTC
+    assert n_bare == "2026-07-29T10:00:00.000Z"
+    # Dictionary order matches chronological order after normalize
+    assert n_js == n_py == n_off
+    assert n_bare < n_js
+
+
+def test_now_utc_iso_canonical_shape():
+    now = timeutil.now_utc_iso()
+    assert now.endswith("Z")
+    assert len(now) == len("2026-07-29T10:00:00.000Z")
+    assert timeutil.normalize_utc_iso(now) == now
+
+
+# ----------------------------------------------------------------- read feed (due scheduled)
+def test_get_published_includes_due_scheduled_and_sorts(monkeypatch):
+    now = "2026-07-29T12:00:00.000Z"
+
+    def fake_query(status, now_iso, fetch_limit):
+        assert now_iso == now
+        if status == "published":
+            return [
+                {
+                    "announcementId": "a1",
+                    "status": "published",
+                    "publishAt": "2026-07-28T00:00:00.000Z",
+                    "pinned": False,
+                    "title": "old",
+                },
+                {
+                    "announcementId": "a2",
+                    "status": "published",
+                    "publishAt": "2026-07-29T10:00:00.000Z",
+                    "pinned": True,
+                    "title": "pinned",
+                },
+            ]
+        if status == "scheduled":
+            return [
+                {
+                    "announcementId": "a3",
+                    "status": "scheduled",
+                    "publishAt": "2026-07-29T11:00:00.000Z",
+                    "pinned": False,
+                    "title": "due scheduled",
+                },
+                {
+                    "announcementId": "a4",
+                    "status": "scheduled",
+                    "publishAt": "2026-07-20T00:00:00.000Z",
+                    "endAt": "2026-07-21T00:00:00.000Z",
+                    "title": "expired",
+                },
+            ]
+        return []
+
+    monkeypatch.setattr(read, "_query_by_status", fake_query)
+    result = read.get_published(10, now)
+    ids = [x["announcementId"] for x in result]
+    assert ids[0] == "a2"  # pinned first
+    assert "a3" in ids  # due scheduled included
+    assert "a4" not in ids  # endAt passed
+    # non-pinned: newer publishAt first
+    non_pinned = [i for i in ids if i != "a2"]
+    assert non_pinned == ["a3", "a1"]
+
+
+def test_get_published_filters_legacy_future_after_normalize(monkeypatch):
+    """GSI may return a row; normalized compare must still hide true-future items."""
+    now = "2026-07-29T10:00:00.000Z"
+
+    def fake_query(status, now_iso, fetch_limit):
+        if status == "published":
+            return [
+                {
+                    "announcementId": "future",
+                    "status": "published",
+                    "publishAt": "2026-07-29T20:00:00+09:00",  # == 11:00Z > 10:00Z
+                    "pinned": False,
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(read, "_query_by_status", fake_query)
+    assert read.get_published(10, now) == []
+
+
+def test_promote_due_updates_scheduled(monkeypatch):
+    class FakeTable:
+        def __init__(self):
+            self.updated = []
+
+        def query(self, **kwargs):
+            return {
+                "Items": [
+                    {"announcementId": "anc_1", "status": "scheduled", "publishAt": "2026-07-01T00:00:00.000Z"},
+                    {"announcementId": "anc_2", "status": "scheduled", "publishAt": "2026-07-02T00:00:00.000Z"},
+                ]
+            }
+
+        def update_item(self, **kwargs):
+            self.updated.append(kwargs["Key"]["announcementId"])
+
+    fake = FakeTable()
+    monkeypatch.setattr(publisher, "table", fake)
+    result = publisher.promote_due("2026-07-29T00:00:00.000Z")
+    assert result["count"] == 2
+    assert result["promoted"] == ["anc_1", "anc_2"]
 
 
 # ----------------------------------------------------------------- health status

@@ -10,14 +10,18 @@ Admin is verified server-side from the Cognito authorizer claims
 Markdown body is sanitized before storage (defense in depth; the frontend renders
 Markdown without raw-HTML, so this is a second layer).
 """
+from __future__ import annotations
+
 import json
 import os
 import re
 import time
-from datetime import datetime, timezone
+from typing import Optional
 
 import boto3
 from botocore.exceptions import ClientError
+
+from timeutil import normalize_utc_iso, now_utc_iso
 
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'ap-northeast-1'))
 
@@ -47,7 +51,17 @@ _JS_URI_RE = re.compile(r'javascript\s*:', re.IGNORECASE)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    return now_utc_iso()
+
+
+def _norm_ts(value) -> Optional[str]:
+    """Normalize a client/server timestamp; raise ValueError on bad input."""
+    if value is None or value == '':
+        return None
+    try:
+        return normalize_utc_iso(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f'invalid timestamp: {value!r}') from e
 
 
 def _response(status: int, body: dict) -> dict:
@@ -83,7 +97,7 @@ def sanitize_markdown(text: str) -> str:
     return text
 
 
-def validate(body: dict, partial: bool = False) -> str | None:
+def validate(body: dict, partial: bool = False) -> Optional[str]:
     """Return an error message, or None if valid."""
     def required(field):
         return field in body and body[field] not in (None, '')
@@ -106,12 +120,28 @@ def validate(body: dict, partial: bool = False) -> str | None:
     if body.get('body') and len(body['body']) > BODY_MAX:
         return f"body must be <= {BODY_MAX} chars"
 
+    # scheduled は未来の publishAt 必須（空欄で即時公開に落ちない）
+    if (not partial or 'status' in body) and body.get('status') == 'scheduled':
+        try:
+            pub = _norm_ts(body.get('publishAt'))
+        except ValueError:
+            return "publishAt must be a valid ISO-8601 timestamp"
+        if not pub:
+            return "scheduled status requires publishAt"
+        if pub <= now_utc_iso():
+            return "scheduled publishAt must be in the future"
+
     # Maintenance requires a valid time window
     if body.get('type') == 'maintenance':
         start, end = body.get('startAt'), body.get('endAt')
         if not partial and (not start or not end):
             return "maintenance requires startAt and endAt"
-        if start and end and start >= end:
+        try:
+            start_n = _norm_ts(start) if start else None
+            end_n = _norm_ts(end) if end else None
+        except ValueError:
+            return "startAt/endAt must be valid ISO-8601 timestamps"
+        if start_n and end_n and start_n >= end_n:
             return "startAt must be before endAt"
     return None
 
@@ -123,7 +153,13 @@ def create(body: dict, actor: str) -> dict:
 
     now = _now_iso()
     status = body['status']
-    publish_at = body.get('publishAt') or now
+    try:
+        publish_at = _norm_ts(body.get('publishAt')) or now
+        start_at = _norm_ts(body.get('startAt'))
+        end_at = _norm_ts(body.get('endAt'))
+    except ValueError as e:
+        return _response(400, {'error': 'ValidationError', 'message': str(e)})
+
     # A future publishAt with published status is treated as scheduled
     if status == 'published' and publish_at > now:
         status = 'scheduled'
@@ -143,10 +179,10 @@ def create(body: dict, actor: str) -> dict:
         'updatedAt': now,
     }
     if body.get('type') == 'maintenance':
-        item['startAt'] = body.get('startAt')
-        item['endAt'] = body.get('endAt')
-    if body.get('endAt') and 'endAt' not in item:
-        item['endAt'] = body['endAt']
+        item['startAt'] = start_at
+        item['endAt'] = end_at
+    elif end_at:
+        item['endAt'] = end_at
     if body.get('ttl'):
         item['ttl'] = int(body['ttl'])
 
@@ -164,15 +200,31 @@ def update(announcement_id: str, body: dict, actor: str) -> dict:
         return _response(400, {'error': 'ValidationError', 'message': err})
 
     merged = dict(existing)
-    for field in ('type', 'title', 'severity', 'status', 'publishAt', 'pinned', 'startAt', 'endAt'):
-        if field in body:
-            merged[field] = body[field]
-    if 'title' in body:
-        merged['title'] = body['title'].strip()
-    if 'body' in body:
-        merged['body'] = sanitize_markdown(body['body'])
-    if 'pinned' in body:
-        merged['pinned'] = bool(body['pinned'])
+    try:
+        for field in ('type', 'title', 'severity', 'status', 'pinned'):
+            if field in body:
+                merged[field] = body[field]
+        if 'title' in body:
+            merged['title'] = body['title'].strip()
+        if 'body' in body:
+            merged['body'] = sanitize_markdown(body['body'])
+        if 'pinned' in body:
+            merged['pinned'] = bool(body['pinned'])
+        if 'publishAt' in body:
+            merged['publishAt'] = _norm_ts(body['publishAt']) or merged.get('publishAt')
+        if 'startAt' in body:
+            merged['startAt'] = _norm_ts(body['startAt'])
+        if 'endAt' in body:
+            merged['endAt'] = _norm_ts(body['endAt'])
+        # Re-normalize existing timestamps so legacy rows become comparable
+        if merged.get('publishAt'):
+            merged['publishAt'] = _norm_ts(merged['publishAt']) or merged['publishAt']
+        if merged.get('startAt'):
+            merged['startAt'] = _norm_ts(merged['startAt'])
+        if merged.get('endAt'):
+            merged['endAt'] = _norm_ts(merged['endAt'])
+    except ValueError as e:
+        return _response(400, {'error': 'ValidationError', 'message': str(e)})
 
     now = _now_iso()
     if merged.get('status') == 'published' and merged.get('publishAt', now) > now:

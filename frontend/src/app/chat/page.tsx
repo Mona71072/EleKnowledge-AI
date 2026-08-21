@@ -9,6 +9,16 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 import { Chip } from '@/components/ui';
+import { Toast } from '@/components/ui/Toast';
+import { ChatMessageFeedback } from '@/components/chat/ChatMessageFeedback';
+import { ProductWishModal } from '@/components/chat/ProductWishModal';
+import { ALL_MODEL_TYPES, POPULAR_MODEL_TYPES } from '@/data/kbModelTypes';
+import {
+  BadFeedbackReasonId,
+  FEEDBACK_COMMENT_MAX,
+  PRODUCT_WISH_TEXT_MAX,
+  submitProductWish,
+} from '@/lib/chat-failures';
 
 interface Message {
   id: string;
@@ -16,6 +26,18 @@ interface Message {
   content: string;
   timestamp: string;
   citations?: string[];
+  responseType?: 'clarify' | 'pages' | 'not_found';
+  clarifyQuestions?: string[];
+  pageCandidates?: Array<{
+    documentName: string;
+    category?: string;
+    modelType?: string;
+    pageNumber?: number;
+    sourceUri: string;
+    relevance: number;
+    snippet?: string | null;
+    lowConfidence?: boolean;
+  }>;
   sourceDocuments?: Array<{
     documentName: string;
     title?: string;  // メタデータタイトル（オプション）
@@ -23,9 +45,18 @@ interface Message {
     category: string;    // Knowledge Base の実メタデータ category（例: C資料 / 据付場用図）
     modelType: string;   // 同 model_type（カンマ連結の多値文字列）
     hasImage?: boolean;  // 該当チャンクが図面などの画像だった場合 true
+    pageNumber?: number;
     relevance: number;
   }>;
   feedback?: 'good' | 'bad' | null;
+  /** 新規: wrong_doc | unresolved | bad_answer | other。wrong_page は旧データ表示用 */
+  feedbackReason?: 'wrong_doc' | 'unresolved' | 'bad_answer' | 'other' | 'wrong_page' | null;
+  feedbackComment?: string | null;
+}
+
+interface ToastState {
+  message: string;
+  variant: 'success' | 'error' | 'info';
 }
 
 interface Session {
@@ -55,46 +86,60 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showAllCitations, setShowAllCitations] = useState<Record<string, boolean>>({});
-  // 資料カテゴリは複数選択 (バックエンド build_kb_filter が in 句に対応)。値は CATEGORY_MAP の安定キー。
+  // 資料カテゴリは複数選択。未選択＝全資料検索。
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   // 機種は model_type の stringContains 単一値のため単一選択。
   const [selectedModel, setSelectedModel] = useState('');
+  const [modelQuery, setModelQuery] = useState('');
+  const [modelListOpen, setModelListOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  // 👎 直後に理由ワンタップを出す対象（必須にしない＝スキップ可）
+  const [pendingBadMessageId, setPendingBadMessageId] = useState<string | null>(null);
+  const [pendingBadComment, setPendingBadComment] = useState('');
+  const [feedbackBusyIds, setFeedbackBusyIds] = useState<Record<string, true>>({});
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [wishOpen, setWishOpen] = useState(false);
+  const [wishText, setWishText] = useState('');
+  const [wishSubmitting, setWishSubmitting] = useState(false);
+  const [wishSent, setWishSent] = useState(false);
+  const [wishError, setWishError] = useState<string | null>(null);
 
-  // value は Knowledge Base の実 category 値に対応する安定キー (バックエンドの CATEGORY_MAP と対)。
-  // 表示用の日本語はこの層だけに置き、資料フォルダ名が変わっても API 契約が壊れないようにする。
-  // ラベルは KB の実 category 名に合わせる (テクニカルインフォメーションのみ通称 TI を使用)。
-  // value キー(安定キー)は変更しないため API 契約は不変。
+  // value は Knowledge Base の実 category 値に対応する安定キー
+  // 並び: 本命（C / TI / 据付基準）を先に、その他は後。
   const categoryOptions = [
-    { value: '', label: 'すべての資料' },
-    { value: 'drawing', label: '据付場用図' },
     { value: 'spec', label: 'C資料' },
     { value: 'tech_info', label: 'TI' },
+    { value: 'std', label: '据付基準' },
+    { value: 'drawing', label: '据付場用図' },
     { value: 'incident', label: '災害事例集' },
     { value: 'qsheet', label: 'Qシート' },
-    { value: 'std', label: '据付基準' },
     { value: 'note', label: '据付ノート' },
-    { value: 'site_agent', label: '現場代理人業務マニュアル' },
-    { value: 'quality_mgmt', label: '品質管理業務マニュアル' },
-    { value: 'w_doc', label: 'W資料' }
+    { value: 'w_doc', label: 'W資料' },
   ];
 
-  // model_type はカンマ連結の多値文字列を部分一致で絞り込むため、
-  // 'AXIEZ' は 'AXIEZ-LINKs' 等にも一致する (上位集合になる)。ラベルで明示している。
-  const modelTypeOptions = [
-    { value: '', label: 'すべての機種' },
-    { value: 'AXIEZ', label: 'AXIEZ 系（AXIEZ-LINKs を含む）' },
-    { value: 'AXIEZ-LINKs', label: 'AXIEZ-LINKs' },
-    { value: 'NEXCUBE', label: 'NEXCUBE' },
-    { value: 'NEXIEZ-MRL', label: 'NEXIEZ-MRL' },
-    { value: 'メルワイド', label: 'メルワイド' },
-    { value: 'メルシティ', label: 'メルシティ' },
-    { value: 'ELENESSA', label: 'ELENESSA' }
-  ];
+  const normalizedModelQuery = modelQuery.trim().toLowerCase();
+  const filteredModelOptions = normalizedModelQuery
+    ? ALL_MODEL_TYPES.filter((opt) =>
+        opt.label.toLowerCase().includes(normalizedModelQuery)
+          || opt.value.toLowerCase().includes(normalizedModelQuery)
+      ).slice(0, 40)
+    : ALL_MODEL_TYPES.slice(0, 30);
+
+  const selectedModelLabel =
+    ALL_MODEL_TYPES.find((o) => o.value === selectedModel)?.label || selectedModel;
 
   const API_URL = process.env.NEXT_PUBLIC_RAG_API_URL || '';
   const CHAT_API_URL = process.env.NEXT_PUBLIC_CHAT_API_URL || '';
 
-  const getUniqueDocs = (docs: Message['sourceDocuments'] = []) => {
+  // 空状態のクリック可能な質問サジェスト（ホーム画面のチップと同一）
+const SUGGESTED_QUESTIONS = [
+  'KE-LG の据付で注意すべきポイントは？',
+  '異音が出るときに最初に確認する項目は？',
+  'エラーコードの原因と対処を手順で教えて',
+];
+
+const getUniqueDocs = (docs: Message['sourceDocuments'] = []) => {
     const seen = new Set<string>();
     return docs.filter((doc) => {
       const key = doc.sourceUri || doc.documentName || '';
@@ -240,7 +285,7 @@ const normalizeTableMarkdown = (text: string): string => {
         setUserId(subId);
 
         // セッション一覧を取得
-        await fetchSessions(subId);
+        await fetchSessions();
       } catch (err) {
         console.error('Initialize error:', err);
         router.push('/login');
@@ -249,6 +294,31 @@ const normalizeTableMarkdown = (text: string): string => {
 
     initializeChat();
   }, [router]);
+
+  // ホームのクイック質問 (?q=...) と失敗一覧からのセッション (?session=...)
+  useEffect(() => {
+    if (!userId) return;
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('q');
+    const sessionId = params.get('session');
+    let dirty = false;
+    if (q) {
+      setInput(q);
+      dirty = true;
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+    if (sessionId) {
+      dirty = true;
+      fetchSessionMessages(sessionId).catch((err) => {
+        console.error('Failed to open session from URL:', err);
+        setError('指定されたセッションを開けませんでした');
+      });
+    }
+    if (dirty) {
+      // URL からクエリを除去してリロード時の再適用を防ぐ
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [userId]);
 
   // タイプライター効果の実装
   useEffect(() => {
@@ -320,30 +390,26 @@ const normalizeTableMarkdown = (text: string): string => {
     setShowScrollButton(false);
   };
 
-  const fetchSessions = async (subId: string) => {
+  const fetchSessions = async () => {
     try {
       setIsLoadingSessions(true);
       const token = await getAuthToken();
       
-      console.log('Fetching sessions with URL:', `${CHAT_API_URL}/chat/sessions?userId=${subId}`);
-      console.log('API_URL:', CHAT_API_URL);
-      console.log('Token available:', !!token);
-      
-      const response = await axios.get(`${CHAT_API_URL}/chat/sessions?userId=${subId}`, {
+      // userId はサーバー側で ID トークンのクレームから決まるため送らない
+      const response = await axios.get(`${CHAT_API_URL}/chat/sessions`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
-      console.log('Sessions fetched successfully:', response.data);
       setSessions(response.data.sessions || []);
     } catch (err: any) {
-      console.error('Error fetching sessions - Full error:', {
+      // err.config は headers.Authorization（ID トークン）を含むためログに出さない
+      console.error('Error fetching sessions:', {
         message: err.message,
         status: err.response?.status,
         statusText: err.response?.statusText,
-        data: err.response?.data,
-        config: err.config
+        data: err.response?.data
       });
       setError(`セッション取得に失敗しました: ${err.response?.status || err.message}`);
     } finally {
@@ -422,18 +488,12 @@ const normalizeTableMarkdown = (text: string): string => {
         filters: effectiveFilters
       };
       
-      console.log('Sending RAG query:', {
-        url: `${API_URL}/rag/query`,
-        payload: payload
-      });
-
       const response = await axios.post(`${API_URL}/rag/query`, payload, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
-      console.log('RAG query response:', response.data);
 
       const aiId = response.data.aiMessageId || response.data.messageId || `msg-ai-${Date.now()}`;
       const aiMessage: Message = {
@@ -442,31 +502,38 @@ const normalizeTableMarkdown = (text: string): string => {
         content: response.data.content,
         timestamp: response.data.timestamp,
         citations: response.data.citations,
+        responseType: response.data.responseType,
+        clarifyQuestions: response.data.clarifyQuestions,
+        pageCandidates: response.data.pageCandidates,
         sourceDocuments: response.data.sourceDocuments
       };
 
       setMessages(prev => [...prev, aiMessage]);
-      
-      // タイプライター効果を開始
-      setStreamingMessageId(aiId);
-      setStreamingMessages(prev => ({
-        ...prev,
-        [aiId]: ''
-      }));
+
+      // clarify / not_found は定型文なのでタイプライター不要（意図: 候補・聞き返しをすぐ読ませる）
+      if (response.data.responseType === 'clarify' || response.data.responseType === 'not_found') {
+        setStreamingMessageId(null);
+      } else {
+        setStreamingMessageId(aiId);
+        setStreamingMessages(prev => ({
+          ...prev,
+          [aiId]: ''
+        }));
+      }
 
       // 新規セッションの場合はセッション一覧を更新
       if (!currentSession && response.data.sessionId) {
         setCurrentSession(response.data.sessionId);
-        await fetchSessions(userId);
+        await fetchSessions();
         await fetchSessionMessages(response.data.sessionId);
       }
     } catch (err: any) {
-      console.error('Error sending RAG query - Full error:', {
+      // err.config は headers.Authorization（ID トークン）を含むためログに出さない
+      console.error('Error sending RAG query:', {
         message: err.message,
         status: err.response?.status,
         statusText: err.response?.statusText,
         data: err.response?.data,
-        config: err.config,
         url: err.config?.url
       });
       setError(`エラーが発生しました: ${err.response?.data?.message || err.message || 'Unknown error'}`);
@@ -505,27 +572,149 @@ const normalizeTableMarkdown = (text: string): string => {
     }
   };
 
-  const handleFeedback = async (messageId: string, feedback: 'good' | 'bad') => {
-    if (!currentSession) return;
+  const handleCopyMessage = async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    } catch (err) {
+      console.error('Copy failed:', err);
+    }
+  };
+
+  const handleSuggestedQuestion = (q: string) => {
+    setInput(q);
+    setTimeout(() => textareaRef.current?.focus(), 50);
+  };
+
+  const handleFeedback = async (
+    messageId: string,
+    feedback: 'good' | 'bad',
+    reason?: BadFeedbackReasonId,
+    comment?: string,
+  ) => {
+    if (!currentSession || feedbackBusyIds[messageId]) return;
+
+    const previous = messages.find((m) => m.id === messageId);
+    const trimmedComment = comment?.trim().slice(0, FEEDBACK_COMMENT_MAX);
+
+    setFeedbackBusyIds((prev) => ({ ...prev, [messageId]: true }));
+    setMessages((prev) => prev.map((m) =>
+      m.id === messageId
+        ? {
+            ...m,
+            feedback,
+            feedbackReason: feedback === 'bad' ? (reason || m.feedbackReason || null) : null,
+            feedbackComment:
+              feedback === 'good'
+                ? null
+                : trimmedComment
+                  ? trimmedComment
+                  : m.feedbackComment,
+          }
+        : m
+    ));
+
+    if (feedback === 'good') {
+      setPendingBadMessageId(null);
+      setPendingBadComment('');
+    } else if (!reason && !trimmedComment) {
+      setPendingBadMessageId(messageId);
+      setPendingBadComment('');
+    } else if (trimmedComment) {
+      setPendingBadMessageId(null);
+      setPendingBadComment('');
+    }
 
     try {
       const token = await getAuthToken();
-      await axios.put(`${CHAT_API_URL}/chat/messages/${messageId}/feedback`, {
+      const body: Record<string, string> = {
         sessionId: currentSession,
-        feedback
-      }, {
+        feedback,
+      };
+      if (feedback === 'bad' && reason) {
+        body.reason = reason;
+      }
+      if (feedback === 'bad' && trimmedComment) {
+        body.comment = trimmedComment;
+      }
+      await axios.put(`${CHAT_API_URL}/chat/messages/${messageId}/feedback`, body, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
 
-      setMessages(messages.map(m =>
-        m.id === messageId ? { ...m, feedback } : m
-      ));
+      // 👎 初回タップはパネル誘導だけでトーストしない（うるささ防止）
+      if (feedback === 'good') {
+        setToast({ message: 'ありがとうございます。評価を記録しました。', variant: 'success' });
+      } else if (trimmedComment) {
+        setToast({ message: '補足を記録しました。', variant: 'success' });
+      } else if (reason) {
+        setToast({ message: '理由を記録しました。補足があれば続けて書けます。', variant: 'info' });
+      }
     } catch (err) {
       console.error('Error submitting feedback:', err);
+      if (previous) {
+        setMessages((prev) => prev.map((m) => (m.id === messageId ? previous : m)));
+      }
+      if (feedback === 'bad' && !reason && !trimmedComment) {
+        setPendingBadMessageId(null);
+      }
+      setToast({ message: '評価の送信に失敗しました。もう一度お試しください。', variant: 'error' });
+    } finally {
+      setFeedbackBusyIds((prev) => {
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
     }
+  };
+
+  const handleBadReason = async (messageId: string, reason: BadFeedbackReasonId) => {
+    await handleFeedback(messageId, 'bad', reason, pendingBadComment);
+  };
+
+  const handleBadCommentOnly = async (messageId: string) => {
+    if (!pendingBadComment.trim()) return;
+    await handleFeedback(messageId, 'bad', undefined, pendingBadComment);
+  };
+
+  const openBadReasonPanel = (messageId: string, existingComment?: string | null) => {
+    setPendingBadMessageId(messageId);
+    setPendingBadComment(existingComment || '');
+  };
+
+  const handleSubmitWish = async () => {
+    const text = wishText.trim();
+    if (!text || wishSubmitting) return;
+    if (text.length > PRODUCT_WISH_TEXT_MAX) {
+      setWishError(`要望は ${PRODUCT_WISH_TEXT_MAX} 文字以内で入力してください`);
+      return;
+    }
+    setWishSubmitting(true);
+    setWishError(null);
+    try {
+      await submitProductWish(text, currentSession);
+      setWishText('');
+      setWishSent(true);
+      setToast({ message: '要望を送信しました。ありがとうございます。', variant: 'success' });
+      window.setTimeout(() => {
+        setWishOpen(false);
+        setWishSent(false);
+      }, 1800);
+    } catch (err) {
+      console.error('wish submit failed', err);
+      setWishError('要望の送信に失敗しました。もう一度お試しください。');
+    } finally {
+      setWishSubmitting(false);
+    }
+  };
+
+  const openWishModal = () => {
+    setWishError(null);
+    setWishSent(false);
+    setWishOpen(true);
   };
 
   return (
@@ -555,17 +744,49 @@ const normalizeTableMarkdown = (text: string): string => {
             </div>
           </div>
         </div>
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 border border-gray-300 rounded-lg text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-        >
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={openWishModal}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-violet-200 rounded-lg text-xs sm:text-sm font-medium text-violet-800 bg-violet-50 hover:bg-violet-100 transition-colors"
+          >
+            こうなってほしい
+          </button>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 border border-gray-300 rounded-lg text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
           </svg>
           <span className="hidden sm:inline">ホームへ戻る</span>
           <span className="sm:hidden">ホーム</span>
         </Link>
+        </div>
       </div>
+
+      <ProductWishModal
+        open={wishOpen}
+        text={wishText}
+        submitting={wishSubmitting}
+        sent={wishSent}
+        error={wishError}
+        onTextChange={setWishText}
+        onSubmit={handleSubmitWish}
+        onClose={() => {
+          setWishOpen(false);
+          setWishError(null);
+          setWishSent(false);
+        }}
+      />
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          variant={toast.variant}
+          onDismiss={() => setToast(null)}
+        />
+      )}
 
       <div className="flex flex-1 overflow-hidden relative h-full">
         {/* Mobile Sidebar Overlay */}
@@ -678,26 +899,44 @@ const normalizeTableMarkdown = (text: string): string => {
             style={{ maxHeight: 'calc(100vh - 150px)' }}
           >
             {messages.length === 0 ? (
-              <div className="flex items-center justify-center h-full w-full min-w-0" style={{ flexDirection: 'row', writingMode: 'horizontal-tb' }}>
-                <div className="text-center w-full max-w-md px-4 mx-auto" style={{ width: '100%', maxWidth: '28rem' }}>
-                  <div className="mb-6">
-                    <div className="w-20 h-20 mx-auto bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg">
-                      <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="flex items-center justify-center h-full w-full min-w-0">
+                <div className="text-center w-full max-w-lg px-4 mx-auto">
+                  <div className="mb-5">
+                    <div className="w-16 h-16 mx-auto bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
+                      <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                       </svg>
                     </div>
                   </div>
-                  <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 whitespace-nowrap leading-tight" style={{ writingMode: 'horizontal-tb', textOrientation: 'mixed' }}>
-                    EleKnowledgeへようこそ！
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2 leading-tight">
+                    何をお調べしますか？
                   </h2>
-                  <p className="text-gray-600 text-base sm:text-lg mb-6 break-words whitespace-normal leading-relaxed" style={{ writingMode: 'horizontal-tb', textOrientation: 'mixed' }}>
-                    技術資料を検索して質問にお答えします
+                  <p className="text-gray-500 text-sm sm:text-base mb-6 leading-relaxed">
+                    技術資料を検索し、参考資料（根拠）つきで回答します
                   </p>
-                  <div className="flex flex-wrap gap-2 justify-center text-sm text-gray-500">
-                    <span className="px-3 py-1.5 bg-gray-100 rounded-full whitespace-nowrap inline-block">💡 質問を入力</span>
-                    <span className="px-3 py-1.5 bg-gray-100 rounded-full whitespace-nowrap inline-block">📚 資料検索</span>
-                    <span className="px-3 py-1.5 bg-gray-100 rounded-full whitespace-nowrap inline-block">🔍 フィルター機能</span>
+                  <div className="space-y-2 text-left">
+                    {SUGGESTED_QUESTIONS.map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        onClick={() => handleSuggestedQuestion(q)}
+                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                        </svg>
+                        <span className="flex-1">{q}</span>
+                        <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    ))}
                   </div>
+                  <p className="mt-5 text-xs text-gray-400 leading-relaxed">
+                    下の「絞り込み」から資料タイプ・機種を指定すると精度が上がります。
+                    <br />
+                    回答の下で「解けた / 解けない」を押すと改善に活かせます（理由・補足は任意）。
+                  </p>
                 </div>
               </div>
             ) : (
@@ -709,50 +948,125 @@ const normalizeTableMarkdown = (text: string): string => {
                     className={`flex min-w-0 animate-fade-in ${
                       message.role === 'user' ? 'justify-end' : 'justify-start'
                     }`}
-                    style={{ animationDelay: `${index * 50}ms` }}
+                    style={{ animationDelay: `${index * 40}ms` }}
                   >
                     <div
-                      className={`px-3.5 py-2.5 rounded-2xl shadow-md break-words flex-shrink-0 transition-all duration-200 hover:shadow-lg ${
+                      className={`break-words min-w-0 ${
                         message.role === 'user'
-                          ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-br-sm max-w-[66%] sm:max-w-[62%] lg:max-w-[58%]'
-                          : 'bg-white border border-gray-200 text-gray-900 rounded-bl-sm hover:border-gray-300 max-w-full sm:max-w-[86%] lg:max-w-[93%]'
+                          ? 'px-4 py-2.5 rounded-2xl rounded-br-md bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-sm max-w-[85%] sm:max-w-[70%]'
+                          : 'px-4 py-3 rounded-2xl rounded-tl-md bg-white border border-gray-200 text-gray-900 shadow-sm max-w-full sm:max-w-[92%]'
                       }`}
-                      style={{ minWidth: '170px' }}
                     >
-                      {/* Role Indicator */}
-                      <div className={`flex items-center gap-2 mb-2.5 ${
-                        message.role === 'user' ? 'justify-end' : 'justify-start'
-                      }`}>
-                        {message.role === 'assistant' && (
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center">
-                              <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                              </svg>
-                            </div>
-                            <span className="text-sm font-semibold text-gray-700">AI</span>
+                      {/* Role Indicator (assistant only) */}
+                      {message.role === 'assistant' && (
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center" aria-hidden>
+                            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
                           </div>
-                        )}
-                        {message.role === 'user' && (
-                          <span className="text-sm font-semibold text-white">あなた</span>
-                        )}
-                      </div>
+                          <span className="text-xs font-semibold text-gray-500">EleKnowledge AI</span>
+                        </div>
+                      )}
 
                       <div className="w-full">
                         {message.role === 'assistant' ? (
-                          <div className="chat-markdown text-gray-800 text-[13px] sm:text-[14px]">
-                            {streamingMessageId === message.id ? (
-                              <>
-                                <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-                                  {normalizeTableMarkdown(streamingMessages[message.id] || '')}
-                                </ReactMarkdown>
-                                <span className="inline-block w-2 h-5 bg-blue-500 ml-1 animate-pulse" />
-                              </>
-                            ) : (
-                              <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-                                {normalizeTableMarkdown(streamingMessages[message.id] || message.content)}
-                              </ReactMarkdown>
+                          <div className="space-y-3">
+                            {/* WHY: 成功定義は該当頁到達。候補を本文より上に出す（design-2026-07-29） */}
+                            {message.pageCandidates && message.pageCandidates.length > 0 && (
+                              <div className={`rounded-lg border p-3 space-y-2 ${
+                                message.responseType === 'not_found' || message.pageCandidates.some((c) => c.lowConfidence)
+                                  ? 'border-amber-200 bg-amber-50/60'
+                                  : 'border-blue-200 bg-blue-50/60'
+                              }`}>
+                                <p className={`text-xs font-semibold ${
+                                  message.responseType === 'not_found' || message.pageCandidates.some((c) => c.lowConfidence)
+                                    ? 'text-amber-900'
+                                    : 'text-blue-900'
+                                }`}>
+                                  {message.responseType === 'not_found' || message.pageCandidates.some((c) => c.lowConfidence)
+                                    ? '参考候補（低信頼）'
+                                    : '該当頁候補'}
+                                </p>
+                                <ul className="space-y-2">
+                                  {message.pageCandidates.map((c, idx) => (
+                                    <li key={`${c.sourceUri}-${idx}`} className="text-sm">
+                                      <a
+                                        href={c.sourceUri}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-medium text-blue-700 hover:underline"
+                                      >
+                                        {c.documentName}
+                                      </a>
+                                      <span className="text-gray-600 text-xs ml-2">
+                                        {c.category ? `${c.category} · ` : ''}
+                                        {typeof c.pageNumber === 'number' ? `p.${c.pageNumber}` : 'ページ不明'}
+                                        {typeof c.relevance === 'number' ? ` · ${Math.round(c.relevance * 100)}%` : ''}
+                                        {c.lowConfidence ? ' · 低信頼' : ''}
+                                      </span>
+                                      {c.snippet ? (
+                                        <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{c.snippet}</p>
+                                      ) : null}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
                             )}
+
+                            {message.responseType === 'clarify' && message.clarifyQuestions && message.clarifyQuestions.length > 0 && (
+                              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                                <p className="text-xs font-semibold text-amber-900 mb-1.5">追加で教えてください</p>
+                                <div className="flex flex-col gap-1.5">
+                                  {message.clarifyQuestions.map((q) => (
+                                    <button
+                                      key={q}
+                                      type="button"
+                                      onClick={() => {
+                                        setInput((prev) => (prev.trim() ? `${prev.trim()}\n${q}` : q));
+                                        setTimeout(() => textareaRef.current?.focus(), 50);
+                                      }}
+                                      className="text-left text-sm text-amber-950 rounded-md px-2 py-1.5 bg-white/70 hover:bg-white border border-amber-100"
+                                    >
+                                      {q}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {message.responseType === 'not_found' && (
+                              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 space-y-2">
+                                <p>検索が弱いため断定回答はしていません</p>
+                                {selectedCategories.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedCategories([]);
+                                      setFiltersOpen(true);
+                                    }}
+                                    className="text-blue-700 underline underline-offset-2"
+                                  >
+                                    資料カテゴリの絞り込みを外す
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="chat-markdown text-gray-800 text-[13px] sm:text-[14px]">
+                              {streamingMessageId === message.id ? (
+                                <>
+                                  <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+                                    {normalizeTableMarkdown(streamingMessages[message.id] || '')}
+                                  </ReactMarkdown>
+                                  <span className="inline-block w-2 h-5 bg-blue-500 ml-1 animate-pulse" />
+                                </>
+                              ) : (
+                                <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+                                  {normalizeTableMarkdown(streamingMessages[message.id] || message.content)}
+                                </ReactMarkdown>
+                              )}
+                            </div>
                           </div>
                         ) : (
                           <p className={`whitespace-pre-wrap break-words text-[13px] leading-relaxed font-normal text-white`}>
@@ -837,57 +1151,48 @@ const normalizeTableMarkdown = (text: string): string => {
                         );
                       })()}
 
-                      {/* Feedback Buttons */}
-                      {message.role === 'assistant' && 
-                       (!streamingMessageId || streamingMessageId !== message.id || (streamingMessages[message.id] || '').length >= message.content.length) && (
-                        <div className="mt-4 pt-3 border-t border-gray-200 flex gap-2.5">
-                          <button
-                            onClick={() => handleFeedback(message.id, 'good')}
-                            className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg transition-all duration-200 font-medium transform hover:scale-105 active:scale-95 ${
-                              message.feedback === 'good'
-                                ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-md'
-                                : 'bg-gray-100 text-gray-700 hover:bg-green-50 hover:text-green-700 hover:shadow-sm'
-                            }`}
-                            aria-label="役立つ"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
-                            </svg>
-                            役立つ
-                          </button>
-                          <button
-                            onClick={() => handleFeedback(message.id, 'bad')}
-                            className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg transition-all duration-200 font-medium transform hover:scale-105 active:scale-95 ${
-                              message.feedback === 'bad'
-                                ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-md'
-                                : 'bg-gray-100 text-gray-700 hover:bg-red-50 hover:text-red-700 hover:shadow-sm'
-                            }`}
-                            aria-label="改善を"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
-                            </svg>
-                            改善を
-                          </button>
-                        </div>
+                      {message.role === 'assistant' && (
+                        <ChatMessageFeedback
+                          messageId={message.id}
+                          timestamp={message.timestamp}
+                          feedback={message.feedback}
+                          feedbackReason={message.feedbackReason}
+                          feedbackComment={message.feedbackComment}
+                          copied={copiedMessageId === message.id}
+                          panelOpen={pendingBadMessageId === message.id}
+                          pendingComment={pendingBadComment}
+                          busy={Boolean(feedbackBusyIds[message.id])}
+                          onCopy={() => handleCopyMessage(message.id, message.content)}
+                          onGood={() => handleFeedback(message.id, 'good')}
+                          onBad={() => handleFeedback(message.id, 'bad')}
+                          onReason={(reason) => handleBadReason(message.id, reason)}
+                          onCommentChange={setPendingBadComment}
+                          onCommentSubmit={() => handleBadCommentOnly(message.id)}
+                          onOpenPanel={() => openBadReasonPanel(message.id, message.feedbackComment)}
+                          onClosePanel={() => {
+                            setPendingBadMessageId(null);
+                            setPendingBadComment('');
+                          }}
+                        />
                       )}
 
-                      <p className={`text-xs mt-3 opacity-80 ${
-                        message.role === 'user' ? 'text-white' : 'text-gray-500'
-                      }`}>
-                        {new Date(message.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
-                      </p>
+                      {/* Timestamp (user) */}
+                      {message.role === 'user' && (
+                        <p className="text-[11px] mt-1.5 text-blue-100 text-right">
+                          {new Date(message.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
                     </div>
                   </div>
                 ))}
                 {/* Typing Indicator */}
                 {loading && (
                   <div className="flex justify-start animate-fade-in">
-                    <div className="min-w-[200px] max-w-[85%] sm:max-w-2xl px-5 py-4 rounded-2xl rounded-bl-sm bg-white border border-gray-200 shadow-md flex-shrink-0">
+                    <div className="px-4 py-3 rounded-2xl rounded-tl-md bg-white border border-gray-200 shadow-sm">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center animate-pulse">
-                          <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center animate-pulse" aria-hidden>
+                          <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                           </svg>
                         </div>
                         <div className="flex gap-1.5">
@@ -943,61 +1248,202 @@ const normalizeTableMarkdown = (text: string): string => {
           )}
 
           {/* Input Area - Fixed at bottom */}
-          {/* Input Area - Fixed at bottom */}
           <div className="border-t border-gray-200 bg-white/95 backdrop-blur-sm sticky bottom-0 z-10 flex-shrink-0 shadow-lg">
             <div className="p-3 sm:p-4">
-              {/* Filter bar - always visible above the input for discoverability */}
-              <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="flex-shrink-0 text-xs font-medium text-gray-500">資料</span>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {categoryOptions.filter((opt) => opt.value).map((opt) => (
-                      <Chip
-                        key={opt.value}
-                        active={selectedCategories.includes(opt.value)}
-                        onClick={() =>
-                          setSelectedCategories((prev) =>
-                            prev.includes(opt.value)
-                              ? prev.filter((v) => v !== opt.value)
-                              : [...prev, opt.value]
-                          )
-                        }
-                      >
-                        {opt.label}
-                      </Chip>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium text-gray-500">機種</span>
-                  <select
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-900 transition-colors hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {modelTypeOptions.map((opt) => (
-                      <option key={opt.value || 'all'} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {(selectedCategories.length > 0 || selectedModel) && (
+              {/* Filter bar: collapsible, active filters summarized when closed */}
+              <div className="mb-2.5">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedCategories([]);
-                      setSelectedModel('');
-                    }}
-                    className="inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700"
+                    onClick={() => setFiltersOpen((v) => !v)}
+                    aria-expanded={filtersOpen}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                      filtersOpen || selectedCategories.length > 0 || selectedModel
+                        ? 'border-blue-300 bg-blue-50 text-blue-700'
+                        : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
                   >
-                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                     </svg>
-                    クリア
+                    絞り込み
+                    {(selectedCategories.length > 0 || !!selectedModel) && (
+                      <span className="inline-flex items-center justify-center rounded-full bg-blue-600 text-white text-[10px] font-bold min-w-[18px] h-[18px] px-1">
+                        {selectedCategories.length + (selectedModel ? 1 : 0)}
+                      </span>
+                    )}
+                    <svg className={`w-3 h-3 transition-transform ${filtersOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
                   </button>
+
+                  {/* Selected filters shown as removable pills while collapsed */}
+                  {!filtersOpen &&
+                    selectedCategories.map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setSelectedCategories((prev) => prev.filter((x) => x !== v))}
+                        className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-800 text-xs px-2.5 py-1 hover:bg-blue-200 transition-colors"
+                        title="クリックで解除"
+                      >
+                        {categoryOptions.find((o) => o.value === v)?.label || v}
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    ))}
+                  {!filtersOpen && selectedModel && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedModel('')}
+                      className="inline-flex items-center gap-1 rounded-full bg-indigo-100 text-indigo-800 text-xs px-2.5 py-1 hover:bg-indigo-200 transition-colors"
+                      title="クリックで解除"
+                    >
+                      {selectedModelLabel}
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+
+                  {(selectedCategories.length > 0 || selectedModel) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategories([]);
+                        setSelectedModel('');
+                        setModelQuery('');
+                      }}
+                      className="inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700"
+                    >
+                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      すべてクリア
+                    </button>
+                  )}
+                </div>
+
+                {filtersOpen && (
+                  <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2.5">
+                    <div className="flex items-start gap-2">
+                      <span className="flex-shrink-0 text-xs font-medium text-gray-500 mt-1">資料</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {categoryOptions.map((opt) => (
+                          <Chip
+                            key={opt.value}
+                            active={selectedCategories.includes(opt.value)}
+                            onClick={() =>
+                              setSelectedCategories((prev) =>
+                                prev.includes(opt.value)
+                                  ? prev.filter((v) => v !== opt.value)
+                                  : [...prev, opt.value]
+                              )
+                            }
+                          >
+                            {opt.label}
+                          </Chip>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-gray-500">機種</span>
+                        {selectedModel && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedModel('');
+                              setModelQuery('');
+                            }}
+                            className="text-[11px] text-gray-500 hover:text-gray-700"
+                          >
+                            すべての機種に戻す
+                          </button>
+                        )}
+                      </div>
+
+                      {selectedModel && (
+                        <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-md px-2 py-1">
+                          選択中: <span className="font-medium">{selectedModelLabel}</span>
+                          <span className="text-indigo-500 ml-1">（部分一致。AXIEZ は LINKs 等も含みます）</span>
+                        </p>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] text-gray-400 w-full sm:w-auto">よく使う</span>
+                        {POPULAR_MODEL_TYPES.map((opt) => (
+                          <Chip
+                            key={opt.value}
+                            active={selectedModel === opt.value}
+                            onClick={() => {
+                              setSelectedModel(opt.value);
+                              setModelQuery('');
+                              setModelListOpen(false);
+                            }}
+                          >
+                            {opt.label}
+                          </Chip>
+                        ))}
+                      </div>
+
+                      <div className="relative">
+                        <input
+                          type="search"
+                          value={modelQuery}
+                          onChange={(e) => {
+                            setModelQuery(e.target.value);
+                            setModelListOpen(true);
+                          }}
+                          onFocus={() => setModelListOpen(true)}
+                          placeholder="機種名で検索（例: AXIEZ / NEX / メル）"
+                          className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          aria-label="機種名検索"
+                          autoComplete="off"
+                        />
+                        {modelListOpen && (
+                          <div className="absolute z-30 mt-1 w-full max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                            <button
+                              type="button"
+                              className="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 border-b border-gray-100"
+                              onClick={() => {
+                                setSelectedModel('');
+                                setModelQuery('');
+                                setModelListOpen(false);
+                              }}
+                            >
+                              すべての機種
+                            </button>
+                            {filteredModelOptions.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-gray-400">一致する機種がありません</p>
+                            ) : (
+                              filteredModelOptions.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 ${
+                                    selectedModel === opt.value ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-800'
+                                  }`}
+                                  onClick={() => {
+                                    setSelectedModel(opt.value);
+                                    setModelQuery('');
+                                    setModelListOpen(false);
+                                  }}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-400">
+                        カタログ全 {ALL_MODEL_TYPES.length} 機種から検索できます
+                      </p>
+                    </div>
+                  </div>
                 )}
               </div>
               <div className="flex gap-2 sm:gap-3 items-end">
