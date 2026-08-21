@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { signIn, signOut } from 'aws-amplify/auth';
 import Link from 'next/link';
 import { Input } from '@/components/ui/Input';
@@ -9,8 +9,20 @@ import { Button } from '@/components/ui/Button';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
 import { Card } from '@/components/ui/Card';
 
-export default function LoginPage() {
+/**
+ * ログイン後の戻り先。オープンリダイレクトを防ぐため、自サイト内の絶対パスだけ許可する。
+ * `//evil.com` は protocol-relative URL として外部へ飛ぶため除外する。
+ */
+function safeNextPath(raw: string | null): string {
+  if (!raw) return '/';
+  if (!raw.startsWith('/') || raw.startsWith('//')) return '/';
+  return raw;
+}
+
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = safeNextPath(searchParams.get('next'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -97,8 +109,7 @@ export default function LoginPage() {
         password: trimmedPassword,
       });
 
-      console.log('Sign in successful');
-      router.push('/');
+      router.push(nextPath);
     } catch (err: any) {
       console.error('Login error details:', {
         name: err.name,
@@ -258,5 +269,13 @@ export default function LoginPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <LoginContent />
+    </Suspense>
   );
 }

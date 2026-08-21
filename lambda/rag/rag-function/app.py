@@ -569,7 +569,6 @@ def build_page_candidates(selected_results: list, max_items: int = 5,
                           low_confidence: bool = False) -> list:
     """UI 上部用の候補頁。pageNumber が無ければキーを省略（不明と嘘をつかない）。"""
     candidates = []
-    s3_client = boto3.client('s3', region_name=AWS_REGION)
     for result in selected_results or []:
         if len(candidates) >= max_items:
             break
@@ -580,18 +579,15 @@ def build_page_candidates(selected_results: list, max_items: int = 5,
         doc_name = doc_uri.split('/')[-1]
         if doc_name.lower().endswith('.md'):
             continue
-        signed = doc_uri
-        try:
-            signed = presign_source_uri(s3_client, doc_uri)
-        except Exception as e:
-            print(f"Error generating signed URL for page candidate {doc_uri}: {e}")
         text = chunk_text(result).strip()
         snippet = (text[:180] + '…') if len(text) > 180 else text
         item = {
             'documentName': doc_name,
             'category': metadata.get('category', '') or '',
             'modelType': metadata.get('model_type', '') or '',
-            'sourceUri': signed,
+            # 署名付き URL ではなく s3:// URI を返す。フロントの中継ページが
+            # ログインを確認したうえで GET /rag/document から都度発行させる。
+            'sourceUri': doc_uri,
             'relevance': float(result.get('score', 0.0) or 0.0),
             'snippet': snippet or None,
         }
@@ -863,6 +859,75 @@ def extract_citations(kb_results: dict, mode: str = "normal") -> tuple:
     return extract_citations_from_selected(selected_results)
 
 
+def is_allowed_document_uri(doc_uri: str) -> bool:
+    """
+    署名付き URL の発行を許可してよい s3:// URI か判定する。
+
+    このチェックが無いと「認証済みなら誰でも、Lambda ロールが読める任意の
+    オブジェクトに署名 URL を発行させられる」エンドポイントになってしまう。
+    許可するのは KB のデータソース (prefix 配下) と documents バケットのみ。
+    """
+    if not doc_uri or not doc_uri.startswith('s3://'):
+        return False
+    parsed = urlparse(doc_uri)
+    bucket, key = parsed.netloc, parsed.path.lstrip('/')
+    if not bucket or not key:
+        return False
+    # '..' を含むキーは正規化で prefix 検証を迂回され得るため拒否する
+    if '..' in key.split('/'):
+        return False
+    if KB_SOURCE_BUCKET and bucket == KB_SOURCE_BUCKET:
+        return key.startswith(KB_SOURCE_PREFIX) if KB_SOURCE_PREFIX else True
+    if DOCUMENTS_BUCKET and bucket == DOCUMENTS_BUCKET:
+        return True
+    return False
+
+
+def handle_document_request(event, headers):
+    """
+    GET /rag/document?uri=s3://bucket/key
+
+    Cognito Authorizer を通過した = ログイン済みのユーザーにだけ、
+    短命の署名付き URL を発行して返す。フロントの中継ページがこれを受けて
+    実ファイルへリダイレクトする。
+    """
+    if not get_caller_id(event):
+        return {
+            'statusCode': 401,
+            'headers': headers,
+            'body': json.dumps({'error': 'Unauthorized', 'message': 'Authentication required'})
+        }
+
+    params = event.get('queryStringParameters') or {}
+    doc_uri = params.get('uri') or ''
+
+    if not is_allowed_document_uri(doc_uri):
+        # 許可外バケットと不正な URI は区別せず 400 に丸める
+        # (どのバケットが存在するかを外部に教えないため)
+        return {
+            'statusCode': 400,
+            'headers': headers,
+            'body': json.dumps({'error': 'InvalidDocumentUri', 'message': '参照できない文書です'})
+        }
+
+    try:
+        s3_client = boto3.client('s3', region_name=AWS_REGION)
+        url = presign_source_uri(s3_client, doc_uri)
+    except Exception as e:
+        print(f'[rag] presign failed for document request: {e}')
+        return {
+            'statusCode': 502,
+            'headers': headers,
+            'body': json.dumps({'error': 'PresignFailed', 'message': '文書の取得に失敗しました'})
+        }
+
+    return {
+        'statusCode': 200,
+        'headers': {**headers, 'Cache-Control': 'no-store'},
+        'body': json.dumps({'url': url, 'expiresIn': PRESIGNED_URL_EXPIRES_IN})
+    }
+
+
 def presign_source_uri(s3_client, doc_uri: str) -> str:
     """
     Convert an s3:// source URI into a presigned HTTPS URL.
@@ -886,7 +951,6 @@ def presign_source_uri(s3_client, doc_uri: str) -> str:
 def extract_citations_from_selected(selected_results: list) -> tuple:
     citations = []
     source_documents = []
-    s3_client = boto3.client('s3', region_name=AWS_REGION)
 
     for result in selected_results or []:
         metadata = result.get('metadata', {}) or {}
@@ -903,19 +967,14 @@ def extract_citations_from_selected(selected_results: list) -> tuple:
 
         citations.append(doc_name)
 
-        # S3 URIをHTTPS署名付きURLに変換
-        signed_url = doc_uri
-        try:
-            signed_url = presign_source_uri(s3_client, doc_uri)
-        except Exception as e:
-            print(f"Error generating signed URL for {doc_uri}: {e}")
-
         # byteContent は絶対に含めない。IMAGE チャンクは 1 件で最大 1.3MB あり、
         # DynamoDB の item 上限 400KB と API Gateway の応答上限 6MB を即座に破る。
         source_doc = {
             'documentName': doc_name,
             'title': metadata.get('title'),
-            'sourceUri': signed_url,
+            # 署名付き URL ではなく s3:// URI を保存・返却する。認証なしで開ける
+            # URL を DynamoDB に残さないため (発行は GET /rag/document で都度)。
+            'sourceUri': doc_uri,
             'category': metadata.get('category', ''),
             'modelType': metadata.get('model_type', ''),
             'hasImage': chunk_image_b64(result) is not None,
@@ -1025,7 +1084,12 @@ def lambda_handler(event, context):
                 'headers': headers,
                 'body': ''
             }
-        
+
+        # 引用文書の解決 (GET /rag/document?uri=s3://...)
+        # 認証済みユーザーにだけ短命の署名付き URL を発行する。
+        if http_method == 'GET':
+            return handle_document_request(event, headers)
+
         # Parse request
         if isinstance(event.get('body'), str):
             body = json.loads(event['body'])
