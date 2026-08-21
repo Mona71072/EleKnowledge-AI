@@ -1,6 +1,6 @@
 ---
 status: reference
-last-verified: 2026-07-27
+last-verified: 2026-08-21
 related-code: lambda/rag/, frontend/src/app/
 ---
 
@@ -8,6 +8,34 @@ related-code: lambda/rag/, frontend/src/app/
 
 作業単位の意思決定と変更内容を、後から見直せるよう 5W1H で記録する運用ログ。
 新しいエントリを**上に**追記する（逆時系列）。仕様そのものは各 `docs/**` を正とし、本ファイルは「いつ・なぜ・どう変えたか」の索引とする。
+
+---
+
+## 2026-08-21 認証改善3件: パスワードリセットSDK化 / サインアップ後自動ログイン / トークン24h化
+
+| 項目 | 内容 |
+|---|---|
+| **Who** | YUKI ITAI / Claude Code |
+| **When** | 2026-08-21 |
+| **Where** | `frontend/src/app/forgot-password|signup|verify/page.tsx` / `infrastructure/sam/phase1-template.yaml` / `lambda/auth/forgot-password|confirm-password-reset/`（削除） |
+
+**What**
+1. **PR #44**（Issue #4）: パスワードリセットを API Gateway 経由から `aws-amplify/auth` の `resetPassword` / `confirmResetPassword` に切替。`ForgotPasswordFunction` / `ConfirmPasswordResetFunction` と両エンドポイント・Lambda ディレクトリを削除。
+2. **PR #45**: `signUp` に `autoSignIn: true` を追加し、メール確認完了後（`COMPLETE_AUTO_SIGN_IN`）は `autoSignIn()` でそのままホームへ遷移。別タブ・リロード時はログイン画面へフォールバック。
+3. **PR #46**: Cognito User Pool Client の `RefreshTokenValidity` を 30日 → **24時間** に短縮。
+
+**Why**
+1. カスタム認証 Lambda はパスワードを平文で受ける経路（2026-07-29 コードレビュー C-1 系統）のため、SDK 化で攻撃面ごと削除。
+2. サインアップ完了後に再ログインさせられる UX の不満解消。
+3. `phase1-foundation.md` セキュリティ要件「セッション有効期限: 24時間」に対し実装が 30日 と乖離していたのを是正。
+
+**How**
+`feature/3-password-reset-refactor` / `feature/signup-auto-signin` / `feature/token-ttl-24h` を develop から分岐し PR #44/#45/#46 を作成。`tsc --noEmit` / `sam validate --lint` パス。ドキュメントは `aws-resource-map.md`・`aws-migration-inventory.md`・`phase1-foundation.md`・`security.md` を各PRで追従。
+
+**リリース状況**
+- 個人検証用 `itai` ブランチ（新設、Amplify 接続済み）に3件をマージし、パスワードリセットの実動作確認 OK（2026-08-21）。
+- develop への正式反映は PR #44/#45/#46 のマージ待ち。フロント分は develop 連動の Amplify で自動反映。
+- **#44（Lambda削除）と #46（トークンTTL）は SAM（phase1）デプロイが必要**。PR #37/#40 のデプロイとまとめると効率的。既存発行済みリフレッシュトークンは失効せず、新規ログインから 24h 適用。
 
 ---
 
