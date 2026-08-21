@@ -21,6 +21,9 @@ logger.setLevel(logging.INFO)
 AGENT_ID = os.environ.get("AGENT_ID", "")
 AGENT_ALIAS_ID = os.environ.get("AGENT_ALIAS_ID", "TSTALIASID")
 DOCUMENTS_BUCKET = os.environ.get("DOCUMENTS_BUCKET", "")
+# 引用リンクの署名付き URL の有効期限（秒）。URL を入手した第三者は期限内なら
+# 認証なしで社内資料を取得できるため、閲覧に必要な最小限に留める。
+PRESIGNED_URL_EXPIRES_IN = int(os.environ.get("PRESIGNED_URL_EXPIRES_IN", "3600"))
 SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "sessions-dev")
 ADMIN_GROUP_NAME = os.environ.get("ADMIN_GROUP_NAME", "admin")
 
@@ -209,7 +212,7 @@ def _presign_source_uri(uri: str) -> str:
         return s3_client.generate_presigned_url(
             "get_object",
             Params={"Bucket": parsed_uri.netloc, "Key": parsed_uri.path.lstrip("/")},
-            ExpiresIn=2592000,
+            ExpiresIn=PRESIGNED_URL_EXPIRES_IN,
         )
     except Exception as e:
         logger.warning(f"presigned URL generation failed: {e}")

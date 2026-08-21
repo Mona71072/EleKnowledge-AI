@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Loading } from '@/components/ui/Loading';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
+import { documentHref } from '@/lib/documents';
 
 const ALLOWED_MODELS = ['KE-LG', 'KM-LD', 'CM-MA', 'ME-CH'] as const;
 
@@ -365,7 +366,7 @@ export default function TroubleshootingPage() {
                         {primaryDocs.map((doc, idx) => (
                           <a
                             key={`${doc.sourceUri || doc.documentName}-${idx}`}
-                            href={doc.sourceUri}
+                            href={documentHref(doc.sourceUri)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"
@@ -397,7 +398,7 @@ export default function TroubleshootingPage() {
                                 {extraDocs.map((doc, idx) => (
                                   <a
                                     key={`${doc.sourceUri || doc.documentName}-extra-${idx}`}
-                                    href={doc.sourceUri}
+                                    href={documentHref(doc.sourceUri)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"

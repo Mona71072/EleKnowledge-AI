@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
+import { documentHref } from '@/lib/documents';
 
 const API_BASE = process.env.NEXT_PUBLIC_TROUBLESHOOTING_API_URL || '';
 
@@ -198,7 +199,7 @@ function HistoryContent() {
                     {uniqueDocs.map((doc, idx) => (
                       <a
                         key={`${doc.sourceUri || doc.documentName}-${idx}`}
-                        href={doc.sourceUri}
+                        href={documentHref(doc.sourceUri)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline p-1.5 rounded-lg hover:bg-blue-50"
