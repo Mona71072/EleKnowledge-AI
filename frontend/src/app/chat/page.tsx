@@ -75,6 +75,8 @@ export default function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSession, setCurrentSession] = useState<string | null>(null);
+  // admin が失敗一覧から他ユーザーのセッションを開いたとき true（閲覧のみ・送信不可）
+  const [readOnlySession, setReadOnlySession] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingMessages, setStreamingMessages] = useState<Record<string, string>>({});
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
@@ -442,8 +444,9 @@ const normalizeTableMarkdown = (text: string): string => {
       });
       setStreamingMessages(completedMessages);
       setStreamingMessageId(null);
-      
+
       setCurrentSession(sessionId);
+      setReadOnlySession(Boolean(response.data.readOnly));
     } catch (err) {
       console.error('Error fetching messages:', err);
       setError('メッセージ取得に失敗しました');
@@ -451,7 +454,7 @@ const normalizeTableMarkdown = (text: string): string => {
   };
 
   const handleSendMessage = async () => {
-    if (!input.trim() || loading || !userId) return;
+    if (!input.trim() || loading || !userId || readOnlySession) return;
 
     const userMessage: Message = {
       id: `msg_${Date.now()}`,
@@ -545,6 +548,7 @@ const normalizeTableMarkdown = (text: string): string => {
 
   const handleNewSession = () => {
     setCurrentSession(null);
+    setReadOnlySession(false);
     setMessages([]);
     setStreamingMessages({});
     setStreamingMessageId(null);
@@ -1446,6 +1450,11 @@ const normalizeTableMarkdown = (text: string): string => {
                   </div>
                 )}
               </div>
+              {readOnlySession && (
+                <div className="mb-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  管理者として他ユーザーのセッションを閲覧しています（読み取り専用・メッセージ送信はできません）
+                </div>
+              )}
               <div className="flex gap-2 sm:gap-3 items-end">
                 <div className="flex-1 relative">
                   <textarea
@@ -1464,8 +1473,10 @@ const normalizeTableMarkdown = (text: string): string => {
                         handleSendMessage();
                       }
                     }}
-                    placeholder="質問を入力してください... (Shift+Enterで改行、Enterで送信)"
-                    disabled={loading}
+                    placeholder={readOnlySession
+                      ? '読み取り専用セッションのため送信できません'
+                      : '質問を入力してください... (Shift+Enterで改行、Enterで送信)'}
+                    disabled={loading || readOnlySession}
                     rows={1}
                     className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 text-sm transition-all placeholder:text-gray-500 placeholder:opacity-100 shadow-sm hover:border-gray-400 bg-white text-gray-900 resize-none min-h-[42px] max-h-[200px] overflow-y-auto"
                     style={{
@@ -1487,7 +1498,7 @@ const normalizeTableMarkdown = (text: string): string => {
                 </div>
                 <button
                   onClick={handleSendMessage}
-                  disabled={loading || !input.trim()}
+                  disabled={loading || readOnlySession || !input.trim()}
                   className="px-3 sm:px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg font-medium text-sm flex items-center gap-2 flex-shrink-0 transform hover:scale-105 active:scale-95 disabled:transform-none"
                 >
                   {loading ? (
