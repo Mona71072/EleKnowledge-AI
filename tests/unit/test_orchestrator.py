@@ -136,7 +136,7 @@ def test_build_source_documents_raw_refs_only():
     orchestrator.s3_client.generate_presigned_url.assert_called_once_with(
         "get_object",
         Params={"Bucket": "test-bucket", "Key": "file.pdf"},
-        ExpiresIn=2592000,
+        ExpiresIn=orchestrator.PRESIGNED_URL_EXPIRES_IN,
     )
 
 
@@ -157,7 +157,7 @@ def test_build_source_documents_presigns_troubleshooting_markdown_uri():
     orchestrator.s3_client.generate_presigned_url.assert_called_once_with(
         "get_object",
         Params={"Bucket": "eleknowledge-ai-troubleshooting-docs", "Key": "1505C0.md"},
-        ExpiresIn=2592000,
+        ExpiresIn=orchestrator.PRESIGNED_URL_EXPIRES_IN,
     )
 
 
@@ -176,7 +176,7 @@ def test_build_source_documents_presigns_nested_s3_key():
     orchestrator.s3_client.generate_presigned_url.assert_called_once_with(
         "get_object",
         Params={"Bucket": "test-bucket", "Key": "manuals/1505C0.md"},
-        ExpiresIn=2592000,
+        ExpiresIn=orchestrator.PRESIGNED_URL_EXPIRES_IN,
     )
 
 
