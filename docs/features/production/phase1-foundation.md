@@ -53,7 +53,7 @@ const signIn = async (email: string, password: string) => {
 
 **トークン管理:**
 - **Access Token:** 1時間（短命）
-- **Refresh Token:** 30日（長命）
+- **Refresh Token:** 24時間（セッション有効期限と一致）
 - **ID Token:** 1時間
 - **自動リフレッシュ:** 有効期限5分前に自動更新
 - **トークン保存:** localStorage（開発環境）/ httpOnly Cookie（本番推奨）

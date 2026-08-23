@@ -1,6 +1,6 @@
 ---
 status: production
-last-verified: 2026-04-24
+last-verified: 2026-08-21
 related-code: infrastructure/, lambda/, waf-rules.json
 ---
 
@@ -13,7 +13,7 @@ related-code: infrastructure/, lambda/, waf-rules.json
 **認証方式:**
 - AWS Cognito User Pool
 - JWT（JSON Web Token）ベース
-- Access Token（1時間）+ Refresh Token（30日）
+- Access Token（1時間）+ Refresh Token（24時間）
 
 **認可:**
 - API Gateway Cognito Authorizer
