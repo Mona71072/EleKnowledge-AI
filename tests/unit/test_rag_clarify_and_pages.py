@@ -54,6 +54,24 @@ def test_no_clarify_for_spec_style_question(rag):
     assert ok is False
 
 
+def test_no_clarify_for_spec_condition_question(rag):
+    # SYMPTOM_RE の「停止」が誤発火しても仕様質問は聞き返さない（Major 5）
+    ok, _ = rag.needs_clarify("地震管制で最寄階に停止する条件は？", {})
+    assert ok is False
+
+
+def test_no_clarify_for_error_code_meaning_question(rag):
+    # 「エラー」を含んでも定義質問は聞き返さない
+    ok, _ = rag.needs_clarify("エラーコードE21の意味は？", {})
+    assert ok is False
+
+
+def test_no_clarify_when_model_and_part_present(rag):
+    # 機種あり＋部位ありなら状況が欠けていても検索へ進む（両方欠けたときだけ聞く）
+    ok, _ = rag.needs_clarify("かごが振動する", {"modelType": "AXIEZ"})
+    assert ok is False
+
+
 def test_followup_after_clarify_skips(rag):
     hist = [{"role": "assistant", "content": rag.CLARIFY_MARKER + "\n1. 機種"}]
     ok, _ = rag.needs_clarify("かご、走行中です", {}, hist)
