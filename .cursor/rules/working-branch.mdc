@@ -1,5 +1,5 @@
 ---
-description: 作業ブランチ・push・デプロイ用PRの運用（mona → develop、@yukiworkspace メンション）
+description: 作業ブランチ・push・デプロイ用PRの共同運用
 alwaysApply: true
 ---
 
@@ -7,31 +7,25 @@ alwaysApply: true
 
 ## 作業ブランチ
 
-- このリポジトリでは **`mona`** を基本の作業ブランチとする
-- 機能追加・修正・コミットの対象は原則 `mona`
 - `develop` や `main` を直接編集しない（明示依頼がある場合のみ）
-- 作業開始時は `git checkout mona` でいることを確認する
+- 作業者とタスクに対応する作業ブランチを使う
+- mona が準備する実装・デプロイ変更は **`mona`** を基本とする
+- itai 自身の変更には `mona` を強制せず、itai 側の feature / fix ブランチを使う
+- 作業開始時に、現在のブランチが作業者・目的・PR種別に合っていることを確認する
 
-## push の流れ（必須・mona 側のみ）
+## push の流れ
 
-**itai が編集するときは適用しない。** itai は本家だけ push / PR すればよい。
+個人・端末固有のアカウント、認証切替、フォーク、リモート設定は共有ルールに含めない。各作業者は自身の未追跡ローカル設定に従い、操作前に認証主体と対象リポジトリを確認する。
 
-mona 側でコード修正が完了したら、次の順で進める。手順の正本は `AGENTS.md`「GitHub アカウント運用【Must】」。
+コード修正が完了したら、次の順で進める。
 
-1. **`mona` にコミット**
-2. **同じブランチを本家とフォークの両方へ push**
-   - 本家 `origin`（`yukiworkspace/EleKnowledge-AI`）: `Mona-mebs`
-   - フォーク `Mona71072`（`Mona71072/EleKnowledge-AI`）: `Mona71072`
-3. **アカウントを `Mona71072` に戻す**（フォーク push のあと。復帰までが完了条件）
-4. **デプロイ用 PR を本家の `develop` 向けに作成する**（`Mona-mebs`）
+1. 承認された現在の作業ブランチにコミット
+2. 明示された依頼範囲と各自のローカル設定に従って作業ブランチを push
+3. **デプロイ用 PR を本家の `develop` 向けに作成する**
    - base: `develop`
-   - head: `mona`（または `mona` から切った feature ブランチを merge 済みの `mona`）
-5. PR 本文の先頭で **デプロイ担当者 `@yukiworkspace`（itai）をメンション**する
-   - PR 操作後も再び `Mona71072` へ戻すこと
-
-**フォークにだけある変更**を本家へ同期するのは、mona が明示したときだけ。指示なく origin へ合わせない。itai の本家編集を、このルールでフォークへ強制同期したりしない。
-
-**本家 `develop` がフォークより進んでいたら**、同期せず mona に報告する（正本: `AGENTS.md`）。fetch / push / PR のときに確認する。
+   - head: 現在の作業ブランチ
+   - mona 側のデプロイ PR は `mona`、または feature ブランチを統合済みの `mona`
+4. PR 本文の先頭で **デプロイ担当者 `@yukiworkspace`（itai）をメンション**する
 
 `mona` への push だけでは **AWS バックエンド（Lambda / API Gateway）は反映されない**。フロント（Amplify）だけが `develop` マージ後に自動反映される。バックエンド変更がある PR では、itai 向けに SAM デプロイ手順を必ず書く。
 

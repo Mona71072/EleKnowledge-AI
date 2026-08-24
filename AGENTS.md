@@ -1,4 +1,4 @@
-# 📋 AI開発ルール（v1.3.4）
+# 📋 AI開発ルール（v1.3.5）
 
 本ファイルは、本プロジェクトにおける **設計・実装・運用の共通ガードレール** を定義するものです。
 本ルールに従わないコード・設定・運用は **原則として実施しません**。
@@ -27,6 +27,13 @@
 * AIルール更新後は、各参照ファイルの参照先、Git追跡可否、`git diff --check` を確認します
 * 完了報告では、正本と同期対象を明示します
 * `README.md`、`spec.md`、`docs/` 配下など、AIルール以外のMarkdownはこの同期対象に含めません
+
+### 共有ルールと個人設定の境界【Must】
+
+* `AGENTS.md` と追跡対象の AI ルールには、全参加者に共通するプロジェクトルールだけを記載します
+* 個人・端末固有のアカウント名、認証切替、個人フォーク、ローカルリモートの手順は、各自の未追跡ローカル設定で管理します
+* 個人設定を他の参加者やその AI エージェントへ適用しません。共有ルールから個人設定を参照させません
+* GitHub 操作は、各自がローカルで認証主体と対象リポジトリを確認し、明示された権限と依頼範囲内で行います
 
 ---
 
@@ -192,7 +199,7 @@
 * main：本番（マージは develop 経由のみ）
 * develop：開発
 * feature/* / hotfix/*
-* mona：実装・デプロイ向けの作業ブランチ（下記「PR の分離」参照）
+* mona：mona が準備する実装・デプロイ向けの作業ブランチ（itai 自身の変更には強制しない。下記「PR の分離」参照）
 
 ### PR・コミュニケーション【Must】
 
@@ -218,81 +225,6 @@
 * テスト通過
 * spec / roadmap 更新確認
 * ユーザー承認取得
-
-### GitHub アカウント運用【Must】
-
-**適用範囲は mona 側だけ。** itai（`yukiworkspace`）が本家を編集・push / PR するときは、この節のアカウント切替・両方 push・フォーク同期は **適用しない**。itai は本家 `yukiworkspace/EleKnowledge-AI` だけでよい。
-
-mona 側のリモートは 2 つ使う。
-
-| リモート | リポジトリ | 用途 |
-| --- | --- | --- |
-| `origin`（`yukiworkspace` も可） | `yukiworkspace/EleKnowledge-AI` | 本家。PR の送り先 |
-| `Mona71072` | `Mona71072/EleKnowledge-AI` | 本家のフォーク。コピー |
-
-`Mona71072` リモートが無い場合は追加する。
-
-```bash
-git remote add Mona71072 https://github.com/Mona71072/EleKnowledge-AI.git
-```
-
-マシン全体のデフォルトは **`Mona71072`**。本家向けの `git push` / PR 作成・更新 / `gh` は **`Mona-mebs`**。フォークへの push は **`Mona71072`**。
-
-#### 作業開始時（本家向け操作のとき）
-
-1. `gh auth status` でアクティブアカウントを確認する
-2. `Mona-mebs` でなければ `gh auth switch --user Mona-mebs`
-3. `gh api user --jq .login` が `Mona-mebs` であることを確認する
-
-#### 通常の push（必須）
-
-mona が push を依頼したら、**同じブランチを本家とフォークの両方へ push** する。片方だけで完了としない。itai の push には適用しない。
-
-1. `Mona-mebs` で `origin`（本家）へ push する
-2. **`Mona71072` へ切り替え**、フォークへ同じブランチを push する
-3. `gh api user --jq .login` が `Mona71072` であることを確認する
-
-```bash
-gh auth switch --user Mona-mebs
-git push -u origin HEAD
-gh auth switch --user Mona71072
-git push -u Mona71072 HEAD
-gh api user --jq .login   # Mona71072 であること
-```
-
-PR 作成・更新・コメントなど本家の `gh` 操作も `Mona-mebs` で行い、**同じターン内で `Mona71072` へ戻す**。
-
-* 本家 push 成功だけでタスク完了としない。**フォークへの push とアカウント復帰までが完了条件**
-* `Mona-mebs` のまま放置しない（他プロジェクトの認証に影響する）
-* 本家への push / PR / `gh` を `Mona71072` で行わない
-
-#### フォークだけ進んでいる変更（必須）
-
-`Mona71072/EleKnowledge-AI` にだけある変更を本家へ載せるのは、**mona が明示したときだけ**。itai の作業では発生させない。
-
-* 「本家に同期」「origin にも push」「オリジナルに載せて」など指示がある場合のみ、本家へ push / PR する
-* 指示が無いのに、フォークが進んでいるからといって本家へ合わせて push しない
-* エージェントが独自判断でフォーク → 本家へ追従させない。mona が「push して」と言った **ローカルの作業コミット** は、通常どおり両方へ出す
-
-#### 本家 `develop` がフォークより進んでいるとき（必須・mona 側）
-
-itai が本家を更新すると、フォークの `develop` は遅れる。mona 側エージェントは **勝手にフォークへ同期せず、mona に報告する**。
-
-確認タイミング: このリポジトリで fetch / push / PR するとき（mona 側）。itai の作業では確認しない。
-
-```bash
-git fetch origin develop
-git fetch Mona71072 develop
-git rev-list --left-right --count Mona71072/develop...origin/develop
-```
-
-右側（origin）が 1 以上なら遅れている。報告内容:
-
-* 本家 `origin/develop` がフォーク `Mona71072/develop` より進んでいること
-* 遅れているコミット数と、短いログ（先頭数件）
-* フォークへは同期していないこと（指示待ち）
-
-同期（GitHub の Sync fork、`develop` を本家に合わせる push など）は、**mona が明示したときだけ**行う。
 
 ---
 
@@ -360,11 +292,15 @@ git rev-list --left-right --count Mona71072/develop...origin/develop
 
 ## 📝 変更履歴
 
+* v1.3.5（itai レビュー反映）
+
+  * 個人・端末固有の GitHub 認証・フォーク運用を共有正本から削除し、各自の未追跡ローカル設定へ分離
+  * 共有ルールと個人設定の境界を Must として明文化
+
 * v1.3.4
 
   * 業務スコープ変更は、選定根拠・決定者・対象外データの扱い・見直し条件を記録して共同確認する
-  * GitHub アカウント運用を mona 側だけに限定し、itai の本家編集には適用しない
-  * mona の通常 push は本家とフォークの両方へ行い、本家先行時は勝手にフォーク同期しない
+  * 個人運用を共有正本内で適用範囲限定する案を追加（v1.3.5 でローカル設定へ移管）
 
 * v1.3.3（itai レビュー反映）
 
@@ -376,8 +312,7 @@ git rev-list --left-right --count Mona71072/develop...origin/develop
 
 * v1.3.2
 
-  * GitHub アカウント運用（作業は `Mona-mebs`、push/`gh` 直後に `Mona71072` へ戻す）を Must 化
-  * アカウント復帰を push 成功後の完了条件として明記
+  * 個人の GitHub アカウント運用を共有正本へ追加（v1.3.5 でローカル設定へ移管）
 
 * v1.3.1
 
