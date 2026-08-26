@@ -119,7 +119,8 @@ export default function ChatPage() {
     { value: 'note', label: '据付ノート' },
     { value: 'site_agent', label: '現場代理人業務マニュアル' },
     { value: 'quality_mgmt', label: '品質管理業務マニュアル' },
-    { value: 'w_doc', label: 'W資料' },
+    // w_doc(W資料) は実機確認 2026-08-26 で選択時0件（全5件が取扱機種スコープ対象外）のため
+    // 業務判断（HANDLED追加 or スコープ例外化）が出るまで非掲載。API上は有効なキー。
   ];
 
   const normalizedModelQuery = modelQuery.trim().toLowerCase();

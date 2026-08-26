@@ -86,11 +86,13 @@ CATEGORY_MAP = {
 ALLOWED_CATEGORY_VALUES = tuple(CATEGORY_MAP.values())
 
 # チャット UI に出すカテゴリ（到達不能キーは載せない）。
-# w_doc(5件) は全件が取扱機種スコープ対象外でスコープ併用時0件になる既知問題があるが、
-# 既掲載のため現状維持（業務判断待ち。verification-2026-08-26 §5.1）。
+# w_doc(5件) は実機確認 2026-08-26 でチップ選択時0件を確認（全件が取扱機種スコープ対象外）。
+# 業務判断（W資料機種の HANDLED 追加 or スコープ例外化）が出るまで非掲載とする
+# （verification-2026-08-26 §5.1）。CATEGORY_MAP / ALLOWED_CATEGORY_VALUES には残しており
+# API 契約・許可リスト上は引き続き有効なキー（UI に出さないだけ）。
 UI_CATEGORY_KEYS = (
     'spec', 'tech_info', 'std', 'drawing', 'incident', 'qsheet', 'note',
-    'site_agent', 'quality_mgmt', 'w_doc',
+    'site_agent', 'quality_mgmt',
 )
 
 # spec モードで参照する資料カテゴリ（本命: C / TI / 据付基準）。
