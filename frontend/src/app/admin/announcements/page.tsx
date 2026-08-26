@@ -16,6 +16,7 @@ import {
   deleteAnnouncement,
   absoluteTime,
 } from '@/lib/announcements';
+import { resolveAnnouncementPublishFields } from '@/lib/announcement-publish.mjs';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 
@@ -135,11 +136,17 @@ export default function AdminAnnouncementsPage() {
     setError(null);
     try {
       const payload: AnnouncementInput = { ...form, status };
-      if (status === 'published' && publishMode === 'schedule' && scheduleAt) {
-        payload.publishAt = fromLocalInput(scheduleAt);
-        payload.status = 'scheduled';
-      } else if (status === 'published') {
-        payload.publishAt = new Date().toISOString();
+      if (status === 'published') {
+        const resolved = resolveAnnouncementPublishFields({
+          requestedStatus: status,
+          publishMode,
+          scheduleAt,
+          editingId,
+          existingStatus: form.status,
+          existingPublishAt: form.publishAt,
+        });
+        payload.status = resolved.status;
+        payload.publishAt = resolved.publishAt;
       }
       if (editingId) {
         await updateAnnouncement(editingId, payload);

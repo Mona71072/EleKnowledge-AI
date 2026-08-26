@@ -1,6 +1,6 @@
 ---
 status: reference
-last-verified: 2026-08-21
+last-verified: 2026-08-26
 related-code: lambda/rag/, frontend/src/app/
 ---
 
@@ -33,9 +33,12 @@ related-code: lambda/rag/, frontend/src/app/
 `feature/3-password-reset-refactor` / `feature/signup-auto-signin` / `feature/token-ttl-24h` を develop から分岐し PR #44/#45/#46 を作成。`tsc --noEmit` / `sam validate --lint` パス。ドキュメントは `aws-resource-map.md`・`aws-migration-inventory.md`・`phase1-foundation.md`・`security.md` を各PRで追従。
 
 **リリース状況**
-- 個人検証用 `itai` ブランチ（新設、Amplify 接続済み）に3件をマージし、パスワードリセットの実動作確認 OK（2026-08-21）。
-- develop への正式反映は PR #44/#45/#46 のマージ待ち。フロント分は develop 連動の Amplify で自動反映。
-- **#44（Lambda削除）と #46（トークンTTL）は SAM（phase1）デプロイが必要**。PR #37/#40 のデプロイとまとめると効率的。既存発行済みリフレッシュトークンは失効せず、新規ログインから 24h 適用。
+- PR #44 / #45 / #46 は **2026-08-23 に develop へマージ済み**。
+- パスワードリセットは **2026-08-23** に itai ブランチを Amplify でデプロイした環境で実環境 E2E を実施し、Amplify SDK 経由のログイン／パスワードリセットが正常に完了することを確認済み。
+- **2026-08-26 14:17 JST** に `EleKnowledge-dev-phase1` へ phase1 SAM デプロイを実施し、`UPDATE_COMPLETE` を確認。PR #44 の旧パスワードリセット Lambda 2本・対応 API ルート／呼び出し権限の削除を実環境で確認済み。
+- 同じ phase1 SAM デプロイで PR #46 の `RefreshTokenValidity=24` / `Units.RefreshToken=hours` を実環境で確認済み。
+- PR #45 のサインアップ後自動ログインは develop へコード反映済み。PR上では develop 環境での個別 E2E 完了記録は確認できていないため、本履歴では「実環境確認済み」とは扱わない。
+- 以前の「PR #37/#40 とまとめて phase1 SAM デプロイ」は不要となった。#44/#46 の phase1 反映は上記 2026-08-26 デプロイで完了している。
 
 ---
 

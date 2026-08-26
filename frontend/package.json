@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "build:turbopack": "next build --turbopack",
-    "start": "next start"
+    "start": "next start",
+    "test:announcements": "node --test tests/announcement-publish.test.mjs"
   },
   "dependencies": {
     "@aws-amplify/ui-react": "^6.13.0",
