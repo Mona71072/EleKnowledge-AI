@@ -20,6 +20,7 @@ related-code: frontend/src/lib/documents.ts, lambda/rag/rag-function/app.py, inf
 | **本決定** | **300秒（5分）** | PR #50 でクリック都度発行（`GET /rag/document`）になり、保存されるのは `s3://` URI のみ。発行済み URL は「開く瞬間」にしか使われないため、長い TTL を維持する理由が消えた |
 
 - 変更箇所: `infrastructure/sam/phase2-template.yaml` の `PresignedUrlExpiresIn` Default（3600 → 300）と、`lambda/rag/rag-function/app.py` の env フォールバック既定値
+- **デプロイ時の注意（2026-08-26 実害確認）**: テンプレートの Default 変更だけでは**既存スタックのパラメータ値は変わらない**（`sam deploy` は未指定パラメータに UsePreviousValue を使う）。既存スタックへは `--parameter-overrides Environment=dev ProjectName=EleKnowledge PresignedUrlExpiresIn=300` の明示指定が必要（CLI 指定は samconfig.toml の parameter_overrides を丸ごと置き換えるため全パラメータを併記する）。dev への反映は同日3回目のデプロイで完了し、`PRESIGNED_URL_EXPIRES_IN=300` を確認済み
 - 300 はテンプレートの `MinValue` と同値（＝許容最小）。大きな PDF でも「リンクを開く」操作自体は数秒であり、5 分で不足する状況は想定していない
 
 ## 2. 残存リスク: 発行済み URL の流出（実機確認 2026-08-26）
