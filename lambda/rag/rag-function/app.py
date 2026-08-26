@@ -68,16 +68,29 @@ CATEGORY_MAP = {
     'qsheet': 'Qシート',
     'std': '据付基準',
     'note': '据付ノート',
-    # site_agent / quality_mgmt は現行 KB カタログ 0 件のため UI 非掲載。
-    # API 後方互換のためマップには残す。
+    # site_agent(30件) / quality_mgmt(7件) は 2026-08-26 実測で実在を確認（旧カタログの0件は誤り）。
+    # site_agent はうち2件（GM-01-03-A / GM-01-29-A）がテキスト層なしスキャンPDFで
+    # KB 未索引のため検索可能実数は28件（差し替えは issue #53 で所有側へ依頼済み）。
     'site_agent': '現場代理人業務マニュアル',
     'quality_mgmt': '品質管理業務マニュアル',
     'w_doc': 'W資料',
 }
 
-# チャット UI に出すカテゴリ（到達不能キーは載せない）
+# 全検索（カテゴリ未指定）時にも常時適用するカテゴリ許可リスト。
+# WHY(2026-08-26): KB VQV81CNYU4 には S3 本命 docs/ 以外に web-crawler（GenU ドキュメント）と
+# quick-start（引用 presign 不能バケット）のデータソースが紐付いており、これらのノイズ文書は
+# category メタデータを持たない／実カテゴリ外。加えて docs/ 内に TEST 文書（ゴミ）が1件ある。
+# category の in 許可リストを常時掛けることで、これら全てを検索母集団から遮断する
+# （TEST は CATEGORY_MAP に無いので自動的に除外される）。
+# 根拠: docs/verification-2026-08-26-kb-vqv-metadata.md §2.1/§3.2/§5.4（PR #55）
+ALLOWED_CATEGORY_VALUES = tuple(CATEGORY_MAP.values())
+
+# チャット UI に出すカテゴリ（到達不能キーは載せない）。
+# w_doc(5件) は全件が取扱機種スコープ対象外でスコープ併用時0件になる既知問題があるが、
+# 既掲載のため現状維持（業務判断待ち。verification-2026-08-26 §5.1）。
 UI_CATEGORY_KEYS = (
-    'spec', 'tech_info', 'std', 'drawing', 'incident', 'qsheet', 'note', 'w_doc',
+    'spec', 'tech_info', 'std', 'drawing', 'incident', 'qsheet', 'note',
+    'site_agent', 'quality_mgmt', 'w_doc',
 )
 
 # spec モードで参照する資料カテゴリ（本命: C / TI / 据付基準）。
@@ -263,24 +276,31 @@ def build_kb_filter(filters: dict = None, categories: list = None) -> dict:
     Args:
         filters: {'category': <stable key>, 'modelType': <model name>}
         categories: 実 category 値の直接指定 (spec モード用。filters['category'] より優先)。
-            None のとき filters['category'] を使う。category 未指定ならカテゴリフィルタなし（全資料）。
+            None のとき filters['category'] を使う。
 
     Returns:
-        dict or None
+        dict（カテゴリ許可リストを常時適用するため None は返らない）
     """
     filters = filters or {}
     clauses = []
 
     if categories is not None:
-        cats = list(categories)
+        # 許可リスト外（TEST 等のゴミ値）は指定されても通さない
+        cats = [c for c in categories if c in ALLOWED_CATEGORY_VALUES]
     else:
         raw = filters.get('category')
         values = [raw] if isinstance(raw, str) and raw else (raw or [])
         cats = [CATEGORY_MAP[v] for v in values if v in CATEGORY_MAP]
 
+    # カテゴリ未指定（全検索）でも許可リストで常時絞り、web-crawler / quick-start / TEST
+    # 由来のノイズ文書を検索母集団から遮断する（ALLOWED_CATEGORY_VALUES の WHY 参照）。
+    # 「未指定＝実カテゴリ全10種」なのでユーザー視点の全検索合意は維持される。
+    if not cats:
+        cats = list(ALLOWED_CATEGORY_VALUES)
+
     if len(cats) == 1:
         clauses.append({'equals': {'key': 'category', 'value': cats[0]}})
-    elif len(cats) > 1:
+    else:
         clauses.append({'in': {'key': 'category', 'value': cats}})
 
     # model_type は ["AXIEZ", "NEXCUBE"] のような多値 (配列/カンマ連結文字列) なので
@@ -304,8 +324,6 @@ def build_kb_filter(filters: dict = None, categories: list = None) -> dict:
             ]
         })
 
-    if not clauses:
-        return None
     # Bedrock APIはandAllに最低2つの要素が必要なため、1つの場合は直接その条件を使用
     if len(clauses) == 1:
         return clauses[0]

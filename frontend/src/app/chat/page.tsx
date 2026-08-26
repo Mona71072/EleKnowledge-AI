@@ -117,6 +117,8 @@ export default function ChatPage() {
     { value: 'incident', label: '災害事例集' },
     { value: 'qsheet', label: 'Qシート' },
     { value: 'note', label: '据付ノート' },
+    { value: 'site_agent', label: '現場代理人業務マニュアル' },
+    { value: 'quality_mgmt', label: '品質管理業務マニュアル' },
     { value: 'w_doc', label: 'W資料' },
   ];
 
