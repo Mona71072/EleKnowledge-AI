@@ -25,9 +25,11 @@ BEDROCK_MODEL_ID = os.environ.get('BEDROCK_MODEL_ID')
 CHATLOGS_TABLE_NAME = os.environ.get('CHATLOGS_TABLE')
 DOCUMENTS_BUCKET = os.environ.get('DOCUMENTS_BUCKET')
 AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-1')
-# 引用リンクの署名付き URL の有効期限（秒）。URL 自体が DynamoDB にも保存され
-# 残留するため、閲覧に必要な最小限に留める。
-PRESIGNED_URL_EXPIRES_IN = int(os.environ.get('PRESIGNED_URL_EXPIRES_IN', '3600'))
+# 引用リンクの署名付き URL の有効期限（秒）。#50 でユーザーが開く瞬間に
+# GET /rag/document から都度発行する方式になったため、閲覧に必要な最小限
+# （5分）にする。発行済み URL は失効前に取り消せないベアラー URL であり、
+# 短い TTL は流出時の露出窓を最小化する。
+PRESIGNED_URL_EXPIRES_IN = int(os.environ.get('PRESIGNED_URL_EXPIRES_IN', '300'))
 
 if not CHATLOGS_TABLE_NAME:
     raise RuntimeError('CHATLOGS_TABLE environment variable is required')

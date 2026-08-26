@@ -159,10 +159,15 @@ Parameters:
 
   PresignedUrlExpiresIn:
     Type: Number
-    Default: 3600
+    Default: 300
     MinValue: 300
     MaxValue: 43200
-    Description: Citation presigned URL lifetime (seconds). Anyone holding the URL can fetch the document without auth, so keep it short.
+    Description: >-
+      Citation presigned URL lifetime (seconds). URLs are issued per click via
+      GET /rag/document (PR #50), so only the minimum needed to open the
+      document (5 min) is required. An issued URL is a bearer URL that cannot
+      be revoked before expiry, so a short TTL minimizes the exposure window
+      if it leaks.
 
 Globals:
   Function:
