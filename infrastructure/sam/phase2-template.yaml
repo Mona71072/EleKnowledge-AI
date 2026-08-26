@@ -32,15 +32,22 @@ Parameters:
 
   KnowledgeBaseId:
     Type: String
-    Default: DF9XUCSPDM
+    Default: VQV81CNYU4
     AllowedPattern: '^[A-Z0-9]{10}$'
     Description: >-
       Existing Bedrock Knowledge Base ID to REUSE. This stack does NOT create it -
       it is owned by RagKnowledgeBaseStackINSTD and is used read-only.
-      DF9XUCSPDM = generative-ai-use-cases-jp-inst-fmp (multimodal FMP; retrieve()
-      returns a mix of TEXT and IMAGE chunks, so the RAG Lambda must handle both).
-      VQV81CNYU4 = generative-ai-use-cases-jpinstd (TEXT only, but its web-crawler
-      data source injects unrelated GenU documentation into results).
+      VQV81CNYU4 = generative-ai-use-cases-jpinstd (ADOPTED; matches the live
+      rag-dev Lambda / EleKnowledge-dev-phase2 stack as verified 2026-08-26).
+      Its s3-data-source KHPV3CNKOU indexes s3://ragknowledgebasestackinst-datasourcebucket9fa93e04-ybbhm1efhyzb/docs/
+      (3,745 docs, standard TEXT parsing, last sync 2026-07-24 with the metadata
+      refresh applied). It also has quick-start / web-crawler data sources that
+      can inject unrelated GenU documents (filtered app-side).
+      DF9XUCSPDM = generative-ai-use-cases-jp-inst-fmp (NOT adopted: MULTIMODAL
+      parsing yields many IMAGE chunks without body text, and it has not been
+      synced since 2026-06-03, missing the 2026-07-24 metadata refresh. Revisit
+      only together with the app-side image-attachment rework).
+      See docs/decisions-2026-08-26-kb-selection.md.
 
   KnowledgeBaseDataSourceBucket:
     Type: String
