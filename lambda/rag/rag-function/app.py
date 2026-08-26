@@ -1357,7 +1357,7 @@ def lambda_handler(event, context):
         if not filters.get('modelType') and page_candidates:
             # 機種未指定の一般検索であることを明示（断定防止）
             ai_response = (
-                '※機種未指定のため、一般資料・部分一致の候補を含みます。'
+                '※機種未指定のため、一般資料・取扱機種スコープ内の候補を含みます。'
                 '特定機種の事実としては断定しないでください。\n\n'
                 + ai_response
             )
