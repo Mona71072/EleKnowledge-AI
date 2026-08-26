@@ -1,9 +1,10 @@
 # KB 資料メタデータ一覧
 
-> **状態:** S3 実測ベース（正本）
+> **状態:** 2026-08-26 時点の S3 実測スナップショット（同時点の正本。以降の S3/KB 状態を保証しない）
 > **ソース:** `s3://ragknowledgebasestackinst-datasourcebucket9fa93e04-ybbhm1efhyzb/docs/documents/` の全 `.metadata.json`
 > **取得日:** 2026-08-26 ／ **生成日:** 2026-08-26 ／ **件数:** 3,745 件
-> **再生成:** `python scripts/generate_kb_metadata_catalog.py <metadata-dir>`（手動編集しない）
+> **再生成:** `python scripts/generate_kb_metadata_catalog.py <metadata-dir> --as-of <取得日> --unindexed <未索引リスト>`（手動編集しない）
+> **注意:** 本ファイルは取得日時点の履歴スナップショット。後日の S3 再取得で上書きせず、新しい取得日で別ファイルを生成すること。
 >
 > 旧版（〜2026-08-26）はユーザー提供 TSV ベース（3,492 件）だったが、実バケットと 253 件乖離していたため
 > 実測へ置換した。TSV 由来の `description` 列は実メタデータに存在しないため本版にはない
@@ -23,8 +24,9 @@
 | `tags` / `tags_string` | サブフォルダ名（据付場用図・災害事例集・据付ノートのみ） |
 | `upload_date` / `folder_depth` | 取り込み日時・階層深さ |
 
-記号: **⚠未索引** = KB 索引に未取り込みで検索不能（issue #53 で所有側へ修正依頼中）／
-**†** = `model_type` がカンマ連結 string（`listContains` 完全一致で拾えない形式。issue #53 依頼 3）
+記号: **⚠未索引** = KB 索引に未取り込みで検索不能（`docs/kb-unindexed-2026-08-26.txt` に基づく取得日時点の観測値。
+再 Sync・issue #53 対応後は変わり得るため、再生成時は索引状態を再確認しリストを更新すること）／
+**†** = `model_type` がカンマ連結 string（VQV81CNYU4 実機確認 2026-08-26 では `listContains` 完全一致で拾えない。AWS の恒久仕様ではなく実測。issue #53 依頼 3）
 
 ## 2. サマリ
 

@@ -7,9 +7,12 @@ related-code: lambda/rag/rag-function/app.py, frontend/src/data/kbModelTypes.ts,
 # RAG 絞り込みマッピング整理（取扱機種・UI項目・スコープ実測 2026-08-26）
 
 > **位置づけ:** PR #37 の `HANDLED_MODEL_TYPES` / `UI_MODEL_FILTERS` 定義を、S3 実測メタデータ 3,745 件
-> （[kb-metadata-catalog-2026-08-26.md](./kb-metadata-catalog-2026-08-26.md)）に当てたスナップショット。
+> （[kb-metadata-catalog-2026-08-26.md](./kb-metadata-catalog-2026-08-26.md)）に当てた **2026-08-26 確認時点のスナップショット**。
+> 本書の件数・分布・挙動は同時点の実測であり、将来の S3/KB 状態や AWS の仕様を恒久保証するものではない。
 > 検証手法・環境事実は [verification-2026-08-26-kb-vqv-metadata.md](./verification-2026-08-26-kb-vqv-metadata.md) を正とする。
-> **PR #37 マージ後は `scripts/generate_model_filter_mapping.py`（#37 同梱）による自動生成に引き継ぐこと。**
+> **PR #37 マージ後の自動生成への引き継ぎは条件付き:** #37 同梱の `scripts/generate_model_filter_mapping.py` は
+> 旧 `docs/kb-metadata-catalog.tsv`（3,492 件）を入力とする実装のため、そのまま引き継ぐと本書の実測前の状態へ戻る。
+> **同ジェネレータを 8/26 実測データ形式（S3 `.metadata.json` 直読、3,745 件）へ更新・検証した後に引き継ぐこと。**
 
 ---
 
@@ -74,13 +77,17 @@ UI カテゴリチップ（安定キー）→ 実 category → スコープ適�
 > スコープフィルタ併用時、`w_doc` チップを選んでも 0 件になる。対応候補 = W資料機種を
 > `HANDLED_MODEL_TYPES` に追加 or W資料カテゴリをスコープ例外化。
 
-## 4. スコープ判定ルール（改修後・確定仕様）
+## 4. スコープ判定ルール（改修後実装が採る仕様）
 
 1. 共通資料: `model_type` の全要素が `*` / `general`（空欄は実データ 0 件）→ **常に検索対象**。
    判定は要素ベース `not els or all(e in {'', '*', 'general'} for e in els)`（`["*"]` 等の list 型対応。旧判定は 495 件を誤除外）。
 2. 機種固有資料: 要素のいずれかが `HANDLED_MODEL_TYPES` に含まれれば対象。
 3. どちらでもない資料: 対象外（下記 §5 の 467 件）。
 4. 共通値と具体機種の混在リストは実データ 0 件（判定の曖昧さなし）。
+
+> **注:** `listContains` の型混在（list / string）に対する挙動（カンマ連結 string は完全一致で拾えない等）は
+> 2026-08-26 の VQV81CNYU4 実機確認に基づく実測事実であり、AWS の公式・恒久仕様として確定したものではない。
+> AWS 側の挙動変更やフィルタ実装変更の際は実機で再確認すること。
 
 ## 5. スコープ対象外の全資料リスト（467 件・実測）
 

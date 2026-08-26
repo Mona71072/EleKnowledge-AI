@@ -1,41 +1,34 @@
 #!/usr/bin/env python3
-"""KB メタデータカタログ (docs/kb-metadata-catalog-2026-08-26.md) を S3 実測から再生成する。
+"""KB メタデータカタログ (docs/kb-metadata-catalog-<取得日>.md) を S3 実測から生成する。
 
 使い方:
     1. データソースバケットからメタデータを全件ダウンロード:
        aws s3 cp s3://ragknowledgebasestackinst-datasourcebucket9fa93e04-ybbhm1efhyzb/docs/documents <local-dir> \
            --recursive --exclude "*" --include "*.metadata.json" --profile datautl-bple-mebs
-    2. python scripts/generate_kb_metadata_catalog.py <local-dir>
+    2. python scripts/generate_kb_metadata_catalog.py <local-dir> \
+           --as-of <S3取得日 YYYY-MM-DD> [--unindexed docs/kb-unindexed-<取得日>.txt] [--overwrite]
 
 出力は S3 の `.metadata.json` と一対一（TSV 由来の description 列は実メタデータに存在しないため出力しない）。
-索引欠落ファイル (UNINDEXED) は 2026-08-26 実測 (docs/verification-2026-08-26-kb-vqv-metadata.md §6,
-issue #53) に基づく。所有側対応・再 Sync 後に確認のうえ更新すること。
+
+スナップショット方針:
+- 出力ファイル名と本文の「取得日」は --as-of（S3 から実際にダウンロードした日）に従う。
+  生成物は取得日時点の履歴スナップショットであり、後日の S3 再取得で過去日付のファイルを
+  上書きしない（新しい取得日で別ファイルを生成する）。既存ファイルの上書きは --overwrite 指定時のみ。
+- KB 索引への未取り込み (未索引) は S3 のメタデータからは判定できない。--unindexed で取得日時点の
+  観測リスト（1 行 1 file_path。空行・`#` 始まりはコメント）を渡す。2026-08-26 観測分は
+  docs/kb-unindexed-2026-08-26.txt（出典: docs/verification-2026-08-26-kb-vqv-metadata.md §6, issue #53）。
+  再 Sync・issue #53 対応後は状態が変わり得るため、再生成時は索引状態を再確認してリストを
+  更新すること。--unindexed 省略時は未索引判定なし（未確認）として生成する。
 """
+import argparse
 import json
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "docs" / "kb-metadata-catalog-2026-08-26.md"
-
-# 2026-08-26 実測: KB 索引 (VQV81CNYU4 / KHPV3CNKOU) に取り込まれていない = 検索不能
-UNINDEXED = {
-    "documents/Qシート/Q-3663.pdf", "documents/Qシート/Q-3665.pdf",
-    "documents/Qシート/Q-3667.pdf", "documents/Qシート/Q-3670.pdf",
-    "documents/Qシート/Q-3671.pdf", "documents/Qシート/Q-3672.pdf",
-    "documents/Qシート/Q-3675.pdf", "documents/Qシート/Q-3678.pdf",
-    "documents/Qシート/Q-3683.pdf", "documents/Qシート/Q-3687.pdf",
-    "documents/Qシート/Q-3689B.pdf", "documents/Qシート/Q-3699.pdf",
-    "documents/W資料/WIG-27--D.pdf",
-    "documents/据付ノート/IN-EL-08-94/追加分/IN-EL-08-94-01-2.pdf",
-    "documents/据付ノート/IN-EL-12-104/IN-EL-12-104-01-1.pdf",
-    "documents/据付ノート/IN-EL-12-104/IN-EL-12-104-01-2.pdf",
-    "documents/据付ノート/IN-EL-12-104/IN-EL-12-104-01-3.pdf",
-    "documents/据付ノート/IN-EL-12-105/IN-EL-12-105-01.pdf",
-    "documents/現場代理人業務マニュアル/GM-01-03-A.pdf",
-    "documents/現場代理人業務マニュアル/GM-01-29-A.pdf",
-}
+DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
 COMMON = {"", "*", "general"}
 
 
@@ -46,13 +39,39 @@ def elements(raw):
     return els
 
 
-def main(src_dir):
+def load_unindexed(path):
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    return {s for s in (l.strip() for l in lines) if s and not s.startswith("#")}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("metadata_dir", help=".metadata.json をダウンロードしたローカルディレクトリ")
+    ap.add_argument("--as-of", required=True, metavar="YYYY-MM-DD",
+                    help="S3 取得日。出力ファイル名 docs/kb-metadata-catalog-<取得日>.md と本文の取得日に使う")
+    ap.add_argument("--unindexed", metavar="FILE",
+                    help="取得日時点で KB 索引に未取り込みの file_path リスト（1 行 1 パス）。省略時は未索引判定なし")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="出力先が既に存在する場合に上書きを許可（過去スナップショットの保護）")
+    args = ap.parse_args()
+
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.as_of):
+        sys.exit(f"--as-of は YYYY-MM-DD 形式で指定してください: {args.as_of}")
+    as_of = args.as_of
+    out = DOCS_DIR / f"kb-metadata-catalog-{as_of}.md"
+    if out.exists() and not args.overwrite:
+        sys.exit(f"{out} は既に存在します。過去スナップショットの上書き防止のため中断します。"
+                 f"意図的な再生成なら --overwrite を付けてください。")
+
+    unindexed = load_unindexed(args.unindexed) if args.unindexed else set()
+    unindexed_display = Path(args.unindexed).as_posix() if args.unindexed else None
+
     docs = []
-    for p in sorted(Path(src_dir).rglob("*.metadata.json")):
+    for p in sorted(Path(args.metadata_dir).rglob("*.metadata.json")):
         a = json.loads(p.read_text(encoding="utf-8"))["metadataAttributes"]
         docs.append(a)
     if not docs:
-        sys.exit(f"no metadata files under {src_dir}")
+        sys.exit(f"no metadata files under {args.metadata_dir}")
 
     cats = Counter(a["category"] for a in docs)
     mt_list = sum(1 for a in docs if isinstance(a.get("model_type"), list))
@@ -62,16 +81,17 @@ def main(src_dir):
     common_n = sum(1 for a in docs
                    if (els := elements(a.get("model_type"))) is not None
                    and (not els or all(e in COMMON for e in els)))
-    unindexed_found = sum(1 for a in docs if a["file_path"] in UNINDEXED)
+    unindexed_found = sum(1 for a in docs if a["file_path"] in unindexed)
 
     L = []
     w = L.append
     w("# KB 資料メタデータ一覧")
     w("")
-    w("> **状態:** S3 実測ベース（正本）")
+    w(f"> **状態:** {as_of} 時点の S3 実測スナップショット（同時点の正本。以降の S3/KB 状態を保証しない）")
     w("> **ソース:** `s3://ragknowledgebasestackinst-datasourcebucket9fa93e04-ybbhm1efhyzb/docs/documents/` の全 `.metadata.json`")
-    w(f"> **取得日:** 2026-08-26 ／ **生成日:** {date.today().isoformat()} ／ **件数:** {len(docs):,} 件")
-    w("> **再生成:** `python scripts/generate_kb_metadata_catalog.py <metadata-dir>`（手動編集しない）")
+    w(f"> **取得日:** {as_of} ／ **生成日:** {date.today().isoformat()} ／ **件数:** {len(docs):,} 件")
+    w("> **再生成:** `python scripts/generate_kb_metadata_catalog.py <metadata-dir> --as-of <取得日> --unindexed <未索引リスト>`（手動編集しない）")
+    w("> **注意:** 本ファイルは取得日時点の履歴スナップショット。後日の S3 再取得で上書きせず、新しい取得日で別ファイルを生成すること。")
     w(">")
     w("> 旧版（〜2026-08-26）はユーザー提供 TSV ベース（3,492 件）だったが、実バケットと 253 件乖離していたため")
     w("> 実測へ置換した。TSV 由来の `description` 列は実メタデータに存在しないため本版にはない")
@@ -91,19 +111,30 @@ def main(src_dir):
     w("| `tags` / `tags_string` | サブフォルダ名（据付場用図・災害事例集・据付ノートのみ） |")
     w("| `upload_date` / `folder_depth` | 取り込み日時・階層深さ |")
     w("")
-    w("記号: **⚠未索引** = KB 索引に未取り込みで検索不能（issue #53 で所有側へ修正依頼中）／")
-    w("**†** = `model_type` がカンマ連結 string（`listContains` 完全一致で拾えない形式。issue #53 依頼 3）")
+    if unindexed_display:
+        w(f"記号: **⚠未索引** = KB 索引に未取り込みで検索不能（`{unindexed_display}` に基づく取得日時点の観測値。")
+        w("再 Sync・issue #53 対応後は変わり得るため、再生成時は索引状態を再確認しリストを更新すること）／")
+    else:
+        w("記号: （本生成では未索引リスト未指定のため ⚠未索引 の判定なし。KB 索引状態は S3 からは判定できず未確認）／")
+    w("**†** = `model_type` がカンマ連結 string（VQV81CNYU4 実機確認 2026-08-26 では `listContains` 完全一致で拾えない。AWS の恒久仕様ではなく実測。issue #53 依頼 3）")
     w("")
     w("## 2. サマリ")
     w("")
     w("### カテゴリ別件数")
     w("")
-    w("| category | 件数 | 未索引 |")
-    w("|---|---:|---:|")
-    ui = Counter(k.split("/")[1] for k in UNINDEXED)
-    for c, n in cats.most_common():
-        w(f"| {c} | {n:,} | {ui.get(c, 0) or ''} |")
-    w(f"| **計** | **{len(docs):,}** | **{unindexed_found}** |")
+    if unindexed:
+        w("| category | 件数 | 未索引 |")
+        w("|---|---:|---:|")
+        ui = Counter(k.split("/")[1] for k in unindexed)
+        for c, n in cats.most_common():
+            w(f"| {c} | {n:,} | {ui.get(c, 0) or ''} |")
+        w(f"| **計** | **{len(docs):,}** | **{unindexed_found}** |")
+    else:
+        w("| category | 件数 |")
+        w("|---|---:|")
+        for c, n in cats.most_common():
+            w(f"| {c} | {n:,} |")
+        w(f"| **計** | **{len(docs):,}** |")
     w("")
     w(f"### model_type 統計")
     w("")
@@ -135,19 +166,18 @@ def main(src_dir):
             disp = " / ".join(els) if els else "(なし)"
             sub = "/".join(a["file_path"].split("/")[2:-1]) or "—"
             notes = []
-            if a["file_path"] in UNINDEXED:
+            if a["file_path"] in unindexed:
                 notes.append("⚠未索引")
             if isinstance(mt, str) and "," in mt:
                 notes.append("†")
             w(f"| `{a['filename']}` | {disp} | {sub} | {' '.join(notes)} |")
         w("")
-    OUT.write_text("\n".join(L) + "\n", encoding="utf-8")
-    print(f"wrote {OUT} ({len(docs)} docs, {OUT.stat().st_size/1024:.0f} KB)")
-    if unindexed_found != len(UNINDEXED):
-        print(f"WARNING: UNINDEXED {len(UNINDEXED)} 件中 {unindexed_found} 件しか S3 に見つからない")
+    out.write_text("\n".join(L) + "\n", encoding="utf-8")
+    print(f"wrote {out} ({len(docs)} docs, {out.stat().st_size/1024:.0f} KB)")
+    if unindexed and unindexed_found != len(unindexed):
+        print(f"WARNING: 未索引リスト {len(unindexed)} 件中 {unindexed_found} 件しか S3 に見つからない"
+              f"（リストが取得日時点の S3 と不整合の可能性）")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit(__doc__)
-    main(sys.argv[1])
+    main()
