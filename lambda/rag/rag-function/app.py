@@ -93,6 +93,40 @@ UI_CATEGORY_KEYS = (
     'site_agent', 'quality_mgmt', 'w_doc',
 )
 
+# --- 取扱機種スコープ（暫定処置 2026-08-21 指定 / 2026-08-26 実測で27値の実在確認） ---
+# サービス提供部門（初期スコープ: 新設工事。モダニ工事→空シ工へ拡大予定）で
+# 取り扱う機種のみを検索対象とする。KB には取扱外機種（NEXIEZ 系・モダニ系・
+# ホームエレベーター等）の資料も含まれるため、機種未指定の検索でも
+# 「取扱機種を1つも含まない」機種固有資料は post-filter で除外する
+# （全機種共通文書 `*` / `general` は常に対象）。
+# 恒久対策は KB メタデータへの model_code 付与（issue #53 で KB 所有側へ依頼中）。
+# 実測件数・スコープ対象外467件の全リスト: docs/rag-model-filter-mapping-2026-08-26.md §2/§5（PR #54）
+# 既知問題: W資料5件は全件スコープ対象外（業務判断待ち。verification-2026-08-26 §5.1）
+HANDLED_MODEL_TYPES = frozenset({
+    'NEXCUBE', 'AXIEZ', 'AXIEZ-LINKs', 'AXIEZ(KE-WF・KE-HF)',
+    '機械室レス荷物用(中抵製)', 'メルシティ', 'メルワイド', 'NEXCUBE Limited',
+    'エスカレーター', '特注機械室レスエレベーター', '斜行エレベーター',
+    '大容量荷物用', '大形荷物用', '小形荷物用', '標準小中形荷物用', '標準形荷物用',
+    '特大形荷物用', '特注形荷物用', '規格形荷物用', '中小形荷物用(中抵製)',
+    'J*', 'LINKs上部作業床', 'その他上部作業床',
+    'ボルトナット・アンカーボルト', '治工具', 'レールブラケット',
+    '駅舎エレ',
+})
+
+# UI の機種絞り込み項目 → 対象 model_type（要素完全一致）。
+# 選択時は展開された各機種の listContains を orAll で検索前フィルタに掛ける。
+# UI項目別の実測母数（AXIEZ 1,137 / AXIEZ-LINKs 913 / NEXCUBE 485 /
+# メルシティ 292 / メルワイド 291 / エスカレーター 83 ＋共通819常時）:
+# docs/rag-model-filter-mapping-2026-08-26.md §1（PR #54）
+UI_MODEL_FILTERS = {
+    'AXIEZ': ('AXIEZ', 'AXIEZ(KE-WF・KE-HF)', '駅舎エレ'),
+    'AXIEZ-LINKs': ('AXIEZ-LINKs',),
+    'NEXCUBE': ('NEXCUBE', 'NEXCUBE Limited', '特注機械室レスエレベーター'),
+    'メルシティ': ('メルシティ',),
+    'メルワイド': ('メルワイド',),
+    'エスカレーター': ('エスカレーター',),
+}
+
 # spec モードで参照する資料カテゴリ（本命: C / TI / 据付基準）。
 # 旧実装は 'D資料' を強制していたが、この KB に D資料 は存在せず必ず 0 件になっていた。
 SPEC_CATEGORIES = ['C資料', 'テクニカルインフォメーション', '据付基準']
@@ -303,24 +337,33 @@ def build_kb_filter(filters: dict = None, categories: list = None) -> dict:
     else:
         clauses.append({'in': {'key': 'category', 'value': cats}})
 
-    # model_type は ["AXIEZ", "NEXCUBE"] のような多値 (配列/カンマ連結文字列) なので
-    # equals では多値レコードに一致しない。stringContains が必須。
-    # 副作用として 'AXIEZ' は 'AXIEZ-LINKs' にも一致する (上位集合になる)。
+    # model_type は list型2,599件 / string型1,146件の混在（2026-08-26 全数実測）。
+    # listContains はリスト要素の完全一致で、string 型もスカラー=単要素リスト扱いで
+    # 一致するため（実機確認済み）、型混在でも取りこぼさない。
+    # 旧 stringContains の部分一致誤マッチ（AXIEZ⊂['AXIEZ-LINKs'] 等・実測752件）は
+    # listContains 化で検索前に消える。
     #
-    # 全機種共通は次のいずれか:
-    #   - model_type が '*' / 'general'
-    #   - model_type が空文字（カタログ上の空欄。据付基準・TI・Q・災害事例など）
-    # 特定機種で stringContains だけを掛けるとこれらが除外されるため OR で常に含める。
-    # 空欄は equals "" で拾う（キー欠落の場合は equals では拾えない点に注意。
-    # 確認: docs/verify-checklist-2026-07-29-kb-filter.md）。
+    # UI 項目は UI_MODEL_FILTERS で複数 model_type に展開し、各機種の listContains を
+    # orAll で合成する（UI に無い値はその値1つの listContains にフォールバック）。
+    #
+    # 全機種共通（model_type が '*' / 'general'。計819件）は機種指定時も常に対象と
+    # するため OR で含める。空文字・空配列・キー欠落は実データ0件のため、
+    # 旧実装の equals "" 句は削除した（verification-2026-08-26 §3.3/§5.4）。
+    #
+    # 既知の残課題: カンマ連結文字列60件（全件据付場用図・同一値
+    # "機械室レス荷物用(中抵製),機械室レス荷物用(モダニ)"）は listContains では
+    # 拾えない唯一の形式。当該機種は UI 6項目に無く機種指定経路では元々対象外、
+    # 機種未指定経路にはこの機種句自体が無いため現状実害なし。
+    # 恒久解消は issue #53 依頼3（所有側でのメタデータ正規化）。
+    # 根拠: docs/verification-2026-08-26-kb-vqv-metadata.md §4/§5.4（PR #55）
     model_type = filters.get('modelType')
     if model_type:
+        targets = UI_MODEL_FILTERS.get(model_type, (model_type,))
         clauses.append({
             'orAll': [
-                {'stringContains': {'key': 'model_type', 'value': model_type}},
-                {'equals': {'key': 'model_type', 'value': '*'}},
-                {'equals': {'key': 'model_type', 'value': 'general'}},
-                {'equals': {'key': 'model_type', 'value': ''}},
+                *[{'listContains': {'key': 'model_type', 'value': t}} for t in targets],
+                {'listContains': {'key': 'model_type', 'value': '*'}},
+                {'listContains': {'key': 'model_type', 'value': 'general'}},
             ]
         })
 
@@ -328,6 +371,64 @@ def build_kb_filter(filters: dict = None, categories: list = None) -> dict:
     if len(clauses) == 1:
         return clauses[0]
     return {'andAll': clauses}
+
+
+def _model_type_elements(raw) -> list:
+    """KB の model_type 値（str / list 混在）を機種名要素のリストに正規化する。
+
+    Retrieve が返す metadata.model_type は S3 の型のまま str / list 混在
+    （2026-08-26 実機確認）。文字列は ',' と '/' を区切りとして分解する
+    （実データのカンマ連結60件と、カタログ表記由来の '/' 区切りに対応）。
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        return [str(e).strip() for e in raw if str(e).strip()]
+    return [e.strip() for e in re.split(r'[,/]', str(raw)) if e.strip()]
+
+
+def _is_common_model_type(raw) -> bool:
+    """全機種共通文書か（要素ベース判定）。
+
+    値を要素リストに正規化した上で「要素なし、または全要素が '*' / 'general'」
+    なら共通と判定する。旧実装（PR #37）は生値の文字列比較だったため
+    list 型の ['*'] / ['general'] を共通と判定できず、実データ495件を
+    誤除外していた（PR #52 §4.2 指摘 → 2026-08-26 実測で確定・修正）。
+    共通値と具体機種の混在リストは実データ0件のため all() 判定に曖昧さはない。
+    根拠: docs/verification-2026-08-26-kb-vqv-metadata.md §5.2/§5.4（PR #55）
+    """
+    els = _model_type_elements(raw)
+    return not els or all(e in ('', '*', 'general') for e in els)
+
+
+def model_type_matches(metadata: dict, model_type: str) -> bool:
+    """UI で選択された機種絞り込みに該当するか（要素単位の完全一致）。
+
+    粗フィルタ（listContains）が要素完全一致になったため通常は素通りするが、
+    フィルタ構成の変更・KB 側のメタデータ変化に対する安全弁として残す。
+    UI 項目は UI_MODEL_FILTERS で複数 model_type に対応する
+    (例 'NEXCUBE' → NEXCUBE / NEXCUBE Limited / 特注機械室レスエレベーター)。
+    """
+    raw = metadata.get('model_type')
+    if _is_common_model_type(raw):
+        return True
+    targets = set(UI_MODEL_FILTERS.get(model_type, (model_type,)))
+    return any(e in targets for e in _model_type_elements(raw))
+
+
+def in_service_scope(metadata: dict) -> bool:
+    """サービス提供部門の取扱機種スコープに入る資料か。
+
+    機種未指定の検索を含む全検索に適用する（暫定処置 2026-08-21）。
+    取扱機種（HANDLED_MODEL_TYPES 27値）を 1 つも含まない機種固有資料
+    （NEXIEZ 系・モダニ系・ホームエレベーター等、実測467件）を除外する。
+    全機種共通文書（`*` / `general` 819件）は常に対象。
+    カンマ連結文字列60件は _model_type_elements の要素分解で正しく判定される。
+    """
+    raw = metadata.get('model_type')
+    if _is_common_model_type(raw):
+        return True
+    return any(e in HANDLED_MODEL_TYPES for e in _model_type_elements(raw))
 
 
 def query_knowledge_base(query: str, filters: dict = None, number_of_results: int = 10,
@@ -360,9 +461,25 @@ def query_knowledge_base(query: str, filters: dict = None, number_of_results: in
             retrievalQuery={'text': query},
             retrievalConfiguration=retrieval_config
         )
-        
+
+        # post-filter（安全弁。粗フィルタが listContains の完全一致になったため
+        # 通常は素通りするが、KB 側メタデータ変化への防波堤として残置）:
+        # 1) 取扱機種スコープ（機種未指定でも適用。共通文書は残る）
+        # 2) 機種絞り込みの要素完全一致
+        results = [
+            r for r in response.get('retrievalResults', [])
+            if in_service_scope(r.get('metadata') or {})
+        ]
+        model_type = (filters or {}).get('modelType')
+        if model_type:
+            results = [
+                r for r in results
+                if model_type_matches(r.get('metadata') or {}, model_type)
+            ]
+        response['retrievalResults'] = results
+
         return response
-        
+
     except ClientError as e:
         print(f"Knowledge Base query error: {e}")
         raise
@@ -1029,7 +1146,8 @@ def lambda_handler(event, context):
         "mode": "normal" | "spec",
         "filters": {
             "category": "spec",        # CATEGORY_MAP の安定キー
-            "modelType": "AXIEZ"       # 部分一致 (AXIEZ は AXIEZ-LINKs にも一致する)
+            "modelType": "AXIEZ"       # UI項目名。UI_MODEL_FILTERS で機種へ展開し
+                                       # listContains（要素完全一致）で絞り込む
         }
     }
     """
