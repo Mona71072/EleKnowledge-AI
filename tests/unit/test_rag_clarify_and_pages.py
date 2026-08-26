@@ -195,7 +195,9 @@ def test_normalize_mode_spec_forces_priority_categories(rag):
     assert filters2['category'] == 'drawing'
 
 
-def test_ui_category_keys_exclude_unreachable(rag):
-    assert 'site_agent' not in rag.UI_CATEGORY_KEYS
-    assert 'quality_mgmt' not in rag.UI_CATEGORY_KEYS
-    assert 'site_agent' in rag.CATEGORY_MAP
+def test_ui_category_keys_include_measured_categories(rag):
+    # 2026-08-26 実測で site_agent 30件 / quality_mgmt 7件の実在を確認 → UI 掲載
+    assert 'site_agent' in rag.UI_CATEGORY_KEYS
+    assert 'quality_mgmt' in rag.UI_CATEGORY_KEYS
+    # UI に出すキーは全て CATEGORY_MAP（= API 契約）に存在すること
+    assert set(rag.UI_CATEGORY_KEYS) <= set(rag.CATEGORY_MAP)
