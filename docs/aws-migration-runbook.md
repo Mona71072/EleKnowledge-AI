@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-07-01
+last-verified: 2026-08-26
 related-code: infrastructure/sam/, amplify.yml, docs/aws-resource-map.md
 ---
 
@@ -114,6 +114,14 @@ Creates the RAG/chat Lambda functions, `rag-api-dev`, `chat-api-dev`, and `/elek
 
 This stack **no longer creates an OpenSearch Serverless collection or a Knowledge Base service role** — Phase 2 reuses the existing Knowledge Base (see section 4). `KnowledgeBaseId` therefore defaults to the real ID `DF9XUCSPDM` and is constrained by `AllowedPattern`; the old `KnowledgeBaseId=pending` two-pass flow is gone, because deploying with `pending` silently produced a `rag-dev` that returned zero results for every query.
 
+> **⚠️ Verified 2026-08-26 — the production reality differs from the example below.** The deployed
+> stack `EleKnowledge-dev-phase2` and the live `rag-dev` Lambda both use
+> **`KnowledgeBaseId=VQV81CNYU4`** (`generative-ai-use-cases-jpinstd`, TEXT ingestion), not
+> `DF9XUCSPDM` (whose MULTIMODAL parsing yields IMAGE chunks the app cannot consume yet).
+> **Always pass `KnowledgeBaseId=VQV81CNYU4` on a full `sam deploy`** until the template default is
+> updated, otherwise the deploy silently repoints the KB. Facts and rationale:
+> `docs/verification-2026-08-26-kb-vqv-metadata.md`.
+
 ```powershell
 sam deploy `
   --template-file infrastructure/sam/phase2-template.yaml `
@@ -122,7 +130,7 @@ sam deploy `
   --profile $Profile `
   --s3-bucket $ArtifactsBucket `
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM `
-  --parameter-overrides "Environment=$Env" "ProjectName=$Project" "KnowledgeBaseId=DF9XUCSPDM"
+  --parameter-overrides "Environment=$Env" "ProjectName=$Project" "KnowledgeBaseId=VQV81CNYU4"
 ```
 
 > **If `$Project-$Env-phase2` is already deployed with the old template**, split the change into two
@@ -156,10 +164,15 @@ Configure the Bedrock Knowledge Bases and the Bedrock Agent in `ap-northeast-1`.
 existing Knowledge Base (see the exception below) and no longer emits OpenSearch/IAM outputs; the
 Phase 3 Knowledge Bases still need to be created against the Phase 1 document bucket.
 
-> **Exception for Phase 2 (approved 2026-07-17).** Phase 2 now **reuses the existing Knowledge Base
+> **Exception for Phase 2 (approved 2026-07-17; superseded in practice — see 2026-08-26 note).**
+> Phase 2 was planned to **reuse the existing Knowledge Base
 > `DF9XUCSPDM`** (`generative-ai-use-cases-jp-inst-fmp`), together with its data source `WQ4ED5IFOP`,
 > its OpenSearch Serverless collection `k9p9daatgyg5pvbhf85h`, and its S3 data-source bucket
 > `ragknowledgebasestackinst-datasourcebucket9fa93e04-ybbhm1efhyzb` (prefix `docs/`).
+> **As of 2026-08-26 the deployed environment instead reuses `VQV81CNYU4`**
+> (`generative-ai-use-cases-jpinstd`, data source `KHPV3CNKOU`, **same S3 bucket and prefix**);
+> the read-only rules below apply identically to it. See
+> `docs/verification-2026-08-26-kb-vqv-metadata.md` for both KBs' data sources and the decision.
 > The knowledge itself is identical to what EleKnowledge needs — the differentiation is the end user,
 > the UI, and how that knowledge is surfaced — so duplicating 3,693 PDFs into a second KB would only
 > add storage, embedding, and sync cost.
@@ -177,23 +190,24 @@ For everything other than the Phase 2 exception above: create brand-new Knowledg
 
 At minimum, collect these IDs:
 
-- General RAG Knowledge Base ID — **Phase 2: already fixed to `DF9XUCSPDM` (reused, see above)**
+- General RAG Knowledge Base ID — **Phase 2: `VQV81CNYU4` as deployed (reused, see the 2026-08-26 note above)**
 - Trouble cases Knowledge Base ID
 - Troubleshooting manuals Knowledge Base ID
 - C-materials Knowledge Base ID
 - Bedrock Agent ID
 - Bedrock Agent Alias ID
 
-For Phase 2 nothing further is needed: `KnowledgeBaseId=DF9XUCSPDM` is already passed at deploy time,
-and the stack writes it to both the `rag-dev` environment variable and the SSM parameter
-`/eleknowledge/$Env/knowledge-base-id`. (The Lambda reads the environment variable, not SSM; the
-parameter exists as an operational reference point.)
+For Phase 2 nothing further is needed: the Knowledge Base ID (`VQV81CNYU4` as deployed — see the
+2026-08-26 note above) is passed at deploy time and the stack writes it to the `rag-dev` environment
+variable. (The Lambda reads the environment variable, not SSM. Note: as of 2026-08-26 the SSM
+parameter `/eleknowledge/dev/knowledge-base-id` does **not** exist in the account — this paragraph
+previously overstated it; whether to recreate it or drop it from the template is an open item.)
 
 Verify the reused Knowledge Base actually answers before moving on:
 
 ```powershell
 aws bedrock-agent-runtime retrieve `
-  --knowledge-base-id DF9XUCSPDM `
+  --knowledge-base-id VQV81CNYU4 `
   --retrieval-query '{\"text\":\"火災管制運転\"}' `
   --retrieval-configuration '{\"vectorSearchConfiguration\":{\"numberOfResults\":5,\"filter\":{\"equals\":{\"key\":\"category\",\"value\":\"C資料\"}}}}' `
   --region $Region --profile $Profile --query 'length(retrievalResults)'
