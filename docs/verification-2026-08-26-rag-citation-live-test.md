@@ -15,7 +15,10 @@ related-code: lambda/rag/rag-function/app.py, frontend/src/app/chat/page.tsx, fr
 | 回 | 内容 | 結果 |
 |---|---|---|
 | 1回目（17:49） | #56/#57/#58 を itai にマージ（280d589）して `sam deploy`。**#50 の `/rag/document` バックエンドもこのとき初回反映**（itai に以前からマージ済みだった分） | UPDATE_COMPLETE。`KnowledgeBaseId` はパラメータ変更なし = VQV81CNYU4 維持 |
-| 2回目（19:13） | 実機確認を受けた追随対応（後述 §4）を itai にマージ（fc9b31b）して `sam deploy` | UPDATE_COMPLETE。実更新は RagFunction のみ（TTL 300 秒反映） |
+| 2回目（19:13） | 実機確認を受けた追随対応（後述 §4）を itai にマージ（fc9b31b）して `sam deploy` | UPDATE_COMPLETE。実更新は RagFunction のみ。**ただし TTL 300 秒は未反映だった**（下記） |
+| 3回目（同日夜） | `--parameter-overrides Environment=dev ProjectName=EleKnowledge PresignedUrlExpiresIn=300` を明示して `sam deploy` | UPDATE_COMPLETE。`PRESIGNED_URL_EXPIRES_IN=300` を `get-function-configuration` で確認 |
+
+**教訓（2回目で TTL が反映されなかった理由）**: `sam deploy` は未指定パラメータに UsePreviousValue を使うため、**テンプレートの `Default` を変えても既存スタックのパラメータ値（3600）は維持される**。実機で「引用 URL を開いて10分後の再読み込みが通る」ことから発覚した。既存スタックのパラメータ値を変えるときは `--parameter-overrides` の明示が必須（CLI 指定は samconfig.toml の `parameter_overrides` を丸ごと置き換えるため、`Environment` / `ProjectName` も併記する）。
 
 注意: スタック Outputs に SSM `/eleknowledge/dev/knowledge-base-id` が出るが、実測（同日）では ParameterNotFound。[decisions-2026-08-26-kb-selection.md](./decisions-2026-08-26-kb-selection.md) の持ち越し論点。
 
@@ -49,7 +52,7 @@ related-code: lambda/rag/rag-function/app.py, frontend/src/app/chat/page.tsx, fr
 | 判断経緯の決定記録（TTL 変遷・ベアラー URL リスク・逆変換） | PR #50: [decisions-2026-08-26-presigned-url-ttl.md](./decisions-2026-08-26-presigned-url-ttl.md) | 65bc8fe |
 | `GET /rag/document` API 仕様と期限切れ URL の想定挙動の明文化 | PR #50: [api/rag.md](./api/rag.md) ほか | ef1f811 |
 
-いずれも itai にマージ済み・2回目デプロイで dev 反映済み（フロント分は Amplify 自動ビルド）。
+いずれも itai にマージ済み・dev 反映済み（コードは2回目デプロイ、TTL パラメータは3回目デプロイ、フロント分は Amplify 自動ビルド）。TTL 300 秒は3回目デプロイ後、引用を開いて6分後の再読み込みが AccessDenied になることで最終確認する。
 
 ## 5. 持ち越し（このサイクルでは対応しない）
 
