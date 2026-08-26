@@ -20,9 +20,14 @@ def _load(name, rel_path):
 history = _load("history_app", "lambda/troubleshooting/history/app.py")
 
 
-def _event(user_id="user-001", session_id=None):
+def _event(user_id="user-001", session_id=None, groups="admin"):
+    # PR #33 で history は admin 専用になった（is_admin ゲート）。
+    # 認可済みケースは cognito:groups=admin を持つ claims を前提にする。
     return {
-        "requestContext": {"authorizer": {"userId": user_id}},
+        "requestContext": {"authorizer": {
+            "userId": user_id,
+            "claims": {"cognito:groups": groups},
+        }},
         "queryStringParameters": {"sessionId": session_id} if session_id else None,
     }
 
@@ -34,6 +39,12 @@ def _make_table_mock():
 # ---------------------------------------------------------------------------
 # 認証チェック
 # ---------------------------------------------------------------------------
+
+def test_non_admin_returns_403(mocker):
+    mocker.patch.object(history.dynamodb_resource, "Table", return_value=_make_table_mock())
+    resp = history.lambda_handler(_event(groups=""), None)
+    assert resp["statusCode"] == 403
+
 
 def test_no_user_id_returns_401(mocker):
     mocker.patch.object(history.dynamodb_resource, "Table", return_value=_make_table_mock())

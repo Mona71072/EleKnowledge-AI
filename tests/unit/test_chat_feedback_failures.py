@@ -282,3 +282,63 @@ def test_list_product_wishes():
     out = mod.list_product_wishes(limit=10)
     assert out["count"] == 1
     assert out["wishes"][0]["text"] == "こうしてほしい"
+
+
+def test_admin_can_read_other_users_session_messages():
+    # PDCA: admin は失敗一覧からの照合のため他人セッションを読み取り可（Major 2）
+    mod, table = load_app()
+    table.query.return_value = {"Items": [{"userId": "other-user", "sessionId": "s1"}]}
+    event = _event(
+        "GET",
+        "/chat/sessions/s1/messages",
+        path_params={"sessionId": "s1"},
+        sub="admin-user",
+        groups="admin",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 200
+    assert json.loads(resp["body"])["readOnly"] is True
+
+
+def test_non_admin_cannot_read_other_users_session_messages():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [{"userId": "other-user", "sessionId": "s1"}]}
+    event = _event(
+        "GET",
+        "/chat/sessions/s1/messages",
+        path_params={"sessionId": "s1"},
+        sub="user-1",
+        groups="user",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 404
+
+
+def test_owner_session_messages_not_readonly():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [{"userId": "user-1", "sessionId": "s1"}]}
+    event = _event(
+        "GET",
+        "/chat/sessions/s1/messages",
+        path_params={"sessionId": "s1"},
+        sub="user-1",
+        groups="user",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 200
+    assert json.loads(resp["body"])["readOnly"] is False
+
+
+def test_admin_cannot_delete_other_users_session():
+    # 読み取りのみの緩和であり、削除は従来どおり所有者限定
+    mod, table = load_app()
+    table.query.return_value = {"Items": [{"userId": "other-user", "sessionId": "s1"}]}
+    event = _event(
+        "DELETE",
+        "/chat/sessions/s1",
+        path_params={"sessionId": "s1"},
+        sub="admin-user",
+        groups="admin",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 404

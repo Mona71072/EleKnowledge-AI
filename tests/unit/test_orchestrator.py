@@ -32,8 +32,10 @@ def test_extract_user_id_missing_authorizer():
 
 
 def test_extract_user_id_empty_string():
+    # 空文字も欠落と同じく 'anonymous' へフォールバック（missing_authorizer と同契約）。
+    # 認証自体は API Gateway の Cognito Authorizer が上流で保証する。
     event = {"requestContext": {"authorizer": {"userId": ""}}}
-    assert orchestrator.extract_user_id(event) == ""
+    assert orchestrator.extract_user_id(event) == "anonymous"
 
 
 # ---------------------------------------------------------------------------
