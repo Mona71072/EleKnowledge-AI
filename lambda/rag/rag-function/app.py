@@ -31,6 +31,17 @@ AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-1')
 # 短い TTL は流出時の露出窓を最小化する。
 PRESIGNED_URL_EXPIRES_IN = int(os.environ.get('PRESIGNED_URL_EXPIRES_IN', '300'))
 
+# 引用 sourceUri の保存・返却形式（段階移行用スイッチ）:
+#   'presigned' … 従来どおり署名付き HTTPS URL（既定）。受付
+#                 （GET /rag/document と /doc）だけを先に本番反映し、既存フロント
+#                 を壊さないための互換モード
+#   's3'        … raw の s3:// URI。/doc → GET /rag/document の都度発行へ完全移行
+#                 （受付の実機確認とフロント反映の完了後に切り替える）
+# 切替手順は PR #50 / docs/api/rag.md を参照。
+CITATION_URI_MODE = os.environ.get('CITATION_URI_MODE', 'presigned')
+if CITATION_URI_MODE not in ('presigned', 's3'):
+    CITATION_URI_MODE = 'presigned'
+
 if not CHATLOGS_TABLE_NAME:
     raise RuntimeError('CHATLOGS_TABLE environment variable is required')
 
@@ -579,6 +590,7 @@ def build_page_candidates(selected_results: list, max_items: int = 5,
                           low_confidence: bool = False) -> list:
     """UI 上部用の候補頁。pageNumber が無ければキーを省略（不明と嘘をつかない）。"""
     candidates = []
+    s3_client = boto3.client('s3', region_name=AWS_REGION) if CITATION_URI_MODE == 'presigned' else None
     for result in selected_results or []:
         if len(candidates) >= max_items:
             break
@@ -591,13 +603,20 @@ def build_page_candidates(selected_results: list, max_items: int = 5,
             continue
         text = chunk_text(result).strip()
         snippet = (text[:180] + '…') if len(text) > 180 else text
+        # CITATION_URI_MODE='s3' では署名付き URL ではなく s3:// URI を返す。
+        # フロントの中継ページがログインを確認したうえで GET /rag/document から
+        # 都度発行させる。'presigned'（既定・移行互換）では従来どおり署名付き URL。
+        source_uri = doc_uri
+        if s3_client is not None:
+            try:
+                source_uri = presign_source_uri(s3_client, doc_uri)
+            except Exception as e:
+                print(f"Error generating signed URL for page candidate {doc_uri}: {e}")
         item = {
             'documentName': doc_name,
             'category': metadata.get('category', '') or '',
             'modelType': metadata.get('model_type', '') or '',
-            # 署名付き URL ではなく s3:// URI を返す。フロントの中継ページが
-            # ログインを確認したうえで GET /rag/document から都度発行させる。
-            'sourceUri': doc_uri,
+            'sourceUri': source_uri,
             'relevance': float(result.get('score', 0.0) or 0.0),
             'snippet': snippet or None,
         }
@@ -961,6 +980,7 @@ def presign_source_uri(s3_client, doc_uri: str) -> str:
 def extract_citations_from_selected(selected_results: list) -> tuple:
     citations = []
     source_documents = []
+    s3_client = boto3.client('s3', region_name=AWS_REGION) if CITATION_URI_MODE == 'presigned' else None
 
     for result in selected_results or []:
         metadata = result.get('metadata', {}) or {}
@@ -977,14 +997,22 @@ def extract_citations_from_selected(selected_results: list) -> tuple:
 
         citations.append(doc_name)
 
+        # CITATION_URI_MODE='s3' では署名付き URL ではなく s3:// URI を保存・返却する。
+        # 認証なしで開ける URL を DynamoDB に残さないため (発行は GET /rag/document で
+        # 都度)。'presigned'（既定・移行互換）では従来どおり署名付き URL を保存する。
+        source_uri = doc_uri
+        if s3_client is not None:
+            try:
+                source_uri = presign_source_uri(s3_client, doc_uri)
+            except Exception as e:
+                print(f"Error generating signed URL for {doc_uri}: {e}")
+
         # byteContent は絶対に含めない。IMAGE チャンクは 1 件で最大 1.3MB あり、
         # DynamoDB の item 上限 400KB と API Gateway の応答上限 6MB を即座に破る。
         source_doc = {
             'documentName': doc_name,
             'title': metadata.get('title'),
-            # 署名付き URL ではなく s3:// URI を保存・返却する。認証なしで開ける
-            # URL を DynamoDB に残さないため (発行は GET /rag/document で都度)。
-            'sourceUri': doc_uri,
+            'sourceUri': source_uri,
             'category': metadata.get('category', ''),
             'modelType': metadata.get('model_type', ''),
             'hasImage': chunk_image_b64(result) is not None,

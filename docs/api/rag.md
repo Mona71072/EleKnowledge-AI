@@ -1,7 +1,7 @@
 ---
 status: production
 phase: 2
-last-verified: 2026-07-29
+last-verified: 2026-08-26
 related-code: lambda/rag/, frontend/src/app/chat/
 ---
 
@@ -62,7 +62,7 @@ RAGクエリ実行
       "category": "C資料",
       "modelType": "AXIEZ",
       "pageNumber": 42,
-      "sourceUri": "https://...",
+      "sourceUri": "s3://<bucket>/docs/.../C-18-....pdf",
       "relevance": 0.81,
       "snippet": "..."
     }
@@ -71,7 +71,7 @@ RAGクエリ実行
   "sourceDocuments": [
     {
       "documentName": "配線マニュアルv2.pdf",
-      "sourceUri": "https://<bucket>.s3.<region>.amazonaws.com/...?X-Amz-Signature=...",
+      "sourceUri": "s3://<bucket>/docs/.../配線マニュアルv2.pdf",
       "category": "C資料",
       "modelType": "AXIEZ",
       "pageNumber": 42,
@@ -90,5 +90,23 @@ RAGクエリ実行
 - 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。
 - `priorityExpanded`: 本命→全資料へ拡大したとき `true`。診断用フィールド（チャット UI では未表示）。
 - `mode`: API 上は `normal` \| `spec` を受け付ける。現行チャット UI は常に `normal`。`spec` は **非推奨**で、サーバ側で `normal` に正規化し、カテゴリ未指定時は本命（`spec`/`tech_info`/`std`）を強制する。
-- `sourceUri` は `s3://` ではなく**プリサイン HTTPS URL**。
+- `sourceUri` の形式は環境変数 `CITATION_URI_MODE`（SAM パラメータ `CitationUriMode`）で切り替える（PR #50 の段階移行スイッチ）。
+  - `s3`（移行完了後）: **raw の `s3://` URI** を保存・返却する。認証なしで開ける URL を DynamoDB に残さないためで、実 URL はユーザーが開く瞬間にフロントの中継ページ `/doc` → `GET /rag/document` で都度発行する。
+  - `presigned`（既定・移行互換）: 従来どおり**プリサイン HTTPS URL**（TTL は `PRESIGNED_URL_EXPIRES_IN`、既定 300 秒）。受付（`GET /rag/document` と `/doc`）だけを先に本番反映し、デプロイ済みフロントを壊さないためのモード。受付の実機確認とフロント反映の完了後に `s3` へ切り替える。
+- **旧履歴リンクの扱い**: #50 以前に保存された署名付き URL（期限切れで AccessDenied になっていたもの）は、フロントの `documentHref()` が S3 の URL と判定できれば bucket/key を `s3://` に逆変換して `/doc` 経由の都度発行に乗せ替える（過去履歴の引用が復活し、DynamoDB に残る発行済み URL が流出しても認証必須の導線に置き換わる）。S3 と判定できない https URL のみ従来どおり素通し。
 - `sourceDocuments[].category` / `modelType` は実 KB メタデータ由来、`hasImage` は当該チャンクに IMAGE が含まれるか。
+
+## GET /rag/document
+
+引用文書の解決エンドポイント（PR #50）。`s3://` URI を、実際に開ける短命の署名付き URL に都度変換する。
+
+**Request:** `GET /rag/document?uri=s3%3A%2F%2F<bucket>%2Fdocs%2F...pdf`（要 Cognito 認証。フロントは中継ページ `/doc` から呼ぶ）
+
+**Response:**
+```json
+{ "url": "https://<bucket>.s3.<region>.amazonaws.com/...?X-Amz-Signature=...", "expiresIn": 300 }
+```
+
+- 認証: API Gateway の Cognito Authorizer + ハンドラ内のクレーム確認。未認証は `401`（フロントの `/doc` が `next` 付きでログイン画面へ誘導し、ログイン後に復帰する。戻り先は `safeNextPath()` でオープンリダイレクト検査）。
+- 許可対象は **KB データソースバケットの prefix 配下と DocumentsBucket のみ**（`is_allowed_document_uri()`）。許可外・不正な URI は区別せず `400`（バケット構成を外部に教えないため）。presign 失敗は `502`（内部例外文は返さない）。
+- 応答には `Cache-Control: no-store` を付与し、署名付き URL をキャッシュに残さない。

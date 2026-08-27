@@ -169,6 +169,20 @@ Parameters:
       be revoked before expiry, so a short TTL minimizes the exposure window
       if it leaks.
 
+  CitationUriMode:
+    Type: String
+    Default: presigned
+    AllowedValues:
+      - presigned
+      - s3
+    Description: >-
+      Citation sourceUri format for staged rollout (PR #50). 'presigned'
+      (default) keeps emitting presigned HTTPS URLs so the currently deployed
+      frontend keeps working while GET /rag/document and /doc are rolled out
+      first. Switch to 's3' only after the resolver is verified in the target
+      environment and the new frontend is live on Amplify; from then on raw
+      s3:// URIs are stored and resolved per click via GET /rag/document.
+
 Globals:
   Function:
     Timeout: 300
@@ -312,6 +326,7 @@ Resources:
           DOCUMENTS_BUCKET:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
           PRESIGNED_URL_EXPIRES_IN: !Ref PresignedUrlExpiresIn
+          CITATION_URI_MODE: !Ref CitationUriMode
       Events:
         RagApi:
           Type: Api

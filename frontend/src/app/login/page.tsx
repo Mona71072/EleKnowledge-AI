@@ -8,16 +8,7 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
 import { Card } from '@/components/ui/Card';
-
-/**
- * ログイン後の戻り先。オープンリダイレクトを防ぐため、自サイト内の絶対パスだけ許可する。
- * `//evil.com` は protocol-relative URL として外部へ飛ぶため除外する。
- */
-function safeNextPath(raw: string | null): string {
-  if (!raw) return '/';
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/';
-  return raw;
-}
+import { safeNextPath } from '@/lib/safe-next-path.mjs';
 
 function LoginContent() {
   const router = useRouter();
