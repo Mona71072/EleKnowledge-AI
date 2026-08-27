@@ -1,6 +1,6 @@
 ---
 status: reference
-last-verified: 2026-08-26
+last-verified: 2026-08-27
 related-code: lambda/rag/, frontend/src/app/
 ---
 
@@ -19,22 +19,53 @@ related-code: lambda/rag/, frontend/src/app/
 | **When** | 2026-08-26 |
 | **Where** | AWS実環境（読み取りのみ）/ `docs/verification-2026-08-26-kb-vqv-metadata.md`（新規）ほかドキュメント群 |
 
-**What**
-1. PR #52（#37前提の共同確認）の §7 A〜D を全項目実測で回答。実稼働KB=`VQV81CNYU4`、`model_type` はlist/string混在、`listContains` 実機動作OK、と確定（分類は Case C+D、技術条件は Case A 成立）。
+**What**（数値・環境値はいずれも **2026-08-26 確認時点の実環境スナップショット**）
+1. PR #52（#37前提の共同確認）の §7 A〜D を全項目実測で回答。実稼働KB=`VQV81CNYU4`（2026-08-26 確認時点のデプロイ済み環境値）、`model_type` はlist/string混在、`listContains` 実機動作OK、と確定（分類は Case C+D、技術条件は Case A 成立）。
 2. S3メタデータ3,745件の全数調査（型・分布・TSVカタログとの253件乖離・カンマ連結60件・索引反映状況）。
 3. 索引欠落20件を特定（暗号化PDF12 / 50MB超6 / テキスト層なし2）→ 所有側依頼を **issue #53** に起票（S3変更はスコープ外と決定）。
 4. DF9XUCSPDM のIMAGEチャンク問題（MULTIMODALパース起因、Syncでは直らない）を確認し、**当面 VQV81CNYU4 で運用**と決定。DF9XUCSPDM の再Syncは共同管理部門未確認のため実施しない。
 5. #37 の `_is_common_model_type()` バグ（`["*"]`/`["general"]` 495件誤除外）の修正方針とlistContains化を全件シミュレーションで確定（回復495件・新規除外0件）。
-6. 検証記録 `docs/verification-2026-08-26-kb-vqv-metadata.md` を新規作成し、verify-checklist / kb-metadata-catalog / runbook / 本ファイルを実測ベースに更新。
+6. 検証記録 `docs/verification-2026-08-26-kb-vqv-metadata.md` を新規作成し、verify-checklist / runbook / 本ファイルを実測ベースに更新（`kb-metadata-catalog` の実測再生成は **PR #54 で更新予定**）。
 
 **Why**
 TSVカタログ・IaC既定値・Runbook と実環境の乖離が #37 レビューで表面化したため、机上情報を捨てて実環境を正とする事実確定を行った。
 
 **How**
-profile `datautl-bple-mebs` で bedrock-agent / lambda / cloudformation / s3 の読み取りAPIと retrieve 実機テスト。詳細・数値はすべて検証記録に集約（**再調査不要**）。
+profile `datautl-bple-mebs` で bedrock-agent / lambda / cloudformation / s3 の読み取りAPIと retrieve 実機テスト。詳細・数値は検証記録に集約。2026-08-26 時点の検証結果は本検証記録を正とする。ただし実環境（KB / Data Source / Sync 状態 / S3資料 / metadata / デプロイ設定等）の変更後は、影響する項目を再確認する。
 
 **未対応・次アクション**
 PR-1〜5（PR #52回答 / IaC是正 / listContains化 / ノイズ遮断 / カタログ再生成）と issue #53 の所有側対応待ち。W資料スコープ問題・model_type 175種の語彙棚卸しは業務判断待ち。
+
+---
+
+## 2026-08-21 認証改善3件: パスワードリセットSDK化 / サインアップ後自動ログイン / トークン24h化
+
+| 項目 | 内容 |
+|---|---|
+| **Who** | YUKI ITAI / Claude Code |
+| **When** | 2026-08-21 |
+| **Where** | `frontend/src/app/forgot-password|signup|verify/page.tsx` / `infrastructure/sam/phase1-template.yaml` / `lambda/auth/forgot-password|confirm-password-reset/`（削除） |
+
+**What**
+1. **PR #44**（Issue #4）: パスワードリセットを API Gateway 経由から `aws-amplify/auth` の `resetPassword` / `confirmResetPassword` に切替。`ForgotPasswordFunction` / `ConfirmPasswordResetFunction` と両エンドポイント・Lambda ディレクトリを削除。
+2. **PR #45**: `signUp` に `autoSignIn: true` を追加し、メール確認完了後（`COMPLETE_AUTO_SIGN_IN`）は `autoSignIn()` でそのままホームへ遷移。別タブ・リロード時はログイン画面へフォールバック。
+3. **PR #46**: Cognito User Pool Client の `RefreshTokenValidity` を 30日 → **24時間** に短縮。
+
+**Why**
+1. カスタム認証 Lambda はパスワードを平文で受ける経路（2026-07-29 コードレビュー C-1 系統）のため、SDK 化で攻撃面ごと削除。
+2. サインアップ完了後に再ログインさせられる UX の不満解消。
+3. `phase1-foundation.md` セキュリティ要件「セッション有効期限: 24時間」に対し実装が 30日 と乖離していたのを是正。
+
+**How**
+`feature/3-password-reset-refactor` / `feature/signup-auto-signin` / `feature/token-ttl-24h` を develop から分岐し PR #44/#45/#46 を作成。`tsc --noEmit` / `sam validate --lint` パス。ドキュメントは `aws-resource-map.md`・`aws-migration-inventory.md`・`phase1-foundation.md`・`security.md` を各PRで追従。
+
+**リリース状況**
+- PR #44 / #45 / #46 は **2026-08-23 に develop へマージ済み**。
+- パスワードリセットは **2026-08-23** に itai ブランチを Amplify でデプロイした環境で実環境 E2E を実施し、Amplify SDK 経由のログイン／パスワードリセットが正常に完了することを確認済み。
+- **2026-08-26 14:17 JST** に `EleKnowledge-dev-phase1` へ phase1 SAM デプロイを実施し、`UPDATE_COMPLETE` を確認。PR #44 の旧パスワードリセット Lambda 2本・対応 API ルート／呼び出し権限の削除を実環境で確認済み。
+- 同じ phase1 SAM デプロイで PR #46 の `RefreshTokenValidity=24` / `Units.RefreshToken=hours` を実環境で確認済み。
+- PR #45 のサインアップ後自動ログインは develop へコード反映済み。PR上では develop 環境での個別 E2E 完了記録は確認できていないため、本履歴では「実環境確認済み」とは扱わない。
+- 以前の「PR #37/#40 とまとめて phase1 SAM デプロイ」は不要となった。#44/#46 の phase1 反映は上記 2026-08-26 デプロイで完了している。
 
 ---
 
