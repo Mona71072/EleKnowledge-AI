@@ -41,11 +41,14 @@ PR #50 のマージ条件だった実環境 E2E 4 ケースの**対象・期待�
   - **(a) ID トークンのみ失効（リフレッシュ有効）** → `fetchAuthSession` が裏で自動リフレッシュし、**再ログインなしで文書が開くのが正**（ここでログインを求められたら不合格）
   - **(b-1) リフレッシュも無効・トークン取得不能** → client 分岐でログインへ（ケース1と同じ UX）
   - **(b-2) 「有効に見える」トークンをサーバーが拒否** → `GET /rag/document` が **401** → server 分岐でログインへ
-- **短縮再現**（24h 放置の代わり。DevTools → Application → Local Storage の `CognitoIdentityServiceProvider.<ClientId>.<Username>.*` キーを操作する）:
-  - **(a)**: ログイン後、`idToken` と `accessToken` のキーを**削除**（`refreshToken` は残す）→ 引用リンクをクリック → 自動リフレッシュで開けること
-  - **(b-1)**: `admin-user-global-sign-out` でリフレッシュトークンを無効化（コマンドは付録）→ (a) と同様に `idToken`/`accessToken` を削除 → クリック → ログインへ
-  - **(b-2)**: `admin-user-global-sign-out` 実行後、`idToken` の**署名部分（最後の数文字）を書き換え**（exp は有効のままなのでクライアントはそのまま送信する）→ クリック → API が 401 → ログインへ
+- **トークンの保存場所**: 本アプリは `Amplify.configure(..., { ssr: true })` のため、トークンは localStorage ではなく **Cookie**（DevTools → Application → Cookies）。キー名は `CognitoIdentityServiceProvider.<ClientId>.<Username>.*`
+- **短縮再現の注意（2026-08-27 実施で判明）**: Amplify v6 は idToken/accessToken の**削除**を「期限切れ」ではなく「**サインアウト済み**」と解釈するため、削除では (a) の自動リフレッシュ経路に**入らない**（client 分岐でログインへ行く）。(a) を厳密に踏むには「期限切れだが Cookie は存在する」状態が必要
+- **短縮再現**:
+  - **(a)**: ログインしたタブを **1時間以上放置**（ID トークンの寿命）→ 引用リンクをクリック → 自動リフレッシュで再ログインなしに開けること。※ SDK 標準動作のため必須確認とはしない（長時間の通常利用で再ログイン不要なことが同じ挙動の傍証になる）
+  - **(b-1)**: `admin-user-global-sign-out` でリフレッシュトークンを無効化（コマンドは付録）→ Cookie の `idToken`/`accessToken` を削除 → クリック → ログインへ
+  - **(b-2)**: `admin-user-global-sign-out` 実行後、Cookie の `idToken` の**署名部分（最後の数文字）を書き換え**（exp は有効のままなのでクライアントはそのまま送信する）→ クリック → API が 401 → ログインへ
 - **経路**: (a) `fetchAuthSession`（リフレッシュ）→ 200 → 文書表示 / (b-1) client 分岐 / (b-2) API Gateway Cognito Authorizer が署名検証で拒否 → 401 → server 分岐
+- **mona 指定の合格基準**は「失効状態で開く → 再ログインを求められること」であり、(b) 系で満たされる。(a) は UX 補助観点
 
 ## ケース3: ログイン後復帰（next の往復と safeNextPath）
 
