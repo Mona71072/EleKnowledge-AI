@@ -569,7 +569,8 @@ def retrieve_for_normal_query(query: str, filters: dict = None, number_of_result
 
     WHY: メタフィルタは本文 HYBRID の母集団制限に過ぎない（検索の代替ではない）。
     ユーザーがカテゴリ未指定のときだけ本命（C/TI/据付基準）を先に当て、
-    弱ければフィルタなし（全資料）へ拡大。UI の全検索合意は維持。
+    弱ければ許可リスト内の全カテゴリ（ALLOWED_CATEGORY_VALUES）へ拡大。
+    UI の全検索合意は維持。
     """
     filters = filters or {}
     if query_filters_have_category(filters):
@@ -582,7 +583,7 @@ def retrieve_for_normal_query(query: str, filters: dict = None, number_of_result
     if not is_weak_retrieval(first_results, mode='normal'):
         return first
 
-    # 本命が弱い → 全資料へ拡大（modelType フィルタは維持）
+    # 本命が弱い → 許可リスト内の全カテゴリへ拡大（modelType フィルタは維持）
     expanded = query_knowledge_base(query, filters, number_of_results=number_of_results)
     return {
         **expanded,
