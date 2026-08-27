@@ -1,12 +1,12 @@
 ---
 status: reference
-last-verified: 2026-08-26
+last-verified: 2026-08-27
 related-code: infrastructure/sam/phase2-template.yaml, lambda/rag/rag-function/app.py
 ---
 
 # 決定記録: 使用 Knowledge Base の選定（VQV81CNYU4 採用）2026-08-26
 
-> **この文書の位置づけ:** Phase 2 RAG が参照する Bedrock Knowledge Base として **VQV81CNYU4 を正式採用**し、IaC 既定値（`phase2-template.yaml` の `KnowledgeBaseId`）を実環境と一致させた決定の記録。根拠となる実測はすべて 2026-08-26 の検証記録（下記「正本参照」）に依る。**ここに書かれた事実は再調査不要。**
+> **この文書の位置づけ:** Phase 2 RAG が参照する Bedrock Knowledge Base として **VQV81CNYU4 を正式採用**し、IaC 既定値（`phase2-template.yaml` の `KnowledgeBaseId`）を実環境と一致させた決定の記録。根拠となる実測はすべて 2026-08-26 の検証記録（下記「正本参照」）に依る（**2026-08-26 確認時点の実環境スナップショット**）。2026-08-26 時点の検証結果は検証記録を正とする。ただし KB / Data Source / Sync 状態 / S3資料 / metadata / デプロイ設定等の実環境が変更された場合は、影響する項目を再確認すること。
 
 ---
 
