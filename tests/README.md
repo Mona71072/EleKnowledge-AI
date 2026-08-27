@@ -20,7 +20,7 @@ AWS_DEFAULT_REGION=ap-northeast-1 AWS_REGION=ap-northeast-1 \
 依存インストール不要（Node 20+ の組み込み `node:test` のみ）。
 
 ```bash
-node --test frontend/tests/
+node --test frontend/tests/*.test.mjs
 ```
 
 `develop` 時点では上記がすべて通ること。件数はブランチによって増える。
