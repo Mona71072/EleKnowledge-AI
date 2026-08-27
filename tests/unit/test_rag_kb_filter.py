@@ -31,16 +31,51 @@ def test_model_filter_includes_star_general_and_empty(rag):
     assert {"equals": {"key": "model_type", "value": ""}} in values
 
 
-def test_no_category_filter_when_omitted(rag):
-    """カテゴリ未指定は全資料（カテゴリフィルタなし）。"""
+def test_all_search_applies_allowed_category_filter(rag):
+    """カテゴリ未指定（全検索）でも許可リスト（実カテゴリ10種）を常時適用する。
+
+    web-crawler / quick-start / TEST のノイズ文書遮断（2026-08-26 実測 PR #55）。
+    """
     f = rag.build_kb_filter({})
-    assert f is None
+    assert f == {
+        "in": {"key": "category", "value": list(rag.ALLOWED_CATEGORY_VALUES)}
+    }
+    assert rag.build_kb_filter(None) == f
+    assert rag.build_kb_filter({"category": []}) == f
 
 
-def test_model_only_filter_when_no_category(rag):
+def test_allowed_categories_are_the_ten_real_values(rag):
+    assert set(rag.ALLOWED_CATEGORY_VALUES) == {
+        "据付場用図", "C資料", "テクニカルインフォメーション", "災害事例集",
+        "Qシート", "据付基準", "据付ノート",
+        "現場代理人業務マニュアル", "品質管理業務マニュアル", "W資料",
+    }
+    assert "TEST" not in rag.ALLOWED_CATEGORY_VALUES
+
+
+def test_model_only_filter_still_applies_category_allowlist(rag):
+    """機種のみ指定でもカテゴリ許可リストと andAll 合成される。"""
     f = rag.build_kb_filter({"modelType": "NEXCUBE"})
-    assert "orAll" in f
-    assert "andAll" not in f
+    assert set(f) == {"andAll"}
+    assert len(f["andAll"]) == 2
+    assert f["andAll"][0] == {
+        "in": {"key": "category", "value": list(rag.ALLOWED_CATEGORY_VALUES)}
+    }
+    assert "orAll" in f["andAll"][1]
+
+
+def test_unknown_category_key_falls_back_to_allowlist(rag):
+    """許可リスト外・未知キーは通さず、許可リスト全体へフォールバック。"""
+    f = rag.build_kb_filter({"category": ["no_such_key"]})
+    assert f == {
+        "in": {"key": "category", "value": list(rag.ALLOWED_CATEGORY_VALUES)}
+    }
+
+
+def test_explicit_categories_param_drops_disallowed_values(rag):
+    """categories 直接指定（spec モード経路）でも許可リスト外は除外。"""
+    f = rag.build_kb_filter({}, categories=["C資料", "TEST"])
+    assert f == {"equals": {"key": "category", "value": "C資料"}}
 
 
 def test_explicit_category_stable_keys(rag):
