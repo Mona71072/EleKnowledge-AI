@@ -139,6 +139,8 @@ SPEC_CATEGORIES = ['C資料', 'テクニカルインフォメーション', '据
 # ただし UI の「未指定＝全検索」合意は壊さない → ユーザーが category を選んでいないときだけ
 # 内部で本命を先に retrieve し、弱いとき全資料へ拡大する（メタだけで探すのではない）。
 # 根拠: docs/decisions-2026-07-29-rag-nuance.md / docs/design-2026-07-29-clarify-and-page.md
+# 2026-08-26: 上記の本命優先 retrieve は一時停止中（少数カテゴリが全検索でヒットしない
+# 副作用のため。mona 了承済み。後継方式の検討 = issue #61）。定数は復元に備えて残す。
 PRIORITY_CATEGORIES = list(SPEC_CATEGORIES)
 
 # ページ番号メタ（本番 KB に無い場合は None → UI は「ページ不明」と嘘をつかない）
@@ -686,31 +688,16 @@ def retrieve_for_normal_query(query: str, filters: dict = None, number_of_result
     """
     normal モードの retrieve。
 
-    WHY: メタフィルタは本文 HYBRID の母集団制限に過ぎない（検索の代替ではない）。
-    ユーザーがカテゴリ未指定のときだけ本命（C/TI/据付基準）を先に当て、
-    弱ければ許可リスト内の全カテゴリ（ALLOWED_CATEGORY_VALUES）へ拡大。
-    UI の全検索合意は維持。
+    2026-08-26: 本命優先の2段階 retrieve（カテゴリ未指定時に C/TI/据付基準 を先行検索し、
+    弱いときだけ許可リスト内の全カテゴリへ拡大。2026-07-29 導入）を一時停止し、
+    常に単一の retrieve に戻した（mona 了承済み）。本命でそこそこのスコアが出ると
+    全資料へ拡大されず、少数カテゴリ（現場代理人業務マニュアル等）が全検索で
+    実質ヒットしない副作用を実機で確認したため。
+    後継方式の選定・実装は issue #61（辞書ルーティング / 暗黙フィルタ / Rerank 等の比較あり）。
+    復元する場合はこの関数の旧実装を git 履歴から戻す（応答の priorityExpanded は
+    互換のためフィールドごと残してあり、現状は常に false）。
     """
-    filters = filters or {}
-    if query_filters_have_category(filters):
-        return query_knowledge_base(query, filters, number_of_results=number_of_results)
-
-    first = query_knowledge_base(
-        query, filters, number_of_results=number_of_results, categories=PRIORITY_CATEGORIES
-    )
-    first_results = first.get('retrievalResults') or []
-    if not is_weak_retrieval(first_results, mode='normal'):
-        return first
-
-    # 本命が弱い → 許可リスト内の全カテゴリへ拡大（modelType フィルタは維持）
-    expanded = query_knowledge_base(query, filters, number_of_results=number_of_results)
-    return {
-        **expanded,
-        'retrievalResults': merge_retrieval_results(
-            first_results, expanded.get('retrievalResults') or []
-        ),
-        '_priorityExpanded': True,
-    }
+    return query_knowledge_base(query, filters or {}, number_of_results=number_of_results)
 
 
 def build_page_candidates(selected_results: list, max_items: int = 5,
