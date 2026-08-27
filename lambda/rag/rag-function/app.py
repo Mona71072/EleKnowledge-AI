@@ -102,6 +102,8 @@ UI_CATEGORY_KEYS = (
 # 「取扱機種を1つも含まない」機種固有資料は post-filter で除外する
 # （全機種共通文書 `*` / `general` は常に対象）。
 # 恒久対策は KB メタデータへの model_code 付与（issue #53 で KB 所有側へ依頼中）。
+# 決定記録（選定根拠・決定者・影響件数・対象外の扱い・見直し条件）:
+# docs/decisions-2026-08-21-model-scope.md
 # 実測件数・スコープ対象外467件の全リスト: docs/rag-model-filter-mapping-2026-08-26.md §2/§5（PR #54）
 # 既知問題: W資料5件は全件スコープ対象外（業務判断待ち。verification-2026-08-26 §5.1）
 HANDLED_MODEL_TYPES = frozenset({
