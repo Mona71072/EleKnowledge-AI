@@ -3,6 +3,11 @@
 This module prepares references and Anthropic message payloads but performs no
 Bedrock API calls.  Generation transport/model invocation remains a separate
 responsibility.
+
+注意（移行期間中）: app.py はまだ本モジュールを import しておらず、本番 Lambda は
+app.py 側のコピーで動作している。app.py の該当ロジックを変更する場合は、必ず
+本モジュールと tests/unit/test_rag_answer_policy.py のパリティテストも同時に
+更新すること。
 """
 from retrieval_policy import chunk_image_b64, chunk_text
 

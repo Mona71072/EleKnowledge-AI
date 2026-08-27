@@ -3,6 +3,11 @@
 The Bedrock API call belongs elsewhere.  This module only interprets and selects
 returned chunks so score thresholds, deduplication, and page metadata can be
 unit-tested without AWS.
+
+注意（移行期間中）: app.py はまだ本モジュールを import しておらず、本番 Lambda は
+app.py 側のコピーで動作している。app.py の該当ロジック（閾値 0.2/0.22/0.3 を含む）
+を変更する場合は、必ず本モジュールと tests/unit/test_rag_retrieval_policy.py の
+パリティテストも同時に更新すること。
 """
 
 PAGE_NUMBER_META_KEYS = (

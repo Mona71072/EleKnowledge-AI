@@ -6,6 +6,11 @@ app.py from mixing request handling, retrieval, persistence, and domain policy.
 
 During the refactor transition, behavior must remain equivalent to the existing
 functions in app.py.  Retrieval strategy changes belong in separate PRs.
+
+注意（移行期間中）: app.py はまだ本モジュールを import しておらず、本番 Lambda は
+app.py 側のコピーで動作している。app.py の該当ロジックを変更する場合は、必ず
+本モジュールと tests/unit/test_rag_query_policy.py のパリティテストも同時に
+更新すること（片側だけの変更は配線 PR で本番挙動を巻き戻す）。
 """
 import re
 import unicodedata
