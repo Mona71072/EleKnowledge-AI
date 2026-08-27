@@ -1,7 +1,7 @@
 ---
 status: production
 phase: 1
-last-verified: 2026-04-24
+last-verified: 2026-08-21
 related-code: frontend/src/app/, lambda/auth/
 ---
 
@@ -13,7 +13,7 @@ related-code: frontend/src/app/, lambda/auth/
 ## 認証システム【完成】
 
 **Phase 1実装機能:**
-- ✅ ユーザー登録（サインアップ）
+- ✅ ユーザー登録（サインアップ）※メール確認完了後は自動ログインしてホーム画面へ遷移（同一ブラウザセッション内のみ。別タブ・リロード後はログイン画面へ）
 - ✅ ログイン・ログアウト
 - ✅ パスワードリセット
 - ✅ MFA（多要素認証）※オプション
@@ -53,7 +53,7 @@ const signIn = async (email: string, password: string) => {
 
 **トークン管理:**
 - **Access Token:** 1時間（短命）
-- **Refresh Token:** 30日（長命）
+- **Refresh Token:** 24時間（セッション有効期限と一致）
 - **ID Token:** 1時間
 - **自動リフレッシュ:** 有効期限5分前に自動更新
 - **トークン保存:** localStorage（開発環境）/ httpOnly Cookie（本番推奨）

@@ -115,6 +115,12 @@ SITUATION_RE = re.compile(
     r'走行中|停止中|開閉時|起動時|着床|階間|停電|復旧|点検中|'
     r'運転中|待機|朝|夜|常時|たまに|時々'
 )
+# 仕様・定義質問（〜とは？／〜の意味は？／〜する条件は？／〜の動作は？）。
+# SYMPTOM_RE の「エラー」「停止」等が誤発火して仕様質問まで聞き返してしまうのを防ぐ。
+# WHY: PR #33 レビュー Major 5。clarify は症状報告の手がかり不足を補うためのもの。
+SPEC_QUESTION_RE = re.compile(
+    r'とは[？?]|の意味|の定義|の仕様|る条件|条件は|の動作|動作は'
+)
 CLARIFY_MARKER = '該当ページを探すために教えてください'
 
 
@@ -483,6 +489,9 @@ def needs_clarify(query: str, filters: dict = None, chat_history: list = None) -
     q = query or ''
     if not SYMPTOM_RE.search(q):
         return False, []
+    # 仕様・定義質問は症状報告ではないため聞き返さない（検索へ進める）
+    if SPEC_QUESTION_RE.search(q):
+        return False, []
 
     has_model = bool(filters.get('modelType'))
     has_part = bool(PART_RE.search(q))
@@ -496,11 +505,10 @@ def needs_clarify(query: str, filters: dict = None, chat_history: list = None) -
     if not has_situation:
         questions.append('いつ発生しますか？（走行中／停止中／開閉時など）')
 
-    # 機種ありでも部位・状況が両方欠けているときは聞き返す（design §4）
-    # 機種なし＋症状は従来どおり聞く
-    if has_model and has_part and has_situation:
-        return False, []
-    if has_model and not questions:
+    # 聞き返すのは手がかり不足のときだけ（design §4）:
+    #   機種あり → 部位・状況が「両方」欠けているときのみ（片方あれば検索へ進む）
+    #   機種なし → 症状ありなら従来どおり聞く
+    if has_model and (has_part or has_situation):
         return False, []
     if not questions:
         return False, []

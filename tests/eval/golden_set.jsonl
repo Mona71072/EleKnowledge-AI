@@ -7,3 +7,5 @@
 {"id": "G101", "query": "巻上機の吊り上げ作業での事故事例を知りたい", "filters": {"category": ["incident"]}, "expected_documents": [], "expected_gate": "pages", "tags": ["incident", "hard"], "notes": "難問枠: 災害事例は機種・説明メタが空（survey-2026-07-29 §3）。ファイル名頼りで当たるか"}
 {"id": "G102", "query": "NEXIEZ-MR の据付場用図で乗場側の芯出し寸法を見たい", "filters": {"category": ["drawing"], "modelType": "NEXIEZ-MR"}, "expected_documents": [], "expected_gate": "pages", "tags": ["drawing", "hard"], "notes": "難問枠: 据付場用図は説明メタ空 84%・図番中心（survey-2026-07-29 §1）"}
 {"id": "G103", "query": "全く関係のない質問。今日の東京の天気を教えて", "filters": {}, "expected_documents": [], "expected_gate": "not_found", "tags": ["gate", "not_found"], "notes": "ドメイン外質問 → 弱い検索ゲートで not_found（作文しない）になるべき"}
+{"id": "G006", "query": "地震管制で最寄階に停止する条件は？", "filters": {}, "expected_documents": [], "expected_gate": "pages", "tags": ["gate", "clarify-negative"], "notes": "仕様質問（条件）。SYMPTOM_RE の「停止」を含むが症状報告ではないため聞き返さず検索へ進むべき。expected_documents は要ラベル付け"}
+{"id": "G007", "query": "エラーコードE21の意味は？", "filters": {}, "expected_documents": [], "expected_gate": "pages", "tags": ["gate", "clarify-negative"], "notes": "定義質問。「エラー」を含むが症状報告ではないため聞き返さない。expected_documents は要ラベル付け"}

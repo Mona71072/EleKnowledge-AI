@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
@@ -102,36 +103,32 @@ export default function ForgotPasswordPage() {
     }
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      
-      if (!apiUrl) {
-        throw new Error('API設定が見つかりません。環境変数を確認してください。');
-      }
+      const output = await resetPassword({ username: email.trim() });
 
-      const response = await fetch(
-        `${apiUrl}/auth/forgot-password`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email.trim() }),
-        }
-      );
-
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        throw new Error('APIがアクセスできません。Lambda関数がデプロイされているか確認してください。');
-      }
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'パスワードリセットリクエストに失敗しました');
+      if (output.nextStep.resetPasswordStep === 'DONE') {
+        setSuccess('パスワードは既にリセットされています。ログイン画面に移動します...');
+        setTimeout(() => {
+          router.push('/login');
+        }, 2000);
+        return;
       }
 
       setSuccess('パスワードリセットコードがメールアドレスに送信されました');
       setStep('reset');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'エラーが発生しました');
+    } catch (err: any) {
+      console.error('Reset password error:', err);
+
+      if (err.name === 'UserNotFoundException') {
+        setError('このメールアドレスで登録されたアカウントが見つかりません。');
+      } else if (err.name === 'InvalidParameterException') {
+        setError('メールアドレスが確認されていないため、パスワードをリセットできません。');
+      } else if (err.name === 'LimitExceededException' || err.name === 'TooManyRequestsException') {
+        setError('試行回数が多すぎます。しばらくしてからもう一度お試しください。');
+      } else if (err.message?.includes('Network')) {
+        setError('ネットワーク接続エラーです。インターネット接続を確認してください。');
+      } else {
+        setError('パスワードリセットリクエストに失敗しました。もう一度お試しください。');
+      }
     } finally {
       setLoading(false);
     }
@@ -155,42 +152,32 @@ export default function ForgotPasswordPage() {
     setLoading(true);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      
-      if (!apiUrl) {
-        throw new Error('API設定が見つかりません。環境変数を確認してください。');
-      }
-
-      const response = await fetch(
-        `${apiUrl}/auth/confirm-password-reset`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: email.trim(),
-            code: code.trim(),
-            newPassword,
-          }),
-        }
-      );
-
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        throw new Error('APIがアクセスできません。Lambda関数がデプロイされているか確認してください。');
-      }
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'パスワードリセットに失敗しました');
-      }
+      await confirmResetPassword({
+        username: email.trim(),
+        confirmationCode: code.trim(),
+        newPassword,
+      });
 
       setSuccess('パスワードが正常にリセットされました。ログイン画面にリダイレクトします...');
       setTimeout(() => {
         router.push('/login');
       }, 2000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'エラーが発生しました');
+    } catch (err: any) {
+      console.error('Confirm reset password error:', err);
+
+      if (err.name === 'CodeMismatchException') {
+        setError('リセットコードが正しくありません。');
+      } else if (err.name === 'ExpiredCodeException') {
+        setError('リセットコードの有効期限が切れています。最初からやり直してください。');
+      } else if (err.name === 'InvalidPasswordException') {
+        setError('パスワードがポリシーを満たしていません。大文字・小文字・数字・記号を含む8文字以上で入力してください。');
+      } else if (err.name === 'LimitExceededException' || err.name === 'TooManyRequestsException') {
+        setError('試行回数が多すぎます。しばらくしてからもう一度お試しください。');
+      } else if (err.message?.includes('Network')) {
+        setError('ネットワーク接続エラーです。インターネット接続を確認してください。');
+      } else {
+        setError('パスワードリセットに失敗しました。もう一度お試しください。');
+      }
     } finally {
       setLoading(false);
     }

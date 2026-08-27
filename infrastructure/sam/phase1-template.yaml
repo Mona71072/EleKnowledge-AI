@@ -204,11 +204,13 @@ Resources:
         - ALLOW_REFRESH_TOKEN_AUTH
         - ALLOW_USER_SRP_AUTH
       PreventUserExistenceErrors: ENABLED
-      RefreshTokenValidity: 30
+      # セッション有効期限は仕様（phase1-foundation.md セキュリティ要件）どおり24時間。
+      # Access/Id トークンは短命のまま、リフレッシュトークン失効でログインが切れる。
+      RefreshTokenValidity: 24
       AccessTokenValidity: 60
       IdTokenValidity: 60
       TokenValidityUnits:
-        RefreshToken: days
+        RefreshToken: hours
         AccessToken: minutes
         IdToken: minutes
       ReadAttributes:
@@ -504,46 +506,6 @@ Resources:
             Path: /auth/verify
             Method: POST
 
-  ForgotPasswordFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub forgot-password-${Environment}
-      CodeUri: ../../lambda/auth/forgot-password/
-      Handler: app.lambda_handler
-      Description: Forgot password request function
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          COGNITO_USER_POOL_ID: !Ref CognitoUserPool
-          COGNITO_CLIENT_ID: !Ref CognitoUserPoolClient
-      Events:
-        ForgotPasswordApi:
-          Type: Api
-          Properties:
-            RestApiId: !Ref AuthApi
-            Path: /auth/forgot-password
-            Method: POST
-
-  ConfirmPasswordResetFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub confirm-password-reset-${Environment}
-      CodeUri: ../../lambda/auth/confirm-password-reset/
-      Handler: app.lambda_handler
-      Description: Confirm password reset function
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          COGNITO_USER_POOL_ID: !Ref CognitoUserPool
-          COGNITO_CLIENT_ID: !Ref CognitoUserPoolClient
-      Events:
-        ConfirmPasswordResetApi:
-          Type: Api
-          Properties:
-            RestApiId: !Ref AuthApi
-            Path: /auth/confirm-password-reset
-            Method: POST
-
   # ============================================================================
   # Amazon API Gateway Configuration
   # ============================================================================
@@ -604,8 +566,8 @@ Resources:
           ThrottlingRateLimit: 10
           LoggingLevel: INFO
           # DataTrace はリクエスト/レスポンスのボディ全文を実行ログに書き出す。
-          # この API は /auth/login /auth/signup /auth/confirm-password-reset を
-          # 持つため、有効にすると平文パスワードが CloudWatch Logs に残る。
+          # この API は /auth/login /auth/signup を持つため、
+          # 有効にすると平文パスワードが CloudWatch Logs に残る。
           # 本番・開発を問わず常に false。
           DataTraceEnabled: false
           MetricsEnabled: true
@@ -714,18 +676,6 @@ Outputs:
     Export:
       Name: !Sub ${ProjectName}-${Environment}-VerifyFunctionArn
   
-  ForgotPasswordFunctionArn:
-    Description: Forgot Password Lambda Function ARN
-    Value: !GetAtt ForgotPasswordFunction.Arn
-    Export:
-      Name: !Sub ${ProjectName}-${Environment}-ForgotPasswordFunctionArn
-  
-  ConfirmPasswordResetFunctionArn:
-    Description: Confirm Password Reset Lambda Function ARN
-    Value: !GetAtt ConfirmPasswordResetFunction.Arn
-    Export:
-      Name: !Sub ${ProjectName}-${Environment}-ConfirmPasswordResetFunctionArn
-
   # IAM
   LambdaExecutionRoleArn:
     Description: Lambda Execution Role ARN

@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-05-27
+last-verified: 2026-08-21
 related-code: infrastructure/sam/, amplify.yml
 ---
 
@@ -30,8 +30,6 @@ Use [AWS Migration Runbook](aws-migration-runbook.md) for deployment order, Bedr
 | `signup-dev` | Lambda function | User signup endpoint handler | `phase1-template.yaml` |
 | `login-dev` | Lambda function | User login endpoint handler | `phase1-template.yaml` |
 | `verify-dev` | Lambda function | Email verification endpoint handler | `phase1-template.yaml` |
-| `forgot-password-dev` | Lambda function | Password reset request handler | `phase1-template.yaml` |
-| `confirm-password-reset-dev` | Lambda function | Password reset confirmation handler | `phase1-template.yaml` |
 | `auth-api-dev` | API Gateway REST API | `/auth/*` public auth API | `phase1-template.yaml` |
 | `/aws/apigateway/auth-api-dev` | CloudWatch Logs log group | API Gateway access/execution logs | `phase1-template.yaml` |
 

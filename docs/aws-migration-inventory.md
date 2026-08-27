@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-05-27
+last-verified: 2026-08-21
 related-code: infrastructure/sam/, amplify.yml
 ---
 
@@ -27,7 +27,7 @@ Phase 1:
 - Cognito user pool/client: `users-dev`
 - DynamoDB: `users-dev`, `chatlogs-dev`
 - S3: `documents-dev-${AWS::AccountId}`, `uploads-dev-${AWS::AccountId}`
-- Lambda: `signup-dev`, `login-dev`, `verify-dev`, `forgot-password-dev`, `confirm-password-reset-dev`
+- Lambda: `signup-dev`, `login-dev`, `verify-dev`
 - API Gateway: `auth-api-dev`
 - IAM role: `auth-lambda-dev`
 
