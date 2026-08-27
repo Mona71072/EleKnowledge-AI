@@ -166,10 +166,29 @@ Parameters:
 
   PresignedUrlExpiresIn:
     Type: Number
-    Default: 3600
+    Default: 300
     MinValue: 300
     MaxValue: 43200
-    Description: Citation presigned URL lifetime (seconds). Anyone holding the URL can fetch the document without auth, so keep it short.
+    Description: >-
+      Citation presigned URL lifetime (seconds). URLs are issued per click via
+      GET /rag/document (PR #50), so only the minimum needed to open the
+      document (5 min) is required. An issued URL is a bearer URL that cannot
+      be revoked before expiry, so a short TTL minimizes the exposure window
+      if it leaks.
+
+  CitationUriMode:
+    Type: String
+    Default: presigned
+    AllowedValues:
+      - presigned
+      - s3
+    Description: >-
+      Citation sourceUri format for staged rollout (PR #50). 'presigned'
+      (default) keeps emitting presigned HTTPS URLs so the currently deployed
+      frontend keeps working while GET /rag/document and /doc are rolled out
+      first. Switch to 's3' only after the resolver is verified in the target
+      environment and the new frontend is live on Amplify; from then on raw
+      s3:// URIs are stored and resolved per click via GET /rag/document.
 
 Globals:
   Function:
@@ -314,6 +333,7 @@ Resources:
           DOCUMENTS_BUCKET:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
           PRESIGNED_URL_EXPIRES_IN: !Ref PresignedUrlExpiresIn
+          CITATION_URI_MODE: !Ref CitationUriMode
       Events:
         RagApi:
           Type: Api
@@ -321,7 +341,16 @@ Resources:
             RestApiId: !Ref RagApi
             Path: /rag/query
             Method: POST
-  
+        # 引用文書の解決。Cognito Authorizer 通過（＝ログイン済み）のユーザーにだけ
+        # 短命の署名付き URL を発行する。未ログインは 401 になり、フロントの
+        # 中継ページがログイン画面へ誘導する。
+        DocumentApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/document
+            Method: GET
+
   ChatManagementFunction:
     Type: AWS::Serverless::Function
     Properties:
