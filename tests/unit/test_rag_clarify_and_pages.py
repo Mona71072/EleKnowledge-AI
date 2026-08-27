@@ -195,7 +195,14 @@ def test_normalize_mode_spec_forces_priority_categories(rag):
     assert filters2['category'] == 'drawing'
 
 
-def test_ui_category_keys_exclude_unreachable(rag):
-    assert 'site_agent' not in rag.UI_CATEGORY_KEYS
-    assert 'quality_mgmt' not in rag.UI_CATEGORY_KEYS
-    assert 'site_agent' in rag.CATEGORY_MAP
+def test_ui_category_keys_include_measured_categories(rag):
+    # 2026-08-26 実測で site_agent 30件 / quality_mgmt 7件の実在を確認 → UI 掲載
+    assert 'site_agent' in rag.UI_CATEGORY_KEYS
+    assert 'quality_mgmt' in rag.UI_CATEGORY_KEYS
+    # w_doc は実機確認 2026-08-26 でチップ選択時0件（全件が取扱機種スコープ対象外）を確認し、
+    # 業務判断が出るまで UI 非掲載。API 契約（CATEGORY_MAP / 許可リスト）には残す。
+    assert 'w_doc' not in rag.UI_CATEGORY_KEYS
+    assert 'w_doc' in rag.CATEGORY_MAP
+    assert 'W資料' in rag.ALLOWED_CATEGORY_VALUES
+    # UI に出すキーは全て CATEGORY_MAP（= API 契約）に存在すること
+    assert set(rag.UI_CATEGORY_KEYS) <= set(rag.CATEGORY_MAP)

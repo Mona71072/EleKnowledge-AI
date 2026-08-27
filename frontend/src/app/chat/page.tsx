@@ -12,7 +12,7 @@ import { Chip } from '@/components/ui';
 import { Toast } from '@/components/ui/Toast';
 import { ChatMessageFeedback } from '@/components/chat/ChatMessageFeedback';
 import { ProductWishModal } from '@/components/chat/ProductWishModal';
-import { ALL_MODEL_TYPES, POPULAR_MODEL_TYPES } from '@/data/kbModelTypes';
+import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { documentHref, documentHrefWithPage } from '@/lib/documents';
 import {
   BadFeedbackReasonId,
@@ -91,10 +91,8 @@ export default function ChatPage() {
   const [showAllCitations, setShowAllCitations] = useState<Record<string, boolean>>({});
   // 資料カテゴリは複数選択。未選択＝全資料検索。
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  // 機種は model_type の stringContains 単一値のため単一選択。
+  // 機種は UI_MODEL_FILTERS の項目を単一選択（サーバー側で要素完全一致に展開）。
   const [selectedModel, setSelectedModel] = useState('');
-  const [modelQuery, setModelQuery] = useState('');
-  const [modelListOpen, setModelListOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   // 👎 直後に理由ワンタップを出す対象（必須にしない＝スキップ可）
@@ -118,19 +116,15 @@ export default function ChatPage() {
     { value: 'incident', label: '災害事例集' },
     { value: 'qsheet', label: 'Qシート' },
     { value: 'note', label: '据付ノート' },
-    { value: 'w_doc', label: 'W資料' },
+    { value: 'site_agent', label: '現場代理人業務マニュアル' },
+    { value: 'quality_mgmt', label: '品質管理業務マニュアル' },
+    // w_doc(W資料) は実機確認 2026-08-26 で選択時0件（全5件が取扱機種スコープ対象外）のため
+    // 業務判断（HANDLED追加 or スコープ例外化）が出るまで非掲載。API上は有効なキー。
   ];
 
-  const normalizedModelQuery = modelQuery.trim().toLowerCase();
-  const filteredModelOptions = normalizedModelQuery
-    ? ALL_MODEL_TYPES.filter((opt) =>
-        opt.label.toLowerCase().includes(normalizedModelQuery)
-          || opt.value.toLowerCase().includes(normalizedModelQuery)
-      ).slice(0, 40)
-    : ALL_MODEL_TYPES.slice(0, 30);
-
-  const selectedModelLabel =
-    ALL_MODEL_TYPES.find((o) => o.value === selectedModel)?.label || selectedModel;
+  const selectedModelOption =
+    ALL_MODEL_TYPES.find((o) => o.value === selectedModel) || null;
+  const selectedModelLabel = selectedModelOption?.label || selectedModel;
 
   const API_URL = process.env.NEXT_PUBLIC_RAG_API_URL || '';
   const CHAT_API_URL = process.env.NEXT_PUBLIC_CHAT_API_URL || '';
@@ -1318,7 +1312,6 @@ const normalizeTableMarkdown = (text: string): string => {
                       onClick={() => {
                         setSelectedCategories([]);
                         setSelectedModel('');
-                        setModelQuery('');
                       }}
                       className="inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700"
                     >
@@ -1359,10 +1352,7 @@ const normalizeTableMarkdown = (text: string): string => {
                         {selectedModel && (
                           <button
                             type="button"
-                            onClick={() => {
-                              setSelectedModel('');
-                              setModelQuery('');
-                            }}
+                            onClick={() => setSelectedModel('')}
                             className="text-[11px] text-gray-500 hover:text-gray-700"
                           >
                             すべての機種に戻す
@@ -1370,82 +1360,30 @@ const normalizeTableMarkdown = (text: string): string => {
                         )}
                       </div>
 
-                      {selectedModel && (
+                      {selectedModelOption && (
                         <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-md px-2 py-1">
-                          選択中: <span className="font-medium">{selectedModelLabel}</span>
-                          <span className="text-indigo-500 ml-1">（部分一致。AXIEZ は LINKs 等も含みます）</span>
+                          選択中: <span className="font-medium">{selectedModelOption.label}</span>
+                          <span className="text-indigo-500 ml-1">
+                            （名前の完全一致。対象: {selectedModelOption.targets.join(' / ')}。共通資料も含む）
+                          </span>
                         </p>
                       )}
 
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[11px] text-gray-400 w-full sm:w-auto">よく使う</span>
-                        {POPULAR_MODEL_TYPES.map((opt) => (
+                        {ALL_MODEL_TYPES.map((opt) => (
                           <Chip
                             key={opt.value}
                             active={selectedModel === opt.value}
-                            onClick={() => {
-                              setSelectedModel(opt.value);
-                              setModelQuery('');
-                              setModelListOpen(false);
-                            }}
+                            onClick={() =>
+                              setSelectedModel((prev) => (prev === opt.value ? '' : opt.value))
+                            }
                           >
                             {opt.label}
                           </Chip>
                         ))}
                       </div>
-
-                      <div className="relative">
-                        <input
-                          type="search"
-                          value={modelQuery}
-                          onChange={(e) => {
-                            setModelQuery(e.target.value);
-                            setModelListOpen(true);
-                          }}
-                          onFocus={() => setModelListOpen(true)}
-                          placeholder="機種名で検索（例: AXIEZ / NEX / メル）"
-                          className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          aria-label="機種名検索"
-                          autoComplete="off"
-                        />
-                        {modelListOpen && (
-                          <div className="absolute z-30 mt-1 w-full max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
-                            <button
-                              type="button"
-                              className="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 border-b border-gray-100"
-                              onClick={() => {
-                                setSelectedModel('');
-                                setModelQuery('');
-                                setModelListOpen(false);
-                              }}
-                            >
-                              すべての機種
-                            </button>
-                            {filteredModelOptions.length === 0 ? (
-                              <p className="px-3 py-2 text-xs text-gray-400">一致する機種がありません</p>
-                            ) : (
-                              filteredModelOptions.map((opt) => (
-                                <button
-                                  key={opt.value}
-                                  type="button"
-                                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 ${
-                                    selectedModel === opt.value ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-800'
-                                  }`}
-                                  onClick={() => {
-                                    setSelectedModel(opt.value);
-                                    setModelQuery('');
-                                    setModelListOpen(false);
-                                  }}
-                                >
-                                  {opt.label}
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        )}
-                      </div>
                       <p className="text-[11px] text-gray-400">
-                        カタログ全 {ALL_MODEL_TYPES.length} 機種から検索できます
+                        取扱機種の絞り込み 6 項目のみ表示しています（未指定でも取扱外機種の資料は検索対象外です）
                       </p>
                     </div>
                   </div>

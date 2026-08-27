@@ -27,8 +27,8 @@ RAGクエリ実行
 
 - `mode`: `normal`（標準 RAG）| `spec`（仕様確認モード）。実装 [app.py](../../lambda/rag/rag-function/app.py) 参照。
 - `filters.category`: フロント側の**安定キー**（`drawing` / `spec` / `tech_info` / `incident` / `qsheet` / `std` / `note` 等）。サーバー側 `CATEGORY_MAP` が実 KB の `category` メタデータ値へ変換する。安定キー・KB実値・UI表示ラベルの対応は下表参照。
-- **カテゴリ未指定時**: カテゴリフィルタなし（**全資料対象**）。フロントの初期状態も未選択＝全検索。チップで選んだときだけ絞り込む。
-- `filters.modelType`: `model_type`（多値）に対する**部分一致**（`AXIEZ` は `AXIEZ-LINKs` にも一致する）。機種を指定した場合でも、全機種共通文書は常に検索対象に含める（**選択機種 OR `*` OR `general` OR 空文字**）。カタログ上の `model_type` 空欄は全機種共通を意味する。空文字フィルタの本番確認は [verify-checklist-2026-07-29-kb-filter.md](../verify-checklist-2026-07-29-kb-filter.md)。
+- **カテゴリ未指定時**: `category` の**許可リスト**（実カテゴリ全10種 = `CATEGORY_MAP` の値 = `ALLOWED_CATEGORY_VALUES`）を**常時適用**する。ユーザー視点では従来どおり「未指定＝全検索」だが、web-crawler（GenU ドキュメント）・quick-start（引用 presign 不能バケット）データソース由来のノイズ文書と `TEST` 文書は category が許可リスト外のため遮断される。カテゴリ指定時も許可リスト外の値は通らない。根拠: [verification-2026-08-26-kb-vqv-metadata.md](../verification-2026-08-26-kb-vqv-metadata.md)（PR #55）。
+- `filters.modelType`: UI 機種絞り込み項目（6項目）。サーバー側 `UI_MODEL_FILTERS` が対象機種へ展開し（例 `AXIEZ` → `AXIEZ` / `AXIEZ(KE-WF・KE-HF)` / `駅舎エレ`）、`model_type` に対する **`listContains`（リスト要素の完全一致）** の `orAll` で検索前に絞り込む。KB の `model_type` は list 型 / string 型が混在するが、string 型はスカラー＝単要素リスト扱いで `listContains` に一致する（2026-08-26 実機確認）。旧実装の `stringContains`（部分一致。`AXIEZ` が `AXIEZ-LINKs` にも一致していた）は廃止。機種を指定した場合でも、全機種共通文書（`model_type` が `*` / `general`）は常に検索対象に含める（**展開機種 OR `*` OR `general`**）。空文字・空配列・キー欠落は実データ 0 件のため空文字句は持たない。加えて取得後に要素完全一致の post-filter と取扱機種スコープ（`HANDLED_MODEL_TYPES`）を安全弁として適用する。根拠: [verification-2026-08-26-kb-vqv-metadata.md](../verification-2026-08-26-kb-vqv-metadata.md) §4/§5.4（PR #55）、[rag-model-filter-mapping-2026-08-26.md](../rag-model-filter-mapping-2026-08-26.md) §1/§4（PR #54）。
 - `mode: spec` のとき `category` はサーバー側 `SPEC_CATEGORIES`（`C資料` / `テクニカルインフォメーション` / `据付基準`）で上書きされる。
 - **検索方式**: Knowledge Base の `overrideSearchType` は環境変数 `RAG_SEARCH_TYPE` で制御する（既定 `HYBRID` / `SEMANTIC` に切替可、不正値は `HYBRID` にフォールバック）。HYBRID はベクトル類似に加えキーワード/全文一致を併用し、型式コード・エラーコードのような完全一致寄りの語の取りこぼしを減らす。
 
@@ -43,9 +43,13 @@ RAGクエリ実行
 | `qsheet` | Qシート | Qシート |
 | `std` | 据付基準 | 据付基準 |
 | `note` | 据付ノート | 据付ノート |
-| `w_doc` | W資料 | W資料 |
+| `site_agent` | 現場代理人業務マニュアル | 現場代理人業務マニュアル |
+| `quality_mgmt` | 品質管理業務マニュアル | 品質管理業務マニュアル |
+| `w_doc` | W資料 | （UI 非掲載・業務判断待ち） |
 
-`site_agent` / `quality_mgmt` は API `CATEGORY_MAP` に残すが、現行 KB カタログ 0 件のため **チャット UI には出さない**（`UI_CATEGORY_KEYS`）。
+- `site_agent`（30件）/ `quality_mgmt`（7件）は 2026-08-26 実測で実在を確認し、チャット UI に掲載（`UI_CATEGORY_KEYS`）。旧記載「カタログ 0 件のため非掲載」は誤りだった。`site_agent` はうち2件（GM-01-03-A / GM-01-29-A）がテキスト層なしスキャン PDF で KB 未索引のため検索可能実数は **28件**（差し替えは issue #53 で所有側へ依頼済み）。
+- `w_doc`（5件）は全件が取扱機種スコープ対象外のため、スコープフィルタ併用時にチップ選択で 0 件になることを実機確認（2026-08-26）。業務判断（W資料機種の HANDLED 追加 or スコープ例外化）が出るまで **UI 非掲載**（`UI_CATEGORY_KEYS` から除外）。API 上は引き続き有効なキーで、`CATEGORY_MAP` / 許可リストには残る（verification-2026-08-26 §5.1）。
+- KB 実 `category` にはこのほか `TEST`（ゴミ・1件）が存在するが、許可リスト外のため常時遮断される。
 
 **Response:**
 ```json
@@ -86,9 +90,9 @@ RAGクエリ実行
 - `responseType`: `clarify`（検索せず聞き返し）/ `pages`（候補あり）/ `not_found`（弱い検索で作文停止）。実装理由は [impl-log-2026-07-29-clarify-and-page.md](../impl-log-2026-07-29-clarify-and-page.md)。
 - `pageCandidates`: UI 上部用。`pageNumber` は KB メタにあるときだけ付与（無ければキー省略＝ページ不明）。`not_found` 時は最大2件の参考候補に `lowConfidence: true` を付ける（作文はしない）。
 - `clarifyQuestions`: `clarify` 時の追加質問リスト。
-- カテゴリ未指定時は内部で本命（C/TI/据付基準）を先に retrieve し、弱ければ全資料へ拡大（`priorityExpanded`）。ユーザーが category を選んでいる場合はそれを尊重。
+- カテゴリ未指定時の**本命優先 2 段階 retrieve は 2026-08-26 に一時停止**（少数カテゴリが全検索でヒットしない副作用のため。mona 了承済み）。現在は未指定時も常に単一の retrieve（対象は実カテゴリ10種の許可リスト内）。後継方式の検討は [issue #61](https://github.com/yukiworkspace/EleKnowledge-AI/issues/61)。ユーザーが category を選んでいる場合はそれを尊重（従来どおり）。
 - 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。
-- `priorityExpanded`: 本命→全資料へ拡大したとき `true`。診断用フィールド（チャット UI では未表示）。
+- `priorityExpanded`: 本命→全資料へ拡大したとき `true` だった診断用フィールド（チャット UI では未表示）。優先 retrieve 停止中は**常に `false`**（API 互換のためフィールドは残置）。
 - `mode`: API 上は `normal` \| `spec` を受け付ける。現行チャット UI は常に `normal`。`spec` は **非推奨**で、サーバ側で `normal` に正規化し、カテゴリ未指定時は本命（`spec`/`tech_info`/`std`）を強制する。
 - `sourceUri` の形式は環境変数 `CITATION_URI_MODE`（SAM パラメータ `CitationUriMode`）で切り替える（デプロイ順を壊さないための段階移行スイッチ）。
   - `s3`（移行完了後の姿。上の例）: **`s3://` URI**。プリサイン HTTPS URL は応答にも DynamoDB にも含めない。フロントは `documentHref()` で中継ページ `/doc?uri=...` へのリンクに変換し、クリック時に `GET /rag/document` で実 URL を都度発行する。
