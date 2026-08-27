@@ -4,26 +4,12 @@ These tests intentionally assert existing public behavior rather than proposing
 new retrieval rules.  They provide a safety net while app.py is split into
 smaller modules.
 """
-import importlib.util
-import os
-import sys
-
 import pytest
-
-BASE = os.path.join(os.path.dirname(__file__), "../..")
 
 
 @pytest.fixture(scope="module")
-def rag():
-    os.environ.setdefault("CHATLOGS_TABLE", "test-chatlogs")
-    os.environ.setdefault("AWS_REGION", "ap-northeast-1")
-    path = os.path.normpath(os.path.join(BASE, "lambda/rag/rag-function/app.py"))
-    name = "rag_refactor_contract_app"
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+def rag(rag_app):
+    return rag_app
 
 
 def _result(uri: str, score: float, text: str, *, chunk_id: str = "", category: str = "C資料"):
@@ -117,10 +103,13 @@ def test_selection_rejects_results_below_current_normal_threshold(rag):
     assert [r["content"]["text"] for r in selected] == ["edge"]
 
 
-def test_modeless_filter_contract_is_currently_no_filter(rag):
-    # This pins develop behavior only.  PR #57/#58 may deliberately change it;
-    # rebase the refactor branch after those decisions are merged.
-    assert rag.build_kb_filter({}) is None
+def test_modeless_filter_applies_category_allowlist(rag):
+    # PR #55/#57/#58 マージ後の develop 挙動: フィルタ未指定でもカテゴリ許可リストを
+    # 常時適用し、web-crawler / TEST 由来のノイズ文書を検索母集団から遮断する
+    # （None は返らない）。根拠: docs/verification-2026-08-26-kb-vqv-metadata.md
+    assert rag.build_kb_filter({}) == {
+        "in": {"key": "category", "value": list(rag.ALLOWED_CATEGORY_VALUES)}
+    }
 
 
 def test_normalize_mode_keeps_explicit_category(rag):

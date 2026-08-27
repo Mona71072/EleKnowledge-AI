@@ -1,28 +1,26 @@
-"""Parity tests for the extracted pure query policy module."""
-import importlib.util
-import os
-import sys
+"""Parity tests for the extracted pure query policy module.
 
+移行期間限定のテスト: app.py が query_policy を import するよう配線された時点で
+new == legacy は恒真（自明に成立）になるため、配線 PR で本ファイルを
+モジュール単体の振る舞いテストへ書き換える（または削除する）こと。
+"""
 import pytest
-
-BASE = os.path.join(os.path.dirname(__file__), "../..")
-RAG_DIR = os.path.normpath(os.path.join(BASE, "lambda/rag/rag-function"))
-
-
-def _load(name: str, filename: str):
-    path = os.path.join(RAG_DIR, filename)
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
 
 @pytest.fixture(scope="module")
-def modules():
-    os.environ.setdefault("CHATLOGS_TABLE", "test-chatlogs")
-    os.environ.setdefault("AWS_REGION", "ap-northeast-1")
-    return _load("rag_query_policy_legacy", "app.py"), _load("rag_query_policy_new", "query_policy.py")
+def modules(rag_app, load_rag_module):
+    return rag_app, load_rag_module("rag_query_policy_new", "query_policy.py")
+
+
+def test_policy_constants_match_existing_behavior(modules):
+    # 固定入力のサンプルでは拾えない定数ドリフト（app.py 側だけの hotfix 等)を
+    # 丸ごと比較で検出する。ABBREV_MAP は置換順序も挙動に影響するため順序も見る
+    legacy, new = modules
+    assert new.ABBREV_MAP == legacy.ABBREV_MAP
+    assert list(new.ABBREV_MAP) == list(legacy.ABBREV_MAP)
+    assert new.CLARIFY_MARKER == legacy.CLARIFY_MARKER
+    for attr in ("SYMPTOM_RE", "PART_RE", "SITUATION_RE", "SPEC_QUESTION_RE"):
+        assert getattr(new, attr).pattern == getattr(legacy, attr).pattern
 
 
 @pytest.mark.parametrize(

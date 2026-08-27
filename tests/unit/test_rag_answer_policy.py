@@ -1,30 +1,20 @@
-"""Parity tests for the extracted answer-context policy module."""
-import importlib.util
-import os
-import sys
+"""Parity tests for the extracted answer-context policy module.
 
+移行期間限定のテスト: app.py が answer_policy を import するよう配線された時点で
+new == legacy は恒真（自明に成立）になるため、配線 PR で本ファイルを
+モジュール単体の振る舞いテストへ書き換える（または削除する）こと。
+"""
 import pytest
-
-BASE = os.path.join(os.path.dirname(__file__), "../..")
-RAG_DIR = os.path.normpath(os.path.join(BASE, "lambda/rag/rag-function"))
-
-
-def _load(name: str, filename: str):
-    path = os.path.join(RAG_DIR, filename)
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
 
 @pytest.fixture(scope="module")
-def modules():
-    os.environ.setdefault("CHATLOGS_TABLE", "test-chatlogs")
-    os.environ.setdefault("AWS_REGION", "ap-northeast-1")
-    if RAG_DIR not in sys.path:
-        sys.path.insert(0, RAG_DIR)
-    return _load("rag_answer_legacy", "app.py"), _load("rag_answer_new", "answer_policy.py")
+def modules(rag_app, load_rag_module):
+    return rag_app, load_rag_module("rag_answer_new", "answer_policy.py")
+
+
+def test_policy_constants_match_existing_behavior(modules):
+    legacy, new = modules
+    assert new.MAX_IMAGE_BLOCKS == legacy.MAX_IMAGE_BLOCKS
 
 
 def _result(uri="s3://bucket/C-123.pdf", score=0.82, text="火災管制の解除条件"):

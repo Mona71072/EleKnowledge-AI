@@ -1,30 +1,20 @@
-"""Parity tests for the extracted retrieval policy module."""
-import importlib.util
-import os
-import sys
+"""Parity tests for the extracted retrieval policy module.
 
+移行期間限定のテスト: app.py が retrieval_policy を import するよう配線された
+時点で new == legacy は恒真（自明に成立）になるため、配線 PR で本ファイルを
+モジュール単体の振る舞いテストへ書き換える（または削除する）こと。
+"""
 import pytest
-
-BASE = os.path.join(os.path.dirname(__file__), "../..")
-RAG_DIR = os.path.normpath(os.path.join(BASE, "lambda/rag/rag-function"))
-
-
-def _load(name: str, filename: str):
-    path = os.path.join(RAG_DIR, filename)
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
 
 @pytest.fixture(scope="module")
-def modules():
-    os.environ.setdefault("CHATLOGS_TABLE", "test-chatlogs")
-    os.environ.setdefault("AWS_REGION", "ap-northeast-1")
-    return _load("rag_retrieval_legacy", "app.py"), _load(
-        "rag_retrieval_new", "retrieval_policy.py"
-    )
+def modules(rag_app, load_rag_module):
+    return rag_app, load_rag_module("rag_retrieval_new", "retrieval_policy.py")
+
+
+def test_policy_constants_match_existing_behavior(modules):
+    legacy, new = modules
+    assert new.PAGE_NUMBER_META_KEYS == legacy.PAGE_NUMBER_META_KEYS
 
 
 def _text_result(uri: str, score: float, text: str, chunk_id: str = ""):
@@ -98,4 +88,20 @@ def test_selection_matches_existing_behavior(modules, mode):
 )
 def test_weak_gate_matches_existing_behavior(modules, results, mode):
     legacy, new = modules
+    assert new.is_weak_retrieval(results, mode) == legacy.is_weak_retrieval(results, mode)
+
+
+@pytest.mark.parametrize("mode", ["normal", "spec"])
+@pytest.mark.parametrize(
+    "score",
+    [0.199, 0.2, 0.201, 0.219, 0.22, 0.221, 0.299, 0.3, 0.301],
+)
+def test_threshold_boundaries_match_existing_behavior(modules, mode, score):
+    # 閾値（spec 0.2 / weak-gate 0.22 / normal 0.3）の境界前後を総当たりで固定し、
+    # 片側コピーだけ閾値が調整された場合に固定入力サンプルをすり抜けるのを防ぐ
+    legacy, new = modules
+    results = [_text_result("s3://b/a.pdf", score, "t", "1")]
+    assert new.select_retrieval_results(results, mode) == legacy.select_retrieval_results(
+        results, mode
+    )
     assert new.is_weak_retrieval(results, mode) == legacy.is_weak_retrieval(results, mode)
