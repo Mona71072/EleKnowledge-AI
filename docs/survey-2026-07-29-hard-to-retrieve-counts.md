@@ -2,7 +2,7 @@
 
 > **状態:** カタログ集計メモ（正本: `docs/kb-metadata-catalog.tsv`）  
 > **件数:** 行 3,492 / ユニーク `file_name` 2,816  
-> **関連:** [verify-checklist-2026-07-29-kb-filter.md](./verify-checklist-2026-07-29-kb-filter.md) / [kb-metadata-catalog-2026-07-29.md](./kb-metadata-catalog-2026-07-29.md)
+> **関連:** [verify-checklist-2026-07-29-kb-filter.md](./verify-checklist-2026-07-29-kb-filter.md) / [kb-metadata-catalog-2026-08-26.md](./kb-metadata-catalog-2026-08-26.md)
 
 「機種名検索」「全文検索」「カテゴリなし全検索」のいずれでも当たりにくい／ノイズになりやすいものを、件数つきで整理する。
 
