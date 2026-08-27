@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-08-26
+last-verified: 2026-08-27
 related-code: infrastructure/sam/, amplify.yml, docs/aws-resource-map.md
 ---
 
@@ -112,17 +112,30 @@ Required outputs for later steps:
 
 Creates the RAG/chat Lambda functions, `rag-api-dev`, `chat-api-dev`, and `/eleknowledge/dev/knowledge-base-id`.
 
-This stack **no longer creates an OpenSearch Serverless collection or a Knowledge Base service role** — Phase 2 reuses the existing Knowledge Base (see section 4). `KnowledgeBaseId` therefore defaults to the real ID `DF9XUCSPDM` and is constrained by `AllowedPattern`; the old `KnowledgeBaseId=pending` two-pass flow is gone, because deploying with `pending` silently produced a `rag-dev` that returned zero results for every query.
+This stack **no longer creates an OpenSearch Serverless collection or a Knowledge Base service role** — Phase 2 reuses the existing Knowledge Base (see section 4). `KnowledgeBaseId` has a default value in `phase2-template.yaml` and is constrained by `AllowedPattern`; the old `KnowledgeBaseId=pending` two-pass flow is gone, because deploying with `pending` silently produced a `rag-dev` that returned zero results for every query. The template default is **not** authoritative for the running environment — always confirm the deployed value as described below.
 
-> **⚠️ Verified 2026-08-26 — the production reality differs from the example below.** The deployed
-> stack `EleKnowledge-dev-phase2` and the live `rag-dev` Lambda both use
-> **`KnowledgeBaseId=VQV81CNYU4`** (`generative-ai-use-cases-jpinstd`, TEXT ingestion), not
-> `DF9XUCSPDM` (whose MULTIMODAL parsing yields IMAGE chunks the app cannot consume yet).
-> **Always pass `KnowledgeBaseId=VQV81CNYU4` on a full `sam deploy`** until the template default is
-> updated, otherwise the deploy silently repoints the KB. Facts and rationale:
+> **⚠️ Template default vs. deployed value.** `DF9XUCSPDM` is the **default value in
+> `phase2-template.yaml`**; the deployed stack `EleKnowledge-dev-phase2` and the live `rag-dev`
+> Lambda both used **`KnowledgeBaseId=VQV81CNYU4`** (`generative-ai-use-cases-jpinstd`, TEXT
+> ingestion) **as of 2026-08-26** (`DF9XUCSPDM`'s MULTIMODAL parsing yields IMAGE chunks the app
+> cannot consume yet). Both are point-in-time facts, not permanent rules.
+> **Before any full `sam deploy`, look up the KB ID currently approved and deployed** — the
+> deployed CloudFormation Parameter and/or the `rag-dev` `KNOWLEDGE_BASE_ID` environment variable —
+> **and pass it explicitly**, otherwise the deploy silently repoints the KB to the template
+> default. For a first-time deployment (no existing stack), use the KB ID currently approved for
+> the environment (see section 4). Facts and rationale:
 > `docs/verification-2026-08-26-kb-vqv-metadata.md`.
 
 ```powershell
+# Confirm the currently deployed KB ID first (cross-check the rag-dev
+# KNOWLEDGE_BASE_ID environment variable if in doubt)
+$KbId = aws cloudformation describe-stacks `
+  --stack-name "$Project-$Env-phase2" `
+  --region $Region `
+  --profile $Profile `
+  --query "Stacks[0].Parameters[?ParameterKey=='KnowledgeBaseId'].ParameterValue" `
+  --output text
+
 sam deploy `
   --template-file infrastructure/sam/phase2-template.yaml `
   --stack-name "$Project-$Env-phase2" `
@@ -130,7 +143,7 @@ sam deploy `
   --profile $Profile `
   --s3-bucket $ArtifactsBucket `
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM `
-  --parameter-overrides "Environment=$Env" "ProjectName=$Project" "KnowledgeBaseId=VQV81CNYU4"
+  --parameter-overrides "Environment=$Env" "ProjectName=$Project" "KnowledgeBaseId=$KbId"
 ```
 
 > **If `$Project-$Env-phase2` is already deployed with the old template**, split the change into two
@@ -190,7 +203,7 @@ For everything other than the Phase 2 exception above: create brand-new Knowledg
 
 At minimum, collect these IDs:
 
-- General RAG Knowledge Base ID — **Phase 2: `VQV81CNYU4` as deployed (reused, see the 2026-08-26 note above)**
+- General RAG Knowledge Base ID — **Phase 2: `VQV81CNYU4` as deployed at the 2026-08-26 verification (reused, see the note above)**
 - Trouble cases Knowledge Base ID
 - Troubleshooting manuals Knowledge Base ID
 - C-materials Knowledge Base ID
@@ -203,11 +216,12 @@ variable. (The Lambda reads the environment variable, not SSM. Note: as of 2026-
 parameter `/eleknowledge/dev/knowledge-base-id` does **not** exist in the account — this paragraph
 previously overstated it; whether to recreate it or drop it from the template is an open item.)
 
-Verify the reused Knowledge Base actually answers before moving on:
+Verify the reused Knowledge Base actually answers before moving on (`$KbId` = the confirmed
+deployed KB ID from section 3):
 
 ```powershell
 aws bedrock-agent-runtime retrieve `
-  --knowledge-base-id VQV81CNYU4 `
+  --knowledge-base-id $KbId `
   --retrieval-query '{\"text\":\"火災管制運転\"}' `
   --retrieval-configuration '{\"vectorSearchConfiguration\":{\"numberOfResults\":5,\"filter\":{\"equals\":{\"key\":\"category\",\"value\":\"C資料\"}}}}' `
   --region $Region --profile $Profile --query 'length(retrievalResults)'

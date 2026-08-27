@@ -1,12 +1,12 @@
 ---
 status: reference
-last-verified: 2026-08-26
+last-verified: 2026-08-27
 related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template.yaml, tests/unit/test_rag_kb_filter.py
 ---
 
 # 実環境検証記録: 使用KB・メタデータ実態・フィルタ挙動（2026-08-26）
 
-> **この文書の位置づけ:** 2026-08-26 に AWS 実環境（profile `datautl-bple-mebs` / ap-northeast-1）で実測した結果の**確定記録**。PR #52 の共同確認（§7 A〜D）への回答であり、PR #37 系のフィルタ再設計・環境正本是正の根拠。ここに書かれた事実は再調査不要。
+> **この文書の位置づけ:** 2026-08-26 に AWS 実環境（profile `datautl-bple-mebs` / ap-northeast-1）で実測した結果の記録（**2026-08-26 確認時点の実環境スナップショット**）。PR #52 の共同確認（§7 A〜D）への回答であり、PR #37 系のフィルタ再設計・環境正本是正の根拠。2026-08-26 時点の検証結果は本検証記録を正とする。ただし KB / Data Source / Sync 状態 / S3資料 / metadata / デプロイ設定等の実環境が変更された場合は、影響する項目を再確認すること。
 >
 > 関連: PR #52 / PR #37 / issue #53（KB所有側への修正依頼） / [verify-checklist-2026-07-29-kb-filter.md](./verify-checklist-2026-07-29-kb-filter.md)
 
@@ -16,7 +16,7 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 
 1. **実稼働KBは `VQV81CNYU4`**（jpinstd）。IaC既定値・Runbookの `DF9XUCSPDM` 記載は古い（PR #52 の分類で Case C）。
 2. **`model_type` は list型2599件 / string型1146件の混在**（Case D）。空文字・キー欠落は0件。
-3. **`listContains` は実機で期待どおり動作**し、string型もスカラー=単要素リストとして一致する。機種絞り込みは検索前の完全一致（listContains）に移行できる（Case A の技術条件成立）。
+3. **`listContains` は実機で期待どおり動作**し、string型もスカラー=単要素リストとして一致した（**実環境で確認した挙動**。AWS公式仕様上 `listContains` は STRING_LIST 向け演算子であり、型混在での動作が仕様として保証されているわけではない → §4 の注意）。機種絞り込みは検索前の完全一致（listContains）に移行できる（Case A の技術条件成立）。
 4. TSVカタログ（3,492件）は実バケット（3,745件）と**253件乖離**しており正本にできない。
 5. 索引欠落20件・TEST文書1件・カンマ連結メタデータ60件は**KB所有側依頼**（issue #53）。
 6. DF9XUCSPDM は MULTIMODAL パースで図表ページがIMAGEチャンク化しており、アプリ改修（画像添付ロジック）とセットでなければ運用に耐えない。**当面 VQV81CNYU4 で運用**。
@@ -113,6 +113,8 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 | `listContains / equals (model_type, "*")` | どちらも `"*"` と `["*"]` の**両方**に一致 |
 | `listContains / equals (model_type, "general")` | 動作OK |
 | `stringContains(model_type, "AXIEZ")` | `["AXIEZ-LINKs"]` 単独資料が混入（部分一致ノイズ実在 = PR #33 Major 4） |
+
+**注意（AWS仕様との関係）:** AWS 公式仕様上 `listContains` は STRING_LIST 型向けの演算子。上表の「string型も一致（スカラー=単要素リスト扱い）」は **VQV81CNYU4 実環境（2026-08-26）で確認した挙動**であり、型混在での動作が AWS 仕様として保証されているわけではない。型の正規化（issue #53 依頼）が完了するまでは、この実測挙動に依存していることを前提として扱うこと。
 
 Retrieve が返す `metadata.model_type` は **S3の型のまま**（str / list 混在）。よって post-filter は両型対応が必須。
 

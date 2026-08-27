@@ -44,4 +44,4 @@
 
 - [ ] フロント: `develop` マージ後 Amplify 反映
 - [ ] バックエンド: itai が RAG Lambda を `sam deploy`（git push だけでは反映されない）
-  - **注意(2026-08-26):** full `sam deploy` 時は `KnowledgeBaseId=VQV81CNYU4` を明示すること（テンプレ既定値はまだ `DF9XUCSPDM` で古い。PR-2で是正予定）
+  - **注意(2026-08-26):** full `sam deploy` 時は、デプロイ済み CFn Parameter / `rag-dev` の `KNOWLEDGE_BASE_ID` 環境変数で**現在承認されている KB ID を確認して明示指定**すること（2026-08-26 確認時点のデプロイ済み環境値は `VQV81CNYU4`、テンプレ既定値は `DF9XUCSPDM`。既定値の是正は PR #56）。手順は runbook §3 参照
