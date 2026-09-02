@@ -1,6 +1,6 @@
 ---
 status: production
-last-verified: 2026-09-02
+last-verified: 2026-04-24
 related-code: infrastructure/, frontend/, lambda/
 ---
 
@@ -9,6 +9,8 @@ related-code: infrastructure/, frontend/, lambda/
 > 出典: 旧 [spec.md](../../spec.md) §2.1（PR #10 で本ファイルに切り出し）
 
 ## システム全体図
+
+> 最終検証: 2026-09-02 — AWS 実査（図中の VPC 層のみ。他の層は 2026-04-24 時点のまま）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

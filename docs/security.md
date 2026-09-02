@@ -1,6 +1,6 @@
 ---
 status: production
-last-verified: 2026-09-02
+last-verified: 2026-08-21
 related-code: infrastructure/, lambda/, waf-rules.json
 ---
 
@@ -33,7 +33,9 @@ related-code: infrastructure/, lambda/, waf-rules.json
 
 ## ネットワークセキュリティ
 
-### 現行の実体（2026-09-02 実査）
+> 最終検証: 2026-09-02 — AWS 実査（VPC / NAT Gateway / Lambda `VpcConfig`）。§IP 制限 は本検証の対象外
+
+### 現行の実体
 
 **Lambda は VPC 外で実行される。** VPC・NAT Gateway は存在しない。
 
