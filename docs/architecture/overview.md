@@ -1,6 +1,6 @@
 ---
 status: production
-last-verified: 2026-04-24
+last-verified: 2026-09-02
 related-code: infrastructure/, frontend/, lambda/
 ---
 
@@ -70,7 +70,7 @@ related-code: infrastructure/, frontend/, lambda/
 └─────────────────┬───────────────────────────────────────────┘
                   │
 ┌─────────────────▼───────────────────────────────────────────┐
-│           VPC: eleknowledge-vpc (x.x.x.0/24)           │
+│  【未実装・将来構想】VPC: eleknowledge-vpc (x.x.x.0/24)      │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │ Private Subnets                                     │    │
 │  │  • eleknowledge-private-1a (x.x.x.0/26)        │    │
@@ -86,6 +86,13 @@ related-code: infrastructure/, frontend/, lambda/
 │  └──────────┴──────────┴──────────┴──────────┴─────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+> **図中の VPC 層について（2026-09-02 実査）**
+> VPC・NAT Gateway・Private Subnet は**実装されていない**（VPC 0 件 / NAT Gateway 0 件 /
+> Lambda 全 42 関数で `VpcConfig` 未設定）。Lambda は VPC 外で実行される。
+> 将来の拡張候補として図に残しているが、実装済みの構成として読まないこと。
+> 実測値・再現コマンド・VPC 化のトレードオフは
+> [../security.md](../security.md) §ネットワークセキュリティ を参照。
 
 ## 関連ドキュメント
 
