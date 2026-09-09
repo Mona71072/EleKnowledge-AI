@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { signUp } from 'aws-amplify/auth';
-import { isEmailDeliveryLimitError, isAttemptLimitError, withErrorName, EMAIL_DELIVERY_LIMIT_MESSAGE, ATTEMPT_LIMIT_MESSAGE } from '@/lib/auth-helpers';
+import { classifyAuthError, logAuthError, withErrorName, EMAIL_DELIVERY_LIMIT_MESSAGE, EMAIL_DELIVERY_LIMIT_SIGNUP_HINT, ATTEMPT_LIMIT_MESSAGE, DELIVERY_FAILURE_MESSAGE } from '@/lib/auth-helpers';
 import Link from 'next/link';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -113,12 +113,16 @@ export default function SignupPage() {
       
       router.push(`/verify?email=${encodeURIComponent(trimmedEmail)}`);
     } catch (err: any) {
-      console.error('Signup error:', err);
-      
-      if (isEmailDeliveryLimitError(err)) {
-        setError(EMAIL_DELIVERY_LIMIT_MESSAGE);
-      } else if (isAttemptLimitError(err)) {
+      logAuthError('signUp', err);
+      const kind = classifyAuthError(err);
+
+      if (kind === 'daily-limit') {
+        // SignUp はユーザーを UNCONFIRMED で作成済みの場合があるため、新規登録の繰り返しではなく翌日の再送へ誘導する
+        setError(`${EMAIL_DELIVERY_LIMIT_MESSAGE} ${EMAIL_DELIVERY_LIMIT_SIGNUP_HINT}`);
+      } else if (kind === 'attempt-limit') {
         setError(ATTEMPT_LIMIT_MESSAGE);
+      } else if (kind === 'delivery-failure') {
+        setError(DELIVERY_FAILURE_MESSAGE);
       } else if (err.name === 'UsernameExistsException') {
         setError('このメールアドレスは既に登録されています。確認コードを入力していない場合は、確認画面の「確認コードを再送信」から続きを行ってください。');
       } else if (err.name === 'InvalidPasswordException') {

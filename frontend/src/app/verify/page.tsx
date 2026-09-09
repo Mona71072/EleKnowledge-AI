@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { autoSignIn, confirmSignUp, resendSignUpCode } from 'aws-amplify/auth';
-import { isEmailDeliveryLimitError, isAttemptLimitError, withErrorName, EMAIL_DELIVERY_LIMIT_MESSAGE, ATTEMPT_LIMIT_MESSAGE } from '@/lib/auth-helpers';
+import { classifyAuthError, logAuthError, withErrorName, EMAIL_DELIVERY_LIMIT_MESSAGE, ATTEMPT_LIMIT_MESSAGE, DELIVERY_FAILURE_MESSAGE } from '@/lib/auth-helpers';
 import Link from 'next/link';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -95,10 +95,16 @@ function VerifyContent() {
       setResendTimer(60); // 60秒のタイマー
     } catch (err: any) {
       console.error('Resend code error:', err);
-      if (isEmailDeliveryLimitError(err)) {
+      logAuthError('resendSignUpCode', err);
+      const kind = classifyAuthError(err);
+      if (kind === 'daily-limit') {
         setError(EMAIL_DELIVERY_LIMIT_MESSAGE);
-      } else if (isAttemptLimitError(err)) {
+      } else if (kind === 'attempt-limit') {
         setError(ATTEMPT_LIMIT_MESSAGE);
+      } else if (kind === 'delivery-failure') {
+        setError(DELIVERY_FAILURE_MESSAGE);
+      } else if (kind === 'user-not-found') {
+        setError('このメールアドレスの登録が完了していません。お手数ですが「新規登録」から登録し直してください。');
       } else {
         setError(withErrorName('確認コードの再送信に失敗しました。', err));
       }
