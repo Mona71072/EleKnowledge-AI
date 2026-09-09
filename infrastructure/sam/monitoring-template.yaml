@@ -17,7 +17,8 @@ Description: >-
 # - Lambda Errors が動かない関数（rag / chat / auth は例外を 500 で return する）は
 #   API Gateway 5XX とログのメトリクスフィルタで検知する
 # - ロググループの保持期間は既存グループのため本テンプレートでは扱わず、
-#   scripts/ops/set-log-retention.sh で設定する（IaC 化は後続）
+#   scripts/ops/set_log_retention.py で設定する（対象は EleKnowledge の関数名 / API 名で限定。IaC 化は後続）
+# - メトリクスフィルタのパターンは大文字小文字を区別するため、handler が出す小文字の error も列挙する
 # ---------------------------------------------------------------------------
 
 Parameters:
@@ -508,7 +509,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Sub /aws/lambda/${RagFunctionName}
-      FilterPattern: '?Error ?Exception ?Traceback ?ThrottlingException'
+      FilterPattern: '?Error ?error ?ERROR ?Exception ?exception ?Traceback ?ThrottlingException'
       MetricTransformations:
         - MetricNamespace: !Sub ${ProjectName}/Logs
           MetricName: RagErrorLines
@@ -520,7 +521,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Sub /aws/lambda/${ChatFunctionName}
-      FilterPattern: '?Error ?Exception ?Traceback'
+      FilterPattern: '?Error ?error ?ERROR ?Exception ?exception ?Traceback'
       MetricTransformations:
         - MetricNamespace: !Sub ${ProjectName}/Logs
           MetricName: ChatErrorLines
@@ -570,7 +571,7 @@ Resources:
       LogGroupNames: [!Sub '/aws/lambda/${RagFunctionName}']
       QueryString: |
         fields @timestamp, @message
-        | filter @message like /Error|Exception|Traceback/
+        | filter @message like /(?i)(error|exception|traceback)/
         | sort @timestamp desc
         | limit 100
 
@@ -581,7 +582,7 @@ Resources:
       LogGroupNames: [!Sub '/aws/lambda/${ChatFunctionName}']
       QueryString: |
         fields @timestamp, @message
-        | filter @message like /Error|Exception|Traceback/
+        | filter @message like /(?i)(error|exception|traceback)/
         | sort @timestamp desc
         | limit 100
 
