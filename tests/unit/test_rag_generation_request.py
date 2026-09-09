@@ -33,6 +33,22 @@ def test_application_profile_arn_needs_explicit_style(rag_app):
 def test_new_api_markers(rag_app):
     assert rag_app.is_new_api_model("global.anthropic.claude-opus-4-8", "auto")
     assert rag_app.is_new_api_model("jp.anthropic.claude-opus-4-7", "auto")
-    assert rag_app.is_new_api_model("anthropic.claude-fable-5-1", "auto")
+    # Fable は adaptive のみ対応（disabled は 400）のため対象外
+    assert not rag_app.is_new_api_model("anthropic.claude-fable-5-1", "auto")
     assert not rag_app.is_new_api_model("jp.anthropic.claude-sonnet-4-6", "auto")
     assert not rag_app.is_new_api_model(None, "auto")
+
+
+def test_title_generation_can_override_budget(rag_app):
+    body = rag_app.build_generation_request(None, [], "global.anthropic.claude-sonnet-5", max_tokens=64, temperature=0)
+    assert body["max_tokens"] == 64
+    assert "temperature" not in body and body["thinking"] == {"type": "disabled"}
+    assert "system" not in body
+    legacy = rag_app.build_generation_request(None, [], "jp.anthropic.claude-haiku-4-5-20251001-v1:0", max_tokens=64, temperature=0)
+    assert legacy["temperature"] == 0 and legacy["max_tokens"] == 64
+
+
+def test_extract_response_text_skips_thinking_block(rag_app):
+    body = {"content": [{"type": "thinking", "thinking": ""}, {"type": "text", "text": "回答"}]}
+    assert rag_app.extract_response_text(body) == "回答"
+    assert rag_app.extract_response_text({"content": []}) == ""

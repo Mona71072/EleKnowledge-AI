@@ -860,7 +860,9 @@ def build_claude_messages(query: str, selected_results: list, chat_history: list
 # 既定で適応思考が動く。RAG の短い整理には思考は不要なので明示的に無効化する。
 # 判定はモデル ID（推論プロファイル ID / ARN のどちらでも可）の部分一致で行う。
 # 経緯: docs/eval-2026-09-09-model-bakeoff.md（Haiku 4.5 → Sonnet 5 切替）
-NEW_API_MODEL_MARKERS = ("sonnet-5", "opus-4-7", "opus-4-8", "opus-5", "fable")
+# 対応範囲は Sonnet 5 / Opus 4.7 以降（thinking を disabled にできるモデル）。
+# Fable 系は adaptive のみ対応で disabled を送ると 400 になるため対象外（PR #90 レビュー）。
+NEW_API_MODEL_MARKERS = ("sonnet-5", "opus-4-7", "opus-4-8", "opus-5")
 GENERATION_MAX_TOKENS = 4096
 LEGACY_GENERATION_TEMPERATURE = 0.3
 # auto: モデル ID の部分一致で判定 / new: 常に新 API 形式 / legacy: 常に旧形式。
@@ -879,19 +881,33 @@ def is_new_api_model(model_id: str, request_style: str = None) -> bool:
     return any(marker in mid for marker in NEW_API_MODEL_MARKERS)
 
 
-def build_generation_request(system_prompt: str, messages: list, model_id: str) -> dict:
-    """InvokeModel 用のリクエスト本文をモデル世代に合わせて組み立てる。"""
+def build_generation_request(system_prompt: str, messages: list, model_id: str,
+                             max_tokens: int = None, temperature: float = None) -> dict:
+    """InvokeModel 用のリクエスト本文をモデル世代に合わせて組み立てる。
+
+    本文生成以外（例: 見出し生成）も同じ関数を使い、max_tokens / temperature だけ変える。
+    新 API 世代では temperature は常に送らない（400 になる）。
+    """
     body = {
         "anthropic_version": "bedrock-2023-05-31",
-        "system": system_prompt,
-        "max_tokens": GENERATION_MAX_TOKENS,
+        "max_tokens": max_tokens or GENERATION_MAX_TOKENS,
         "messages": messages,
     }
+    if system_prompt:
+        body["system"] = system_prompt
     if is_new_api_model(model_id):
         body["thinking"] = {"type": "disabled"}
     else:
-        body["temperature"] = LEGACY_GENERATION_TEMPERATURE
+        body["temperature"] = LEGACY_GENERATION_TEMPERATURE if temperature is None else temperature
     return body
+
+
+def extract_response_text(response_body: dict) -> str:
+    """content から最初の text ブロックを返す（thinking ブロックが先頭に来る場合に備える）。"""
+    for block in response_body.get("content") or []:
+        if block.get("type") == "text" and block.get("text"):
+            return block["text"]
+    return ""
 
 
 def generate_response_with_claude(query: str, kb_results: dict, chat_history: list = None,
@@ -944,7 +960,7 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
         )
         
         response_body = json.loads(response['body'].read())
-        assistant_message = response_body['content'][0]['text']
+        assistant_message = extract_response_text(response_body)
         
         return assistant_message
         
