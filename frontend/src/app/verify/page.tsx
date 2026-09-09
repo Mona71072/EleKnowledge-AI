@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { autoSignIn, confirmSignUp, resendSignUpCode } from 'aws-amplify/auth';
+import { classifyAuthError, logAuthError, withErrorName, EMAIL_DELIVERY_LIMIT_MESSAGE, ATTEMPT_LIMIT_MESSAGE, DELIVERY_FAILURE_MESSAGE } from '@/lib/auth-helpers';
 import Link from 'next/link';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -75,7 +76,7 @@ function VerifyContent() {
       } else if (err.name === 'ExpiredCodeException') {
         setError('確認コードの有効期限が切れています。新しいコードを再送信してください。');
       } else {
-        setError('確認に失敗しました。もう一度お試しください。');
+        setError(withErrorName('確認に失敗しました。もう一度お試しください。', err));
       }
     } finally {
       setLoading(false);
@@ -94,7 +95,19 @@ function VerifyContent() {
       setResendTimer(60); // 60秒のタイマー
     } catch (err: any) {
       console.error('Resend code error:', err);
-      setError('確認コードの再送信に失敗しました。');
+      logAuthError('resendSignUpCode', err);
+      const kind = classifyAuthError(err);
+      if (kind === 'daily-limit') {
+        setError(EMAIL_DELIVERY_LIMIT_MESSAGE);
+      } else if (kind === 'attempt-limit') {
+        setError(ATTEMPT_LIMIT_MESSAGE);
+      } else if (kind === 'delivery-failure') {
+        setError(DELIVERY_FAILURE_MESSAGE);
+      } else if (kind === 'user-not-found') {
+        setError('このメールアドレスの登録が完了していません。お手数ですが「新規登録」から登録し直してください。');
+      } else {
+        setError(withErrorName('確認コードの再送信に失敗しました。', err));
+      }
     }
   };
 
