@@ -1,5 +1,6 @@
 ---
 status: draft
+# 2026-09-09 判定完了。切替決定の記録として保持
 last-verified: 2026-09-09
 related-code: scripts/eval/run_model_bakeoff.py, scripts/eval/bakeoff_questions.jsonl, lambda/rag/rag-function/app.py
 ---
@@ -69,6 +70,13 @@ KB: `VQV81CNYU4` / 質問数: 32 / 生成対象（pages ゲート通過）: 29
   1. 推論プロファイルを追加して別モデル（Haiku 4.5 等）へ切り替えられるようにする（環境変数の差し替えのみ）
   2. UI に「速い / 詳しい」等の選択を設け、モデルや出力長を利用者側で選べるようにする
   3. 候補頁を先に返してから回答を後追いで返す二段応答、またはストリーミング応答（P2）
+
+## 判定まとめ（2026-09-09）
+
+- itai 記入分: GATE-01 同等 / GOLD-01 Sonnet 5 / GOLD-02 同等（Sonnet 5 の方が文章が丁寧で分かりやすい）/ GOLD-03 Sonnet 5。Haiku 優位の判定なし
+- AI 事前所見（10 問）: Sonnet 5 優位 6・同等 3・Haiku 優位 1
+- **決定: 生成モデルを Sonnet 5（`global.anthropic.claude-sonnet-5`）に切り替える**（itai 2026-09-09）。出力長・レイテンシは当面制限しない（前節「採用時の方針」）
+- 次の手順: タグ付きアプリケーション推論プロファイルの作成 → `app.py` の互換対応（`temperature` 削除・`thinking: disabled`）と phase2 テンプレート（IAM・`BedrockModelId`）の変更 → 定時後に phase2 再デプロイ → 切替日を記録し、いいね率・not_found 率・レイテンシを管理画面で追う
 
 ## 質問別
 
