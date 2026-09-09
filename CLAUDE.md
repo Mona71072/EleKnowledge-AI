@@ -18,6 +18,7 @@
 | 稼働中／開発中の機能仕様 | `docs/features/production/` ／ `docs/features/development/` |
 | アーキテクチャ・API・データモデル | `docs/architecture/` ／ `docs/api/` ／ `docs/data-model.md` |
 | デプロイ | `docs/deployment.md` |
+| 運用（アラーム・切り分け・ロールバック・モデル切替・コスト） | `docs/ops-runbook.md`（経緯は issue #86） |
 | RAG 機種絞り込み（取扱機種スコープ・KB model_type 対応） | `docs/rag-model-filter-mapping.md`（自動生成。正本は `lambda/rag/rag-function/app.py`） |
 | KB メタデータ実測カタログ | `docs/kb-metadata-catalog-2026-07-29.md` |
 | タスク履歴・過去の経緯 | `docs/task-history.md` |

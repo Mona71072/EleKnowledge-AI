@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-08-21
+last-verified: 2026-09-10
 related-code: infrastructure/sam/, amplify.yml
 ---
 
@@ -78,6 +78,17 @@ Use [AWS Migration Runbook](aws-migration-runbook.md) for deployment order, Bedr
 | `NEXT_PUBLIC_TROUBLESHOOTING_API_URL` | Amplify environment variable | Troubleshooting API base URL from Phase 3 `TroubleshootingApiUrl`; frontend appends `/analyze` and `/history` | `amplify.yml` |
 | `NEXT_PUBLIC_COGNITO_USER_POOL_ID` | Amplify environment variable | Cognito User Pool ID from Phase 1 output | `amplify.yml` |
 | `NEXT_PUBLIC_COGNITO_CLIENT_ID` | Amplify environment variable | Cognito User Pool Client ID from Phase 1 output | `amplify.yml` |
+
+## Additional Stacks (added 2026-07-21 to 2026-09-09)
+
+| Stack | Template | Key resources |
+|---|---|---|
+| `announcements-monitoring-dev` | `infrastructure/sam/announcements-monitoring-template.yaml` | DynamoDB `announcements-dev`, `metrics-dev` (TTL disabled 2026-09-09); Lambda `announcements-read/write/publisher-dev`, `metrics-read-dev`, `metrics-aggregator-dev`; API `announcements-monitoring-api-dev` (`0q3vewys59`, `GET /admin/metrics`, announcements routes); EventBridge `metrics-daily-agg-dev` (02:00 JST), `announcements-promote-dev` (5 min) |
+| `eleknowledge-chat-archive-dev` | `infrastructure/sam/chat-archive-template.yaml` | Lambda `eleknowledge-chat-archive-dev` (chatlogs stream -> S3); S3 `eleknowledge-chat-archive-dev-<account>` (versioned), `eleknowledge-athena-results-dev-<account>`; SQS `eleknowledge-chat-archive-dev-failures` (OnFailure); Athena workgroup `eleknowledge-analytics-dev`; Glue `eleknowledge_analytics.chatlogs_archive` |
+| `eleknowledge-security-waf-dev` | `infrastructure/sam/security-waf-template.yaml` | WAFv2 regional `EleKnowledge-dev-RegionalWebAcl` + IPSet, associated with the 4 REST API stages |
+| `eleknowledge-monitoring-dev` | `infrastructure/sam/monitoring-template.yaml` | SNS `eleknowledge-alerts-dev` (2 email subscriptions, passed at deploy), 22 CloudWatch alarms (`EleKnowledge-dev-P1-*` / `P2-*`), 2 metric filters, 3 Logs Insights saved queries. Runbook: `docs/ops-runbook.md` |
+
+Not in IaC: Bedrock application inference profile `EleKnowledge-rag-dev-sonnet5-20260909` (created 2026-09-09, unused until the SCP allows global-based profiles; see issue #86). Log group retention is set by `scripts/ops/set_log_retention.py` (Lambda 365 d / API Gateway 90 d).
 
 ## Not Recreated by Current IaC
 
