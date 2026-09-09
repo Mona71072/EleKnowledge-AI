@@ -88,6 +88,10 @@ Parameters:
   CognitoUserPoolClientId:
     Type: String
     Default: doa4arfmc7shs8u0mb91u70mq
+  CognitoAlertErrorCodes:
+    Type: CommaDelimitedList
+    Default: "LimitExceededException,CodeDeliveryFailureException,TooManyRequestsException,InternalErrorException"
+    Description: Cognito errorCodes (CloudTrail) that trigger the P1 e-mail error notification. Add UsernameExistsException temporarily to test the path.
 
   # --- 閾値（issue #86 P0 案。初週の実測で見直す） ---
   Api4xxThreshold:
@@ -600,7 +604,7 @@ Resources:
         detail:
           eventSource: [cognito-idp.amazonaws.com]
           eventName: [SignUp, ResendConfirmationCode, ForgotPassword, AdminCreateUser, AdminResetUserPassword]
-          errorCode: [LimitExceededException, CodeDeliveryFailureException, TooManyRequestsException, InternalErrorException]
+          errorCode: !Ref CognitoAlertErrorCodes
       Targets:
         - Id: AlertTopic
           Arn: !Ref AlertTopic
