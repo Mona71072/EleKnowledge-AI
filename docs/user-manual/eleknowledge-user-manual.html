@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>EleKnowledge 利用者マニュアル</title>
+<style>
+  @page { size: A4; margin: 16mm 16mm 18mm 16mm; }
+  html { font-size: 10.5pt; }
+  body {
+    font-family: "BIZ UDPGothic", "Yu Gothic UI", "Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif;
+    color: #1a1a1a; line-height: 1.7; margin: 0;
+  }
+  h1 { font-size: 18pt; margin: 0 0 6mm; padding: 2mm 0 2mm 4mm; border-left: 6px solid #1d4ed8; background: #eff6ff; break-before: page; }
+  h1.first { break-before: auto; }
+  h2 { font-size: 13.5pt; margin: 7mm 0 3mm; padding-bottom: 1mm; border-bottom: 2px solid #93c5fd; break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 5mm 0 2mm; color: #1e3a8a; break-after: avoid; }
+  p { margin: 0 0 2.5mm; }
+  ol, ul { margin: 0 0 3mm; padding-left: 6mm; }
+  li { margin-bottom: 1.2mm; }
+  ol.steps > li { margin-bottom: 2mm; }
+  .cover { text-align: center; padding-top: 55mm; }
+  .cover .title { font-size: 26pt; font-weight: bold; margin-bottom: 4mm; }
+  .cover .sub { font-size: 14pt; color: #334155; margin-bottom: 30mm; }
+  .cover table { margin: 0 auto; border-collapse: collapse; font-size: 10.5pt; text-align: left; }
+  .cover td { padding: 1.5mm 4mm; border-bottom: 1px solid #cbd5e1; }
+  .cover td:first-child { color: #475569; white-space: nowrap; }
+  .toc ol { list-style: none; padding-left: 0; column-count: 1; }
+  .toc li { padding: 1mm 0; border-bottom: 1px dotted #cbd5e1; }
+  .toc li span { color: #1d4ed8; font-weight: bold; margin-right: 3mm; }
+  figure { margin: 3mm 0 5mm; break-inside: avoid; text-align: center; }
+  figure img { max-width: 100%; height: auto; border: 1px solid #cbd5e1; border-radius: 3px; }
+  figure.w60 img { max-width: 60%; }
+  figure.w70 img { max-width: 70%; }
+  figure.w80 img { max-width: 80%; }
+  figure.w90 img { max-width: 90%; }
+  figcaption { font-size: 9.5pt; color: #475569; margin-top: 1.5mm; text-align: left; }
+  figcaption b { color: #1e3a8a; }
+  .box { border: 1px solid #cbd5e1; border-radius: 4px; padding: 2.5mm 4mm; margin: 3mm 0; background: #f8fafc; break-inside: avoid; }
+  .box.note { border-color: #fcd34d; background: #fffbeb; }
+  .box.warn { border-color: #fca5a5; background: #fef2f2; }
+  .box.ok { border-color: #86efac; background: #f0fdf4; }
+  .box .t { font-weight: bold; margin-bottom: 1mm; }
+  .tag { display: inline-block; font-size: 8.5pt; font-weight: bold; padding: 0 2mm; border-radius: 3px; margin-right: 1.5mm; vertical-align: middle; }
+  .req { background: #dc2626; color: #fff; }
+  .opt { background: #64748b; color: #fff; }
+  .btn { display: inline-block; border: 1px solid #94a3b8; border-radius: 3px; padding: 0 1.5mm; background: #fff; font-weight: bold; white-space: nowrap; }
+  .num { display: inline-block; width: 5.2mm; height: 5.2mm; line-height: 5.2mm; text-align: center; border-radius: 50%; background: #d62828; color: #fff; font-weight: bold; font-size: 8.5pt; margin-right: 1mm; }
+  table.grid { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; font-size: 9.8pt; break-inside: auto; }
+  table.grid th, table.grid td { border: 1px solid #cbd5e1; padding: 1.5mm 2.5mm; vertical-align: top; text-align: left; }
+  table.grid th { background: #eff6ff; }
+  table.grid tr { break-inside: avoid; }
+  .cols { display: flex; gap: 4mm; }
+  .cols > * { flex: 1; }
+  code { font-family: Consolas, "BIZ UDGothic", monospace; background: #f1f5f9; padding: 0 1mm; border-radius: 2px; }
+  .small { font-size: 9pt; color: #475569; }
+  .keep { break-inside: avoid; }
+  table.grid.keep { break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<!-- ===================== 表紙 ===================== -->
+<section class="cover">
+  <div class="title">EleKnowledge<br>利用者マニュアル</div>
+  <div class="sub">昇降機ナレッジ検索（RAGチャット）の使い方</div>
+  <table>
+    <tr><td>対象者</td><td>東日本支社 工事統括部　現場代理人・品質管理担当者</td></tr>
+    <tr><td>利用端末</td><td>社用PC（社内ネットワークに接続した状態）</td></tr>
+    <tr><td>接続先</td><td>https://develop.d9ngenggxas1k.amplifyapp.com/</td></tr>
+    <tr><td>問い合わせ先</td><td>Ele-Knowledge サポート　b_ele-knowledge-support@meltec.co.jp</td></tr>
+    <tr><td>バージョン・発行日</td><td>第1版（2026年9月9日）</td></tr>
+  </table>
+</section>
+
+<!-- ===================== 目次 ===================== -->
+<h1>目次</h1>
+<div class="toc">
+<ol>
+  <li><span>1</span>はじめに（できること・利用条件・画面の構成）</li>
+  <li><span>2</span>アカウントを作る（サインアップ）</li>
+  <li><span>3</span>ログインする／ログアウトする／パスワードを忘れたとき</li>
+  <li><span>4</span>ホーム画面の見方</li>
+  <li><span>5</span>質問を送る</li>
+  <li><span>6</span>資料や機種を絞り込む</li>
+  <li><span>7</span>回答と参考資料を確認する</li>
+  <li><span>8</span>回答への評価・要望を送る</li>
+  <li><span>9</span>履歴（過去のチャット）を開く</li>
+  <li><span>10</span>困ったときは（症状別の対処と問い合わせ先）</li>
+  <li><span>付録</span>画面に出る主なメッセージ一覧／用語</li>
+</ol>
+</div>
+<div class="box">
+  <div class="t">このマニュアルの読み方</div>
+  <ul>
+    <li>画面の名称やボタン名は、実際の画面の表記をそのまま使っています（例: <span class="btn">新規チャット</span>）。</li>
+    <li>手順の <span class="tag req">必須</span> は必ず行う操作、<span class="tag opt">任意</span> は必要なときだけ行う操作です。</li>
+    <li>画像の赤い番号（<span class="num">1</span> など）は、本文の手順番号や説明の番号に対応します。</li>
+    <li>画像内の利用者名・メールアドレス・質問文・回答内容は説明用の例です。実際の表示内容は利用者や質問により異なります。</li>
+  </ul>
+</div>
+
+<!-- ===================== 1 ===================== -->
+<h1>1. はじめに</h1>
+
+<h2>1.1 EleKnowledge でできること</h2>
+<p>EleKnowledge（画面表記: EleKnowledge、サポート名: Ele-Knowledge）は、昇降機の技術資料（据付基準、C資料、TI、現場代理人業務マニュアルなど）を検索し、<b>参考資料（根拠）つきで質問に回答する</b>社内向けのチャット型検索システムです。</p>
+<ul>
+  <li>困りごとをそのまま日本語で質問できます。</li>
+  <li>回答には「該当頁候補」と「参考資料」が付き、元の PDF をその場で開いて確認できます。</li>
+  <li>資料の種類や機種で検索対象を絞り込めます。</li>
+  <li>回答が役に立ったかどうかを「解けた／解けない」で送ると、改善に活かされます。</li>
+  <li>過去のチャットは履歴として残り、後から開き直せます（60日で自動削除）。</li>
+</ul>
+<div class="box note">
+  <div class="t">回答の扱いについて</div>
+  <p>回答は AI が資料をもとに要約したものです。<b>現場判断は必ず「参考資料」の原本（PDF）で確認</b>してください。回答の先頭に「※機種未指定のため…」と表示された場合は、特定機種の事実として断定しないでください。</p>
+</div>
+
+<div class="keep">
+<h2>1.2 利用条件</h2>
+<table class="grid keep">
+  <tr><th style="width:32%">項目</th><th>内容</th></tr>
+  <tr><td>接続先 URL</td><td><code>https://develop.d9ngenggxas1k.amplifyapp.com/</code></td></tr>
+  <tr><td>利用端末・ネットワーク</td><td>社用PC。社内ネットワークからのみ接続できます（接続元の制限あり）。社外ネットワークからは画面が表示されません。</td></tr>
+  <tr><td>ブラウザ</td><td>Microsoft Edge など、社用PCの標準ブラウザ。</td></tr>
+  <tr><td>アカウント</td><td>自分でサインアップ（アカウント作成）すると利用できます。登録できるメールアドレスは <b>@meltec.co.jp</b> または <b>@○○.mitsubishielectric.co.jp</b> の会社アドレスのみです。</td></tr>
+  <tr><td>ログインの有効期間</td><td>ログインから24時間。経過後は再度ログインが必要です。</td></tr>
+  <tr><td>問い合わせ先</td><td>Ele-Knowledge サポート　<code>b_ele-knowledge-support@meltec.co.jp</code></td></tr>
+</table>
+</div>
+
+<div class="keep">
+<h2>1.3 画面の構成</h2>
+<p>主に次の画面を使います。</p>
+<table class="grid keep">
+  <tr><th style="width:26%">画面</th><th>用途</th><th style="width:22%">本書の章</th></tr>
+  <tr><td>ログイン</td><td>メールアドレスとパスワードでログインする。アカウント作成・パスワードリセットへの入口。</td><td>3章</td></tr>
+  <tr><td>アカウント作成</td><td>初回のみ。名前・メールアドレス・パスワードを登録する。</td><td>2章</td></tr>
+  <tr><td>メールアドレスの確認</td><td>初回のみ。メールで届いた6桁の確認コードを入力する。</td><td>2章</td></tr>
+  <tr><td>ホーム</td><td>ログイン後の最初の画面。質問の入力、RAGチャットへの入口、使い方ガイド、運営からのお知らせ。</td><td>4章</td></tr>
+  <tr><td>RAGチャット</td><td>質問と回答のやり取り。絞り込み、参考資料の確認、評価、履歴。</td><td>5〜9章</td></tr>
+</table>
+</div>
+
+<!-- ===================== 2 ===================== -->
+<h1>2. アカウントを作る（サインアップ）</h1>
+
+<h2>2.1 できること・前提</h2>
+<p>初めて使うときに一度だけ行います。会社のメールアドレスとパスワードを登録し、メールで届く確認コードを入力すると利用を開始できます。</p>
+<div class="box">
+  <div class="t">操作前に必要なもの</div>
+  <ul>
+    <li>会社のメールアドレス（@meltec.co.jp または @○○.mitsubishielectric.co.jp）と、そのメールを受信できる Outlook 等。</li>
+    <li>パスワード: <b>8文字以上で、大文字・小文字・数字・記号（! @ # $ % など）をすべて含む</b>もの。</li>
+  </ul>
+</div>
+
+<h2>2.2 手順（アカウント作成画面）</h2>
+<ol class="steps">
+  <li><span class="tag req">必須</span>ブラウザで接続先 URL を開きます。ログイン画面が表示されます。</li>
+  <li><span class="tag req">必須</span>ログイン画面の下にある <span class="btn">アカウントを作成</span> を押します。「アカウント作成」画面が開きます。</li>
+  <li><span class="tag req">必須</span><span class="num">1</span> 名前 に氏名を入力します（2文字以上。例: 現場 太郎）。ホーム画面の「こんにちは、○○さん」に表示されます。</li>
+  <li><span class="tag req">必須</span><span class="num">2</span> メールアドレス に会社のメールアドレスを入力します。</li>
+  <li><span class="tag req">必須</span><span class="num">3</span> パスワード を入力します。入力すると <span class="num">4</span> の強度表示が更新され、満たした条件が緑の点になります。5つすべてが緑になるまで入力してください。</li>
+  <li><span class="tag opt">任意</span>目のマークを押すと、入力したパスワードを表示して確認できます。</li>
+  <li><span class="tag req">必須</span><span class="num">5</span> <span class="btn">登録</span> を押します。「メールアドレスの確認」画面に切り替わります（2.3へ）。</li>
+</ol>
+<figure class="w60">
+  <img src="images/03-signup-zoom.png" alt="アカウント作成画面">
+  <figcaption><b>図2-1</b> アカウント作成画面（入力後）。<span class="num">6</span> 既にアカウントをお持ちの方 を押すとログイン画面に戻ります。</figcaption>
+</figure>
+<figure class="w60">
+  <img src="images/03-signup-error-zoom.png" alt="パスワード条件のエラー表示">
+  <figcaption><b>図2-2</b> 条件を満たさない場合は、入力欄の下に赤字で理由が表示されます。修正すると消えます。</figcaption>
+</figure>
+
+<h2>2.3 手順（メールアドレスの確認画面）</h2>
+<ol class="steps">
+  <li><span class="tag req">必須</span>Outlook で、差出人 <code>no-reply@verificationemail.com</code>、件名 <b>Your verification code</b> のメールを開きます。本文の <b>Your confirmation code is</b> の後ろにある6桁の数字が確認コードです。
+    <div class="box note"><div class="t">メールが見つからないとき</div>受信トレイ直下ではなく「社外メール」や「迷惑メール」のフォルダーに振り分けられていることがあります。数分待っても届かない場合は、画面の <span class="btn">確認コードを再送信</span> を押してください（押した後60秒間は再度押せません）。</div>
+  </li>
+  <li><span class="tag req">必須</span><span class="num">2</span> 確認コード（6桁） の枠に、左から順に数字を入力します。1桁入れると自動で次の枠に移ります。メール本文の6桁をコピーして貼り付けても入力できます。<span class="num">1</span> のメールアドレスは自動で入り、変更できません。</li>
+  <li><span class="tag req">必須</span>6桁入力すると <span class="num">3</span> <span class="btn">確認</span> が押せるようになるので押します。</li>
+  <li>青いメッセージ「メールアドレスが確認されました。…」が表示されます。
+    <ul>
+      <li>「ホーム画面に移動します...」と出た場合: 自動でログインされ、約1.5秒後にホーム画面が開きます。<b>これで完了です。</b></li>
+      <li>「ログインページに移動します...」と出た場合: 約2秒後にログイン画面が開くので、登録したメールアドレスとパスワードでログインしてください（3章）。</li>
+    </ul>
+  </li>
+</ol>
+<figure class="w70">
+  <img src="images/04-verify-zoom.png" alt="メールアドレスの確認画面">
+  <figcaption><b>図2-3</b> メールアドレスの確認画面（コード入力後）。<span class="num">4</span> 確認コードを再送信、<span class="num">5</span> ログインページに戻る。</figcaption>
+</figure>
+<figure class="w60">
+  <img src="images/04-verify-done-zoom.png" alt="確認完了メッセージ">
+  <figcaption><b>図2-4</b> 確認が完了したときのメッセージ表示例。</figcaption>
+</figure>
+
+<div class="keep">
+<h2>2.4 想定どおりにならない場合</h2>
+<table class="grid keep">
+  <tr><th style="width:40%">表示・状況</th><th>対処</th></tr>
+  <tr><td>「このメールアドレスは既に登録されています。」</td><td>すでにアカウントがあります。ログイン画面からログインしてください。パスワードが分からない場合は 3.4「パスワードを忘れたとき」へ。</td></tr>
+  <tr><td>「登録に失敗しました。もう一度お試しください。」</td><td>会社のメールアドレス以外（@meltec.co.jp／@〜.mitsubishielectric.co.jp 以外）は登録できません。アドレスを確認して再度登録してください。それでも失敗する場合はサポートへ連絡してください。</td></tr>
+  <tr><td>「確認コードが正しくありません。」</td><td>最新のメールのコードを入力し直してください。再送信した場合は、最後に届いたメールのコードが有効です。</td></tr>
+  <tr><td>「確認コードの有効期限が切れています。…」</td><td><span class="btn">確認コードを再送信</span> を押し、新しいコードを入力してください。</td></tr>
+  <tr><td>確認画面を閉じてしまった</td><td>ログイン画面でメールアドレスとパスワードを入力してログインすると、確認画面に自動で移動します。</td></tr>
+</table>
+</div>
+
+<!-- ===================== 3 ===================== -->
+<h1>3. ログインする／ログアウトする／パスワードを忘れたとき</h1>
+
+<h2>3.1 ログインする</h2>
+<p><b>前提:</b> 2章でアカウント作成とメールアドレスの確認が済んでいること。</p>
+<ol class="steps">
+  <li><span class="tag req">必須</span>ブラウザで接続先 URL を開きます。ログイン画面が表示されます（ログイン中に開いた場合も、この画面を開いた時点でログアウト状態になります）。</li>
+  <li><span class="tag req">必須</span><span class="num">1</span> メールアドレス を入力します。</li>
+  <li><span class="tag req">必須</span><span class="num">2</span> パスワード を入力します。<span class="tag opt">任意</span><span class="num">3</span> 目のマークで入力内容を表示できます。</li>
+  <li><span class="tag req">必須</span><span class="num">4</span> <span class="btn">ログイン</span> を押します（Enter キーでも送信できます）。</li>
+  <li>ホーム画面（4章）が表示されれば完了です。</li>
+</ol>
+<figure class="w70">
+  <img src="images/01-login-zoom.png" alt="ログイン画面">
+  <figcaption><b>図3-1</b> ログイン画面。<span class="num">5</span> パスワードを忘れた、<span class="num">6</span> アカウントを作成。</figcaption>
+</figure>
+<div class="box">
+  <div class="t">ログイン状態の有効期間</div>
+  <p>ログインから24時間はブラウザを閉じても再ログインなしで利用できます。24時間を過ぎると自動的にログイン画面に戻るので、再度ログインしてください。</p>
+</div>
+
+<h2>3.2 想定どおりにならない場合（ログイン）</h2>
+<figure class="w60">
+  <img src="images/02-login-error-zoom.png" alt="ログインエラー表示">
+  <figcaption><b>図3-2</b> エラーは入力欄の上に赤い枠で表示されます。右の × で閉じられます。</figcaption>
+</figure>
+<table class="grid keep">
+  <tr><th style="width:40%">表示・状況</th><th>対処</th></tr>
+  <tr><td>「メールアドレスまたはパスワードが正しくありません。」</td><td>入力内容を確認して再入力してください。何度も失敗すると一時的にログインできなくなるので、数分〜15分ほど待ってから再度お試しください。パスワードが分からない場合は 3.4 へ。</td></tr>
+  <tr><td>「メールアドレスの確認が必要です。…」と出て確認画面に移動した</td><td>アカウント作成時の確認コード入力が済んでいません。2.3 の手順で確認コードを入力してください。</td></tr>
+  <tr><td>「ログイン試行が多すぎます。後でもう一度お試しください。」</td><td>しばらく時間をおいてから再度お試しください。</td></tr>
+  <tr><td>「ネットワーク接続エラーです。…」／画面自体が表示されない</td><td>社内ネットワークに接続しているか確認してください。社外からは利用できません。</td></tr>
+</table>
+
+<h2>3.3 ログアウトする</h2>
+<ol class="steps">
+  <li><span class="tag req">必須</span>ホーム画面の右上にある <span class="btn">ログアウト</span> を押します（RAGチャット画面では、先に <span class="btn">ホームへ戻る</span> を押します）。</li>
+  <li>ログイン画面に戻れば完了です。共用PCでは、離席時に必ずログアウトしてください。</li>
+</ol>
+<figure class="w60">
+  <img src="images/06-home-header-zoom.png" alt="ホーム画面右上のログアウト">
+  <figcaption><b>図3-3</b> ホーム画面右上。ログイン中の名前とメールアドレスの右に <span class="num">5</span> ログアウト があります。</figcaption>
+</figure>
+
+<h2>3.4 パスワードを忘れたとき（パスワードリセット）</h2>
+<p><b>前提:</b> 登録したメールアドレスでメールを受信できること。</p>
+<ol class="steps">
+  <li><span class="tag req">必須</span>ログイン画面の <span class="btn">パスワードを忘れた</span> を押します。「パスワードリセット」画面（ステップ1: メール送信）が開きます。</li>
+  <li><span class="tag req">必須</span><span class="num">1</span> メールアドレスを入力し、<span class="num">2</span> <span class="btn">リセットコード送信</span> を押します。「パスワードリセットコードがメールアドレスに送信されました」と表示され、ステップ2の入力欄に切り替わります。</li>
+  <li><span class="tag req">必須</span>メールで届いたリセットコード（数字）を <span class="num">1</span> メールで受け取ったコード に入力します。</li>
+  <li><span class="tag req">必須</span><span class="num">2</span> に新しいパスワード（8文字以上、大文字・小文字・数字・記号を含む）を入力し、<span class="num">3</span> に同じパスワードをもう一度入力します。</li>
+  <li><span class="tag req">必須</span><span class="num">4</span> <span class="btn">パスワードリセット</span> を押します。「パスワードが正常にリセットされました。…」と表示され、約2秒後にログイン画面に戻ります。新しいパスワードでログインしてください。</li>
+  <li><span class="tag opt">任意</span>メールアドレスを間違えた場合は <span class="num">5</span> <span class="btn">メールアドレスを変更する</span> でステップ1に戻れます。</li>
+</ol>
+<div class="cols">
+  <figure><img src="images/05-forgot-step1-zoom.png" alt="パスワードリセット ステップ1"><figcaption><b>図3-4</b> ステップ1（メール送信）</figcaption></figure>
+  <figure><img src="images/05-forgot-step2-zoom.png" alt="パスワードリセット ステップ2"><figcaption><b>図3-5</b> ステップ2（パスワード変更）</figcaption></figure>
+</div>
+<table class="grid keep">
+  <tr><th style="width:40%">表示・状況</th><th>対処</th></tr>
+  <tr><td>「このメールアドレスで登録されたアカウントが見つかりません。」</td><td>アドレスを確認してください。未登録の場合は 2章 の手順でアカウントを作成します。</td></tr>
+  <tr><td>「メールアドレスが確認されていないため、パスワードをリセットできません。」</td><td>アカウント作成時の確認コード入力が済んでいません。サポートへ連絡してください。</td></tr>
+  <tr><td>「リセットコードが正しくありません。」／「…有効期限が切れています。」</td><td>最新のメールのコードを入力してください。期限切れの場合は <span class="btn">メールアドレスを変更する</span> でステップ1に戻り、もう一度コードを送信します。</td></tr>
+  <tr><td>「試行回数が多すぎます。…」</td><td>しばらく時間をおいてから再度お試しください。</td></tr>
+</table>
+
+<!-- ===================== 4 ===================== -->
+<h1>4. ホーム画面の見方</h1>
+<p>ログインすると最初に表示される画面です。ここから RAGチャットに進みます。</p>
+<figure class="w90">
+  <img src="images/06-home.png" alt="ホーム画面">
+  <figcaption><b>図4-1</b> ホーム画面（全体）</figcaption>
+</figure>
+<table class="grid">
+  <tr><th style="width:8%">番号</th><th style="width:28%">名称</th><th>説明</th></tr>
+  <tr><td><span class="num">1</span></td><td>質問の入力欄</td><td>ここに質問を入力して <span class="num">2</span> を押すと、入力した文をそのまま RAGチャットの入力欄に引き継いで開きます（RAGチャット側で <span class="btn">送信</span> を押すと送信されます）。</td></tr>
+  <tr><td><span class="num">2</span></td><td><span class="btn">質問する</span></td><td>RAGチャット画面を開きます。入力欄が空でも開けます。</td></tr>
+  <tr><td><span class="num">3</span></td><td>質問例</td><td>押すと、その質問文を引き継いで RAGチャットを開きます。</td></tr>
+  <tr><td><span class="num">4</span></td><td>RAGチャット（機能カード）</td><td>「利用可能」の機能です。カード内の <span class="btn">今すぐ開く</span> または カード全体を押すと RAGチャットが開きます。隣の「トラブルシューティング」は開発中で、現在は利用できません。</td></tr>
+  <tr><td><span class="num">5</span></td><td><span class="btn">ログアウト</span></td><td>ログアウトしてログイン画面に戻ります（3.3）。</td></tr>
+  <tr><td><span class="num">6</span></td><td>はじめての方へ — 使い方ガイド</td><td>3ステップの簡単な説明です。見出しを押すと開閉でき、状態は次回以降も記憶されます。「参考資料の見方」「Knowledge Baseとは」を押すと補足説明が小窓で開きます。</td></tr>
+  <tr><td><span class="num">7</span></td><td>運営からのお知らせ</td><td>メンテナンス予定や更新情報が表示されます。項目を押すと本文が開き、<span class="btn">すべて見る →</span> で一覧画面に移動します。お知らせがないときは「現在お知らせはありません。」と表示されます。</td></tr>
+</table>
+<figure class="w80">
+  <img src="images/06-home-hero-zoom.png" alt="ホーム画面の質問入力部分">
+  <figcaption><b>図4-2</b> 質問の入力欄（拡大）</figcaption>
+</figure>
+
+<!-- ===================== 5 ===================== -->
+<h1>5. 質問を送る</h1>
+
+<h2>5.1 RAGチャット画面を開く</h2>
+<p><b>前提:</b> ログイン済みでホーム画面が表示されていること。</p>
+<ol class="steps">
+  <li><span class="tag req">必須</span>ホーム画面で「RAGチャット」カードの <span class="btn">今すぐ開く</span> を押します（または <span class="btn">質問する</span>／質問例を押します）。</li>
+  <li>RAGチャット画面が開きます。初めてのときは左の履歴欄に「セッションはまだありません」と表示されます。</li>
+</ol>
+<figure class="w90">
+  <img src="images/07-chat-empty.png" alt="RAGチャット画面（初期状態）">
+  <figcaption><b>図5-1</b> RAGチャット画面（初期状態）</figcaption>
+</figure>
+<table class="grid">
+  <tr><th style="width:8%">番号</th><th style="width:26%">名称</th><th>説明</th></tr>
+  <tr><td><span class="num">1</span></td><td><span class="btn">新規チャット</span></td><td>新しいチャット（セッション）を始めます。表示中の会話は履歴に残ります。</td></tr>
+  <tr><td><span class="num">2</span></td><td>履歴欄</td><td>過去のチャットの一覧です（9章）。</td></tr>
+  <tr><td><span class="num">3</span></td><td>質問例</td><td>押すと入力欄にその文が入ります。そのまま送信するか、書き換えてから送信します。</td></tr>
+  <tr><td><span class="num">4</span></td><td><span class="btn">絞り込み</span></td><td>資料の種類・機種で検索対象を絞り込みます（6章）。</td></tr>
+  <tr><td><span class="num">5</span></td><td>質問の入力欄</td><td>質問を入力します。Enter で送信、Shift+Enter で改行です。</td></tr>
+  <tr><td><span class="num">6</span></td><td><span class="btn">送信</span></td><td>質問を送ります。入力欄が空のときは押せません。</td></tr>
+  <tr><td><span class="num">7</span></td><td><span class="btn">こうなってほしい</span></td><td>使い方や表示についての要望を運用チームに送ります（8.3）。</td></tr>
+  <tr><td><span class="num">8</span></td><td><span class="btn">ホームへ戻る</span></td><td>ホーム画面に戻ります。</td></tr>
+</table>
+
+<h2>5.2 質問を入力して送る</h2>
+<ol class="steps">
+  <li><span class="tag req">必須</span><span class="num">1</span> 入力欄に質問を入力します。困りごとを文章のまま書いて構いません（例: 現場代理人が着工時に用意する書類は？）。改行したいときは Shift+Enter を押します。</li>
+  <li><span class="tag opt">任意</span>機種や資料の種類が分かっているときは、先に <span class="btn">絞り込み</span> で指定しておくと精度が上がります（6章）。</li>
+  <li><span class="tag req">必須</span><span class="num">2</span> <span class="btn">送信</span> を押すか、Enter キーを押します。</li>
+  <li>右側に自分の質問が青い吹き出しで表示され、左側に「考え中...」が出ます。送信ボタンは「送信中」になり、回答が出るまで次の質問は送れません。</li>
+  <li>回答が表示されれば完了です。本文は少しずつ表示され、表示が終わると「参考資料」と評価ボタンが出ます（7章）。1回目の送信後、左の履歴欄に今回のチャットが追加されます。</li>
+</ol>
+<figure class="w90">
+  <img src="images/11-chat-typed-zoom.png" alt="質問入力後の入力欄">
+  <figcaption><b>図5-2</b> 質問を入力した状態。入力欄右端の × で入力を消せます。</figcaption>
+</figure>
+<figure class="w90">
+  <img src="images/12-chat-thinking.png" alt="回答を待っている状態">
+  <figcaption><b>図5-3</b> 送信直後（「考え中...」の表示）。通常は数秒〜十数秒で回答が表示されます。</figcaption>
+</figure>
+<div class="box ok">
+  <div class="t">精度を上げる質問のコツ</div>
+  <ul>
+    <li><b>機種・部位・状況</b>を書く（例: 「AXIEZ の乗場ドアで、開閉時に異音がする」）。</li>
+    <li>同じチャット内で続けて質問すると、直前のやり取りを踏まえて回答します。別の話題に移るときは <span class="btn">新規チャット</span> を押します。</li>
+    <li>資料の種類が分かっているときは「絞り込み」を使います（6章）。</li>
+  </ul>
+</div>
+
+<h2>5.3 追加の情報を求められたとき（聞き返し）</h2>
+<p>「異音がする」「動かない」のような症状だけの質問で、機種・部位・状況が書かれていない場合、回答の代わりに<b>「追加で教えてください」</b>が表示されることがあります。</p>
+<ol class="steps">
+  <li><span class="num">1</span> 「追加で教えてください」の下に、不足している項目が並びます。</li>
+  <li><span class="tag req">必須</span>分かる範囲で情報を入力欄に書いて送信します（例: 「AXIEZ、乗場ドア、開閉時」）。<span class="tag opt">任意</span><span class="num">2</span> 項目のボタンを押すと、その項目の文が入力欄に入るので、続けて内容を書き足せます。</li>
+  <li>追記して送ると、直前の質問と合わせて検索され、回答が表示されます。</li>
+</ol>
+<figure class="w60">
+  <img src="images/20-clarify-zoom.png" alt="聞き返しの表示例">
+  <figcaption><b>図5-4</b> 聞き返しの表示例（質問「異音がする」の場合）</figcaption>
+</figure>
+
+<h2>5.4 「条件に合う頁が十分に見つかりませんでした」と出たとき</h2>
+<p>検索の結果が弱いときは、見当違いの回答をしないよう、断定した回答をせずに「参考候補（低信頼）」と注意文が表示されます。</p>
+<figure class="w80">
+  <img src="images/21-notfound-zoom.png" alt="見つからないときの表示例">
+  <figcaption><b>図5-5</b> 見つからないときの表示例。<span class="num">1</span> 参考候補（低信頼）、<span class="num">2</span> 「検索が弱いため断定回答はしていません」、<span class="num">3</span> 資料の絞り込み中のみ表示される「資料カテゴリの絞り込みを外す」。</figcaption>
+</figure>
+<ul>
+  <li>機種・症状・対象部位を具体的に書き直して、もう一度質問してください。</li>
+  <li>資料の種類で絞り込んでいる場合は、<span class="num">3</span> <span class="btn">資料カテゴリの絞り込みを外す</span> を押すと絞り込みが解除され、絞り込みパネルが開きます。そのまま再度質問を送ってください。</li>
+  <li>「参考候補（低信頼）」の資料名を押すと、その PDF を開いて自分で確認できます（7.3）。</li>
+</ul>
+
+<div class="keep">
+<h2>5.5 想定どおりにならない場合（質問の送信）</h2>
+<table class="grid keep">
+  <tr><th style="width:40%">表示・状況</th><th>対処</th></tr>
+  <tr><td>入力欄の下に赤い帯で「エラーが発生しました: …」</td><td>右端の × で閉じ、少し待ってからもう一度送信してください。送った質問は画面に残っています。繰り返し発生する場合は、表示されたメッセージを添えてサポートへ連絡してください。</td></tr>
+  <tr><td>「セッション取得に失敗しました: …」</td><td>履歴の読み込みに失敗しています。ページを再読み込み（F5）してください。改善しない場合はサポートへ。</td></tr>
+  <tr><td>送信ボタンが押せない</td><td>入力欄が空か、前の質問の回答待ち（「送信中」）です。回答が表示されるまで待ってください。</td></tr>
+  <tr><td>ログイン画面に戻ってしまう</td><td>ログインの有効期間（24時間）が切れています。再度ログインしてください。</td></tr>
+  <tr><td>「考え中...」のまま長時間変わらない</td><td>1分程度待っても変わらない場合は、ページを再読み込みし、履歴からそのチャットを開いて回答の有無を確認してください。回答がなければ再度質問を送ってください。</td></tr>
+</table>
+</div>
+
+<!-- ===================== 6 ===================== -->
+<h1>6. 資料や機種を絞り込む</h1>
+
+<h2>6.1 できること</h2>
+<ul>
+  <li><b>資料</b>（資料の種類）: 複数選択できます。未選択のときはすべての資料が対象です。</li>
+  <li><b>機種</b>: 1つだけ選択できます。未選択のときは機種を限定せずに検索します（ただし、取扱外の機種の資料はもともと検索対象外です）。</li>
+  <li>絞り込みは<b>これから送る質問</b>に適用されます。同じチャット内で質問ごとに変えられます。</li>
+</ul>
+<div class="box note">
+  <div class="t">機種を選ばずに質問した場合</div>
+  <p>回答の先頭に「※機種未指定のため、一般資料・取扱機種スコープ内の候補を含みます。特定機種の事実としては断定しないでください。」と表示されます。特定機種について確認したいときは、機種を選んで質問してください。</p>
+</div>
+
+<h2>6.2 手順</h2>
+<ol class="steps">
+  <li><span class="tag req">必須</span>入力欄の上にある <span class="num">1</span> <span class="btn">絞り込み</span> を押します。絞り込みパネルが開きます。</li>
+  <li><span class="tag opt">任意</span><span class="num">2</span> 「資料」の行で、対象にしたい資料の種類を押します。押すたびに選択／解除が切り替わり、選択中は青色になります。複数選べます。</li>
+  <li><span class="tag opt">任意</span><span class="num">3</span> 「機種」の行で、対象の機種を1つ押します。選ぶと「選択中: ○○（名前の完全一致。対象: …。共通資料も含む）」の説明が表示されます。別の機種を押すと切り替わり、同じ機種をもう一度押すと解除されます。</li>
+  <li><span class="tag opt">任意</span>もう一度 <span class="btn">絞り込み</span> を押すとパネルが閉じます。選択した内容はボタンの横に青い札で残ります。</li>
+  <li><span class="tag req">必須</span>質問を入力して送信します。以降の質問にはこの絞り込みが適用されます。</li>
+</ol>
+<figure>
+  <img src="images/08-filter-open-zoom.png" alt="絞り込みパネル">
+  <figcaption><b>図6-1</b> 絞り込みパネル（何も選んでいない状態）。<span class="num">2</span> 資料: C資料／TI／据付基準／据付場用図／災害事例集／Qシート／据付ノート／現場代理人業務マニュアル／品質管理業務マニュアル。<span class="num">3</span> 機種: AXIEZ／AXIEZ-LINKs／NEXCUBE／メルシティ／メルワイド／エスカレーター。</figcaption>
+</figure>
+<figure>
+  <img src="images/09-filter-selected-zoom.png" alt="絞り込みを選択した状態">
+  <figcaption><b>図6-2</b> 「据付基準」と「AXIEZ」を選んだ状態。<span class="num">3</span> 選択中の機種の説明、<span class="num">4</span> すべての機種に戻す（機種のみ解除）。絞り込みボタンには選択数（2）が表示されます。</figcaption>
+</figure>
+
+<h2>6.3 絞り込みを解除する</h2>
+<ul>
+  <li>パネルを閉じた状態: ボタン横の札（例: <span class="btn">据付基準 ×</span>）を押すと、その項目だけ解除されます。<span class="btn">× すべてクリア</span> を押すと全部解除されます。</li>
+  <li>パネルを開いた状態: 選択中の項目をもう一度押すと解除されます。機種は <span class="btn">すべての機種に戻す</span> でも解除できます。</li>
+</ul>
+<figure class="w90">
+  <img src="images/10-filter-pills-zoom.png" alt="絞り込みを閉じた状態の表示">
+  <figcaption><b>図6-3</b> パネルを閉じた状態。<span class="num">2</span><span class="num">3</span> 選択中の項目（押すと解除）、<span class="num">4</span> すべてクリア。</figcaption>
+</figure>
+<table class="grid keep">
+  <tr><th style="width:40%">状況</th><th>対処</th></tr>
+  <tr><td>目的の機種が一覧にない</td><td>この画面で選べる機種は、担当部門の取扱機種6項目のみです。一覧にない機種の資料は検索対象外です。必要な場合はサポートへ相談してください。</td></tr>
+  <tr><td>絞り込むと「条件に合う頁が十分に見つかりませんでした」になる</td><td>資料の種類の絞り込みを外して再度質問してください（5.4）。</td></tr>
+  <tr><td>新規チャットを押したら絞り込みが残っている</td><td>絞り込みはチャットを切り替えても残ります。不要なら「すべてクリア」で解除してください。</td></tr>
+</table>
+
+<!-- ===================== 7 ===================== -->
+<h1>7. 回答と参考資料を確認する</h1>
+
+<h2>7.1 回答の見方</h2>
+<figure class="w90">
+  <img src="images/13-chat-answer.png" alt="回答の全体">
+  <figcaption><b>図7-1</b> 回答の全体（表示例）</figcaption>
+</figure>
+<table class="grid keep">
+  <tr><th style="width:8%">番号</th><th style="width:26%">名称</th><th>説明</th></tr>
+  <tr><td><span class="num">1</span></td><td>該当頁候補</td><td>回答のもとになった資料の<b>ページ</b>の候補です（最大5件）。資料名・種類・ページ番号・関連度（%）・本文の抜粋が並びます。資料名を押すと、そのページを開いた状態で PDF が別タブに表示されます（7.3）。</td></tr>
+  <tr><td><span class="num">2</span></td><td>注意書き</td><td>機種を指定せずに質問したときに表示されます（6.1）。</td></tr>
+  <tr><td>—</td><td>回答本文</td><td>資料の内容を「資料から分かること」「注意・不明点」などに整理した要約です。</td></tr>
+  <tr><td><span class="num">3</span></td><td>参考資料</td><td>回答が参照した資料の一覧です。関連度の高い順に上位3件が表示されます。資料名を押すと PDF が別タブで開きます。</td></tr>
+  <tr><td><span class="num">4</span></td><td><span class="btn">さらに N 件表示</span></td><td>4件目以降の参考資料を表示します。<span class="btn">折りたたむ</span> で元に戻ります。</td></tr>
+  <tr><td><span class="num">5</span></td><td>操作ボタン</td><td>左から、回答のコピー、<span class="btn">解けた</span>、<span class="btn">解けない</span>（8章）。右端は回答時刻です。</td></tr>
+</table>
+<div class="box note">
+  <div class="t">関連度（%）の見方</div>
+  <p>%は質問と資料の内容がどれくらい近いかの目安です。数値が高いほど関連が強い可能性がありますが、正しさを保証するものではありません。必ず原本で確認してください。</p>
+</div>
+
+<h2>7.2 参考資料の一覧を広げる</h2>
+<ol class="steps">
+  <li><span class="tag opt">任意</span><span class="num">3</span> <span class="btn">さらに N 件表示</span> を押します。残りの資料が表示されます。</li>
+  <li><span class="tag opt">任意</span><span class="btn">折りたたむ</span> を押すと上位3件だけの表示に戻ります。</li>
+</ol>
+<figure class="w80">
+  <img src="images/14-citations-zoom.png" alt="参考資料を広げた状態">
+  <figcaption><b>図7-2</b> 参考資料をすべて表示した状態。<span class="num">2</span> 資料名を押すと PDF が開きます。</figcaption>
+</figure>
+
+<h2>7.3 資料（PDF）を開いて原本を確認する</h2>
+<p><b>前提:</b> ログイン中であること（資料はログインした利用者しか開けません）。</p>
+<ol class="steps">
+  <li><span class="tag req">必須</span>「該当頁候補」または「参考資料」の資料名（青い文字）を押します。</li>
+  <li>新しいタブが開き、「文書を開いています…」と表示された後、PDF がブラウザで表示されます。「該当頁候補」から開いた場合は該当ページが表示されます（PDF の表示設定によっては先頭ページになることがあります。その場合は「該当頁候補」に書かれたページ番号 p.○ を参照してください）。</li>
+  <li><span class="tag opt">任意</span>確認が終わったら、そのタブを閉じてチャットのタブに戻ります。</li>
+</ol>
+<figure class="w60">
+  <img src="images/22-doc-opening-zoom.png" alt="文書を開いています">
+  <figcaption><b>図7-3</b> 資料を開いている途中の表示。数秒で PDF に切り替わります。</figcaption>
+</figure>
+<div class="box warn">
+  <div class="t">資料の URL について</div>
+  <ul>
+    <li>PDF を表示したタブの URL は<b>発行から約5分で無効</b>になります。無効になった後に再読み込みすると「AccessDenied」などの英語のエラーが表示されます。チャット画面に戻り、資料名をもう一度押して開き直してください。</li>
+    <li>PDF の URL を他の人に送っても、相手は開けません（開けても5分以内に限られます）。資料を共有したいときは、資料名（例: GM-01-05-D.pdf）を伝えてください。</li>
+    <li>資料には「社外秘」などの区分があります。取り扱いは各資料の表示に従ってください。</li>
+  </ul>
+</div>
+<table class="grid keep">
+  <tr><th style="width:40%">表示・状況</th><th>対処</th></tr>
+  <tr><td>「ログイン画面に移動します…」と出てログイン画面が開いた</td><td>ログインの有効期間が切れています。ログインすると、開こうとした資料に自動で戻ります。</td></tr>
+  <tr><td>「文書を開けませんでした」</td><td><span class="btn">チャットに戻る</span> を押して戻り、もう一度資料名を押してください。繰り返し発生する場合は資料名を添えてサポートへ連絡してください。</td></tr>
+  <tr><td>新しいタブが開かない</td><td>ブラウザのポップアップブロックを確認してください。アドレスバー右端の表示から許可できます。</td></tr>
+</table>
+
+<h2>7.4 回答をコピーする</h2>
+<ol class="steps">
+  <li><span class="tag opt">任意</span>回答の下にある <span class="num">1</span> コピーのマーク（四角が重なった形）を押します。アイコンが緑のチェックに変わり、回答本文がクリップボードにコピーされます。</li>
+  <li>メールやメモに貼り付けて使えます。参考資料の一覧はコピーに含まれないので、必要なら資料名を別途控えてください。</li>
+</ol>
+<figure class="w80">
+  <img src="images/13-feedback-bar-zoom.png" alt="回答下の操作ボタン">
+  <figcaption><b>図7-4</b> 回答の下の操作ボタン。<span class="num">1</span> コピー、<span class="num">2</span> 解けた、<span class="num">3</span> 解けない。</figcaption>
+</figure>
+
+<!-- ===================== 8 ===================== -->
+<h1>8. 回答への評価・要望を送る</h1>
+<p>評価は<b>任意</b>ですが、送っていただくと検索精度や資料の整備に活かされます。評価はチャットごとに記録され、後から変更できます。</p>
+
+<h2>8.1 疑問が解けたとき（解けた）</h2>
+<ol class="steps">
+  <li><span class="tag opt">任意</span>回答の下の <span class="num">1</span> <span class="btn">解けた</span> を押します。</li>
+  <li>ボタンが緑色になり、横に <span class="num">2</span> 「記録しました」と表示されます。画面上部に「ありがとうございます。評価を記録しました。」と一時的に表示されます。これで完了です。</li>
+</ol>
+<figure class="w80">
+  <img src="images/17-feedback-good-zoom.png" alt="解けたを押した状態">
+  <figcaption><b>図8-1</b> 「解けた」を押した後の表示</figcaption>
+</figure>
+
+<h2>8.2 疑問が解けなかったとき（解けない）</h2>
+<ol class="steps">
+  <li><span class="tag opt">任意</span>回答の下の <span class="num">1</span> <span class="btn">解けない</span> を押します。この時点で評価は記録済みです。続けて「詳しく教えてください（任意）」のパネルが開きます。</li>
+  <li><span class="tag opt">任意</span><span class="num">2</span> 当てはまる理由を1つ押します: <b>資料が違う</b>（別の資料・機種が出た）／<b>疑問が解けない</b>（読んでも判断できない）／<b>回答がおかしい</b>（要約や断定が違う）／<b>その他</b>。押すと「理由を記録しました。」と表示されます。</li>
+  <li><span class="tag opt">任意</span><span class="num">3</span> 補足（200字まで）に具体的な内容を書き、<span class="num">4</span> <span class="btn">補足を送る</span> を押します（Ctrl+Enter でも送れます）。「補足を記録しました。」と表示されます。</li>
+  <li><span class="tag opt">任意</span><span class="num">5</span> <span class="btn">閉じる</span> でパネルを閉じます。理由や補足を書かずに閉じても、「解けない」の評価は残ります。</li>
+</ol>
+<figure class="w80">
+  <img src="images/15-feedback-bad-zoom.png" alt="解けないを押した後のパネル">
+  <figcaption><b>図8-2</b> 「解けない」を押した後に開くパネル</figcaption>
+</figure>
+<figure class="w80">
+  <img src="images/16-feedback-bad-done-zoom.png" alt="理由と補足を送った後の表示">
+  <figcaption><b>図8-3</b> 理由と補足を送った後。<span class="num">1</span> 選んだ理由、<span class="num">2</span> 補足、<span class="num">3</span> 理由・補足を編集（押すとパネルが再び開きます）。</figcaption>
+</figure>
+<div class="box">
+  <div class="t">評価を変えたいとき</div>
+  <p>もう一方のボタン（<span class="btn">解けた</span>／<span class="btn">解けない</span>）を押すと評価が置き換わります。「解けた」に変えると、理由・補足は消えます。</p>
+</div>
+<table class="grid keep">
+  <tr><th style="width:40%">表示・状況</th><th>対処</th></tr>
+  <tr><td>「評価の送信に失敗しました。もう一度お試しください。」</td><td>少し待ってからもう一度ボタンを押してください。改善しない場合はサポートへ。</td></tr>
+  <tr><td>ボタンを押しても反応しない</td><td>回答本文の表示が終わるまで待ってください。直前の評価を送信中の間も押せません。</td></tr>
+</table>
+
+<h2>8.3 使い方・表示についての要望を送る（こうなってほしい）</h2>
+<p>回答の評価とは別に、「候補資料をもっと上に出してほしい」のような要望を運用チームに送れます。</p>
+<ol class="steps">
+  <li><span class="tag opt">任意</span>RAGチャット画面右上の <span class="btn">こうなってほしい</span> を押します。入力用の小窓が開きます。</li>
+  <li><span class="tag req">必須</span><span class="num">1</span> 要望を入力します（1000字まで）。</li>
+  <li><span class="tag req">必須</span><span class="num">2</span> <span class="btn">送信</span> を押します。「送信しました。ありがとうございます」と表示され、小窓は自動で閉じます。</li>
+  <li><span class="tag opt">任意</span>送らずにやめるときは <span class="num">3</span> <span class="btn">閉じる</span>、右上の ×、または Esc キーで閉じます。</li>
+</ol>
+<figure class="w60">
+  <img src="images/19-wish-zoom.png" alt="こうなってほしいの入力画面">
+  <figcaption><b>図8-4</b> 「こうなってほしい」の入力画面</figcaption>
+</figure>
+
+<!-- ===================== 9 ===================== -->
+<h1>9. 履歴（過去のチャット）を開く</h1>
+
+<h2>9.1 履歴欄の見方</h2>
+<p>RAGチャット画面の左側に、自分の過去のチャットが新しい順に並びます。他の利用者の履歴は表示されません。</p>
+<figure class="w60">
+  <img src="images/18-sessions-zoom.png" alt="履歴欄">
+  <figcaption><b>図9-1</b> 履歴欄。<span class="num">1</span> 新規チャット、<span class="num">2</span> チャットの項目（見出し）、<span class="num">3</span> 削除（項目にマウスを重ねると表示）、<span class="num">4</span> メッセージ件数と削除までの残り日数。</figcaption>
+</figure>
+<ul>
+  <li><b>見出し</b>: そのチャットの最初の質問をもとに自動で付きます。</li>
+  <li><b>N件</b>: そのチャットに含まれる質問と回答の合計数です。</li>
+  <li><b>残り N 日</b>: 履歴は最後のやり取りから<b>60日</b>で自動的に削除されます。残り日数が少ない履歴は、必要なら回答をコピーして保存してください（7.4）。</li>
+</ul>
+
+<h2>9.2 過去のチャットを開く</h2>
+<ol class="steps">
+  <li><span class="tag req">必須</span>履歴欄の <span class="num">2</span> 開きたい項目を押します。</li>
+  <li>右側にそのチャットの質問と回答が表示されます。選択中の項目は青い背景で示されます。</li>
+  <li><span class="tag opt">任意</span>入力欄に質問を入力して送ると、そのチャットの続きとして質問できます。</li>
+</ol>
+
+<h2>9.3 新しいチャットを始める</h2>
+<ol class="steps">
+  <li><span class="tag req">必須</span><span class="num">1</span> <span class="btn">新規チャット</span> を押します。右側が「何をお調べしますか？」の初期表示に戻ります。</li>
+  <li>質問を送ると、新しい項目として履歴欄に追加されます。</li>
+</ol>
+
+<h2>9.4 履歴を削除する</h2>
+<ol class="steps">
+  <li><span class="tag opt">任意</span>履歴欄の項目にマウスを重ねると、右端に <span class="num">3</span> × が表示されます。× を押します。</li>
+  <li>「このセッションを削除しますか？」の確認が表示されます。<span class="btn">OK</span> を押すと削除されます（<span class="btn">キャンセル</span> でやめられます）。</li>
+  <li>一覧から消えれば完了です。削除した履歴は元に戻せません。</li>
+</ol>
+<table class="grid keep">
+  <tr><th style="width:40%">表示・状況</th><th>対処</th></tr>
+  <tr><td>「メッセージ取得に失敗しました」</td><td>もう一度項目を押してください。改善しない場合はページを再読み込みしてください。</td></tr>
+  <tr><td>「セッション削除に失敗しました」</td><td>少し待ってから再度お試しください。</td></tr>
+  <tr><td>「指定されたセッションを開けませんでした」</td><td>リンクなどから開いたチャットが存在しないか、自分のものではありません。履歴欄から開き直してください。</td></tr>
+  <tr><td>履歴欄に「読み込み中...」のまま表示されない</td><td>ページを再読み込みしてください。</td></tr>
+</table>
+
+<!-- ===================== 10 ===================== -->
+<h1>10. 困ったときは</h1>
+
+<h2>10.1 症状別の対処</h2>
+<table class="grid">
+  <tr><th style="width:34%">症状</th><th style="width:40%">まず試すこと</th><th>それでも直らないとき</th></tr>
+  <tr><td>URL を開いても画面が表示されない／接続できない</td><td>社内ネットワークに接続した社用PCか確認し、ブラウザを再起動して開き直す。</td><td>サポートへ連絡（接続元の制限の可能性）。</td></tr>
+  <tr><td>アカウントを作れない（登録に失敗）</td><td>会社のメールアドレスか、パスワード条件を満たすか確認（2章）。</td><td>サポートへ連絡（メールアドレスを添える）。</td></tr>
+  <tr><td>確認コード／リセットコードのメールが届かない</td><td>「社外メール」「迷惑メール」フォルダーを確認。再送信を押す。</td><td>サポートへ連絡。</td></tr>
+  <tr><td>ログインできない</td><td>3.2 の表を確認。パスワードが不明ならリセット（3.4）。</td><td>サポートへ連絡。</td></tr>
+  <tr><td>質問を送ってもエラーになる</td><td>× で閉じて再送信。ページを再読み込み。</td><td>エラーの文言と質問文を添えてサポートへ。</td></tr>
+  <tr><td>回答が的外れ／資料が違う</td><td>機種・部位・状況を具体的に書き直す。絞り込みを見直す（6章）。<span class="btn">解けない</span> と理由を送る（8.2）。</td><td>「こうなってほしい」で要望を送る（8.3）。</td></tr>
+  <tr><td>資料（PDF）が開けない</td><td>チャットに戻って資料名を押し直す（URL は約5分で無効）。</td><td>資料名を添えてサポートへ。</td></tr>
+  <tr><td>履歴が消えた</td><td>60日を過ぎた履歴は自動削除されます（9.1）。</td><td>—</td></tr>
+  <tr><td>「トラブルシューティング」を使いたい</td><td>現在は開発中で利用できません。</td><td>公開時期はお知らせを確認。</td></tr>
+</table>
+
+<h2>10.2 問い合わせ先と伝える内容</h2>
+<div class="box ok keep">
+  <div class="t">Ele-Knowledge サポート</div>
+  <p>メール: <b>b_ele-knowledge-support@meltec.co.jp</b></p>
+  <p>問い合わせの際は、次の内容を書いていただくと調査が早く進みます。</p>
+  <ol>
+    <li>発生日時（例: 9月9日 16:30 ごろ）</li>
+    <li>行っていた操作（例: 「据付基準」で絞り込んで質問を送った）</li>
+    <li>入力した質問文（差し支えない範囲で）</li>
+    <li>画面に表示されたメッセージ（そのままの文言）と、可能ならスクリーンショット</li>
+    <li>ログインに使ったメールアドレス</li>
+  </ol>
+  <p class="small">※ パスワードは絶対に書かないでください。サポートがパスワードを尋ねることもありません。</p>
+</div>
+
+<!-- ===================== 付録 ===================== -->
+<h1>付録A. 画面に出る主なメッセージ一覧</h1>
+<table class="grid">
+  <tr><th style="width:44%">メッセージ</th><th style="width:16%">表示場所</th><th>意味・対処</th></tr>
+  <tr><td>ありがとうございます。評価を記録しました。</td><td>チャット</td><td>「解けた」が記録されました。</td></tr>
+  <tr><td>理由を記録しました。補足があれば続けて書けます。</td><td>チャット</td><td>「解けない」の理由が記録されました。</td></tr>
+  <tr><td>補足を記録しました。</td><td>チャット</td><td>補足が記録されました。</td></tr>
+  <tr><td>要望を送信しました。ありがとうございます。</td><td>チャット</td><td>「こうなってほしい」の要望が送られました。</td></tr>
+  <tr><td>評価の送信に失敗しました。もう一度お試しください。</td><td>チャット</td><td>時間をおいて再度押してください。</td></tr>
+  <tr><td>エラーが発生しました: …</td><td>チャット（赤い帯）</td><td>質問の送信に失敗しました。再送信してください。</td></tr>
+  <tr><td>該当ページを探すために教えてください</td><td>回答</td><td>聞き返しです。機種・部位・状況を追記して送ってください（5.3）。</td></tr>
+  <tr><td>条件に合う頁が十分に見つかりませんでした。…</td><td>回答</td><td>質問を具体化するか、絞り込みを外して再質問（5.4）。</td></tr>
+  <tr><td>※機種未指定のため、一般資料・取扱機種スコープ内の候補を含みます。…</td><td>回答の先頭</td><td>機種を選ばずに質問したときの注意書き（6.1）。</td></tr>
+  <tr><td>このセッションを削除しますか？</td><td>履歴</td><td>OK で削除、キャンセルで中止（9.4）。</td></tr>
+  <tr><td>文書を開いています… ／ ログイン画面に移動します…</td><td>資料を開く時</td><td>そのまま待ちます。後者はログイン後に資料へ戻ります（7.3）。</td></tr>
+  <tr><td>メールアドレスが確認されました。…</td><td>確認画面</td><td>アカウント作成が完了しました（2.3）。</td></tr>
+  <tr><td>パスワードリセットコードがメールアドレスに送信されました</td><td>リセット画面</td><td>メールのコードを入力します（3.4）。</td></tr>
+</table>
+
+<h2>付録B. 用語</h2>
+<table class="grid">
+  <tr><th style="width:28%">用語</th><th>意味</th></tr>
+  <tr><td>RAGチャット</td><td>資料を検索し、その内容をもとに回答を作る方式（RAG: 検索拡張生成）のチャット画面。</td></tr>
+  <tr><td>Knowledge Base</td><td>回答の根拠となる技術資料の集まり。運用側が資料を登録・管理しています。</td></tr>
+  <tr><td>セッション（チャット）</td><td>1つの話題の質問と回答のまとまり。履歴欄の1項目に対応します。</td></tr>
+  <tr><td>該当頁候補</td><td>回答のもとになった資料ページの候補。資料名を押すとそのページを開けます。</td></tr>
+  <tr><td>参考資料</td><td>回答が参照した資料の一覧。関連度（%）付き。</td></tr>
+  <tr><td>C資料／TI／据付基準／据付場用図／災害事例集／Qシート／据付ノート／現場代理人業務マニュアル／品質管理業務マニュアル</td><td>絞り込みで選べる資料の種類。</td></tr>
+  <tr><td>取扱機種</td><td>この画面で検索対象になっている機種（AXIEZ／AXIEZ-LINKs／NEXCUBE／メルシティ／メルワイド／エスカレーター）。</td></tr>
+</table>
+<p class="small" style="margin-top:8mm">本書の内容は 2026年9月9日時点の画面（develop ブランチ コミット ba6d330）に基づきます。画面の更新により表示が変わる場合があります。最新の情報はホーム画面の「運営からのお知らせ」を確認してください。</p>
+
+</body>
+</html>
