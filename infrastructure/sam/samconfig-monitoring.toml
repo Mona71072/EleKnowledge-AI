@@ -1,0 +1,25 @@
+version = 0.1
+
+# 監視スタック（SNS + アラーム + メトリクスフィルタ + 保存クエリ）。issue #86。
+# 通知先メールはリポジトリに書かず、デプロイ時に --parameter-overrides で渡す:
+#   sam deploy --config-file samconfig-monitoring.toml --profile <profile> \
+#     --parameter-overrides Environment=dev ProjectName=EleKnowledge \
+#       AlertEmailPrimary=<mail1> AlertEmailSecondary=<mail2>
+# （--parameter-overrides は下記の parameter_overrides を丸ごと置き換えるため、全項目を渡す）
+
+[default]
+[default.deploy.parameters]
+stack_name = "eleknowledge-monitoring-dev"
+template_file = "monitoring-template.yaml"
+# Org SCP denies s3:PutBucketPublicAccessBlock, so resolve_s3 cannot be used.
+s3_bucket = "eleknowledge-sam-artifacts-dev-730972069979-ap-northeast-1"
+s3_prefix = "monitoring"
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+region = "ap-northeast-1"
+confirm_changeset = true
+disable_rollback = false
+tags = "Project=EleKnowledge Env=dev ManagedBy=SAM"
+parameter_overrides = [
+    "Environment=dev",
+    "ProjectName=EleKnowledge",
+]
