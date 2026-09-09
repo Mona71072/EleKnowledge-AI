@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from urllib.parse import urlparse
 from botocore.exceptions import ClientError
+from botocore.config import Config as BotoConfig
 
 
 def _utc_now_iso() -> str:
@@ -64,7 +65,17 @@ MAX_IMAGE_BLOCKS = 3
 
 # Initialize AWS clients with region from environment
 bedrock_agent = boto3.client('bedrock-agent-runtime', region_name=AWS_REGION)
-bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
+# ThrottlingException / 一時障害に備えたリトライ（issue #86 P0）。adaptive はクライアント側で
+# レート制御も行う。read_timeout は Sonnet 5 の生成（最大 17 秒実測）と API Gateway 29 秒制限の間。
+bedrock_runtime = boto3.client(
+    'bedrock-runtime',
+    region_name=AWS_REGION,
+    config=BotoConfig(
+        retries={'max_attempts': int(os.environ.get('BEDROCK_MAX_ATTEMPTS', '4')), 'mode': 'adaptive'},
+        read_timeout=int(os.environ.get('BEDROCK_READ_TIMEOUT', '25')),
+        connect_timeout=5,
+    ),
+)
 dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 
 # DynamoDB table
