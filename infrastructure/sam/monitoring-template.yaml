@@ -7,6 +7,10 @@ Description: >-
 
 # ---------------------------------------------------------------------------
 # 運用メモ
+# - アラーム名がそのまま通知メールの件名になる（例: ALARM: "EleKnowledge-dev-P1-rag-api-5xx" in Asia Pacific (Tokyo)）
+#   P1 = 利用者影響あり・即時対応（5XX / スロットル / 29 秒超え / エラー行 / アーカイブ失敗）
+#   P2 = 翌営業日対応（4XX 急増 / p90 遅延 / 集計・予約公開・スケジュール失敗 / DynamoDB スロットル）
+#   件名を自由に整形するには SNS → Lambda → メール送信の中継が必要（後続）
 # - 通知先メールは AlertEmailPrimary / AlertEmailSecondary パラメータで
 #   デプロイ時に渡す（リポジトリには書かない。AGENTS.md「共有ルールと個人設定の境界」）
 # - SNS のメール購読は受信者が確認リンクを押すまで有効にならない
@@ -145,7 +149,7 @@ Resources:
   RagApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-rag-api-5xx
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-api-5xx
       AlarmDescription: RAG API returned 5XX (Bedrock / KB / DynamoDB failure in rag Lambda)
       Namespace: AWS/ApiGateway
       MetricName: 5XXError
@@ -162,7 +166,7 @@ Resources:
   ChatApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-chat-api-5xx
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-api-5xx
       AlarmDescription: Chat API (sessions / messages / feedback) returned 5XX
       Namespace: AWS/ApiGateway
       MetricName: 5XXError
@@ -179,7 +183,7 @@ Resources:
   AuthApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-auth-api-5xx
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-auth-api-5xx
       AlarmDescription: Auth API (login / signup / verify) returned 5XX
       Namespace: AWS/ApiGateway
       MetricName: 5XXError
@@ -196,7 +200,7 @@ Resources:
   AppApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-app-api-5xx
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-app-api-5xx
       AlarmDescription: Announcements / metrics API returned 5XX
       Namespace: AWS/ApiGateway
       MetricName: 5XXError
@@ -213,7 +217,7 @@ Resources:
   TroubleshootingApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-troubleshooting-api-5xx
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-troubleshooting-api-5xx
       AlarmDescription: Troubleshooting API returned 5XX (metrics may be absent until MethodSettings are enabled)
       Namespace: AWS/ApiGateway
       MetricName: 5XXError
@@ -233,7 +237,7 @@ Resources:
   RagApi4xxSpikeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-rag-api-4xx-spike
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-rag-api-4xx-spike
       AlarmDescription: RAG API 4XX spike (check WAF IP allowlist vs Cognito token expiry)
       Namespace: AWS/ApiGateway
       MetricName: 4XXError
@@ -250,7 +254,7 @@ Resources:
   ChatApi4xxSpikeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-chat-api-4xx-spike
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-chat-api-4xx-spike
       AlarmDescription: Chat API 4XX spike
       Namespace: AWS/ApiGateway
       MetricName: 4XXError
@@ -267,7 +271,7 @@ Resources:
   AuthApi4xxSpikeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-auth-api-4xx-spike
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-auth-api-4xx-spike
       AlarmDescription: Auth API 4XX spike (login failures / blocked IPs)
       Namespace: AWS/ApiGateway
       MetricName: 4XXError
@@ -287,7 +291,7 @@ Resources:
   RagThrottlesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-rag-throttles
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-throttles
       AlarmDescription: rag Lambda throttled (account concurrency limit)
       Namespace: AWS/Lambda
       MetricName: Throttles
@@ -304,7 +308,7 @@ Resources:
   ChatThrottlesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-chat-throttles
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-throttles
       AlarmDescription: chat Lambda throttled
       Namespace: AWS/Lambda
       MetricName: Throttles
@@ -321,7 +325,7 @@ Resources:
   LoginThrottlesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-login-throttles
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-login-throttles
       AlarmDescription: login Lambda throttled
       Namespace: AWS/Lambda
       MetricName: Throttles
@@ -341,7 +345,7 @@ Resources:
   MetricsAggregatorErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-metrics-aggregator-errors
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-metrics-aggregator-errors
       AlarmDescription: Daily/hourly KPI aggregation failed (dashboard will be stale)
       Namespace: AWS/Lambda
       MetricName: Errors
@@ -358,7 +362,7 @@ Resources:
   ArchiveErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-chat-archive-errors
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-archive-errors
       AlarmDescription: chatlogs stream -> S3 archive failed (records are retried 3 times then dropped)
       Namespace: AWS/Lambda
       MetricName: Errors
@@ -375,7 +379,7 @@ Resources:
   AnnouncementsPublisherErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-announcements-publisher-errors
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-announcements-publisher-errors
       AlarmDescription: Scheduled announcement promotion failed
       Namespace: AWS/Lambda
       MetricName: Errors
@@ -395,7 +399,7 @@ Resources:
   RagDurationP90Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-rag-duration-p90
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-rag-duration-p90
       AlarmDescription: rag Lambda p90 duration over 15 minutes is high (Bedrock / KB slow)
       Namespace: AWS/Lambda
       MetricName: Duration
@@ -412,7 +416,7 @@ Resources:
   RagDurationMaxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-rag-duration-max
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-duration-max
       AlarmDescription: A single rag invocation approached the API Gateway 29s limit (user likely saw 504)
       Namespace: AWS/Lambda
       MetricName: Duration
@@ -432,7 +436,7 @@ Resources:
   MetricsScheduleFailedAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-metrics-schedule-failed
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-metrics-schedule-failed
       AlarmDescription: EventBridge could not invoke the metrics aggregator
       Namespace: AWS/Events
       MetricName: FailedInvocations
@@ -452,7 +456,7 @@ Resources:
   ChatLogsReadThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-chatlogs-read-throttle
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-chatlogs-read-throttle
       Namespace: AWS/DynamoDB
       MetricName: ReadThrottleEvents
       Dimensions: [{ Name: TableName, Value: !Ref ChatLogsTableName }]
@@ -468,7 +472,7 @@ Resources:
   ChatLogsWriteThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-chatlogs-write-throttle
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-chatlogs-write-throttle
       Namespace: AWS/DynamoDB
       MetricName: WriteThrottleEvents
       Dimensions: [{ Name: TableName, Value: !Ref ChatLogsTableName }]
@@ -484,7 +488,7 @@ Resources:
   SessionsWriteThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-sessions-write-throttle
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-sessions-write-throttle
       Namespace: AWS/DynamoDB
       MetricName: WriteThrottleEvents
       Dimensions: [{ Name: TableName, Value: !Ref SessionsTableName }]
@@ -527,7 +531,7 @@ Resources:
   RagErrorLinesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-rag-error-lines
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-error-lines
       AlarmDescription: rag Lambda logged an error line (catches failures returned as HTTP 500)
       Namespace: !Sub ${ProjectName}/Logs
       MetricName: RagErrorLines
@@ -543,7 +547,7 @@ Resources:
   ChatErrorLinesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-chat-error-lines
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-error-lines
       AlarmDescription: chat Lambda logged an error line
       Namespace: !Sub ${ProjectName}/Logs
       MetricName: ChatErrorLines
