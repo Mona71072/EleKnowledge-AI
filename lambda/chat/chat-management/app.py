@@ -171,7 +171,7 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
         
         # Group by sessionId and get session metadata
         sessions_dict = {}
-        # タイトル採用済みメッセージの優先度: (0=user / 1=それ以外, timestamp)
+        # タイトル採用済みメッセージの優先度（小さいほど優先）
         title_rank = {}
         for msg in messages:
             session_id = msg['sessionId']
@@ -201,12 +201,23 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
             if msg.get('ttl', 0) > session['ttl']:
                 session['ttl'] = msg.get('ttl', 0)
 
-            # タイトルはそのセッションの「最初のユーザー質問」を使う。
-            # 直近メッセージ（多くは AI 回答）を使うと、機種未指定の注意書きで一覧が埋まる
-            rank = (0 if msg.get('role') == 'user' else 1, timestamp)
+            # タイトルは RAG が最初のやりとりで生成した sessionTitle を最優先で使う。
+            # 無い場合（生成前の既存セッション・生成失敗時）はそのセッションの
+            # 「最初のユーザー質問」を使う。直近メッセージ（多くは AI 回答）を使うと、
+            # 機種未指定の注意書きで一覧が埋まる。
+            stored_title = str(msg.get('sessionTitle') or '').strip()
+            # rank: 0=生成済み見出し / 1=ユーザー発言 / 2=それ以外、同順位なら古い方
+            if stored_title:
+                rank = (0, timestamp)
+            else:
+                rank = (1 if msg.get('role') == 'user' else 2, timestamp)
             if title_rank[session_id] is None or rank < title_rank[session_id]:
                 title_rank[session_id] = rank
-                session['title'] = build_session_title(msg.get('content'))
+                session['title'] = (
+                    stored_title[:SESSION_TITLE_MAX_LENGTH]
+                    if stored_title
+                    else build_session_title(msg.get('content'))
+                )
         
         # Convert to list and calculate days until deletion
         sessions = list(sessions_dict.values())

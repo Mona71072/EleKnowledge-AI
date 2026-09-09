@@ -65,6 +65,21 @@ def test_title_uses_first_user_question_not_latest_answer():
     assert sessions[0]["ttl"] == 200
 
 
+def test_stored_session_title_wins_over_raw_question():
+    """RAG が生成した見出し（sessionTitle）があればそれを使う。"""
+    mod, table = load_app()
+    items = [
+        _msg("s1", "assistant", NOTICE + "\n\n溶接脚長の基準は…", "2026-09-09T08:30:00Z"),
+        _msg("s1", "user", "溶接の脚長が基準外となる判断基準は？", "2026-09-09T08:29:00Z"),
+    ]
+    items[1]["sessionTitle"] = "溶接脚長の判断基準"
+    table.query.return_value = {"Items": items}
+
+    sessions = mod.get_sessions_by_user("user-1")
+
+    assert sessions[0]["title"] == "溶接脚長の判断基準"
+
+
 def test_title_falls_back_to_assistant_message_without_notice():
     """ユーザー発言が取得範囲に無ければ AI 回答を使うが、注意書きは落とす。"""
     mod, table = load_app()
