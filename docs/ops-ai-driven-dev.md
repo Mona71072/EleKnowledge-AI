@@ -5,7 +5,7 @@
 > **きっかけ:** 2026-07-29 の整合確認で、同期ルールが無かったために docs 先行・実装ギャップが残った  
 > **関連:** `.cursor/rules/ai-collaboration.mdc` / `.cursor/rules/docs-code-sync.mdc` / `.cursor/skills/joint-pr-review/SKILL.md`
 
-最終更新: 2026-08-26
+最終更新: 2026-09-10
 
 ---
 
@@ -198,6 +198,22 @@ Approve（内容OK）と **マージボタンを誰が押すか** は別であ�
 
 ---
 
+## 6c. なぜ会話が壊れるか（2026-09-10）
+
+詳細: `docs/decisions-2026-09-10-pr-conversation.md`
+
+起きやすいずれ:
+
+- Claude Code は `CLAUDE.md` → `AGENTS.md` を読む。Cursor の `pr-clarity` / `joint-pr-review` は見ない
+- `AGENTS.md` の「細かく分ける」と Cursor 側の「同種はまとめる」が食い違う
+- `CLAUDE.md` に古い docs 一覧や「PR は細かめ」を置くと、Claude Code だけが古い運用に従う
+- マージ担当欄だけ埋めて Yes/No を書かないと、相手は何を認めればよいか分からない
+- 進行中の相手 PR 本文をテンプレ是正で書き直すと、レビューが壊れる
+
+直す場所は **`AGENTS.md` の「PR の会話」**。Cursor 短則だけ直しても再発する。
+
+---
+
 ## 7. mona / itai
 
 ### 共通
@@ -218,6 +234,7 @@ Approve（内容OK）と **マージボタンを誰が押すか** は別であ�
 
 - 同じ正本マップ・同じチェックリスト
 - 根本変更は mona がレビューできる共同確認 PR にする
+- 自分宛てメンションは不要。mona が Yes/No できる本文にする
 - mona の個人・端末固有設定を itai や itai 側エージェントへ適用しない
 
 ---
