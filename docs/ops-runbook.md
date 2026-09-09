@@ -94,8 +94,9 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 - 利用者側の表示: 画面が自動で「本日のメール送信数が上限に達したため…明日以降に」を出す。サインアップの場合はアカウントが未確認で作成済みのことがあるため「翌日、確認画面の『確認コードを再送信』から」と案内される（PR #102）
 - 対応:
   1. 問い合わせには「翌日 9 時以降に確認画面の再送から。『登録が完了していません』と出た人だけ新規登録をやり直す」と案内
-  2. 登録が集中する見込みなら **事前発行**（`scripts/ops/provision_users.py`、CSV から招待メールなしで作成し初期パスワードを配布。PR #101）
-  3. 恒久対策は SES への切替（送信元ドメイン検証 + 本番アクセス申請 + Cognito の `DEVELOPER` 設定）。issue #99
+  2. **上限に当たった人を個別に救う（推奨）**: `python scripts/ops/confirm_unconfirmed_users.py list` で本日作成の未確認アカウントを一覧 → 本人に「登録しましたか」を確認（アドレスの所有確認ができていないため）→ `confirm --emails <address>` で確認済みにする → 本人へ「ログインできます」と連絡。利用者はサインアップ時に決めたパスワードでそのまま入れる（メール不要）
+  3. 登録が集中する見込みなら **事前発行**（`scripts/ops/provision_users.py`、CSV から招待メールなしで作成し初期パスワードを配布。PR #101）
+  4. 恒久対策は SES への切替（送信元ドメイン検証 + 本番アクセス申請 + Cognito の `DEVELOPER` 設定）。issue #99
 - 初回に到達したときは、SNS 本文のエラーコードと本文を issue #99 に記録し、画面側の判定（`classifyAuthError`）と一致しているか確認する
 
 ## 6. データ保全と保持期間
