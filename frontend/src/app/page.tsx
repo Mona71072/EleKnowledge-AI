@@ -54,7 +54,9 @@ export default function HomePage() {
       const info = await getUserInfo();
       if (info) setIsAdmin(info.isAdmin);
     })();
-    getAnnouncements(5)
+    // バナーは期間中のメンテ告知を新しい告知に押し出されずに拾う必要があるため広めに取得し、
+    // 一覧側は先頭 5 件だけ表示する（issue #94 B1）
+    getAnnouncements(30)
       .then((res) => setAnnouncements(res.announcements))
       .catch((e) => setAnnError((e as Error).message))
       .finally(() => setAnnLoading(false));
@@ -439,7 +441,7 @@ export default function HomePage() {
 
         {/* 運営からのお知らせ */}
         <AnnouncementsSection
-          announcements={announcements}
+          announcements={announcements.slice(0, 5)}
           loading={annLoading}
           error={annError}
         />
