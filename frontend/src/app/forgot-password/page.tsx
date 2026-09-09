@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
-import { isEmailDeliveryLimitError, EMAIL_DELIVERY_LIMIT_MESSAGE } from '@/lib/auth-helpers';
+import { isEmailDeliveryLimitError, withErrorName, EMAIL_DELIVERY_LIMIT_MESSAGE } from '@/lib/auth-helpers';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
@@ -130,7 +130,7 @@ export default function ForgotPasswordPage() {
       } else if (err.message?.includes('Network')) {
         setError('ネットワーク接続エラーです。インターネット接続を確認してください。');
       } else {
-        setError('パスワードリセットリクエストに失敗しました。もう一度お試しください。');
+        setError(withErrorName('パスワードリセットリクエストに失敗しました。もう一度お試しください。', err));
       }
     } finally {
       setLoading(false);

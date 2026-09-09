@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { signUp } from 'aws-amplify/auth';
-import { isEmailDeliveryLimitError, EMAIL_DELIVERY_LIMIT_MESSAGE } from '@/lib/auth-helpers';
+import { isEmailDeliveryLimitError, isAttemptLimitError, withErrorName, EMAIL_DELIVERY_LIMIT_MESSAGE, ATTEMPT_LIMIT_MESSAGE } from '@/lib/auth-helpers';
 import Link from 'next/link';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -117,12 +117,14 @@ export default function SignupPage() {
       
       if (isEmailDeliveryLimitError(err)) {
         setError(EMAIL_DELIVERY_LIMIT_MESSAGE);
+      } else if (isAttemptLimitError(err)) {
+        setError(ATTEMPT_LIMIT_MESSAGE);
       } else if (err.name === 'UsernameExistsException') {
         setError('このメールアドレスは既に登録されています。確認コードを入力していない場合は、確認画面の「確認コードを再送信」から続きを行ってください。');
       } else if (err.name === 'InvalidPasswordException') {
         setError('パスワードは8文字以上で、大文字・小文字・数字・記号を含む必要があります。');
       } else {
-        setError('登録に失敗しました。もう一度お試しください。');
+        setError(withErrorName('登録に失敗しました。もう一度お試しください。', err));
       }
     } finally {
       setLoading(false);

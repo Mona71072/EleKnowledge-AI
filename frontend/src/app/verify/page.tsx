@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { autoSignIn, confirmSignUp, resendSignUpCode } from 'aws-amplify/auth';
-import { isEmailDeliveryLimitError, EMAIL_DELIVERY_LIMIT_MESSAGE } from '@/lib/auth-helpers';
+import { isEmailDeliveryLimitError, isAttemptLimitError, withErrorName, EMAIL_DELIVERY_LIMIT_MESSAGE, ATTEMPT_LIMIT_MESSAGE } from '@/lib/auth-helpers';
 import Link from 'next/link';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -76,7 +76,7 @@ function VerifyContent() {
       } else if (err.name === 'ExpiredCodeException') {
         setError('確認コードの有効期限が切れています。新しいコードを再送信してください。');
       } else {
-        setError('確認に失敗しました。もう一度お試しください。');
+        setError(withErrorName('確認に失敗しました。もう一度お試しください。', err));
       }
     } finally {
       setLoading(false);
@@ -95,7 +95,13 @@ function VerifyContent() {
       setResendTimer(60); // 60秒のタイマー
     } catch (err: any) {
       console.error('Resend code error:', err);
-      setError(isEmailDeliveryLimitError(err) ? EMAIL_DELIVERY_LIMIT_MESSAGE : '確認コードの再送信に失敗しました。');
+      if (isEmailDeliveryLimitError(err)) {
+        setError(EMAIL_DELIVERY_LIMIT_MESSAGE);
+      } else if (isAttemptLimitError(err)) {
+        setError(ATTEMPT_LIMIT_MESSAGE);
+      } else {
+        setError(withErrorName('確認コードの再送信に失敗しました。', err));
+      }
     }
   };
 

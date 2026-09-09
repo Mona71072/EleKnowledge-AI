@@ -67,12 +67,27 @@ export function authHeaders(token: string | null): Record<string, string> {
 export function isEmailDeliveryLimitError(err: unknown): boolean {
   const name = (err as { name?: string } | null)?.name ?? '';
   const message = ((err as { message?: string } | null)?.message ?? '').toLowerCase();
+  // 日次上限の超過は「配信失敗」として返る（本文に daily email limit）。
+  // LimitExceededException は同一利用者の試行回数制限で別原因のため、ここには含めない。
   return (
     name === 'CodeDeliveryFailureException' ||
-    name === 'LimitExceededException' ||
     message.includes('daily email limit') ||
     message.includes('exceeded daily')
   );
+}
+
+/** 同一利用者の再送・試行が多すぎるときの Cognito エラー（上限超過とは別原因）。 */
+export function isAttemptLimitError(err: unknown): boolean {
+  const name = (err as { name?: string } | null)?.name ?? '';
+  return name === 'LimitExceededException' || name === 'TooManyRequestsException';
+}
+
+export const ATTEMPT_LIMIT_MESSAGE = '試行回数が多すぎます。しばらく時間をおいてからもう一度お試しください。';
+
+/** 想定外のエラーに、問い合わせ時の切り分け用にエラー名を添える。 */
+export function withErrorName(base: string, err: unknown): string {
+  const name = (err as { name?: string } | null)?.name;
+  return name ? `${base}（エラー: ${name}）` : base;
 }
 
 export const EMAIL_DELIVERY_LIMIT_MESSAGE =
