@@ -98,6 +98,7 @@ Resources:
         Variables:
           ARCHIVE_BUCKET: !Ref ArchiveBucket
           ARCHIVE_PREFIX: chatlogs
+          ARCHIVE_FAILED_PREFIX: failed
       Events:
         ChatLogsStream:
           Type: DynamoDB
@@ -133,7 +134,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-archive-dlq
-      AlarmDescription: chatlogs -> S3 archive dropped a batch after retries (records are in the failure queue)
+      AlarmDescription: chatlogs -> S3 archive failed a batch after retries. Raw records are preserved under s3://<archive bucket>/failed/ (best effort); the queue holds shard/sequence metadata only. Replay per docs/ops runbook within 24h of the stream event.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:

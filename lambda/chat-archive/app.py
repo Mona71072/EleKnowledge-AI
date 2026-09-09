@@ -43,7 +43,42 @@ class _Enc(json.JSONEncoder):
         return super().default(o)
 
 
+FAILED_PREFIX = os.environ.get("ARCHIVE_FAILED_PREFIX", "failed")
+
+
+def _preserve_failed_batch(event, context, error):
+    """失敗したバッチの生レコードを S3 の failed/ に残す（issue #86 P0、PR #96 レビュー）。
+
+    Lambda の OnFailure 宛先（SQS）にはシャード / シーケンス番号などのメタデータしか入らず、
+    DynamoDB Streams 自体は 24 時間で失効するため、本文を別に保存しないと復旧できない。
+    ここは最善努力（S3 自体が落ちている場合は SQS のメタデータと 24 時間以内の再処理に頼る）。
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        key = f"{FAILED_PREFIX}/dt={now:%Y-%m-%d}/{now:%Y%m%dT%H%M%S}-{context.aws_request_id}.json"
+        payload = json.dumps({
+            "error": f"{type(error).__name__}: {error}",
+            "requestId": context.aws_request_id,
+            "records": event.get("Records", []),
+        }, cls=_Enc, ensure_ascii=False)
+        s3.put_object(Bucket=BUCKET, Key=key, Body=payload.encode("utf-8"),
+                      ContentType="application/json")
+        print(f"[chat-archive] batch failed; raw records preserved at s3://{BUCKET}/{key}")
+        return key
+    except Exception as e2:  # noqa: BLE001
+        print(f"[chat-archive] batch failed AND could not preserve raw records: {type(e2).__name__}: {e2}")
+        return None
+
+
 def handler(event, context):
+    try:
+        return _archive(event, context)
+    except Exception as e:  # noqa: BLE001
+        _preserve_failed_batch(event, context, e)
+        raise
+
+
+def _archive(event, context):
     records = event.get("Records", [])
     if not records:
         return {"archived": 0}
@@ -69,4 +104,5 @@ def handler(event, context):
     key = f"{PREFIX}/dt={dt:%Y-%m-%d}/{dt:%Y%m%dT%H%M%S}-{context.aws_request_id}.jsonl.gz"
     s3.put_object(Bucket=BUCKET, Key=key, Body=body,
                   ContentType="application/json", ContentEncoding="gzip")
+    print(f"[chat-archive] archived={len(lines)} key={key}")
     return {"archived": len(lines), "key": key}
