@@ -82,6 +82,13 @@ Parameters:
     Type: String
     Default: sessions-dev
 
+  CognitoUserPoolId:
+    Type: String
+    Default: ap-northeast-1_DN17ekXik
+  CognitoUserPoolClientId:
+    Type: String
+    Default: doa4arfmc7shs8u0mb91u70mq
+
   # --- 閾値（issue #86 P0 案。初週の実測で見直す） ---
   Api4xxThreshold:
     Type: Number
@@ -497,6 +504,72 @@ Resources:
       Period: 300
       EvaluationPeriods: 1
       Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # Cognito のメール送信上限（既定 50 通/日）の接近を検知（issue #99、2026-09-10）
+  # ------------------------------------------------------------------
+  CognitoSignups40Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-cognito-signups-40-per-day
+      AlarmDescription: Sign-ups today (UTC day) reached 40. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99.
+      Namespace: AWS/Cognito
+      MetricName: SignUpSuccesses
+      Dimensions:
+        - Name: UserPool
+          Value: !Ref CognitoUserPoolId
+        - Name: UserPoolClient
+          Value: !Ref CognitoUserPoolClientId
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 40
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  CognitoSignups45Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-signups-45-per-day
+      AlarmDescription: Sign-ups today (UTC day) reached 45. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99.
+      Namespace: AWS/Cognito
+      MetricName: SignUpSuccesses
+      Dimensions:
+        - Name: UserPool
+          Value: !Ref CognitoUserPoolId
+        - Name: UserPoolClient
+          Value: !Ref CognitoUserPoolClientId
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 45
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  CognitoSignups50Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-signups-50-per-day
+      AlarmDescription: Sign-ups today (UTC day) reached 50. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99.
+      Namespace: AWS/Cognito
+      MetricName: SignUpSuccesses
+      Dimensions:
+        - Name: UserPool
+          Value: !Ref CognitoUserPoolId
+        - Name: UserPoolClient
+          Value: !Ref CognitoUserPoolClientId
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 50
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlertTopic]
