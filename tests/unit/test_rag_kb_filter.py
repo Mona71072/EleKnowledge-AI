@@ -200,6 +200,17 @@ def test_handled_model_types_are_the_27_measured_values(rag):
     assert "NEXIEZ-MRL Version 2" not in rag.HANDLED_MODEL_TYPES
 
 
+def test_ui_model_filter_keys_are_the_six_chat_items(rag):
+    """フロント ALL_MODEL_TYPES の value と UI_MODEL_FILTERS のキーを一致させる（PR #58 UI 是正）。"""
+    assert set(rag.UI_MODEL_FILTERS) == {
+        "AXIEZ", "AXIEZ-LINKs", "NEXCUBE", "メルシティ", "メルワイド", "エスカレーター",
+    }
+    assert rag.UI_MODEL_FILTERS["AXIEZ"] == ("AXIEZ", "AXIEZ(KE-WF・KE-HF)", "駅舎エレ")
+    assert rag.UI_MODEL_FILTERS["NEXCUBE"] == (
+        "NEXCUBE", "NEXCUBE Limited", "特注機械室レスエレベーター",
+    )
+
+
 def test_query_knowledge_base_applies_post_filters(rag, monkeypatch):
     """retrieve 結果にスコープ＋機種完全一致の post-filter が掛かる。"""
 

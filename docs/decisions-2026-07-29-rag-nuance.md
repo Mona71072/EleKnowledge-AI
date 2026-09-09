@@ -75,6 +75,6 @@
 
 ## 参照
 
-- カタログ: [kb-metadata-catalog-2026-07-29.md](./kb-metadata-catalog-2026-07-29.md)
+- カタログ: [kb-metadata-catalog-2026-08-26.md](./kb-metadata-catalog-2026-08-26.md)
 - 件数調査: [survey-2026-07-29-hard-to-retrieve-counts.md](./survey-2026-07-29-hard-to-retrieve-counts.md)
 - API: [api/rag.md](./api/rag.md)

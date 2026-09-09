@@ -69,6 +69,16 @@ Parameters:
       not a bare foundation model ID - anthropic.claude-sonnet-4-20250514-v1:0 is LEGACY
       and only supports INFERENCE_PROFILE invocation in ap-northeast-1.
   
+  SessionTitleLlm:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >-
+      Generate chat session titles with Claude (BedrockModelId) from the first question.
+      Set to false to fall back to truncating the raw question (no extra Bedrock call).
+
   RagSearchType:
     Type: String
     Default: HYBRID
@@ -175,6 +185,20 @@ Parameters:
       document (5 min) is required. An issued URL is a bearer URL that cannot
       be revoked before expiry, so a short TTL minimizes the exposure window
       if it leaks.
+
+  CitationUriMode:
+    Type: String
+    Default: presigned
+    AllowedValues:
+      - presigned
+      - s3
+    Description: >-
+      Citation sourceUri format for staged rollout (PR #50). 'presigned'
+      (default) keeps emitting presigned HTTPS URLs so the currently deployed
+      frontend keeps working while GET /rag/document and /doc are rolled out
+      first. Switch to 's3' only after the resolver is verified in the target
+      environment and the new frontend is live on Amplify; from then on raw
+      s3:// URIs are stored and resolved per click via GET /rag/document.
 
 Globals:
   Function:
@@ -311,6 +335,8 @@ Resources:
         Variables:
           KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          # 履歴一覧の見出し生成。既定は BEDROCK_MODEL_ID と同じモデル（追加の IAM 不要）
+          SESSION_TITLE_LLM: !Ref SessionTitleLlm
           RAG_SEARCH_TYPE: !Ref RagSearchType
           KB_SOURCE_BUCKET: !Ref KnowledgeBaseDataSourceBucket
           KB_SOURCE_PREFIX: !Ref KnowledgeBaseSourcePrefix
@@ -319,6 +345,7 @@ Resources:
           DOCUMENTS_BUCKET:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
           PRESIGNED_URL_EXPIRES_IN: !Ref PresignedUrlExpiresIn
+          CITATION_URI_MODE: !Ref CitationUriMode
       Events:
         RagApi:
           Type: Api

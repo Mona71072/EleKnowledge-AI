@@ -40,5 +40,5 @@ alwaysApply: true
 - 設計: `docs/design-2026-07-29-clarify-and-page.md`
 - 成功定義訂正: `docs/decisions-2026-07-29-success-document-reach.md`
 
-- `docs/kb-metadata-catalog.tsv` / `docs/kb-metadata-catalog-2026-07-29.md`
+- `docs/kb-metadata-catalog.tsv` / `docs/kb-metadata-catalog-2026-08-26.md`
 - 件数・引っ掛けにくさ: `docs/survey-2026-07-29-hard-to-retrieve-counts.md`

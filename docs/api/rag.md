@@ -90,11 +90,14 @@ RAGクエリ実行
 - `responseType`: `clarify`（検索せず聞き返し）/ `pages`（候補あり）/ `not_found`（弱い検索で作文停止）。実装理由は [impl-log-2026-07-29-clarify-and-page.md](../impl-log-2026-07-29-clarify-and-page.md)。
 - `pageCandidates`: UI 上部用。`pageNumber` は KB メタにあるときだけ付与（無ければキー省略＝ページ不明）。`not_found` 時は最大2件の参考候補に `lowConfidence: true` を付ける（作文はしない）。
 - `clarifyQuestions`: `clarify` 時の追加質問リスト。
-- カテゴリ未指定時の**本命優先 2 段階 retrieve は 2026-08-26 に一時停止**（少数カテゴリが全検索でヒットしない副作用のため。mona 了承済み）。現在は未指定時も常に単一の retrieve（実カテゴリ10種の許可リスト内の全資料）。後継方式の検討は [issue #61](https://github.com/yukiworkspace/EleKnowledge-AI/issues/61)。ユーザーが category を選んでいる場合はそれを尊重（従来どおり）。
+- カテゴリ未指定時の**本命優先 2 段階 retrieve は 2026-08-26 に一時停止**（少数カテゴリが全検索でヒットしない副作用のため。mona 了承済み）。現在は未指定時も常に単一の retrieve（対象は実カテゴリ10種の許可リスト内）。後継方式の検討は [issue #61](https://github.com/yukiworkspace/EleKnowledge-AI/issues/61)。ユーザーが category を選んでいる場合はそれを尊重（従来どおり）。
 - 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。
 - `priorityExpanded`: 本命→全資料へ拡大したとき `true` だった診断用フィールド（チャット UI では未表示）。優先 retrieve 停止中は**常に `false`**（API 互換のためフィールドは残置）。
 - `mode`: API 上は `normal` \| `spec` を受け付ける。現行チャット UI は常に `normal`。`spec` は **非推奨**で、サーバ側で `normal` に正規化し、カテゴリ未指定時は本命（`spec`/`tech_info`/`std`）を強制する。
-- `sourceUri` は **`s3://` URI**（引用リンクのログイン必須化以降）。プリサイン HTTPS URL は応答にも DynamoDB にも含めない。フロントは `documentHref()` で中継ページ `/doc?uri=...` へのリンクに変換し、クリック時に `GET /rag/document` で実 URL を都度発行する。旧データ（プリサイン URL が保存済みの履歴）もフロント側で `s3://` に逆変換して同じ導線に乗せる。
+- `sourceUri` の形式は環境変数 `CITATION_URI_MODE`（SAM パラメータ `CitationUriMode`）で切り替える（デプロイ順を壊さないための段階移行スイッチ）。
+  - `s3`（移行完了後の姿。上の例）: **`s3://` URI**。プリサイン HTTPS URL は応答にも DynamoDB にも含めない。フロントは `documentHref()` で中継ページ `/doc?uri=...` へのリンクに変換し、クリック時に `GET /rag/document` で実 URL を都度発行する。
+  - `presigned`（既定・移行互換）: 従来どおり**プリサイン HTTPS URL**（TTL は `PresignedUrlExpiresIn`、既定 300 秒）。受付（`GET /rag/document` と `/doc`）だけを先に本番反映しても、デプロイ済みフロントを壊さないためのモード。受付の実機確認とフロント反映（Amplify）の完了後に `s3` へ切り替える。
+- 旧データ（プリサイン URL が保存済みの履歴。期限切れで AccessDenied になっていたもの）もフロント側で `s3://` に逆変換して同じ導線に乗せる（過去履歴の引用が復活し、DynamoDB に残る発行済み URL が流出しても認証必須の導線に置き換わる）。S3 と判定できない https URL のみ素通し。
 - `sourceDocuments[].category` / `modelType` は実 KB メタデータ由来、`hasImage` は当該チャンクに IMAGE が含まれるか。
 
 ---
@@ -103,7 +106,7 @@ RAGクエリ実行
 
 引用文書の実体を開くための**短命プリサイン URL を都度発行する**エンドポイント。チャット応答の `sourceUri`（`s3://` URI）を、開く瞬間にだけ有効な HTTPS URL に解決する。呼び出し元は中継ページ `/doc`（`frontend/src/lib/documents.ts` の `resolveDocumentUrl`）。
 
-**認証:** Cognito Authorizer 必須（未ログインは API Gateway / ハンドラで 401）。これにより引用リンクを共有されても、開けるのは登録ユーザーのみ。
+**認証:** Cognito Authorizer 必須（未ログインは API Gateway / ハンドラで 401）。これにより引用リンクを共有されても、開けるのは登録ユーザーのみ。未ログイン時はフロントの `/doc` が `next` 付きでログイン画面へ誘導し、ログイン後に復帰する（戻り先は `safeNextPath()` で正規化・origin 検証するオープンリダイレクト対策済み。`frontend/src/lib/safe-next-path.mjs`）。
 
 **Request:**
 

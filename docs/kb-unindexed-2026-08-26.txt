@@ -1,0 +1,25 @@
+# 2026-08-26 時点の観測値: KB 索引 (VQV81CNYU4 / KHPV3CNKOU) に未取り込み = 検索不能な file_path (20 件)
+# 出典: docs/verification-2026-08-26-kb-vqv-metadata.md §6 / issue #53 依頼 1
+# 用途: scripts/generate_kb_metadata_catalog.py の --unindexed 入力
+# 注意: 再 Sync・issue #53 の所有側対応後は状態が変わり得る。カタログ再生成時は
+#       索引状態を再確認し、新しい取得日の観測ファイルを別途作成すること（本ファイルは 8/26 観測の記録として保持）。
+documents/Qシート/Q-3663.pdf
+documents/Qシート/Q-3665.pdf
+documents/Qシート/Q-3667.pdf
+documents/Qシート/Q-3670.pdf
+documents/Qシート/Q-3671.pdf
+documents/Qシート/Q-3672.pdf
+documents/Qシート/Q-3675.pdf
+documents/Qシート/Q-3678.pdf
+documents/Qシート/Q-3683.pdf
+documents/Qシート/Q-3687.pdf
+documents/Qシート/Q-3689B.pdf
+documents/Qシート/Q-3699.pdf
+documents/W資料/WIG-27--D.pdf
+documents/据付ノート/IN-EL-08-94/追加分/IN-EL-08-94-01-2.pdf
+documents/据付ノート/IN-EL-12-104/IN-EL-12-104-01-1.pdf
+documents/据付ノート/IN-EL-12-104/IN-EL-12-104-01-2.pdf
+documents/据付ノート/IN-EL-12-104/IN-EL-12-104-01-3.pdf
+documents/据付ノート/IN-EL-12-105/IN-EL-12-105-01.pdf
+documents/現場代理人業務マニュアル/GM-01-03-A.pdf
+documents/現場代理人業務マニュアル/GM-01-29-A.pdf

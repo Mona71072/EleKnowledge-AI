@@ -27,9 +27,6 @@ __pycache__/
 *.swo
 *~
 
-# AI assistant local config
-CLAUDE.md
-
 # OS
 .DS_Store
 Thumbs.db

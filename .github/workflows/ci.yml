@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+  # マージ後の develop も検証する（個別PRが緑でも、組み合わせで壊れる事故の検出用）
+  push:
+    branches:
+      - develop
+
+# CI はコードを読むだけ。書き込み権限は与えない
+permissions:
+  contents: read
+
+# 同じ PR への連続 push で古い実行をキャンセルする
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Lambda ランタイム（SAM テンプレートの Runtime: python3.13）に合わせる
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: tests/unit/requirements-test.txt
+      - name: Install unit test dependencies
+        run: pip install -r tests/unit/requirements-test.txt
+      - name: Run unit tests
+        env:
+          AWS_DEFAULT_REGION: ap-northeast-1
+          AWS_REGION: ap-northeast-1
+        run: python -m pytest tests/unit -q
+      # フロントの純粋ロジック（src/lib/*.mjs）の node:test。依存インストール不要。
+      # ディレクトリ指定は Node の版によって解釈が変わるため、ファイルをグロブで明示する
+      - name: Run frontend logic tests
+        run: node --test frontend/tests/*.test.mjs

@@ -115,3 +115,58 @@ def test_presign_failure_is_502():
     assert res["statusCode"] == 502
     # 内部の例外文をそのまま返さない
     assert "boom" not in res["body"]
+
+
+# --- CITATION_URI_MODE（段階移行スイッチ） -----------------------------------
+# 'presigned'（既定）の間は従来フロントを壊さず、's3' に切り替えたときだけ
+# raw の s3:// URI を保存・返却することを固定する。
+
+def _kb_result(uri="s3://kb-source-bucket/docs/manual.pdf", score=0.9):
+    return {
+        "content": {"text": "本文テキスト"},
+        "score": score,
+        "metadata": {
+            "x-amz-bedrock-kb-source-uri": uri,
+            "category": "C資料",
+            "model_type": "AXIEZ",
+        },
+    }
+
+
+def test_default_citation_mode_is_presigned():
+    # env 未指定の既定が presigned（デプロイ順の互換性の要）であること
+    assert rag.CITATION_URI_MODE == "presigned"
+
+
+def test_citations_presigned_mode_keeps_presigning(monkeypatch):
+    fake_s3 = MagicMock()
+    fake_s3.generate_presigned_url.return_value = "https://signed.example.com/manual.pdf"
+    monkeypatch.setattr(rag, "CITATION_URI_MODE", "presigned")
+    with patch.object(rag.boto3, "client", return_value=fake_s3):
+        _, docs = rag.extract_citations_from_selected([_kb_result()])
+    assert docs[0]["sourceUri"] == "https://signed.example.com/manual.pdf"
+
+
+def test_citations_s3_mode_returns_raw_uri(monkeypatch):
+    monkeypatch.setattr(rag, "CITATION_URI_MODE", "s3")
+    with patch.object(
+        rag.boto3, "client", side_effect=AssertionError("s3 モードでは presign しない")
+    ):
+        _, docs = rag.extract_citations_from_selected([_kb_result()])
+    assert docs[0]["sourceUri"] == "s3://kb-source-bucket/docs/manual.pdf"
+
+
+def test_page_candidates_follow_citation_mode(monkeypatch):
+    monkeypatch.setattr(rag, "CITATION_URI_MODE", "s3")
+    with patch.object(
+        rag.boto3, "client", side_effect=AssertionError("s3 モードでは presign しない")
+    ):
+        cands = rag.build_page_candidates([_kb_result()])
+    assert cands[0]["sourceUri"] == "s3://kb-source-bucket/docs/manual.pdf"
+
+    fake_s3 = MagicMock()
+    fake_s3.generate_presigned_url.return_value = "https://signed.example.com/manual.pdf"
+    monkeypatch.setattr(rag, "CITATION_URI_MODE", "presigned")
+    with patch.object(rag.boto3, "client", return_value=fake_s3):
+        cands = rag.build_page_candidates([_kb_result()])
+    assert cands[0]["sourceUri"] == "https://signed.example.com/manual.pdf"
