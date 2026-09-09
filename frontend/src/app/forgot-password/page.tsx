@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
+import { isEmailDeliveryLimitError, EMAIL_DELIVERY_LIMIT_MESSAGE } from '@/lib/auth-helpers';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
@@ -118,7 +119,9 @@ export default function ForgotPasswordPage() {
     } catch (err: any) {
       console.error('Reset password error:', err);
 
-      if (err.name === 'UserNotFoundException') {
+      if (isEmailDeliveryLimitError(err)) {
+        setError(EMAIL_DELIVERY_LIMIT_MESSAGE.replace('確認コード', 'リセットコード'));
+      } else if (err.name === 'UserNotFoundException') {
         setError('このメールアドレスで登録されたアカウントが見つかりません。');
       } else if (err.name === 'InvalidParameterException') {
         setError('メールアドレスが確認されていないため、パスワードをリセットできません。');

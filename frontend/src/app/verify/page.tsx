@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { autoSignIn, confirmSignUp, resendSignUpCode } from 'aws-amplify/auth';
+import { isEmailDeliveryLimitError, EMAIL_DELIVERY_LIMIT_MESSAGE } from '@/lib/auth-helpers';
 import Link from 'next/link';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -94,7 +95,7 @@ function VerifyContent() {
       setResendTimer(60); // 60秒のタイマー
     } catch (err: any) {
       console.error('Resend code error:', err);
-      setError('確認コードの再送信に失敗しました。');
+      setError(isEmailDeliveryLimitError(err) ? EMAIL_DELIVERY_LIMIT_MESSAGE : '確認コードの再送信に失敗しました。');
     }
   };
 
