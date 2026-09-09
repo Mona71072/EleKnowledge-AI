@@ -1,11 +1,12 @@
 version = 0.1
 
-# 監視スタック（SNS + アラーム + メトリクスフィルタ + 保存クエリ）。issue #86。
-# 通知先メールはリポジトリに書かず、デプロイ時に --parameter-overrides で渡す:
+# Monitoring stack (SNS + alarms + metric filters + saved queries). See issue #86.
+# Alert e-mail addresses are NOT stored in the repository. Pass them at deploy time:
 #   sam deploy --config-file samconfig-monitoring.toml --profile <profile> \
 #     --parameter-overrides Environment=dev ProjectName=EleKnowledge \
 #       AlertEmailPrimary=<mail1> AlertEmailSecondary=<mail2>
-# （--parameter-overrides は下記の parameter_overrides を丸ごと置き換えるため、全項目を渡す）
+# (--parameter-overrides replaces the whole parameter_overrides list below, so pass every value)
+# NOTE: keep this file ASCII-only; SAM CLI on Windows reads samconfig with the system code page.
 
 [default]
 [default.deploy.parameters]

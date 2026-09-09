@@ -71,13 +71,13 @@ while IFS= read -r g; do
   [[ -z "$g" ]] && continue
   set_retention "$g" "$APIGW_DAYS"
 done < <(aws logs describe-log-groups --log-group-name-prefix "API-Gateway-Execution-Logs_" \
-          --query 'logGroups[].logGroupName' --output text | tr '\t' '\n')
+          --query 'logGroups[].logGroupName' --output text | tr -d '\r' | tr '\t' '\n')
 
 # Lambda の DomainGuard は論理 ID 由来の自動命名のため前方一致で設定
 while IFS= read -r g; do
   [[ -z "$g" ]] && continue
   set_retention "$g" "$LAMBDA_DAYS"
 done < <(aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/EleKnowledge-${ENV}-phase1-DomainGuardFunction" \
-          --query 'logGroups[].logGroupName' --output text | tr '\t' '\n')
+          --query 'logGroups[].logGroupName' --output text | tr -d '\r' | tr '\t' '\n')
 
 echo "done"
