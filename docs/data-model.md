@@ -1,6 +1,6 @@
 ---
 status: production
-last-verified: 2026-07-29
+last-verified: 2026-09-09
 related-code: infrastructure/, lambda/rag/, lambda/chat/
 ---
 
@@ -42,6 +42,8 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/
   pageCandidates?: object[];
   clarifyQuestions?: string[];
   queryFilters?: object;    // 当時の機種・カテゴリ等
+  // --- 2026-09-09 履歴一覧の見出し（最初の user メッセージのみ）---
+  sessionTitle?: string;    // Claude 生成の短い見出し。一覧 API はこれを最優先で使う
   // --- フィードバック ---
   feedback?: 'good' | 'bad';
   feedbackReason?: 'wrong_doc' | 'unresolved' | 'bad_answer' | 'other' | 'wrong_page';
