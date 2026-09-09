@@ -135,6 +135,14 @@ Resources:
             Condition:
               ArnLike:
                 aws:SourceArn: !Sub arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*
+          - Sid: AllowEventBridgeRules
+            Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sns:Publish
+            Resource: !Ref AlertTopic
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/*
 
   AlertSubscriptionPrimary:
     Type: AWS::SNS::Subscription
@@ -570,6 +578,56 @@ Resources:
       Period: 86400
       EvaluationPeriods: 1
       Threshold: 50
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # Cognito のメール送信に関わるエラーを CloudTrail 経由で検知（issue #99、2026-09-10）
+  # サインアップ・確認コード再送・パスワード再設定はブラウザから直接 Cognito を呼ぶため、
+  # API Gateway / Lambda のアラームには掛からない。利用者起因のエラー（UsernameExists 等）は除外。
+  # ------------------------------------------------------------------
+  CognitoEmailErrorRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${ProjectName}-${Environment}-cognito-email-errors
+      Description: Cognito SignUp / ResendConfirmationCode / ForgotPassword failed with a quota or delivery error (CloudTrail)
+      State: ENABLED
+      EventPattern:
+        source: [aws.cognito-idp]
+        detail-type: [AWS API Call via CloudTrail]
+        detail:
+          eventSource: [cognito-idp.amazonaws.com]
+          eventName: [SignUp, ResendConfirmationCode, ForgotPassword, AdminCreateUser, AdminResetUserPassword]
+          errorCode: [LimitExceededException, CodeDeliveryFailureException, TooManyRequestsException, InternalErrorException]
+      Targets:
+        - Id: AlertTopic
+          Arn: !Ref AlertTopic
+          InputTransformer:
+            InputPathsMap:
+              api: $.detail.eventName
+              code: $.detail.errorCode
+              msg: $.detail.errorMessage
+              time: $.detail.eventTime
+            InputTemplate: |
+              "[P1] Cognito メール送信エラー: <api> が <code> で失敗しました（<time> UTC）。
+              本文: <msg>
+              対応: docs/ops-runbook.md §5.6。日次上限（Exceeded daily email limit）の場合、利用者には画面で翌日の手順が表示されます。
+              登録受付の停止告知や事前発行（scripts/ops/provision_users.py）を検討してください。"
+
+  CognitoEmailErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-email-errors
+      AlarmDescription: A Cognito sign-up / resend / password-reset call failed with a quota or delivery error in the last 5 minutes (details in the EventBridge message).
+      Namespace: AWS/Events
+      MetricName: TriggeredRules
+      Dimensions: [{ Name: RuleName, Value: !Ref CognitoEmailErrorRule }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlertTopic]
