@@ -35,6 +35,8 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 | P2-metrics-aggregator-errors / P2-metrics-schedule-failed | 日次・毎時集計の失敗 | `/aws/lambda/metrics-aggregator-dev` | 管理画面の数字が止まる。翌日 02:00 の再実行で埋まるか、手動再実行（`{"date": "YYYY-MM-DD"}` で invoke） |
 | P2-announcements-publisher-errors | 予約公開の昇格失敗 | `/aws/lambda/announcements-publisher-dev` | 予約した告知が「予約」のまま。read 側は期限到来分を表示するので利用者影響は小さい |
 | P2-chatlogs-read/write-throttle / P2-sessions-write-throttle | DynamoDB スロットル | DynamoDB コンソールのメトリクス | オンデマンドのため通常は起きない。起きたら急激な負荷 |
+| **P1-cognito-email-errors** | Cognito のサインアップ・再送・再設定が上限 / 配信失敗 / スロットルで失敗（CloudTrail 経由） | SNS 本文（API 名・エラーコード・本文） | §5.6 |
+| P2-cognito-signups-40 / **P1-cognito-signups-45・50** | その日のサインアップ数が 40 / 45 / 50 に到達（メール 50 通/日の接近） | Cognito ユーザー一覧（作成日） | §5.6。40 で受付停止の告知を検討 |
 
 「INSUFFICIENT_DATA」は「その 5 分間にデータが無かった」だけで異常ではない（データ欠損は正常扱いの設定）。
 
@@ -85,6 +87,16 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 3. 原因解消後、保存した JSON の `records` を payload にして `eleknowledge-chat-archive-dev` を手動 invoke → `chatlogs/dt=.../` に出力されたことと件数を確認
 4. SQS のメッセージを削除し、アラームが OK に戻ることを確認
 5. `failed/` に無い場合は Stream の保持（24 時間）内に Lambda の再処理で回収する
+
+### 5.6 Cognito のメール送信上限（P1-cognito-email-errors / P1-cognito-signups-45・50 / P2-cognito-signups-40）
+- 背景: サインアップ・確認コード再送・パスワード再設定の確認メールは Cognito 既定の送信で、**1 ユーザープールあたり 1 日 50 通**（境界は UTC 0 時 = 日本時間 9 時と想定）。SES 未設定のため増やせない（issue #99）
+- 検知: (a) サインアップ数が 40 / 45 / 50 に達した（`SignUpSuccesses`、再送・再設定は含まない）、(b) Cognito が `Exceeded daily email limit` 等のエラーを返した（CloudTrail → EventBridge。SNS 本文に API 名・エラーコード・本文が入る）
+- 利用者側の表示: 画面が自動で「本日のメール送信数が上限に達したため…明日以降に」を出す。サインアップの場合はアカウントが未確認で作成済みのことがあるため「翌日、確認画面の『確認コードを再送信』から」と案内される（PR #102）
+- 対応:
+  1. 問い合わせには「翌日 9 時以降に確認画面の再送から。『登録が完了していません』と出た人だけ新規登録をやり直す」と案内
+  2. 登録が集中する見込みなら **事前発行**（`scripts/ops/provision_users.py`、CSV から招待メールなしで作成し初期パスワードを配布。PR #101）
+  3. 恒久対策は SES への切替（送信元ドメイン検証 + 本番アクセス申請 + Cognito の `DEVELOPER` 設定）。issue #99
+- 初回に到達したときは、SNS 本文のエラーコードと本文を issue #99 に記録し、画面側の判定（`classifyAuthError`）と一致しているか確認する
 
 ## 6. データ保全と保持期間
 
