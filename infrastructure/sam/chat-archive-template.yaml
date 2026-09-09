@@ -6,11 +6,11 @@ Description: >
   out-of-band on 2026-07-21 (Step 2 of the soft-delete / analytics work).
 
 # ---------------------------------------------------------------------------
-# NOTE: The live resources were first created via the AWS API on 2026-07-21.
-# To manage them with this template you must reconcile first, e.g. either:
-#   (a) delete the API-created resources, then `sam deploy` this template, or
-#   (b) CloudFormation resource import.
-# Deploying as-is into a fresh account/stack just works.
+# NOTE: Deployed as CloudFormation stack `eleknowledge-chat-archive-dev`
+# (UPDATE_COMPLETE, verified 2026-09-09). Earlier note about out-of-band
+# creation is obsolete. Deploy with:
+#   sam build --template chat-archive-template.yaml
+#   sam deploy --stack-name eleknowledge-chat-archive-dev --s3-bucket <artifacts bucket> --no-resolve-s3 ...
 # ---------------------------------------------------------------------------
 
 Parameters:
@@ -32,6 +32,9 @@ Resources:
     # PublicAccessBlock is enforced org-wide by SCP; do not set it here.
     Properties:
       BucketName: !Sub eleknowledge-chat-archive-${Environment}-${AWS::AccountId}
+      # 永久保存の正本のため誤削除・上書きに備える（issue #86 P0）
+      VersioningConfiguration:
+        Status: Enabled
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -76,6 +79,10 @@ Resources:
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub arn:aws:s3:::${ArchiveBucket}/*
+              - Sid: DlqWrite
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt ArchiveFailureQueue.Arn
 
   ArchiveFunction:
     Type: AWS::Serverless::Function
@@ -100,6 +107,48 @@ Resources:
             BatchSize: 100
             MaximumBatchingWindowInSeconds: 30
             MaximumRetryAttempts: 3
+            # 3 回失敗したバッチを黙って捨てず、失敗レコードのキー情報を SQS に残す（issue #86 P0）
+            BisectBatchOnFunctionError: true
+            DestinationConfig:
+              OnFailure:
+                Type: SQS
+                Destination: !GetAtt ArchiveFailureQueue.Arn
+
+  ArchiveFailureQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub eleknowledge-chat-archive-${Environment}-failures
+      MessageRetentionPeriod: 1209600  # 14 days
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+
+  # 失敗宛先にメッセージが入ったら通知（監視スタックの SNS トピックを参照）
+  ArchiveFailureQueueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-archive-dlq
+      AlarmDescription: chatlogs -> S3 archive dropped a batch after retries (records are in the failure queue)
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt ArchiveFailureQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
+      OKActions:
+        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
 
   AthenaResultsBucket:
     Type: AWS::S3::Bucket
