@@ -29,7 +29,7 @@ class FakeS3:
         self.fail_prefix = fail_prefix
 
     def put_object(self, **kw):
-        if self.fail_prefix and kw["Key"].startswith(self.fail_prefix):
+        if self.fail_prefix is not None and kw["Key"].startswith(self.fail_prefix):
             raise RuntimeError("s3 down for " + kw["Key"])
         self.puts.append(kw)
         return {}
