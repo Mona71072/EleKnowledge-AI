@@ -143,4 +143,8 @@ ORDER BY a.newimage.messageid, c.rank;
 
 - `text` の上限 4,000 文字で足りるか → **足りる**（2026-09-10 実測: KB `VQV81CNYU4` の 3 データソースはいずれも既定チャンク（約 300 トークン）、うち 1 つは FMP 解析。1 チャンクは日本語で数百〜1,500 文字程度）
 - 除外候補（`excludedBy=model_scope`）の本文は保存しない（メタのみ）でよいか → よい（本文が要るときは KB から引ける）
-- `RAG_LOGIC_VERSION` の運用（デプロイ手順に組み込む）
+- `RAG_LOGIC_VERSION` の運用 → 次のとおり決定（itai 2026-09-10）
+  - 意味: その回答を **どの版のコード・プロンプトで生成したか** を各トレースに残す印。プロンプトや検索閾値を変えた前後で Athena の集計を分けるために使う（モデル ID は別項目 `modelId` で持つ）
+  - 値: デプロイ元 commit の短縮 SHA（例: `ecc7d09`）。統合ブランチからデプロイした場合はそのマージ commit
+  - 渡し方: SAM パラメータ `RagLogicVersion` → 環境変数 `RAG_LOGIC_VERSION`。手入力は忘れるため、phase2 のデプロイを `scripts/ops/deploy_phase2.sh`（`git rev-parse --short HEAD` を自動で取り、`sam build` → `sam deploy --no-execute-changeset` まで行う）に集約し、ランブック §8 の手順をこのスクリプトに置き換える
+  - 未設定時: `"unknown"` を保存し、集計側で除外できるようにする
