@@ -844,6 +844,45 @@ def build_claude_messages(query: str, selected_results: list, chat_history: list
     return messages
 
 
+
+# Claude 4.7 以降 / Sonnet 5 / Fable 系は temperature 等のサンプリング指定を 400 で拒否し、
+# 既定で適応思考が動く。RAG の短い整理には思考は不要なので明示的に無効化する。
+# 判定はモデル ID（推論プロファイル ID / ARN のどちらでも可）の部分一致で行う。
+# 経緯: docs/eval-2026-09-09-model-bakeoff.md（Haiku 4.5 → Sonnet 5 切替）
+NEW_API_MODEL_MARKERS = ("sonnet-5", "opus-4-7", "opus-4-8", "opus-5", "fable")
+GENERATION_MAX_TOKENS = 4096
+LEGACY_GENERATION_TEMPERATURE = 0.3
+# auto: モデル ID の部分一致で判定 / new: 常に新 API 形式 / legacy: 常に旧形式。
+# アプリケーション推論プロファイルの ARN には元モデル名が含まれないため、
+# ARN を指定する場合は new / legacy を明示する。
+BEDROCK_REQUEST_STYLE = os.environ.get('BEDROCK_REQUEST_STYLE', 'auto').lower()
+
+
+def is_new_api_model(model_id: str, request_style: str = None) -> bool:
+    style = (request_style or BEDROCK_REQUEST_STYLE or 'auto').lower()
+    if style == 'new':
+        return True
+    if style == 'legacy':
+        return False
+    mid = (model_id or "").lower()
+    return any(marker in mid for marker in NEW_API_MODEL_MARKERS)
+
+
+def build_generation_request(system_prompt: str, messages: list, model_id: str) -> dict:
+    """InvokeModel 用のリクエスト本文をモデル世代に合わせて組み立てる。"""
+    body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "system": system_prompt,
+        "max_tokens": GENERATION_MAX_TOKENS,
+        "messages": messages,
+    }
+    if is_new_api_model(model_id):
+        body["thinking"] = {"type": "disabled"}
+    else:
+        body["temperature"] = LEGACY_GENERATION_TEMPERATURE
+    return body
+
+
 def generate_response_with_claude(query: str, kb_results: dict, chat_history: list = None,
                                   mode: str = "normal", search_query: str = None) -> str:
     """
@@ -886,15 +925,8 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
             query, selected_results, chat_history, search_query=search_query
         )
 
-        # Call Claude 4
-        request_body = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "system": system_prompt,
-            "max_tokens": 4096,
-            "temperature": 0.3,
-            "messages": messages
-        }
-        
+        request_body = build_generation_request(system_prompt, messages, BEDROCK_MODEL_ID)
+
         response = bedrock_runtime.invoke_model(
             modelId=BEDROCK_MODEL_ID,
             body=json.dumps(request_body)
