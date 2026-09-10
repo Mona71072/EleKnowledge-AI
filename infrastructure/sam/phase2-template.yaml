@@ -449,6 +449,11 @@ Resources:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
+      # アクセスログ（JSON 1 行/リクエスト）。実行ログと違い、4xx の種別（errorType）・送信元 IP・利用者（sub）・
+      # 体感レイテンシ（responseLatency）が 1 行で読める。本文は含まない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
+      AccessLogSetting:
+        DestinationArn: !GetAtt RagApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","path":"$context.path","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","ip":"$context.identity.sourceIp","userAgent":"$context.identity.userAgent","sub":"$context.authorizer.claims.sub","errorType":"$context.error.responseType","errorMessage":"$context.error.message","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
@@ -492,6 +497,11 @@ Resources:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
+      # アクセスログ（JSON 1 行/リクエスト）。実行ログと違い、4xx の種別（errorType）・送信元 IP・利用者（sub）・
+      # 体感レイテンシ（responseLatency）が 1 行で読める。本文は含まない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
+      AccessLogSetting:
+        DestinationArn: !GetAtt ChatApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","path":"$context.path","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","ip":"$context.identity.sourceIp","userAgent":"$context.identity.userAgent","sub":"$context.authorizer.claims.sub","errorType":"$context.error.responseType","errorMessage":"$context.error.message","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
