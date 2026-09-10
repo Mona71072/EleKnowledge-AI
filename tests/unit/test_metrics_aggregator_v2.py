@@ -131,7 +131,8 @@ def test_write_day_writes_daily_and_hourly_rows_without_ttl(monkeypatch):
     fake = FakeTable()
     monkeypatch.setattr(agg, "metrics_table", fake)
     monkeypatch.setattr(agg, "scan_day", lambda day: _items())
-    monkeypatch.setattr(agg, "aggregate_health", lambda day: {"errorRate": 0.0, "latencyP90": 1.0, "http5xx": 0, "incidents": 0})
+    monkeypatch.setattr(agg, "aggregate_platform", lambda day, chat: {"errorRate": 0.0, "latencyP90": 1.0, "http5xx": 0, "incidents": 0})
+    monkeypatch.setattr(agg, "count_new_users", lambda ids, day: 0)
 
     result = agg.write_day(date(2026, 9, 10), partial=True, upto_hour=8)
     assert result["date"] == "2026-09-10" and result["partial"] is True
@@ -151,7 +152,8 @@ def test_write_day_final_writes_24_hourly_rows(monkeypatch):
     fake = FakeTable()
     monkeypatch.setattr(agg, "metrics_table", fake)
     monkeypatch.setattr(agg, "scan_day", lambda day: [])
-    monkeypatch.setattr(agg, "aggregate_health", lambda day: {"errorRate": 0.0, "latencyP90": 0.0, "http5xx": 0, "incidents": 0})
+    monkeypatch.setattr(agg, "aggregate_platform", lambda day, chat: {"errorRate": 0.0, "latencyP90": 0.0, "http5xx": 0, "incidents": 0})
+    monkeypatch.setattr(agg, "count_new_users", lambda ids, day: 0)
     agg.write_day(date(2026, 9, 10), partial=False)
     daily = [i for i in fake.items if i["scope"] == "overall"]
     assert daily[0]["partial"] is False and daily[0]["queries"] == 0
@@ -162,6 +164,7 @@ def test_lambda_handler_daily_runs_three_days(monkeypatch):
     calls = []
     monkeypatch.setattr(agg, "write_day", lambda day, partial, upto_hour=23: calls.append((day.isoformat(), partial)) or {"date": day.isoformat()})
     monkeypatch.setattr(agg, "jst_now", lambda: datetime(2026, 9, 24, 2, 0, tzinfo=JST))
+    monkeypatch.setattr(agg, "write_cost_rows", lambda: {"costRows": 0})
     out = agg.lambda_handler({"mode": "daily"}, None)
     assert out["statusCode"] == 200
     assert calls == [("2026-09-23", False), ("2026-09-22", False), ("2026-09-21", False)]
