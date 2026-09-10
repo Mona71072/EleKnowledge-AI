@@ -991,7 +991,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                   {message.pageCandidates.map((c, idx) => (
                                     <li key={`${c.sourceUri}-${idx}`} className="text-sm">
                                       <a
-                                        href={documentHrefWithPage(c.sourceUri, c.pageNumber)}
+                                        href={documentHrefWithPage(c.sourceUri, c.pageNumber, { sessionId: currentSession, messageId: message.id })}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="font-medium text-blue-700 hover:underline"
@@ -1095,7 +1095,7 @@ const normalizeTableMarkdown = (text: string): string => {
                               {primaryDocs.map((doc, idx) => (
                                 <a
                                   key={`${doc.sourceUri || doc.documentName}-${idx}`}
-                                  href={documentHref(doc.sourceUri)}
+                                  href={documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id })}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"
@@ -1127,7 +1127,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                       {extraDocs.map((doc, idx) => (
                                         <a
                                           key={`${doc.sourceUri || doc.documentName}-extra-${idx}`}
-                                          href={documentHref(doc.sourceUri)}
+                                          href={documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id })}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"

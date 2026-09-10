@@ -31,6 +31,14 @@ AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-1')
 # 短い TTL は流出時の露出窓を最小化する。
 PRESIGNED_URL_EXPIRES_IN = int(os.environ.get('PRESIGNED_URL_EXPIRES_IN', '300'))
 
+# 運用テレメトリ（構造化ログ・資料クリック・言い換え）。本処理を止めない設計。
+# Lambda では関数ディレクトリが sys.path にあるが、テストが importlib で直接読むときは無いので補う
+import sys as _sys  # noqa: E402
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in _sys.path:
+    _sys.path.insert(0, _HERE)
+import telemetry  # noqa: E402
+
 # 引用 sourceUri の保存・返却形式（段階移行用スイッチ）:
 #   'presigned' … 従来どおり署名付き HTTPS URL（既定）。受付
 #                 （GET /rag/document と /doc）だけを先に本番反映し、既存フロント
@@ -1056,6 +1064,9 @@ def handle_document_request(event, headers):
 
     params = event.get('queryStringParameters') or {}
     doc_uri = params.get('uri') or ''
+    # どの回答の引用から開いたか（/doc が &s=&m= で渡す。無くても文書の解決はする）
+    open_session_id = params.get('s') or ''
+    open_message_id = params.get('m') or ''
 
     if not is_allowed_document_uri(doc_uri):
         # 許可外バケットと不正な URI は区別せず 400 に丸める
@@ -1077,6 +1088,9 @@ def handle_document_request(event, headers):
             'body': json.dumps({'error': 'PresignFailed', 'message': '文書の取得に失敗しました'})
         }
 
+    telemetry.record_document_open(
+        chatlogs_table, open_session_id, open_message_id, get_caller_id(event), owns_session, doc_uri, event,
+    )
     return {
         'statusCode': 200,
         'headers': {**headers, 'Cache-Control': 'no-store'},
@@ -1216,6 +1230,14 @@ def get_chat_history(session_id: str, limit: int = 10) -> list:
 
 
 def lambda_handler(event, context):
+    """1 リクエスト 1 行の構造化ログを出す外側。本体は handle_rag_request。"""
+    started_at = time.perf_counter()
+    response = handle_rag_request(event, context, started_at)
+    telemetry.log_request(event, response, started_at)
+    return response
+
+
+def handle_rag_request(event, context, started_at):
     """
     Handle RAG query
     
@@ -1311,6 +1333,8 @@ def lambda_handler(event, context):
 
         # Get chat history for context
         chat_history = get_chat_history(session_id, limit=5)
+        # 直前の回答が「候補あり」で評価が無く 10 分以内なら、言い換えの印を付ける（暗黙の失敗信号）
+        telemetry.stamp_reformulation(chatlogs_table, chat_history)
 
         # --- Phase1: 聞き返しゲート（検索前） ---
         # WHY: 曖昧症状のまま検索すると見当違い資料→作文になる。番号は聞かない。
@@ -1494,25 +1518,8 @@ def lambda_handler(event, context):
         }
         
     except ClientError as e:
-        error_code = e.response['Error']['Code']
-        error_message = e.response['Error']['Message']
-        
-        return {
-            'statusCode': 500,
-            'headers': headers,
-            'body': json.dumps({
-                'error': error_code,
-                'message': error_message
-            })
-        }
-    
-    except Exception as e:
-        print(f"Unexpected error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': headers,
-            'body': json.dumps({
-                'error': 'InternalServerError',
-                'message': 'An unexpected error occurred'
-            })
-        }
+        # 段階（retrieve / generate / save）とエラーコードを構造化行に残し、利用者には一般化した本文だけを返す
+        return telemetry.error_response(headers, e, started_at, event)
+
+    except Exception as e:  # noqa: BLE001
+        return telemetry.error_response(headers, e, started_at, event)
