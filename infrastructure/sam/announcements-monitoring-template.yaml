@@ -23,11 +23,6 @@ Parameters:
     Default: admin
     Description: Cognito group name that grants admin privileges (server-side enforced)
 
-  MetricTtlDays:
-    Type: Number
-    Default: 400
-    Description: Retention (days) for metric snapshots (~13 months for YoY comparison)
-
   AllowedIPList:
     Type: CommaDelimitedList
     Description: Office egress /32 CIDRs allowed to reach the API (same as GenU / WAF)
@@ -365,7 +360,8 @@ Resources:
       Environment:
         Variables:
           METRICS_TABLE: !Ref MetricsTable
-          METRIC_TTL_DAYS: !Ref MetricTtlDays
+          # 日次確定時に D-1〜D-3 を再集計する（後付けの 👍👎・資料クリックを回答日の行へ反映）
+          REAGGREGATE_DAYS: "3"
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
           RAG_FUNCTION_NAME: !Sub rag-${Environment}
@@ -375,10 +371,19 @@ Resources:
         DailySchedule:
           Type: Schedule
           Properties:
-            # 02:00 JST == 17:00 UTC, aggregates the previous UTC day
+            # 02:00 JST == 17:00 UTC. 前日（JST）を確定し、D-2・D-3 も再集計する
             Schedule: cron(0 17 * * ? *)
             Name: !Sub metrics-daily-agg-${Environment}
             Description: Daily metrics aggregation for EleKnowledge dashboard
+            Input: '{"mode": "daily"}'
+        HourlySchedule:
+          Type: Schedule
+          Properties:
+            # 当日（JST）を partial=true で毎時上書きし、時間帯別の行も更新する
+            Schedule: rate(1 hour)
+            Name: !Sub metrics-hourly-agg-${Environment}
+            Description: Hourly (partial) metrics aggregation for today
+            Input: '{"mode": "hourly"}'
 
   # ==========================================================================
   # API Gateway (Cognito authorizer + office IP whitelist, mirrors phase2)

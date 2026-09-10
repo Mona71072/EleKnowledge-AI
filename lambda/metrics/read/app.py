@@ -5,6 +5,8 @@ GET /admin/metrics?period=today|week|month|custom&from=&to=&scope=overall
 
 Reads pre-aggregated daily snapshots from the metrics table (no heavy scans),
 shapes them into KPI / time-series / rankings / health for the dashboard.
+
+日付は JST（固定オフセット +09:00）。日次行の metricDate は JST の日付。
 """
 import json
 import os
@@ -19,6 +21,8 @@ dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', '
 METRICS_TABLE = os.environ.get('METRICS_TABLE')
 ADMIN_GROUP_NAME = os.environ.get('ADMIN_GROUP_NAME', 'admin')
 table = dynamodb.Table(METRICS_TABLE)
+
+JST = timezone(timedelta(hours=9))
 
 CORS_HEADERS = {
     'Content-Type': 'application/json',
@@ -37,6 +41,10 @@ THRESHOLDS = {
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _today_jst():
+    return _now().astimezone(JST).date()
 
 
 def _response(status: int, body: dict) -> dict:
@@ -70,7 +78,7 @@ def status_for(name: str, value: float) -> str:
 
 def resolve_range(qs: dict):
     period = (qs.get('period') or 'week').lower()
-    today = _now().date()
+    today = _today_jst()
     if period == 'today':
         start = today
     elif period == 'month':
@@ -101,7 +109,40 @@ def query_snapshots(scope: str, start_date, end_date) -> list:
     return [it for it in items if len(it.get('metricDate', '')) == 10]
 
 
-def build_payload(items: list, period: str) -> dict:
+def query_hourly(day) -> list:
+    """当日の時間帯別の行（scope=hourly, metricDate=YYYY-MM-DDTHH）。"""
+    prefix = day.isoformat()
+    resp = table.query(
+        IndexName='scope-metricDate-index',
+        KeyConditionExpression=Key('scope').eq('hourly') & Key('metricDate').between(prefix + 'T00', prefix + 'T23'),
+        ScanIndexForward=True,
+    )
+    return resp.get('Items', [])
+
+
+def unique_users(items: list) -> int:
+    """期間内のユニーク利用者数。userIds を持つ行は和集合、無い旧行は日別最大値で近似。"""
+    union = set()
+    legacy_max = 0
+    for it in items:
+        ids = it.get('userIds')
+        if isinstance(ids, list):
+            union.update(ids)
+        else:
+            legacy_max = max(legacy_max, int(_num(it.get('activeUsers'))))
+    return max(len(union), legacy_max)
+
+
+def freshness(items: list) -> dict:
+    latest = items[-1] if items else {}
+    return {
+        'latestDate': latest.get('metricDate'),
+        'aggregatedAt': latest.get('aggregatedAt'),
+        'partial': bool(latest.get('partial', False)),
+    }
+
+
+def build_payload(items: list, period: str, hourly: list | None = None) -> dict:
     queries_by_day = [{'date': it['metricDate'], 'value': int(_num(it.get('queries')))} for it in items]
     like_by_day = [{'date': it['metricDate'], 'value': round(_num(it.get('likeRate')), 4)} for it in items]
 
@@ -109,7 +150,7 @@ def build_payload(items: list, period: str) -> dict:
     total_good = sum(int(_num(it.get('feedbackGood'))) for it in items)
     total_bad = sum(int(_num(it.get('feedbackBad'))) for it in items)
     like_rate = round(total_good / (total_good + total_bad), 4) if (total_good + total_bad) else 0.0
-    active_users = max((int(_num(it.get('activeUsers'))) for it in items), default=0)
+    active_users = unique_users(items)
 
     # deltas: compare last day vs previous available day
     def delta(seq):
@@ -134,18 +175,27 @@ def build_payload(items: list, period: str) -> dict:
         key=lambda x: x['count'], reverse=True
     )[:5]
 
+    series = {
+        'queriesByDay': queries_by_day,
+        'likeRateByDay': like_by_day,
+    }
+    if hourly is not None:
+        series['queriesByHour'] = [
+            {'hour': it['metricDate'][-2:], 'value': int(_num(it.get('queries'))),
+             'unreached': int(_num(it.get('unreached')))}
+            for it in hourly
+        ]
+
     return {
         'period': period,
         'generatedAt': _now().isoformat().replace('+00:00', 'Z'),
+        'freshness': freshness(items),
         'kpi': {
             'likeRate': {'value': like_rate, 'delta': delta(like_by_day)},
             'queries': {'value': total_queries, 'delta': delta(queries_by_day)},
             'activeUsers': {'value': active_users},
         },
-        'series': {
-            'queriesByDay': queries_by_day,
-            'likeRateByDay': like_by_day,
-        },
+        'series': series,
         'topDocuments': top_documents,
         'health': {
             'errorRate': {'value': round(err, 4), 'status': status_for('errorRate', err)},
@@ -169,7 +219,8 @@ def lambda_handler(event, context):
         scope = qs.get('scope') or 'overall'
         start_date, end_date, period = resolve_range(qs)
         items = query_snapshots(scope, start_date, end_date)
-        return _response(200, build_payload(items, period))
+        hourly = query_hourly(end_date) if period == 'today' else None
+        return _response(200, build_payload(items, period, hourly))
 
     except ClientError as e:
         print(f"[metrics-read] ClientError: {e}")
