@@ -43,6 +43,11 @@ Parameters:
     Default: '{"global.anthropic.claude-sonnet-5": {"inputPerMTok": 2.0, "outputPerMTok": 10.0}, "jp.anthropic.claude-haiku-4-5-20251001-v1:0": {"inputPerMTok": 1.1, "outputPerMTok": 5.5}}'
     Description: USD per million tokens by model id (JSON). Stored in SSM; the daily estimate is reconciled against Cost Explorer.
 
+  BedrockBudgetUsd:
+    Type: Number
+    Default: 100
+    Description: Monthly budget (USD) for the Bedrock model line, shown on the cost page. Keep equal to the AWS Budgets amount.
+
   CostExplorerEnabled:
     Type: String
     Default: "true"
@@ -255,6 +260,13 @@ Resources:
                 Resource:
                   - !GetAtt MetricsTable.Arn
                   - !Sub ${MetricsTable.Arn}/index/*
+                  # 表示中の告知（ダッシュボードの「いま」）
+                  - !GetAtt AnnouncementsTable.Arn
+                  - !Sub ${AnnouncementsTable.Arn}/index/*
+              # 「いま」の値は表示のたびに CloudWatch を直接読む（設計 §2.2）
+              - Effect: Allow
+                Action: [cloudwatch:DescribeAlarms, cloudwatch:DescribeAlarmHistory, cloudwatch:GetMetricData]
+                Resource: '*'
 
   MetricsAggregatorRole:
     Type: AWS::IAM::Role
@@ -387,12 +399,30 @@ Resources:
       Environment:
         Variables:
           METRICS_TABLE: !Ref MetricsTable
+          ANNOUNCEMENTS_TABLE: !Ref AnnouncementsTable
+          API_NAMES: !Sub rag-api-${Environment},chat-api-${Environment},auth-api-${Environment},announcements-monitoring-api-${Environment}
+          ALARM_PREFIX: !Sub ${ProjectName}-${Environment}-
+          BEDROCK_COST_SERVICE_NAME: !Ref BedrockCostServiceName
+          BEDROCK_BUDGET_USD: !Ref BedrockBudgetUsd
       Events:
+        # 旧形式（現行 UI）。UI 切替後に削除する
         Get:
           Type: Api
           Properties:
             RestApiId: !Ref AppApi
             Path: /admin/metrics
+            Method: GET
+        GetDashboard:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/metrics/dashboard
+            Method: GET
+        GetCost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/metrics/cost
             Method: GET
 
   MetricsAggregatorFunction:
