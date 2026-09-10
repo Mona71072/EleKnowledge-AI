@@ -172,6 +172,7 @@ def aggregate_chat(items: list) -> dict:
     document_opens = 0
     messages_with_open = 0
     reformulated = 0
+    triage_open = 0
     doc_counts = {}
 
     for it in items:
@@ -207,6 +208,9 @@ def aggregate_chat(items: list) -> dict:
                 pages += 1
             if _is_unreached(it):
                 unreached += 1
+                # 未振り分け: 到達できなかった回答のうち triage が無いか open のもの（設計 §9.4）
+                if (it.get('triage') or {}).get('status', 'open') == 'open':
+                    triage_open += 1
             opens = int(it.get('documentOpens') or 0)
             if opens > 0:
                 document_opens += opens
@@ -239,6 +243,7 @@ def aggregate_chat(items: list) -> dict:
         'clarify': clarify,
         'pages': pages,
         'unreached': unreached,
+        'triageOpen': triage_open,
         'documentOpens': document_opens,
         'messagesWithOpen': messages_with_open,
         'reformulated': reformulated,

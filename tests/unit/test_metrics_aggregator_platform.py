@@ -291,3 +291,14 @@ def test_aggregate_chat_counts_opens_and_reformulation():
     out = agg.aggregate_chat(items)
     assert out["documentOpens"] == 3 and out["messagesWithOpen"] == 2
     assert out["reformulated"] == 1
+
+
+def test_aggregate_chat_counts_open_triage_among_unreached():
+    items = [
+        {"role": "assistant", "responseType": "not_found", "timestamp": "2026-09-23T01:00:00Z"},                      # triage なし → open
+        {"role": "assistant", "responseType": "pages", "feedback": "bad", "triage": {"status": "open"}, "timestamp": "x"},
+        {"role": "assistant", "responseType": "pages", "feedback": "bad", "triage": {"status": "done"}, "timestamp": "x"},
+        {"role": "assistant", "responseType": "pages", "feedback": "good", "timestamp": "x"},                          # 到達できずではない
+    ]
+    out = agg.aggregate_chat(items)
+    assert out["unreached"] == 3 and out["triageOpen"] == 2
