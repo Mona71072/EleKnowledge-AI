@@ -8,6 +8,9 @@ Parameters:
   Environment:
     Type: String
     Default: dev
+  ProjectName:
+    Type: String
+    Default: EleKnowledge
   AllowedIPList:
     Type: CommaDelimitedList
     Description: Office egress /32 CIDRs allowed to reach the APIs (same as GenU)
@@ -34,6 +37,13 @@ Resources:
       Scope: REGIONAL
       IPAddressVersion: IPV4
       Addresses: !Ref AllowedIPList
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
 
   RegionalWebAcl:
     Type: AWS::WAFv2::WebACL
@@ -43,6 +53,13 @@ Resources:
       Scope: REGIONAL
       DefaultAction:
         Block: {}
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
       VisibilityConfig:
         SampledRequestsEnabled: true
         CloudWatchMetricsEnabled: true

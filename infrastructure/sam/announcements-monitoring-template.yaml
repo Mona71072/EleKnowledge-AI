@@ -95,8 +95,9 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+      # 2026-09-09 itai 決定: 日次 KPI は前年比較に使うため自動削除しない（issue #86）
       TimeToLiveSpecification:
-        Enabled: true
+        Enabled: false
         AttributeName: ttl
       AttributeDefinitions:
         - AttributeName: metricDate

@@ -13,6 +13,7 @@ lint = true
 
 [default.deploy.parameters]
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+tags = "Project=EleKnowledge Env=dev ManagedBy=SAM"
 confirm_changeset = true
 resolve_s3 = true
 s3_prefix = "eleknowledge-ai"
@@ -42,6 +43,7 @@ stack_name = "EleKnowledge-prd"
 
 [production.deploy.parameters]
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+tags = "Project=EleKnowledge Env=prd ManagedBy=SAM"
 confirm_changeset = true
 resolve_s3 = true
 s3_prefix = "eleknowledge-ai"

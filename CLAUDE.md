@@ -8,7 +8,7 @@
 
 - `status: production` のドキュメントは**ユーザーの事前確認なしに編集しない**
 - PR は base `develop`・日本語・細かめ。`main` へは develop 経由のみ
-- ドキュメント更新時は frontmatter の `last-verified` を更新。ファイル移動は `git mv`
+- ドキュメント更新時は検証日を更新。**部分検証なら frontmatter の `last-verified` は進めず、セクション見出し直下に `> 最終検証: YYYY-MM-DD — <検証方法・範囲>` を置く**。ファイル移動は `git mv`
 
 ## 情報の場所
 
