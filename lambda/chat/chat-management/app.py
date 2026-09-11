@@ -3,6 +3,7 @@ EleKnowledge Chat Management Lambda Function
 Session and Message Management
 """
 import json
+import re
 import os
 import boto3
 import time
@@ -505,6 +506,11 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
         filter_parts.append('#tr.#st = :tst')
         values[':tst'] = triage
 
+    filter_expression = ' AND '.join(filter_parts)
+    # 式で使っていない別名を渡すと DynamoDB が ValidationException を返す（kind=bad / reformulated で 500 になった）
+    used_names = set(re.findall(r'#\w+', filter_expression))
+    names = {key: value for key, value in names.items() if key in used_names}
+
     collected = []
     exclusive_start = None
     pages = 0
@@ -512,7 +518,7 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
 
     while pages < FAILURES_SCAN_MAX_PAGES:
         kwargs = {
-            'FilterExpression': ' AND '.join(filter_parts),
+            'FilterExpression': filter_expression,
             'ExpressionAttributeNames': names,
             'ExpressionAttributeValues': values,
             'Limit': 100,
@@ -1076,7 +1082,9 @@ def lambda_handler(event, context):
     except ClientError as e:
         error_code = e.response['Error']['Code']
         error_message = e.response['Error']['Message']
-        
+        # 500 を返す経路は必ずログに残す（アクセスログの requestId で突き合わせる）
+        print(f"[chat] ClientError {error_code} on {event.get('httpMethod')} {event.get('path')}: {error_message}")
+
         return {
             'statusCode': 500,
             'headers': headers,
