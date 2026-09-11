@@ -60,6 +60,8 @@ AWS API（Bedrock / DynamoDB / S3）宛のみで、インターネット上の�
 
 ### VPC 構成【未実装・将来構想】
 
+> 最終検証: 2026-09-11 — AWS 公式ドキュメント照合（Lambda VPC の Hyperplane ENI・NAT Gateway の機能範囲）。AWS 実査は 2026-09-02 のまま
+
 > ⚠️ **以下は将来の拡張候補であり、2026-09-02 時点で実装されていない。**
 > 実装済みの統制として扱わないこと。将来 VPC 化する際の設計意図として記載を残す。
 
@@ -73,10 +75,12 @@ VPC なし構成のトレードオフ:
 
 | | VPC なし（現行） | VPC + NAT（将来構想） |
 |---|---|---|
-| アウトバウンドの記録・追跡 | VPC Flow Logs がなく**追跡不可** | Flow Logs で追跡可能 |
-| egress の宛先制限 | **なし**（侵害時のデータ持ち出し経路が無制御） | Security Group / NAT で宛先を限定可能 |
+| アウトバウンドのフロー記録（VPC Flow Logs） | Flow Logs の対象外のため、**ネットワークフローとしては追跡不可**（AWS API 呼び出しは CloudTrail、処理内容は Lambda ログで追跡できる） | Flow Logs で送信元・宛先・ポート単位に追跡可能 |
+| egress の宛先制限 | **なし**（侵害時のデータ持ち出し経路が無制御） | Security Group / NACL / Network Firewall 等の設定で宛先を限定可能（NAT Gateway 自体に宛先 allowlist 機能はない） |
 | 常時コスト | NAT Gateway 課金なし | NAT Gateway の時間課金が発生 |
-| Lambda コールドスタート | ENI 割り当てなし | ENI 割り当て分の増加 |
+| Lambda コールドスタート | ENI 不要 | Hyperplane ENI は関数の VPC 設定（サブネット × Security Group の組）ごとに作成・共有・再利用されるため、通常のコールドスタートごとに ENI 割り当ては発生しない。ENI の初回作成（VPC 設定の新規追加・変更直後）時のみ作成待ちが生じる |
+
+出典: [AWS Lambda — VPC 内リソースへのアクセス（Hyperplane ENI）](https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html)
 
 **外部インターネットへ能動的に通信する処理を追加する場合は、この構成の是非を先に判断すること。**
 （例: 外部 API からのデータ取り込み。→ issue #79）
