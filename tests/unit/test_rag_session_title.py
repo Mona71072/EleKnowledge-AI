@@ -199,7 +199,7 @@ def test_session_title_budget_allows_boundary(rag):
 
 def test_handler_passes_deadline_to_every_title_call(rag):
     """通常回答・聞き返し・該当なしの全経路で応答期限を渡す（渡し忘れの回帰防止）。"""
-    src = inspect.getsource(rag.lambda_handler)
+    src = inspect.getsource(getattr(rag, "handle_rag_request", rag.lambda_handler))  # #111 以降は本体が handle_rag_request
     assert "request_deadline = time.monotonic() + RESPONSE_TIME_BUDGET_SECONDS" in src
     assert src.count("generate_session_title(") == 3
     assert src.count("generate_session_title(query, deadline=request_deadline)") == 3
