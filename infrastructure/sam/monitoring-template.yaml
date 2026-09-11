@@ -1,0 +1,736 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  EleKnowledge monitoring - SNS alert topic, CloudWatch alarms, log metric
+  filters and saved Logs Insights queries. Additive stack; it references the
+  phase1/phase2/phase3/announcements-monitoring/chat-archive resources by name
+  and does not modify them. Design: issue #86 (2026-09-09).
+
+# ---------------------------------------------------------------------------
+# 運用メモ
+# - アラーム名がそのまま通知メールの件名になる（例: ALARM: "EleKnowledge-dev-P1-rag-api-5xx" in Asia Pacific (Tokyo)）
+#   P1 = 利用者影響あり・即時対応（5XX / スロットル / 29 秒超え / エラー行 / アーカイブ失敗）
+#   P2 = 翌営業日対応（4XX 急増 / p90 遅延 / 集計・予約公開・スケジュール失敗 / DynamoDB スロットル）
+#   件名を自由に整形するには SNS → Lambda → メール送信の中継が必要（後続）
+# - 通知先メールは AlertEmailPrimary / AlertEmailSecondary パラメータで
+#   デプロイ時に渡す（リポジトリには書かない。AGENTS.md「共有ルールと個人設定の境界」）
+# - SNS のメール購読は受信者が確認リンクを押すまで有効にならない
+# - Lambda Errors が動かない関数（rag / chat / auth は例外を 500 で return する）は
+#   API Gateway 5XX とログのメトリクスフィルタで検知する
+# - ロググループの保持期間は既存グループのため本テンプレートでは扱わず、
+#   scripts/ops/set_log_retention.py で設定する（対象は EleKnowledge の関数名 / API 名で限定。IaC 化は後続）
+# - メトリクスフィルタのパターンは大文字小文字を区別するため、handler が出す小文字の error も列挙する
+# ---------------------------------------------------------------------------
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prd]
+  ProjectName:
+    Type: String
+    Default: EleKnowledge
+  AlertEmailPrimary:
+    Type: String
+    Description: Primary alert recipient (email). Passed at deploy time, never committed.
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+  AlertEmailSecondary:
+    Type: String
+    Default: ''
+    Description: Optional second alert recipient (email). Empty to skip.
+
+  # --- 監視対象の名前（既存スタックの命名に合わせる） ---
+  RagFunctionName:
+    Type: String
+    Default: rag-dev
+  ChatFunctionName:
+    Type: String
+    Default: chat-dev
+  LoginFunctionName:
+    Type: String
+    Default: login-dev
+  MetricsAggregatorFunctionName:
+    Type: String
+    Default: metrics-aggregator-dev
+  ArchiveFunctionName:
+    Type: String
+    Default: eleknowledge-chat-archive-dev
+  AnnouncementsPublisherFunctionName:
+    Type: String
+    Default: announcements-publisher-dev
+  RagApiName:
+    Type: String
+    Default: rag-api-dev
+  ChatApiName:
+    Type: String
+    Default: chat-api-dev
+  AuthApiName:
+    Type: String
+    Default: auth-api-dev
+  AppApiName:
+    Type: String
+    Default: announcements-monitoring-api-dev
+  TroubleshootingApiName:
+    Type: String
+    Default: troubleshooting-api-dev
+  MetricsScheduleRuleName:
+    Type: String
+    Default: metrics-daily-agg-dev
+  ChatLogsTableName:
+    Type: String
+    Default: chatlogs-dev
+  SessionsTableName:
+    Type: String
+    Default: sessions-dev
+
+  CognitoUserPoolId:
+    Type: String
+    Default: ap-northeast-1_DN17ekXik
+  CognitoUserPoolClientId:
+    Type: String
+    Default: doa4arfmc7shs8u0mb91u70mq
+  CognitoAlertErrorCodes:
+    Type: CommaDelimitedList
+    Default: "LimitExceededException,CodeDeliveryFailureException,TooManyRequestsException,InternalErrorException"
+    Description: Cognito errorCodes (CloudTrail) that trigger the P1 e-mail error notification. Add UsernameExistsException temporarily to test the path.
+
+  # --- 閾値（issue #86 P0 案。初週の実測で見直す） ---
+  Api4xxThreshold:
+    Type: Number
+    Default: 30
+    Description: 4XX count per 5 minutes that triggers the alarm (WAF 403 / Cognito 401 are mixed)
+  RagDurationP90ThresholdMs:
+    Type: Number
+    Default: 20000
+    Description: p90 Lambda duration over 15 minutes (API Gateway integration timeout is 29s)
+  RagDurationMaxThresholdMs:
+    Type: Number
+    Default: 25000
+
+Conditions:
+  HasSecondaryEmail: !Not [!Equals [!Ref AlertEmailSecondary, '']]
+
+Resources:
+
+  # ------------------------------------------------------------------
+  # 通知経路
+  # ------------------------------------------------------------------
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub eleknowledge-alerts-${Environment}
+      DisplayName: !Sub EleKnowledge ${Environment} alerts
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Env, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: SAM }
+
+  AlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref AlertTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudWatchAlarms
+            Effect: Allow
+            Principal: { Service: cloudwatch.amazonaws.com }
+            Action: sns:Publish
+            Resource: !Ref AlertTopic
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*
+          - Sid: AllowEventBridgeRules
+            Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sns:Publish
+            Resource: !Ref AlertTopic
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/*
+
+  AlertSubscriptionPrimary:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmailPrimary
+
+  AlertSubscriptionSecondary:
+    Type: AWS::SNS::Subscription
+    Condition: HasSecondaryEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmailSecondary
+
+  # ------------------------------------------------------------------
+  # API Gateway 5XX（主アラーム: Lambda が 500 を return する設計のため）
+  # ------------------------------------------------------------------
+  RagApi5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-api-5xx
+      AlarmDescription: RAG API returned 5XX (Bedrock / KB / DynamoDB failure in rag Lambda)
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions: [{ Name: ApiName, Value: !Ref RagApiName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  ChatApi5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-api-5xx
+      AlarmDescription: Chat API (sessions / messages / feedback) returned 5XX
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions: [{ Name: ApiName, Value: !Ref ChatApiName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  AuthApi5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-auth-api-5xx
+      AlarmDescription: Auth API (login / signup / verify) returned 5XX
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions: [{ Name: ApiName, Value: !Ref AuthApiName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  AppApi5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-app-api-5xx
+      AlarmDescription: Announcements / metrics API returned 5XX
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions: [{ Name: ApiName, Value: !Ref AppApiName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  TroubleshootingApi5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-troubleshooting-api-5xx
+      AlarmDescription: Troubleshooting API returned 5XX (metrics may be absent until MethodSettings are enabled)
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions: [{ Name: ApiName, Value: !Ref TroubleshootingApiName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # API Gateway 4XX 急増（WAF 403 / Cognito 401 が混ざるため緩い閾値。初週で見直し）
+  # ------------------------------------------------------------------
+  RagApi4xxSpikeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-rag-api-4xx-spike
+      AlarmDescription: RAG API 4XX spike (check WAF IP allowlist vs Cognito token expiry)
+      Namespace: AWS/ApiGateway
+      MetricName: 4XXError
+      Dimensions: [{ Name: ApiName, Value: !Ref RagApiName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref Api4xxThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  ChatApi4xxSpikeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-chat-api-4xx-spike
+      AlarmDescription: Chat API 4XX spike
+      Namespace: AWS/ApiGateway
+      MetricName: 4XXError
+      Dimensions: [{ Name: ApiName, Value: !Ref ChatApiName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref Api4xxThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  AuthApi4xxSpikeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-auth-api-4xx-spike
+      AlarmDescription: Auth API 4XX spike (login failures / blocked IPs)
+      Namespace: AWS/ApiGateway
+      MetricName: 4XXError
+      Dimensions: [{ Name: ApiName, Value: !Ref AuthApiName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref Api4xxThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # Lambda Throttles（同時実行上限）
+  # ------------------------------------------------------------------
+  RagThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-throttles
+      AlarmDescription: rag Lambda throttled (account concurrency limit)
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions: [{ Name: FunctionName, Value: !Ref RagFunctionName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  ChatThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-throttles
+      AlarmDescription: chat Lambda throttled
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions: [{ Name: FunctionName, Value: !Ref ChatFunctionName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  LoginThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-login-throttles
+      AlarmDescription: login Lambda throttled
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions: [{ Name: FunctionName, Value: !Ref LoginFunctionName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # Lambda Errors（例外を raise する関数のみ有効）
+  # ------------------------------------------------------------------
+  MetricsAggregatorErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-metrics-aggregator-errors
+      AlarmDescription: Daily/hourly KPI aggregation failed (dashboard will be stale)
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref MetricsAggregatorFunctionName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  ArchiveErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-archive-errors
+      AlarmDescription: chatlogs stream -> S3 archive failed (records are retried 3 times then dropped)
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref ArchiveFunctionName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  AnnouncementsPublisherErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-announcements-publisher-errors
+      AlarmDescription: Scheduled announcement promotion failed
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref AnnouncementsPublisherFunctionName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # RAG レイテンシ（API Gateway 統合タイムアウト 29 秒の手前で検知）
+  # ------------------------------------------------------------------
+  RagDurationP90Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-rag-duration-p90
+      AlarmDescription: rag Lambda p90 duration over 15 minutes is high (Bedrock / KB slow)
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions: [{ Name: FunctionName, Value: !Ref RagFunctionName }]
+      ExtendedStatistic: p90
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: !Ref RagDurationP90ThresholdMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  RagDurationMaxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-duration-max
+      AlarmDescription: A single rag invocation approached the API Gateway 29s limit (user likely saw 504)
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions: [{ Name: FunctionName, Value: !Ref RagFunctionName }]
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref RagDurationMaxThresholdMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # EventBridge スケジュール失敗
+  # ------------------------------------------------------------------
+  MetricsScheduleFailedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-metrics-schedule-failed
+      AlarmDescription: EventBridge could not invoke the metrics aggregator
+      Namespace: AWS/Events
+      MetricName: FailedInvocations
+      Dimensions: [{ Name: RuleName, Value: !Ref MetricsScheduleRuleName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # DynamoDB スロットル
+  # ------------------------------------------------------------------
+  ChatLogsReadThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-chatlogs-read-throttle
+      Namespace: AWS/DynamoDB
+      MetricName: ReadThrottleEvents
+      Dimensions: [{ Name: TableName, Value: !Ref ChatLogsTableName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  ChatLogsWriteThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-chatlogs-write-throttle
+      Namespace: AWS/DynamoDB
+      MetricName: WriteThrottleEvents
+      Dimensions: [{ Name: TableName, Value: !Ref ChatLogsTableName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  SessionsWriteThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-sessions-write-throttle
+      Namespace: AWS/DynamoDB
+      MetricName: WriteThrottleEvents
+      Dimensions: [{ Name: TableName, Value: !Ref SessionsTableName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # Cognito のメール送信上限（既定 50 通/日）の接近を検知（issue #99、2026-09-10）
+  # ------------------------------------------------------------------
+  CognitoSignups40Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P2-cognito-signups-40-per-day
+      AlarmDescription: Sign-ups today (UTC day) reached 40. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99.
+      Namespace: AWS/Cognito
+      MetricName: SignUpSuccesses
+      Dimensions:
+        - Name: UserPool
+          Value: !Ref CognitoUserPoolId
+        - Name: UserPoolClient
+          Value: !Ref CognitoUserPoolClientId
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 40
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  CognitoSignups45Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-signups-45-per-day
+      AlarmDescription: Sign-ups today (UTC day) reached 45. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99.
+      Namespace: AWS/Cognito
+      MetricName: SignUpSuccesses
+      Dimensions:
+        - Name: UserPool
+          Value: !Ref CognitoUserPoolId
+        - Name: UserPoolClient
+          Value: !Ref CognitoUserPoolClientId
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 45
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  CognitoSignups50Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-signups-50-per-day
+      AlarmDescription: Sign-ups today (UTC day) reached 50. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99.
+      Namespace: AWS/Cognito
+      MetricName: SignUpSuccesses
+      Dimensions:
+        - Name: UserPool
+          Value: !Ref CognitoUserPoolId
+        - Name: UserPoolClient
+          Value: !Ref CognitoUserPoolClientId
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 50
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # Cognito のメール送信に関わるエラーを CloudTrail 経由で検知（issue #99、2026-09-10）
+  # サインアップ・確認コード再送・パスワード再設定はブラウザから直接 Cognito を呼ぶため、
+  # API Gateway / Lambda のアラームには掛からない。利用者起因のエラー（UsernameExists 等）は除外。
+  # ------------------------------------------------------------------
+  CognitoEmailErrorRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${ProjectName}-${Environment}-cognito-email-errors
+      Description: Cognito SignUp / ResendConfirmationCode / ForgotPassword failed with a quota or delivery error (CloudTrail)
+      State: ENABLED
+      EventPattern:
+        source: [aws.cognito-idp]
+        detail-type: [AWS API Call via CloudTrail]
+        detail:
+          eventSource: [cognito-idp.amazonaws.com]
+          eventName: [SignUp, ResendConfirmationCode, ForgotPassword, AdminCreateUser, AdminResetUserPassword]
+          errorCode: !Ref CognitoAlertErrorCodes
+      Targets:
+        - Id: AlertTopic
+          Arn: !Ref AlertTopic
+          InputTransformer:
+            InputPathsMap:
+              api: $.detail.eventName
+              code: $.detail.errorCode
+              msg: $.detail.errorMessage
+              time: $.detail.eventTime
+            # InputTemplate は 1 行の JSON 文字列でなければならない（改行は \n エスケープ）
+            InputTemplate: '"[P1] Cognito メール送信エラー: <api> が <code> で失敗しました（<time> UTC）。\n本文: <msg>\n対応: docs/ops-runbook.md §5.6。日次上限（Exceeded daily email limit）の場合、利用者には画面で翌日の手順が表示されます。登録受付の停止告知や事前発行（scripts/ops/provision_users.py）を検討してください。"'
+
+  CognitoEmailErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-email-errors
+      AlarmDescription: A Cognito sign-up / resend / password-reset call failed with a quota or delivery error in the last 5 minutes (details in the EventBridge message).
+      Namespace: AWS/Events
+      MetricName: TriggeredRules
+      Dimensions: [{ Name: RuleName, Value: !Ref CognitoEmailErrorRule }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # ログのメトリクスフィルタ（500 を return する関数のエラー行を拾う暫定検知）
+  # ------------------------------------------------------------------
+  RagErrorLinesFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${RagFunctionName}
+      FilterPattern: '?Error ?error ?ERROR ?Exception ?exception ?Traceback ?ThrottlingException'
+      MetricTransformations:
+        - MetricNamespace: !Sub ${ProjectName}/Logs
+          MetricName: RagErrorLines
+          MetricValue: '1'
+          DefaultValue: 0
+          Unit: Count
+
+  ChatErrorLinesFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ChatFunctionName}
+      FilterPattern: '?Error ?error ?ERROR ?Exception ?exception ?Traceback'
+      MetricTransformations:
+        - MetricNamespace: !Sub ${ProjectName}/Logs
+          MetricName: ChatErrorLines
+          MetricValue: '1'
+          DefaultValue: 0
+          Unit: Count
+
+  RagErrorLinesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-error-lines
+      AlarmDescription: rag Lambda logged an error line (catches failures returned as HTTP 500)
+      Namespace: !Sub ${ProjectName}/Logs
+      MetricName: RagErrorLines
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  ChatErrorLinesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-error-lines
+      AlarmDescription: chat Lambda logged an error line
+      Namespace: !Sub ${ProjectName}/Logs
+      MetricName: ChatErrorLines
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # Logs Insights 保存クエリ（ランブックから名前で参照）
+  # ------------------------------------------------------------------
+  QueryRagErrors:
+    Type: AWS::Logs::QueryDefinition
+    Properties:
+      Name: !Sub ${ProjectName}/${Environment}/rag-error-lines
+      LogGroupNames: [!Sub '/aws/lambda/${RagFunctionName}']
+      QueryString: |
+        fields @timestamp, @message
+        | filter @message like /(?i)(error|exception|traceback)/
+        | sort @timestamp desc
+        | limit 100
+
+  QueryChatErrors:
+    Type: AWS::Logs::QueryDefinition
+    Properties:
+      Name: !Sub ${ProjectName}/${Environment}/chat-error-lines
+      LogGroupNames: [!Sub '/aws/lambda/${ChatFunctionName}']
+      QueryString: |
+        fields @timestamp, @message
+        | filter @message like /(?i)(error|exception|traceback)/
+        | sort @timestamp desc
+        | limit 100
+
+  QueryRagSlowRequests:
+    Type: AWS::Logs::QueryDefinition
+    Properties:
+      Name: !Sub ${ProjectName}/${Environment}/rag-slow-requests
+      LogGroupNames: [!Sub '/aws/lambda/${RagFunctionName}']
+      QueryString: |
+        filter @type = "REPORT"
+        | fields @timestamp, @requestId, @duration, @maxMemoryUsed / 1024 / 1024 as memMB
+        | sort @duration desc
+        | limit 50
+
+Outputs:
+  AlertTopicArn:
+    Value: !Ref AlertTopic
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-AlertTopicArn
