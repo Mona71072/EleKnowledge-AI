@@ -28,15 +28,26 @@ def _now_iso() -> str:
 def promote_due(now_iso: Optional[str] = None) -> dict:
     """Flip status scheduled -> published for items whose publishAt has arrived."""
     now_iso = normalize_utc_iso(now_iso) if now_iso else _now_iso()
-    assert now_iso is not None
+    if not now_iso:
+        raise ValueError('now_iso could not be normalized')
     promoted = []
     kwargs = {
         'IndexName': 'status-publishAt-index',
         'KeyConditionExpression': Key('status').eq('scheduled') & Key('publishAt').lte(now_iso),
     }
+    # GSI のキー（status / publishAt）を更新しながら同じ GSI をページングすると項目を取りこぼすため、
+    # 先に全件を取り出してから更新する（issue #94 R1）
+    due_items = []
     while True:
         resp = table.query(**kwargs)
-        for item in resp.get('Items', []):
+        due_items.extend(resp.get('Items', []))
+        lek = resp.get('LastEvaluatedKey')
+        if not lek:
+            break
+        kwargs['ExclusiveStartKey'] = lek
+
+    if True:
+        for item in due_items:
             aid = item['announcementId']
             # Defense: skip legacy rows whose normalized publishAt is still in the future
             try:
@@ -63,10 +74,6 @@ def promote_due(now_iso: Optional[str] = None) -> dict:
             except ClientError as e:
                 if e.response['Error']['Code'] != 'ConditionalCheckFailedException':
                     raise
-        lek = resp.get('LastEvaluatedKey')
-        if not lek:
-            break
-        kwargs['ExclusiveStartKey'] = lek
 
     return {'promoted': promoted, 'count': len(promoted), 'serverTime': now_iso}
 

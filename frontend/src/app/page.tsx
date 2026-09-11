@@ -36,6 +36,7 @@ export default function HomePage() {
   const [isDevBypass, setIsDevBypass] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [activeMaintenance, setActiveMaintenance] = useState<Announcement[]>([]);
   const [annLoading, setAnnLoading] = useState(true);
   const [annError, setAnnError] = useState<string | null>(null);
   const [infoModal, setInfoModal] = useState<InfoModalPayload | null>(null);
@@ -54,8 +55,13 @@ export default function HomePage() {
       const info = await getUserInfo();
       if (info) setIsAdmin(info.isAdmin);
     })();
+    // バナー用の有効なメンテ告知は API が一覧とは独立に返す（activeMaintenance）ため、
+    // 通常告知の件数に押し出されない（issue #94 B1）
     getAnnouncements(5)
-      .then((res) => setAnnouncements(res.announcements))
+      .then((res) => {
+        setAnnouncements(res.announcements);
+        setActiveMaintenance(res.activeMaintenance ?? []);
+      })
       .catch((e) => setAnnError((e as Error).message))
       .finally(() => setAnnLoading(false));
   }, []);
@@ -128,7 +134,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Active-maintenance banner (critical cannot be dismissed) */}
-      <MaintenanceBanner announcements={announcements} />
+      <MaintenanceBanner announcements={activeMaintenance.length > 0 ? activeMaintenance : announcements} />
 
       {/* Header */}
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-gray-200">

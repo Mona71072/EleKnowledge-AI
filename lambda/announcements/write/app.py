@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import time
 from typing import Optional
 
@@ -164,7 +165,8 @@ def create(body: dict, actor: str) -> dict:
     if status == 'published' and publish_at > now:
         status = 'scheduled'
 
-    announcement_id = f"anc_{int(time.time() * 1000)}"
+    # 同一ミリ秒の衝突で上書きしないよう乱数を付与（issue #94 R5）
+    announcement_id = f"anc_{int(time.time() * 1000)}_{secrets.token_hex(2)}"
     item = {
         'announcementId': announcement_id,
         'type': body['type'],
@@ -183,8 +185,7 @@ def create(body: dict, actor: str) -> dict:
         item['endAt'] = end_at
     elif end_at:
         item['endAt'] = end_at
-    if body.get('ttl'):
-        item['ttl'] = int(body['ttl'])
+    # ttl はクライアントから受け取らない（テーブルの TTL が有効なため、過去 epoch を渡すと公開中の告知が消える。issue #94 B2）
 
     table.put_item(Item=item)
     return _response(201, {'announcementId': announcement_id, 'status': status})
@@ -212,10 +213,14 @@ def update(announcement_id: str, body: dict, actor: str) -> dict:
             merged['pinned'] = bool(body['pinned'])
         if 'publishAt' in body:
             merged['publishAt'] = _norm_ts(body['publishAt']) or merged.get('publishAt')
-        if 'startAt' in body:
-            merged['startAt'] = _norm_ts(body['startAt'])
-        if 'endAt' in body:
-            merged['endAt'] = _norm_ts(body['endAt'])
+        # 空文字は「属性を消す」扱い（None を書くと DynamoDB に NULL 属性が残る。issue #94 R7）
+        for field in ('startAt', 'endAt'):
+            if field in body:
+                value = _norm_ts(body[field])
+                if value:
+                    merged[field] = value
+                else:
+                    merged.pop(field, None)
         # Re-normalize existing timestamps so legacy rows become comparable
         if merged.get('publishAt'):
             merged['publishAt'] = _norm_ts(merged['publishAt']) or merged['publishAt']
@@ -225,6 +230,21 @@ def update(announcement_id: str, body: dict, actor: str) -> dict:
             merged['endAt'] = _norm_ts(merged['endAt'])
     except ValueError as e:
         return _response(400, {'error': 'ValidationError', 'message': str(e)})
+
+    # type を maintenance 以外へ変えたとき、明示指定が無ければ旧メンテ期間を引き継がない
+    # （endAt が残ると read 側の期限切れフィルタで告知が黙って消える。issue #94 B4）
+    if existing.get('type') == 'maintenance' and merged.get('type') != 'maintenance':
+        if 'startAt' not in body:
+            merged.pop('startAt', None)
+        if 'endAt' not in body:
+            merged.pop('endAt', None)
+
+    # maintenance の期間チェックはマージ後の項目に対して行う（部分更新で素通りしない。issue #94 B3）
+    if merged.get('type') == 'maintenance':
+        if not merged.get('startAt') or not merged.get('endAt'):
+            return _response(400, {'error': 'ValidationError', 'message': 'maintenance requires startAt and endAt'})
+        if merged['startAt'] >= merged['endAt']:
+            return _response(400, {'error': 'ValidationError', 'message': 'startAt must be before endAt'})
 
     now = _now_iso()
     if merged.get('status') == 'published' and merged.get('publishAt', now) > now:
@@ -237,7 +257,16 @@ def update(announcement_id: str, body: dict, actor: str) -> dict:
 
 
 def delete(announcement_id: str) -> dict:
-    table.delete_item(Key={'announcementId': announcement_id})
+    # 存在しない id は 404（無条件削除で 200 を返さない。issue #94 R8）
+    try:
+        table.delete_item(
+            Key={'announcementId': announcement_id},
+            ConditionExpression='attribute_exists(announcementId)',
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return _response(404, {'error': 'NotFound', 'message': 'Announcement not found'})
+        raise
     return _response(200, {'message': 'deleted', 'announcementId': announcement_id})
 
 
