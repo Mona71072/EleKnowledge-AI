@@ -184,3 +184,18 @@ def test_put_triage_forbidden_and_not_found():
     resp = mod.lambda_handler(_event("PUT", "/chat/admin/messages/s1/missing/triage", body={"status": "done"},
                                      path_params={"sessionId": "s1", "messageId": "missing"}), None)
     assert resp["statusCode"] == 404
+
+
+# ------------------------------------------------------------------ regression: unused expression names
+@pytest.mark.parametrize("kind", ["all", "bad", "not_found", "reformulated"])
+@pytest.mark.parametrize("triage", ["all", "open", "done"])
+@pytest.mark.parametrize("since", [None, "2026-09-05"])
+def test_failures_expression_names_exactly_match_expression(kind, triage, since):
+    """式で使っていない別名を渡すと DynamoDB が ValidationException（"unused in expressions"）を返す。
+    2026-09-11 に kind=reformulated（と旧来の kind=bad）で #rt が余って 500 になった回帰防止。"""
+    import re
+    mod, table = load_app()
+    captured = _scan_capture(table)
+    mod.list_failure_messages(kind=kind, since=since, until=since, triage=triage)
+    used = set(re.findall(r"#\w+", captured["FilterExpression"]))
+    assert set(captured["ExpressionAttributeNames"]) == used
