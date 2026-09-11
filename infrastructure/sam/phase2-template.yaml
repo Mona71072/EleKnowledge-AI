@@ -65,9 +65,10 @@ Parameters:
     Type: String
     Default: jp.anthropic.claude-haiku-4-5-20251001-v1:0
     Description: >-
-      Bedrock LLM Model ID. Must be an inference profile ID (jp.* / apac.* / global.*),
-      not a bare foundation model ID - anthropic.claude-sonnet-4-20250514-v1:0 is LEGACY
-      and only supports INFERENCE_PROFILE invocation in ap-northeast-1.
+      Bedrock LLM Model ID. Must be an inference profile ID (jp.* / apac.* / global.*)
+      or an application inference profile ARN (arn:aws:bedrock:...:application-inference-profile/xxx),
+      not a bare foundation model ID. Sonnet 5 / Opus 4.7+ are handled by app.py
+      (no temperature, thinking disabled). See docs/eval-2026-09-09-model-bakeoff.md.
   
   SessionTitleLlm:
     Type: String
@@ -78,6 +79,15 @@ Parameters:
     Description: >-
       Generate chat session titles with Claude (BedrockModelId) from the first question.
       Set to false to fall back to truncating the raw question (no extra Bedrock call).
+
+  BedrockRequestStyle:
+    Type: String
+    Default: auto
+    AllowedValues: [auto, new, legacy]
+    Description: >-
+      Request body style for InvokeModel. auto = detect from BedrockModelId
+      (sonnet-5 / opus-4-7+ / fable => new). Set explicitly when BedrockModelId
+      is an application inference profile ARN (model name not visible).
 
   RagSearchType:
     Type: String
@@ -272,7 +282,8 @@ Resources:
                 Action:
                   - bedrock:InvokeModel
                 Resource:
-                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*
                   - !Sub arn:aws:bedrock:*::foundation-model/*
         - PolicyName: DynamoDBAccess
           PolicyDocument:
@@ -337,6 +348,7 @@ Resources:
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           # 履歴一覧の見出し生成。既定は BEDROCK_MODEL_ID と同じモデル（追加の IAM 不要）
           SESSION_TITLE_LLM: !Ref SessionTitleLlm
+          BEDROCK_REQUEST_STYLE: !Ref BedrockRequestStyle
           RAG_SEARCH_TYPE: !Ref RagSearchType
           KB_SOURCE_BUCKET: !Ref KnowledgeBaseDataSourceBucket
           KB_SOURCE_PREFIX: !Ref KnowledgeBaseSourcePrefix
