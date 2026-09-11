@@ -111,9 +111,13 @@ RAGクエリ実行
 **Request:**
 
 ```text
-GET /rag/document?uri=s3%3A%2F%2F<bucket>%2Fdocs%2F....pdf
+GET /rag/document?uri=s3%3A%2F%2F<bucket>%2Fdocs%2F....pdf&s=<sessionId>&m=<messageId>
 Authorization: Bearer <IdToken>
 ```
+
+> 最終検証: 2026-09-11 — `s` / `m` と 500 応答の形は実装 PR #111 のコードと突合（実環境は未デプロイ）
+
+- `s`（sessionId）と `m`（messageId）は任意。**どの回答の引用から開いたか**を記録するためで、フロントの `/doc?uri=…&s=&m=` が引き継ぐ。両方あり、かつ `s` が呼び出し元の所有セッションなら、該当の assistant 行に `documentOpens` を加算し `lastOpenedAt` を記録する（到達ファネル「資料を開いた」。設計 [design-2026-09-10-dashboard-v2.md](../design-2026-09-10-dashboard-v2.md) §4.3 I3）。無くても文書は開ける。CloudWatch には `document_open` の構造化行（文書名のみ）が出る
 
 **Response (200):**
 
@@ -141,3 +145,24 @@ Authorization: Bearer <IdToken>
 - それでも発行済み URL に期限後アクセスした場合（タブのリロード・ブラウザ履歴・コピーされた URL）、リクエストはブラウザ → S3 に直行しアプリは経路上に存在しないため、**S3 が素の 403 XML（`AccessDenied` / `Request has expired`）を返すのが想定動作**。アプリ側でのエラーページ表示や再発行リダイレクトは構造的に不可能
 - **復旧導線はチャットの引用リンクを再クリック**（都度発行で新しい URL が出る）
 - 既知エッジ: ブラウザ PDF ビューアはレンジリクエストで逐次読み込むため、大きい PDF を 5 分超閲覧すると未読ページの取得が失敗しうる（表示済みページは影響なし。復旧は同上）
+
+---
+
+## 500 応答の形と構造化ログ（2026-09-11）
+
+> 最終検証: 2026-09-11 — 実装 PR #111 のコードと突合（実環境は未デプロイ）
+
+`POST /rag/query` の 500 は AWS のエラーメッセージを返さず、一般化した本文と API Gateway のリクエスト ID だけを返す。
+
+```json
+{ "error": "InternalServerError", "message": "処理に失敗しました。時間をおいて再度お試しください。", "requestId": "<apiRequestId>" }
+```
+
+CloudWatch Logs には 1 リクエスト 1 行の構造化行が出る（本文・質問文は含まない）。
+
+| event | 主な項目 | 用途 |
+|---|---|---|
+| `rag_request` | `apiRequestId`, `statusCode`, `sessionId`, `messageId`, `responseType`, `pageCandidates`, `sourceDocuments`, `latencyMs` | アクセスログの `requestId` と結合（保存クエリ `request-by-id`） |
+| `rag_error` | `apiRequestId`, `stage`（retrieve / generate / save / history）, `errorCode`, `errorMessage`, `latencyMs` | 500 の段階と原因 |
+| `document_open` | `apiRequestId`, `sessionId`, `messageId`, `documentName` | 資料到達の追跡 |
+| `reformulation` | `sessionId`, `messageId` | 直前の回答に言い換えの印（`reformulatedAt`）を付けた |
