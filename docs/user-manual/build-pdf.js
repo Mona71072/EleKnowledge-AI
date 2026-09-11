@@ -27,7 +27,7 @@ const jobs = [
       printBackground: true,
       preferCSSPageSize: true,
       displayHeaderFooter: true,
-      headerTemplate: `<div style="width:100%;font-size:8px;color:#64748b;padding:0 16mm;display:flex;justify-content:space-between;font-family:'BIZ UDPGothic','Yu Gothic','Meiryo',sans-serif;"><span>${j.title}</span><span>第1版 2026-09-09</span></div>`,
+      headerTemplate: `<div style="width:100%;font-size:8px;color:#64748b;padding:0 16mm;display:flex;justify-content:space-between;font-family:'BIZ UDPGothic','Yu Gothic','Meiryo',sans-serif;"><span>${j.title}</span><span>第1版 2026-09-09（2026-09-11 訂正）</span></div>`,
       footerTemplate: `<div style="width:100%;font-size:8px;color:#64748b;text-align:center;font-family:'BIZ UDPGothic','Yu Gothic','Meiryo',sans-serif;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>`,
       margin: { top: '16mm', bottom: '18mm', left: '16mm', right: '16mm' },
     });
