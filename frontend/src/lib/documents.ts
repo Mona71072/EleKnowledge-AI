@@ -1,6 +1,21 @@
 import { getIdToken, authHeaders } from './auth-helpers';
 
 /**
+ * どの回答の引用から文書を開いたか（到達ファネル「資料を開いた」の計測に使う）。
+ * 中継ページ /doc → GET /rag/document に &s=&m= で渡り、rag Lambda が該当の assistant 行に
+ * documentOpens を加算する。無くても文書は開ける。
+ */
+export interface DocumentOpenContext {
+  sessionId?: string | null;
+  messageId?: string | null;
+}
+
+function contextQuery(ctx?: DocumentOpenContext): string {
+  if (!ctx?.sessionId || !ctx?.messageId) return '';
+  return `&s=${encodeURIComponent(ctx.sessionId)}&m=${encodeURIComponent(ctx.messageId)}`;
+}
+
+/**
  * 過去データに保存されている S3 署名付き URL（または素の S3 HTTPS URL）を
  * `s3://bucket/key` URI に逆変換する。S3 の URL と判定できなければ null。
  *
@@ -58,14 +73,14 @@ function s3UriFromHttpsUrl(url: string): string | null {
  * 過去履歴の引用が復活し、DynamoDB に残る発行済み URL が流出しても意味を持たなくなる。
  * S3 と判定できない https URL のみ従来どおりそのまま開かせる。
  */
-export function documentHref(sourceUri: string | undefined | null): string | undefined {
+export function documentHref(sourceUri: string | undefined | null, ctx?: DocumentOpenContext): string | undefined {
   if (!sourceUri) return undefined;
   if (sourceUri.startsWith('s3://')) {
-    return `/doc?uri=${encodeURIComponent(sourceUri)}`;
+    return `/doc?uri=${encodeURIComponent(sourceUri)}${contextQuery(ctx)}`;
   }
   const legacyS3Uri = s3UriFromHttpsUrl(sourceUri);
   if (legacyS3Uri) {
-    return `/doc?uri=${encodeURIComponent(legacyS3Uri)}`;
+    return `/doc?uri=${encodeURIComponent(legacyS3Uri)}${contextQuery(ctx)}`;
   }
   return sourceUri;
 }
@@ -74,8 +89,9 @@ export function documentHref(sourceUri: string | undefined | null): string | und
 export function documentHrefWithPage(
   sourceUri: string | undefined | null,
   pageNumber?: number,
+  ctx?: DocumentOpenContext,
 ): string | undefined {
-  const href = documentHref(sourceUri);
+  const href = documentHref(sourceUri, ctx);
   if (!href || !pageNumber) return href;
   return `${href}#page=${pageNumber}`;
 }
@@ -91,14 +107,14 @@ export class DocumentAuthRequiredError extends Error {
  * `s3://` URI を、実際に開ける短命の署名付き URL に解決する。
  * 未ログインなら DocumentAuthRequiredError を投げる。
  */
-export async function resolveDocumentUrl(sourceUri: string): Promise<string> {
+export async function resolveDocumentUrl(sourceUri: string, ctx?: DocumentOpenContext): Promise<string> {
   const token = await getIdToken();
   if (!token) throw new DocumentAuthRequiredError();
 
   const base = process.env.NEXT_PUBLIC_RAG_API_URL || '';
   if (!base) throw new Error('API設定が見つかりません');
 
-  const res = await fetch(`${base}/rag/document?uri=${encodeURIComponent(sourceUri)}`, {
+  const res = await fetch(`${base}/rag/document?uri=${encodeURIComponent(sourceUri)}${contextQuery(ctx)}`, {
     headers: authHeaders(token),
   });
 
