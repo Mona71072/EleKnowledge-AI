@@ -4,11 +4,14 @@
 Bedrock が落ちても回答自体は返す必要があるため、フォールバックを重点的に確認する。
 """
 import importlib.util
+import inspect
 import json
 import os
 import sys
+import time
 
 import pytest
+from botocore.exceptions import ReadTimeoutError
 
 BASE = os.path.join(os.path.dirname(__file__), "../..")
 
@@ -42,7 +45,7 @@ def _stub_invoke(rag, monkeypatch, text, capture=None):
             capture["body"] = json.loads(body)
         return {"body": _Body({"content": [{"text": text}]})}
 
-    monkeypatch.setattr(rag.bedrock_runtime, "invoke_model", fake_invoke_model)
+    monkeypatch.setattr(rag.bedrock_runtime_title, "invoke_model", fake_invoke_model)
 
 
 def test_title_uses_model_output(rag, monkeypatch):
@@ -83,7 +86,7 @@ def test_title_falls_back_when_bedrock_fails(rag, monkeypatch):
     def boom(**kwargs):
         raise RuntimeError("bedrock down")
 
-    monkeypatch.setattr(rag.bedrock_runtime, "invoke_model", boom)
+    monkeypatch.setattr(rag.bedrock_runtime_title, "invoke_model", boom)
 
     assert rag.generate_session_title("溶接の脚長は？") == "溶接の脚長は？"
 
@@ -103,7 +106,7 @@ def test_title_llm_can_be_disabled(rag, monkeypatch):
     def unexpected(**kwargs):  # pragma: no cover - 呼ばれたら失敗させる
         raise AssertionError("LLM は呼ばない")
 
-    monkeypatch.setattr(rag.bedrock_runtime, "invoke_model", unexpected)
+    monkeypatch.setattr(rag.bedrock_runtime_title, "invoke_model", unexpected)
 
     long_query = "あ" * 60
     title = rag.generate_session_title(long_query)
@@ -112,6 +115,94 @@ def test_title_llm_can_be_disabled(rag, monkeypatch):
 
 def test_title_empty_query(rag):
     assert rag.generate_session_title("") == "Untitled"
+
+
+# --- 遅い失敗でも回答を止めない（PR #84 レビュー: 補助処理に回答期限より短い上限を設ける） ---
+
+
+def test_title_client_has_short_timeout_and_no_retry(rag):
+    """見出し生成は専用クライアント。既定（read 60 秒・legacy リトライ）を使わない。"""
+    cfg = rag.bedrock_runtime_title.meta.config
+    assert cfg.read_timeout == rag.SESSION_TITLE_READ_TIMEOUT_SECONDS
+    assert cfg.connect_timeout == rag.SESSION_TITLE_CONNECT_TIMEOUT_SECONDS
+    assert cfg.retries.get("total_max_attempts") == 1  # botocore が mode を補うので鍵だけ見る
+    # 読取期限 + 予備時間が応答予算に収まる（= 1 回の見出し生成で 29 秒を越えない）
+    assert (
+        rag.SESSION_TITLE_READ_TIMEOUT_SECONDS + rag.SESSION_TITLE_RESERVE_SECONDS
+        < rag.RESPONSE_TIME_BUDGET_SECONDS
+    )
+    assert rag.RESPONSE_TIME_BUDGET_SECONDS < 29
+    # 回答本体のクライアントとは別インスタンス
+    assert rag.bedrock_runtime_title is not rag.bedrock_runtime
+
+
+def test_title_falls_back_when_bedrock_stalls_and_times_out(rag, monkeypatch):
+    """Bedrock が停滞して読取期限で切れた場合も、期限内にフォールバック見出しを返す。"""
+    monkeypatch.setattr(rag, "SESSION_TITLE_LLM_ENABLED", True)
+    monkeypatch.setattr(rag, "SESSION_TITLE_MODEL_ID", "model-x")
+    calls = {"n": 0}
+
+    def stalled(**kwargs):
+        calls["n"] += 1
+        time.sleep(0.05)  # 専用クライアントが read_timeout で打ち切った状況を模す
+        raise ReadTimeoutError(endpoint_url="https://bedrock-runtime.example")
+
+    monkeypatch.setattr(rag.bedrock_runtime_title, "invoke_model", stalled)
+
+    deadline = time.monotonic() + rag.RESPONSE_TIME_BUDGET_SECONDS
+    started = time.monotonic()
+    title = rag.generate_session_title("溶接の脚長は？", deadline=deadline)
+    elapsed = time.monotonic() - started
+
+    assert title == "溶接の脚長は？"
+    assert calls["n"] == 1  # 再試行しない
+    assert elapsed < rag.SESSION_TITLE_RESERVE_SECONDS
+    assert time.monotonic() < deadline
+
+
+def test_title_skipped_when_response_budget_is_low(rag, monkeypatch):
+    """残り予算が読取期限 + 予備時間に満たなければ Bedrock を呼ばずにフォールバックする。"""
+    monkeypatch.setattr(rag, "SESSION_TITLE_LLM_ENABLED", True)
+    monkeypatch.setattr(rag, "SESSION_TITLE_MODEL_ID", "model-x")
+
+    def unexpected(**kwargs):  # pragma: no cover - 呼ばれたら失敗させる
+        raise AssertionError("予算不足時は LLM を呼ばない")
+
+    monkeypatch.setattr(rag.bedrock_runtime_title, "invoke_model", unexpected)
+
+    # 検索・生成で時間を使い切り、残り予算が閾値をわずかに下回る
+    threshold = rag.SESSION_TITLE_READ_TIMEOUT_SECONDS + rag.SESSION_TITLE_RESERVE_SECONDS
+    deadline = time.monotonic() + threshold - 0.5
+
+    assert rag.generate_session_title("溶接の脚長は？", deadline=deadline) == "溶接の脚長は？"
+
+
+def test_title_generated_when_response_budget_is_enough(rag, monkeypatch):
+    monkeypatch.setattr(rag, "SESSION_TITLE_LLM_ENABLED", True)
+    monkeypatch.setattr(rag, "SESSION_TITLE_MODEL_ID", "model-x")
+    _stub_invoke(rag, monkeypatch, "溶接脚長の判断基準")
+
+    threshold = rag.SESSION_TITLE_READ_TIMEOUT_SECONDS + rag.SESSION_TITLE_RESERVE_SECONDS
+    deadline = time.monotonic() + threshold + 1.0
+
+    assert rag.generate_session_title("溶接の脚長は？", deadline=deadline) == "溶接脚長の判断基準"
+
+
+def test_session_title_budget_allows_boundary(rag):
+    threshold = rag.SESSION_TITLE_READ_TIMEOUT_SECONDS + rag.SESSION_TITLE_RESERVE_SECONDS
+    now = 1000.0
+    assert rag.session_title_budget_allows(None) is True
+    assert rag.session_title_budget_allows(now + threshold, now=now) is True
+    assert rag.session_title_budget_allows(now + threshold - 0.01, now=now) is False
+    assert rag.session_title_budget_allows(now - 1, now=now) is False
+
+
+def test_handler_passes_deadline_to_every_title_call(rag):
+    """通常回答・聞き返し・該当なしの全経路で応答期限を渡す（渡し忘れの回帰防止）。"""
+    src = inspect.getsource(rag.lambda_handler)
+    assert "request_deadline = time.monotonic() + RESPONSE_TIME_BUDGET_SECONDS" in src
+    assert src.count("generate_session_title(") == 3
+    assert src.count("generate_session_title(query, deadline=request_deadline)") == 3
 
 
 def test_save_message_persists_session_title(rag, monkeypatch):

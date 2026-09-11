@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from urllib.parse import urlparse
 from botocore.exceptions import ClientError
+from botocore.config import Config
 
 
 def _utc_now_iso() -> str:
@@ -266,6 +267,25 @@ SESSION_TITLE_MAX_LENGTH = 30
 # 失敗・無効時は質問文の切り詰めにフォールバックするため、可用性は落とさない。
 SESSION_TITLE_MODEL_ID = os.environ.get('SESSION_TITLE_MODEL_ID') or BEDROCK_MODEL_ID
 SESSION_TITLE_LLM_ENABLED = os.environ.get('SESSION_TITLE_LLM', 'true').lower() != 'false'
+# 見出し生成は補助処理で、通常回答だけでなく聞き返し・該当なしでもメッセージ保存と応答返却の
+# 前に同期実行される。既定クライアント（read 60 秒・legacy リトライ）で Bedrock が停滞すると、
+# 既に作れた回答まで API Gateway の統合タイムアウト（29 秒）を越えるため、専用クライアントに
+# 短い期限を持たせ再試行しない。加えて handler 開始からの応答予算が足りなければ呼ばない。
+SESSION_TITLE_CONNECT_TIMEOUT_SECONDS = float(os.environ.get('SESSION_TITLE_CONNECT_TIMEOUT_SECONDS', '2'))
+SESSION_TITLE_READ_TIMEOUT_SECONDS = float(os.environ.get('SESSION_TITLE_READ_TIMEOUT_SECONDS', '5'))
+# handler 開始から応答を返し切るまでの予算（API Gateway 29 秒より手前）。
+RESPONSE_TIME_BUDGET_SECONDS = float(os.environ.get('RESPONSE_TIME_BUDGET_SECONDS', '26'))
+# 見出し生成後にメッセージ保存・応答返却へ残す時間。残り予算がこれ + 読取期限を下回れば生成を省く。
+SESSION_TITLE_RESERVE_SECONDS = float(os.environ.get('SESSION_TITLE_RESERVE_SECONDS', '3'))
+bedrock_runtime_title = boto3.client(
+    'bedrock-runtime',
+    region_name=AWS_REGION,
+    config=Config(
+        connect_timeout=SESSION_TITLE_CONNECT_TIMEOUT_SECONDS,
+        read_timeout=SESSION_TITLE_READ_TIMEOUT_SECONDS,
+        retries={'total_max_attempts': 1},
+    ),
+)
 
 SESSION_TITLE_SYSTEM_PROMPT = """あなたはチャット履歴一覧に出す短い見出しを付ける役です。
 
@@ -304,17 +324,35 @@ def _normalize_session_title(raw: str) -> str:
     return text[:SESSION_TITLE_MAX_LENGTH]
 
 
-def generate_session_title(query: str) -> str:
+def session_title_budget_allows(deadline, now=None) -> bool:
+    """応答予算の残りで見出し生成（最悪 読取期限いっぱい）を走らせてよいか。
+
+    deadline は time.monotonic() 基準の応答期限。None なら制限しない（単体呼び出し用）。
+    """
+    if deadline is None:
+        return True
+    remaining = deadline - (time.monotonic() if now is None else now)
+    return remaining >= SESSION_TITLE_READ_TIMEOUT_SECONDS + SESSION_TITLE_RESERVE_SECONDS
+
+
+def generate_session_title(query: str, deadline=None) -> str:
     """最初の質問から、履歴一覧で見分けられる短い見出しを作る。
 
     質問文をそのまま切り詰めると「※機種未指定のため…」や長い文がそのまま並び、
     一覧で会話を判別できない。Claude に短い体言止めの見出しを作らせ、
     失敗時は従来どおり質問文の先頭50文字にフォールバックする。
+
+    deadline（time.monotonic() 基準）を渡すと、残り予算が読取期限 + 保存・返却の
+    予備時間に満たないときは Bedrock を呼ばずにフォールバックする。呼ぶ場合も
+    専用クライアントの短い期限で打ち切られるため、見出しの停滞で回答は遅れない。
     """
     text = (query or '').strip()
     if not text:
         return 'Untitled'
     if not SESSION_TITLE_LLM_ENABLED or not SESSION_TITLE_MODEL_ID:
+        return _fallback_session_title(text)
+    if not session_title_budget_allows(deadline):
+        print("Session title generation skipped: response budget too low, falling back")
         return _fallback_session_title(text)
 
     try:
@@ -334,7 +372,7 @@ def generate_session_title(query: str) -> str:
                 }
             ],
         }
-        response = bedrock_runtime.invoke_model(
+        response = bedrock_runtime_title.invoke_model(
             modelId=SESSION_TITLE_MODEL_ID,
             body=json.dumps(request_body),
         )
@@ -1315,6 +1353,9 @@ def lambda_handler(event, context):
     }
     """
     
+    # 応答期限（API Gateway の統合タイムアウトより手前）。補助処理はこれを見て自分を打ち切る。
+    request_deadline = time.monotonic() + RESPONSE_TIME_BUDGET_SECONDS
+
     # CORS headers
     headers = {
         'Content-Type': 'application/json',
@@ -1407,7 +1448,7 @@ def lambda_handler(event, context):
         if should_clarify:
             ai_response = build_clarify_content(clarify_questions)
             response_type = 'clarify'
-            session_title = generate_session_title(query) if not chat_history else None
+            session_title = generate_session_title(query, deadline=request_deadline) if not chat_history else None
             user_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='user', content=query,
                 session_title=session_title,
@@ -1481,7 +1522,7 @@ def lambda_handler(event, context):
             page_candidates = build_page_candidates(
                 weak_source, max_items=2, low_confidence=True
             )
-            session_title = generate_session_title(query) if not chat_history else None
+            session_title = generate_session_title(query, deadline=request_deadline) if not chat_history else None
             user_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='user', content=query,
                 session_title=session_title,
@@ -1532,7 +1573,7 @@ def lambda_handler(event, context):
 
         citations, source_documents = extract_citations(kb_results, mode)
 
-        session_title = generate_session_title(query) if not chat_history else None
+        session_title = generate_session_title(query, deadline=request_deadline) if not chat_history else None
 
         user_message_id = save_message_to_dynamodb(
             session_id=session_id,
