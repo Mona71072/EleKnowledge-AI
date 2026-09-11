@@ -40,7 +40,7 @@ def _stub_invoke(rag, monkeypatch, text, capture=None):
         if capture is not None:
             capture["modelId"] = modelId
             capture["body"] = json.loads(body)
-        return {"body": _Body({"content": [{"text": text}]})}
+        return {"body": _Body({"content": [{"type": "text", "text": text}]})}
 
     monkeypatch.setattr(rag.bedrock_runtime, "invoke_model", fake_invoke_model)
 

@@ -337,30 +337,27 @@ def generate_session_title(query: str) -> str:
         return _fallback_session_title(text)
 
     try:
-        request_body = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "system": SESSION_TITLE_SYSTEM_PROMPT,
-            "max_tokens": 64,
-            "temperature": 0,
-            "messages": [
-                {
-                    "role": "user",
-                    # SECURITY: 質問文は信頼できない入力。タグで囲み、指示として解釈させない
-                    "content": (
-                        "次の質問に見出しを付けてください。\n"
-                        f"<question>\n{text[:500]}\n</question>"
-                    ),
-                }
-            ],
-        }
+        messages = [
+            {
+                "role": "user",
+                # SECURITY: 質問文は信頼できない入力。タグで囲み、指示として解釈させない
+                "content": (
+                    "次の質問に見出しを付けてください。\n"
+                    f"<question>\n{text[:500]}\n</question>"
+                ),
+            }
+        ]
+        # 本文生成と同じ組み立て（Sonnet 5 以降は temperature を送ると 400 になる）
+        request_body = build_generation_request(
+            SESSION_TITLE_SYSTEM_PROMPT, messages, SESSION_TITLE_MODEL_ID,
+            max_tokens=64, temperature=0,
+        )
         response = bedrock_runtime.invoke_model(
             modelId=SESSION_TITLE_MODEL_ID,
             body=json.dumps(request_body),
         )
         response_body = json.loads(response['body'].read())
-        title = _normalize_session_title(
-            (response_body.get('content') or [{}])[0].get('text', '')
-        )
+        title = _normalize_session_title(extract_response_text(response_body))
         return title or _fallback_session_title(text)
     except Exception as e:  # noqa: BLE001 - 見出し生成の失敗で回答を落とさない
         print(f"Session title generation failed, falling back: {e}")
