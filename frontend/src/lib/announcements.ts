@@ -24,6 +24,8 @@ export interface Announcement {
 
 export interface AnnouncementsResponse {
   announcements: Announcement[];
+  /** 現在有効なメンテナンス告知（通常一覧の件数に依存しない。issue #94 B1） */
+  activeMaintenance?: Announcement[];
   serverTime: string;
 }
 
