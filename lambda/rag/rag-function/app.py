@@ -66,6 +66,9 @@ MAX_IMAGE_BLOCKS = 3
 # Initialize AWS clients with region from environment
 bedrock_agent = boto3.client('bedrock-agent-runtime', region_name=AWS_REGION)
 bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
+# 非同期の見出しタスク起動は回答を待たせない短いクライアントで行う。
+lambda_client = boto3.client('lambda', region_name=AWS_REGION,
+    config=Config(connect_timeout=1, read_timeout=1, retries={'total_max_attempts': 1}))
 dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 
 # DynamoDB table
@@ -385,6 +388,44 @@ def generate_session_title(query: str, deadline=None) -> str:
         print(f"Session title generation failed, falling back: {e}")
         return _fallback_session_title(text)
 
+
+
+def update_session_title(session_id: str, message_id: str, user_id: str, title: str) -> None:
+    """最初のユーザーメッセージだけを条件付きで更新する。"""
+    chatlogs_table.update_item(
+        Key={'sessionId': session_id, 'messageId': message_id},
+        UpdateExpression='SET sessionTitle = :title',
+        ConditionExpression='userId = :uid AND attribute_not_exists(sessionTitle)',
+        ExpressionAttributeValues={':title': title, ':uid': user_id},
+    )
+
+
+def handle_session_title_task(task: dict) -> dict:
+    """応答返却後に実行される見出し生成タスク。"""
+    title = generate_session_title(task.get('query', ''))
+    try:
+        update_session_title(task['sessionId'], task['messageId'], task['userId'], title)
+    except ClientError as error:
+        print(f"Session title update skipped: {error.response['Error']['Code']}")
+    return {'ok': True}
+
+
+def enqueue_session_title(session_id: str, message_id: str, user_id: str, query: str) -> None:
+    """見出し生成を非同期起動する。Bedrock待機は回答経路に入れない。"""
+    if not SESSION_TITLE_LLM_ENABLED or not SESSION_TITLE_MODEL_ID:
+        return
+    try:
+        lambda_client.invoke(
+            FunctionName=os.environ['AWS_LAMBDA_FUNCTION_NAME'],
+            InvocationType='Event',
+            Payload=json.dumps({
+                '_internalTask': 'session-title',
+                'sessionId': session_id, 'messageId': message_id,
+                'userId': user_id, 'query': (query or '')[:500],
+            }).encode('utf-8'),
+        )
+    except Exception as error:  # noqa: BLE001
+        print(f"Session title enqueue failed: {error}")
 
 def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: str,
                              citations: list = None, source_documents: list = None,
@@ -1353,7 +1394,10 @@ def lambda_handler(event, context):
     }
     """
     
-    # 応答期限（API Gateway の統合タイムアウトより手前）。補助処理はこれを見て自分を打ち切る。
+    if event.get('_internalTask') == 'session-title':
+        return handle_session_title_task(event)
+
+    # 見出し生成は非同期であり、通常応答はBedrock見出し生成を待たない。
     request_deadline = time.monotonic() + RESPONSE_TIME_BUDGET_SECONDS
 
     # CORS headers
@@ -1448,11 +1492,13 @@ def lambda_handler(event, context):
         if should_clarify:
             ai_response = build_clarify_content(clarify_questions)
             response_type = 'clarify'
-            session_title = generate_session_title(query, deadline=request_deadline) if not chat_history else None
+            session_title = _fallback_session_title(query) if not chat_history else None
             user_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='user', content=query,
                 session_title=session_title,
             )
+            if not chat_history:
+                enqueue_session_title(session_id, user_message_id, user_id, query)
             ai_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='assistant',
                 content=ai_response, response_type=response_type,
@@ -1522,11 +1568,13 @@ def lambda_handler(event, context):
             page_candidates = build_page_candidates(
                 weak_source, max_items=2, low_confidence=True
             )
-            session_title = generate_session_title(query, deadline=request_deadline) if not chat_history else None
+            session_title = _fallback_session_title(query) if not chat_history else None
             user_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='user', content=query,
                 session_title=session_title,
             )
+            if not chat_history:
+                enqueue_session_title(session_id, user_message_id, user_id, query)
             ai_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='assistant',
                 content=ai_response, citations=citations, source_documents=source_documents,
@@ -1573,7 +1621,7 @@ def lambda_handler(event, context):
 
         citations, source_documents = extract_citations(kb_results, mode)
 
-        session_title = generate_session_title(query, deadline=request_deadline) if not chat_history else None
+        session_title = _fallback_session_title(query) if not chat_history else None
 
         user_message_id = save_message_to_dynamodb(
             session_id=session_id,
@@ -1582,6 +1630,8 @@ def lambda_handler(event, context):
             content=query,
             session_title=session_title,
         )
+        if not chat_history:
+            enqueue_session_title(session_id, user_message_id, user_id, query)
 
         ai_message_id = save_message_to_dynamodb(
             session_id=session_id,
