@@ -197,12 +197,27 @@ def test_session_title_budget_allows_boundary(rag):
     assert rag.session_title_budget_allows(now - 1, now=now) is False
 
 
-def test_handler_passes_deadline_to_every_title_call(rag):
-    """通常回答・聞き返し・該当なしの全経路で応答期限を渡す（渡し忘れの回帰防止）。"""
+def test_handler_enqueues_title_after_saving_user_message(rag):
+    """通常・聞き返し・該当なしの全経路で、回答を待たずに非同期化する。"""
     src = inspect.getsource(rag.lambda_handler)
-    assert "request_deadline = time.monotonic() + RESPONSE_TIME_BUDGET_SECONDS" in src
-    assert src.count("generate_session_title(") == 3
-    assert src.count("generate_session_title(query, deadline=request_deadline)") == 3
+    assert src.count("enqueue_session_title(session_id, user_message_id, user_id, query)") == 3
+    assert "generate_session_title(query, deadline=request_deadline)" not in src
+    assert "event.get('_internalTask') == 'session-title'" in src
+
+
+def test_enqueue_title_is_async_and_never_raises(rag, monkeypatch):
+    calls = {}
+
+    def invoke(**kwargs):
+        calls.update(kwargs)
+
+    monkeypatch.setattr(rag, "SESSION_TITLE_LLM_ENABLED", True)
+    monkeypatch.setattr(rag, "SESSION_TITLE_MODEL_ID", "model-x")
+    monkeypatch.setattr(rag.lambda_client, "invoke", invoke)
+    monkeypatch.setenv("AWS_LAMBDA_FUNCTION_NAME", "rag-dev")
+    rag.enqueue_session_title("s", "m", "u", "質問")
+    assert calls["InvocationType"] == "Event"
+    assert json.loads(calls["Payload"].decode("utf-8"))["_internalTask"] == "session-title"
 
 
 def test_save_message_persists_session_title(rag, monkeypatch):
