@@ -95,7 +95,7 @@ RAGクエリ実行
   - モデルは `SESSION_TITLE_MODEL_ID`（未設定時は `BEDROCK_MODEL_ID`）。Sonnet 5系では `temperature` を送らず `thinking: {type: disabled}` を指定し、本文生成と同じ互換形式を使う。
   - `SESSION_TITLE_LLM=false`、非同期起動失敗、Bedrock例外、空応答ではフォールバック見出しを維持する。見出し生成の失敗で回答は落とさない。
   - **SECURITY:** 質問文は `<question>` タグで囲み、システムプロンプトで資料扱いを明示する。タスクは同一LambdaのIAM権限でのみ起動される。
-  - 現行チャット UI はこのフィールドを直接使ず、一覧 API を再取得して表示する。
+  - 現行チャット UI はこのフィールドを直接使わず、一覧 API を再取得して表示する。
 
 - カテゴリ未指定時の**本命優先 2 段階 retrieve は 2026-08-26 に一時停止**（少数カテゴリが全検索でヒットしない副作用のため。mona 了承済み）。現在は未指定時も常に単一の retrieve（対象は実カテゴリ10種の許可リスト内）。後継方式の検討は [issue #61](https://github.com/yukiworkspace/EleKnowledge-AI/issues/61)。ユーザーが category を選んでいる場合はそれを尊重（従来どおり）。
 - 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。
