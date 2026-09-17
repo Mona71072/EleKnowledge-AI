@@ -12,6 +12,9 @@ related-code: lambda/rag/, frontend/src/app/chat/
 **Base URL:** Phase 2 `RagApiUrl` output, e.g. `https://{api-id}.execute-api.{region}.amazonaws.com/{env}`
 
 ## POST /rag/query
+
+> 最終検証: 2026-09-17 — #84 実装・CI（非同期 sessionTitle / Sonnet 5 互換）
+
 RAGクエリ実行
 
 **Request:**
