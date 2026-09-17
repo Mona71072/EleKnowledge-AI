@@ -298,7 +298,8 @@ def build_generation_request(system_prompt: str, messages: list, model_id: str,
 
 def extract_response_text(response_body: dict) -> str:
     for block in response_body.get('content') or []:
-        if block.get('type') == 'text' and block.get('text'):
+        # 旧形式のテストスタブ／応答は type を省くことがある。text があれば本文として扱う。
+        if block.get('text') and block.get('type', 'text') == 'text':
             return block['text']
     return ''
 
