@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   EleKnowledge dev WAF - allow only the office IP ranges (same set as GenU),
   block everything else. Associated with the auth / rag / chat / troubleshooting
-  API Gateway stages. Reflects resources created out-of-band on 2026-07-21.
+  / announcements-monitoring API Gateway stages. Reflects resources created out-of-band on 2026-07-21.
 
 Parameters:
   Environment:
@@ -27,6 +27,9 @@ Parameters:
   TroubleshootingApiId:
     Type: String
     Default: zh4kbz8bb1
+  AppApiId:
+    Type: String
+    Default: 0q3vewys59
 
 Resources:
   AllowedIPSet:
@@ -99,6 +102,12 @@ Resources:
     Type: AWS::WAFv2::WebACLAssociation
     Properties:
       ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${TroubleshootingApiId}/stages/${Environment}
+      WebACLArn: !GetAtt RegionalWebAcl.Arn
+
+  AppApiAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${AppApiId}/stages/${Environment}
       WebACLArn: !GetAtt RegionalWebAcl.Arn
 
 Outputs:
