@@ -62,6 +62,17 @@ def test_title_uses_model_output(rag, monkeypatch):
     assert capture["body"]["max_tokens"] <= 64
 
 
+def test_title_uses_sonnet5_compatible_request(rag, monkeypatch):
+    monkeypatch.setattr(rag, "SESSION_TITLE_LLM_ENABLED", True)
+    monkeypatch.setattr(rag, "SESSION_TITLE_MODEL_ID", "global.anthropic.claude-sonnet-5")
+    capture = {}
+    _stub_invoke(rag, monkeypatch, "見出し", capture)
+
+    assert rag.generate_session_title("質問") == "見出し"
+    assert "temperature" not in capture["body"]
+    assert capture["body"]["thinking"] == {"type": "disabled"}
+
+
 def test_title_strips_quotes_prefix_and_extra_lines(rag, monkeypatch):
     monkeypatch.setattr(rag, "SESSION_TITLE_LLM_ENABLED", True)
     monkeypatch.setattr(rag, "SESSION_TITLE_MODEL_ID", "model-x")
