@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   EleKnowledge dev WAF - allow only the office IP ranges (same set as GenU),
   block everything else. Associated with the auth / rag / chat / troubleshooting
-  / announcements-monitoring API Gateway stages. Reflects resources created out-of-band on 2026-07-21.
+  / announcements-monitoring API Gateway stages and the users-dev Cognito User Pool.
+  Reflects resources created out-of-band on 2026-07-21.
 
 Parameters:
   Environment:
@@ -30,6 +31,9 @@ Parameters:
   AppApiId:
     Type: String
     Default: 0q3vewys59
+  CognitoUserPoolId:
+    Type: String
+    Default: ap-northeast-1_DN17ekXik
 
 Resources:
   AllowedIPSet:
@@ -108,6 +112,12 @@ Resources:
     Type: AWS::WAFv2::WebACLAssociation
     Properties:
       ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${AppApiId}/stages/${Environment}
+      WebACLArn: !GetAtt RegionalWebAcl.Arn
+
+  CognitoUserPoolAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
       WebACLArn: !GetAtt RegionalWebAcl.Arn
 
 Outputs:
