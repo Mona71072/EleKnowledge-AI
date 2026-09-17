@@ -27,6 +27,8 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/
 
 ### eleknowledge-chatlogs テーブル（ホットウィンドウ）
 
+> 最終検証: 2026-09-17 — #84 実装・CI（最初の user メッセージの sessionTitle）
+
 ```typescript
 {
   sessionId: string;        // Partition Key
