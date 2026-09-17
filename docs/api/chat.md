@@ -14,6 +14,9 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 認可: Cognito Authorizer（ID トークン）。セッション操作は **呼び出し元 sub の所有セッションのみ**（ボディ／クエリの userId は使わない）。
 
 ## GET /chat/sessions
+
+> 最終検証: 2026-09-17 — #84 実装・CI（sessionTitle の優先順位とフォールバック）
+
 セッション一覧取得（自分の分のみ）
 
 各セッションは `sessionId` / `title` / `messageCount` / `createdAt`（最古メッセージ）/ `lastMessageTime`（最新メッセージ）/ `ttl` / `daysUntilDeletion` を返す。`wish-` で始まるセッション（改善要望）は含めない。
