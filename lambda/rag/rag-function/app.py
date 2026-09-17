@@ -265,6 +265,44 @@ def expand_query_abbreviations(text: str) -> str:
     return expanded
 
 
+# #90 と同じモデル世代別のリクエスト形式。見出しも本文と同じSonnet 5互換処理を使う。
+NEW_API_MODEL_MARKERS = ("sonnet-5", "opus-4-7", "opus-4-8", "opus-5")
+LEGACY_GENERATION_TEMPERATURE = 0.3
+BEDROCK_REQUEST_STYLE = os.environ.get('BEDROCK_REQUEST_STYLE', 'auto').lower()
+
+
+def is_new_api_model(model_id: str, request_style: str = None) -> bool:
+    style = (request_style or BEDROCK_REQUEST_STYLE or 'auto').lower()
+    if style == 'new':
+        return True
+    if style == 'legacy':
+        return False
+    return any(marker in (model_id or '').lower() for marker in NEW_API_MODEL_MARKERS)
+
+
+def build_generation_request(system_prompt: str, messages: list, model_id: str,
+                             max_tokens: int, temperature: float = None) -> dict:
+    body = {
+        'anthropic_version': 'bedrock-2023-05-31',
+        'max_tokens': max_tokens,
+        'messages': messages,
+    }
+    if system_prompt:
+        body['system'] = system_prompt
+    if is_new_api_model(model_id):
+        body['thinking'] = {'type': 'disabled'}
+    else:
+        body['temperature'] = LEGACY_GENERATION_TEMPERATURE if temperature is None else temperature
+    return body
+
+
+def extract_response_text(response_body: dict) -> str:
+    for block in response_body.get('content') or []:
+        if block.get('type') == 'text' and block.get('text'):
+            return block['text']
+    return ''
+
+
 SESSION_TITLE_MAX_LENGTH = 30
 # 見出し生成は Claude（既定はチャットと同じ Haiku 4.5 の推論プロファイル）で行う。
 # 失敗・無効時は質問文の切り詰めにフォールバックするため、可用性は落とさない。
@@ -359,30 +397,21 @@ def generate_session_title(query: str, deadline=None) -> str:
         return _fallback_session_title(text)
 
     try:
-        request_body = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "system": SESSION_TITLE_SYSTEM_PROMPT,
-            "max_tokens": 64,
-            "temperature": 0,
-            "messages": [
-                {
-                    "role": "user",
-                    # SECURITY: 質問文は信頼できない入力。タグで囲み、指示として解釈させない
-                    "content": (
-                        "次の質問に見出しを付けてください。\n"
-                        f"<question>\n{text[:500]}\n</question>"
-                    ),
-                }
-            ],
-        }
+        messages = [{
+            "role": "user",
+            # SECURITY: 質問文は信頼できない入力。タグで囲み、指示として解釈させない
+            "content": "次の質問に見出しを付けてください。\n"
+                       f"<question>\n{text[:500]}\n</question>",
+        }]
+        request_body = build_generation_request(
+            SESSION_TITLE_SYSTEM_PROMPT, messages, SESSION_TITLE_MODEL_ID,
+            max_tokens=64, temperature=0,
+        )
         response = bedrock_runtime_title.invoke_model(
-            modelId=SESSION_TITLE_MODEL_ID,
-            body=json.dumps(request_body),
+            modelId=SESSION_TITLE_MODEL_ID, body=json.dumps(request_body),
         )
         response_body = json.loads(response['body'].read())
-        title = _normalize_session_title(
-            (response_body.get('content') or [{}])[0].get('text', '')
-        )
+        title = _normalize_session_title(extract_response_text(response_body))
         return title or _fallback_session_title(text)
     except Exception as e:  # noqa: BLE001 - 見出し生成の失敗で回答を落とさない
         print(f"Session title generation failed, falling back: {e}")
