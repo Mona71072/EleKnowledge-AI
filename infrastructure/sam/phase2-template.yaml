@@ -274,6 +274,14 @@ Resources:
                 Resource:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
                   - !Sub arn:aws:bedrock:*::foundation-model/*
+        - PolicyName: InvokeSelfForSessionTitle
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:rag-${Environment}
         - PolicyName: DynamoDBAccess
           PolicyDocument:
             Version: '2012-10-17'
