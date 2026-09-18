@@ -34,8 +34,76 @@ Parameters:
   CognitoUserPoolId:
     Type: String
     Default: ap-northeast-1_DN17ekXik
+  WafAlertEmailItai:
+    Type: String
+    NoEcho: true
+    Description: itai の WAF Block アラーム通知先メールアドレス（デプロイ時に指定）
+  WafAlertEmailMona:
+    Type: String
+    NoEcho: true
+    Description: mona の WAF Block アラーム通知先メールアドレス（デプロイ時に指定）
+  WafBlockAlarmThreshold:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    Description: 5 分間の Block 件数アラーム閾値。初月の実測後に見直す。
+  WafWebAclMetricName:
+    Type: String
+    Default: EleKnowledgeDevRegionalWebAcl
+    Description: RegionalWebAcl の CloudWatch metric name。環境ごとに明示する。
 
 Resources:
+  WafLogBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub aws-waf-logs-eleknowledge-${Environment}-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveAfter90Days
+            Status: Enabled
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 90
+            ExpirationInDays: 365
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+
+  WafAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${ProjectName}-${Environment}-waf-alerts
+      Subscription:
+        - Endpoint: !Ref WafAlertEmailItai
+          Protocol: email
+        - Endpoint: !Ref WafAlertEmailMona
+          Protocol: email
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+
   AllowedIPSet:
     Type: AWS::WAFv2::IPSet
     Properties:
@@ -84,6 +152,53 @@ Resources:
             CloudWatchMetricsEnabled: true
             MetricName: EleKnowledgeAllowIPv4
 
+  WafLoggingConfiguration:
+    Type: AWS::WAFv2::LoggingConfiguration
+    Properties:
+      ResourceArn: !GetAtt RegionalWebAcl.Arn
+      LogDestinationConfigs:
+        - !GetAtt WafLogBucket.Arn
+      RedactedFields:
+        - SingleHeader:
+            Name: authorization
+        - SingleHeader:
+            Name: cookie
+        - QueryString: {}
+      LoggingFilter:
+        DefaultBehavior: DROP
+        Filters:
+          - Behavior: KEEP
+            Requirement: MEETS_ALL
+            Conditions:
+              - ActionCondition:
+                  Action: BLOCK
+
+  WafBlockedRequestsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-waf-blocked-requests-P1
+      AlarmDescription: !Sub >-
+        P1: WAF が 5 分間に ${WafBlockAlarmThreshold} 件以上を遮断しました。
+        S3 の WAF ログと AWS/WAFV2 の BlockedRequests を確認してください。
+      Namespace: AWS/WAFV2
+      MetricName: BlockedRequests
+      Dimensions:
+        - Name: Region
+          Value: !Ref AWS::Region
+        - Name: Rule
+          Value: ALL
+        - Name: WebACL
+          Value: !Ref WafWebAclMetricName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: !Ref WafBlockAlarmThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref WafAlertTopic
+
   AuthApiAssociation:
     Type: AWS::WAFv2::WebACLAssociation
     Properties:
@@ -125,3 +240,7 @@ Outputs:
     Value: !GetAtt RegionalWebAcl.Arn
   IPSetId:
     Value: !GetAtt AllowedIPSet.Id
+  WafLogBucketName:
+    Value: !Ref WafLogBucket
+  WafAlertTopicArn:
+    Value: !Ref WafAlertTopic
