@@ -51,21 +51,9 @@ def test_success_writes_gzip_archive(monkeypatch):
     assert len(s3.puts) == 1
 
 
-def test_failure_preserves_raw_records_then_reraises(monkeypatch):
+def test_failure_reraises_for_managed_s3_failure_destination(monkeypatch):
     mod = _load()
     s3 = FakeS3(fail_prefix="chatlogs/"); monkeypatch.setattr(mod, "s3", s3)
-    with pytest.raises(RuntimeError):
-        mod.handler(EVENT, Ctx())
-    assert len(s3.puts) == 1
-    key = s3.puts[0]["Key"]
-    assert key.startswith("failed/dt=") and key.endswith("req-1.json")
-    body = s3.puts[0]["Body"].decode("utf-8")
-    assert "e1" in body and "RuntimeError" in body
-
-
-def test_failure_when_s3_fully_down_still_reraises(monkeypatch):
-    mod = _load()
-    s3 = FakeS3(fail_prefix=""); monkeypatch.setattr(mod, "s3", s3)  # every put fails
     with pytest.raises(RuntimeError):
         mod.handler(EVENT, Ctx())
     assert s3.puts == []

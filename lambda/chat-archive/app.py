@@ -71,11 +71,11 @@ def _preserve_failed_batch(event, context, error):
 
 
 def handler(event, context):
-    try:
-        return _archive(event, context)
-    except Exception as e:  # noqa: BLE001
-        _preserve_failed_batch(event, context, e)
-        raise
+    # The event-source mapping retries and then writes the complete invocation
+    # record to its S3 OnFailure destination. A handler-level best-effort write
+    # cannot cover timeouts or initialization errors, so it is deliberately not
+    # part of the recovery guarantee.
+    return _archive(event, context)
 
 
 def _archive(event, context):

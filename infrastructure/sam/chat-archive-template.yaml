@@ -49,6 +49,17 @@ Resources:
                 TransitionInDays: 60
               - StorageClass: GLACIER
                 TransitionInDays: 180
+          - Id: transition-failed-invocations
+            Status: Enabled
+            Prefix: aws/lambda/
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 60
+              - StorageClass: GLACIER
+                TransitionInDays: 180
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
 
   ArchiveFunctionRole:
     Type: AWS::IAM::Role
@@ -79,10 +90,10 @@ Resources:
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub arn:aws:s3:::${ArchiveBucket}/*
-              - Sid: DlqWrite
+              - Sid: S3DestinationList
                 Effect: Allow
-                Action: sqs:SendMessage
-                Resource: !GetAtt ArchiveFailureQueue.Arn
+                Action: s3:ListBucket
+                Resource: !GetAtt ArchiveBucket.Arn
 
   ArchiveFunction:
     Type: AWS::Serverless::Function
@@ -98,7 +109,6 @@ Resources:
         Variables:
           ARCHIVE_BUCKET: !Ref ArchiveBucket
           ARCHIVE_PREFIX: chatlogs
-          ARCHIVE_FAILED_PREFIX: failed
       Events:
         ChatLogsStream:
           Type: DynamoDB
@@ -112,44 +122,55 @@ Resources:
             BisectBatchOnFunctionError: true
             DestinationConfig:
               OnFailure:
-                Type: SQS
-                Destination: !GetAtt ArchiveFailureQueue.Arn
-
-  ArchiveFailureQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub eleknowledge-chat-archive-${Environment}-failures
-      MessageRetentionPeriod: 1209600  # 14 days
-      SqsManagedSseEnabled: true
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: SAM
+                Type: S3
+                Destination: !GetAtt ArchiveBucket.Arn
 
   # 失敗宛先にメッセージが入ったら通知（監視スタックの SNS トピックを参照）
-  ArchiveFailureQueueAlarm:
-    Type: AWS::CloudWatch::Alarm
+  ArchiveFailureEventRule:
+    Type: AWS::Events::Rule
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-archive-dlq
-      AlarmDescription: chatlogs -> S3 archive failed a batch after retries. Raw records are preserved under s3://<archive bucket>/failed/ (best effort); the queue holds shard/sequence metadata only. Replay per docs/ops runbook within 24h of the stream event.
-      Namespace: AWS/SQS
-      MetricName: ApproximateNumberOfMessagesVisible
-      Dimensions:
-        - Name: QueueName
-          Value: !GetAtt ArchiveFailureQueue.QueueName
-      Statistic: Maximum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 1
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
+      Name: !Sub eleknowledge-chat-archive-${Environment}-failure-notification
+      Description: Notify when Lambda writes a failed DynamoDB Streams invocation to the archive bucket.
+      EventPattern:
+        source: [aws.s3]
+        detail-type: [Object Created]
+        detail:
+          bucket:
+            name: [!Ref ArchiveBucket]
+          object:
+            key:
+              - prefix: aws/lambda/
+      State: ENABLED
+      Targets:
+        - Arn:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
+          Id: ArchiveFailureAlertTopic
+
+  ArchiveFailureAlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
         - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
-      OKActions:
-        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccountOwner
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: sns:*
+            Resource:
+              Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
+          - Sid: AllowEventBridgeArchiveFailureNotifications
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource:
+              Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt ArchiveFailureEventRule.Arn
 
   AthenaResultsBucket:
     Type: AWS::S3::Bucket
