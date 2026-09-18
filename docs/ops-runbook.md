@@ -29,7 +29,7 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 | **P1-rag-throttles** / **P1-chat-throttles** / **P1-login-throttles** | Lambda 同時実行の上限 | CloudWatch Lambda メトリクス `ConcurrentExecutions` | 同時利用が想定（20 人）を超えた。アカウントの同時実行上限を確認 |
 | **P1-rag-duration-max** | 1 回の RAG が 25 秒超（API Gateway の 29 秒制限の手前） | 保存クエリ `rag-slow-requests` | Bedrock の遅延。利用者には 504 が出た可能性。連続するなら Bedrock 側の状況を確認し、代替モデル切替（§7）を検討 |
 | **P1-rag-error-lines** / **P1-chat-error-lines** | Lambda ログにエラー行（500 を return する設計のため Lambda Errors には乗らない） | 同上の保存クエリ | 5XX アラームと同時に鳴るのが普通。単独で鳴ったらログ本文を読む |
-| **P1-chat-archive-errors** / **P1-chat-archive-dlq** | 会話ログの S3 アーカイブが失敗 | §6.5 の復旧手順 | S3 障害か権限。**24 時間以内に対処**（Stream の保持期限） |
+| **P1-chat-archive-errors** / **archive failure notification** | 会話ログの S3 アーカイブが失敗し、再試行後の完全な呼出し記録がS3へ保存された | §5.5 の復旧手順 | S3 障害か権限。**24 時間以内に対処**（Stream の保持期限） |
 | P2-rag-api-4xx-spike / chat / auth | 5 分に 4XX が 30 件超 | API Gateway 実行ログ | 許可リスト外 IP からの 403 か、トークン失効の 401 が大半。§5.1 |
 | P2-rag-duration-p90 | 15 分間の p90 が 20 秒超 | Bedrock メトリクス `InvocationLatency`（ModelId = 使用中プロファイル） | Bedrock の遅延傾向。単発なら様子見 |
 | P2-metrics-aggregator-errors / P2-metrics-schedule-failed | 日次・毎時集計の失敗 | `/aws/lambda/metrics-aggregator-dev` | 管理画面の数字が止まる。翌日 02:00 の再実行で埋まるか、手動再実行（`{"date": "YYYY-MM-DD"}` で invoke） |
@@ -58,7 +58,7 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 2. `/admin/dashboard` の「今日 / 今週」に前日の利用件数・いいね率が出ている（0 のままなら集計の障害）
 3. `/admin/failures` の新着（👎・not_found）を眺め、明らかな検索ミスがあれば issue #86 に一言残す
 4. Bedrock メトリクスで前日の呼び出し数がチャット件数と合っている
-5. アーカイブの失敗キュー（SQS `eleknowledge-chat-archive-dev-failures`）が空
+5. アーカイブ失敗通知が届いていないこと（届いた場合は §5.5 を完了するまで障害として扱う）
 
 ## 5. 切り分け手順
 
@@ -82,19 +82,19 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 2. `metrics-aggregator-dev` を `{"date": "YYYY-MM-DD"}` で手動 invoke（同じ日付は上書きされる）
 
 ### 5.5 アーカイブ失敗（P1-chat-archive-*）
-1. Lambda ログで原因（S3 権限 / 障害）を確認
-2. 生レコードは `s3://eleknowledge-chat-archive-dev-<account>/failed/dt=YYYY-MM-DD/` に保存されている（最善努力）
-3. 原因解消後、保存した JSON の `records` を payload にして `eleknowledge-chat-archive-dev` を手動 invoke → `chatlogs/dt=.../` に出力されたことと件数を確認
-4. SQS のメッセージを削除し、アラームが OK に戻ることを確認
-5. `failed/` に無い場合は Stream の保持（24 時間）内に Lambda の再処理で回収する
+1. Lambda ログで原因（S3 権限 / 障害）を確認する。失敗通知は、再試行を使い切った後にS3へ失敗記録が作られたことを示す。
+2. `s3://eleknowledge-chat-archive-dev-<account>/aws/lambda/` 配下の失敗記録を取得する。S3失敗宛先はメタデータに加え、元のDynamoDB Streamsイベント全体を JSON の `payload` に保存する。
+3. `payload` を JSON として復元し、`Records` 配列の件数、`eventID`、`NewImage` / `OldImage`、重複の有無を確認する。保存JSONそのものや小文字の `records` をそのままLambdaに渡さない。
+4. 原因解消後、復元した `payload` を `eleknowledge-chat-archive-dev` に手動 invoke する。`chatlogs/dt=.../` への出力後、同じ照合を行い、記録する。
+5. 通知はSQSではなくS3オブジェクト作成に対するSNS通知であるため、削除対象のメッセージはない。復旧記録を残して障害をクローズする。
 
 ### 5.6 Cognito のメール送信上限（P1-cognito-email-errors / P1-cognito-signups-45・50 / P2-cognito-signups-40）
-- 背景: サインアップ・確認コード再送・パスワード再設定の確認メールは Cognito 既定の送信で、**1 ユーザープールあたり 1 日 50 通**（境界は UTC 0 時 = 日本時間 9 時と想定）。SES 未設定のため増やせない（issue #99）
+- 背景: サインアップ・確認コード再送・パスワード再設定の確認メールは Cognito 既定の送信で、**AWSアカウントあたり 1 日 50 通**。リセットは **09:00 UTC（18:00 JST）**。SES 未設定のため増やせない（issue #99）
 - 検知: (a) サインアップ数が 40 / 45 / 50 に達した（`SignUpSuccesses`、再送・再設定は含まない）、(b) Cognito が `Exceeded daily email limit` 等のエラーを返した（CloudTrail → EventBridge。SNS 本文に API 名・エラーコード・本文が入る）
 - 利用者側の表示: 画面が自動で「本日のメール送信数が上限に達したため…明日以降に」を出す。サインアップの場合はアカウントが未確認で作成済みのことがあるため「翌日、確認画面の『確認コードを再送信』から」と案内される（PR #102）
 - 対応:
-  1. 問い合わせには「翌日 9 時以降に確認画面の再送から。『登録が完了していません』と出た人だけ新規登録をやり直す」と案内
-  2. **上限に当たった人を個別に救う（推奨）**: `python scripts/ops/confirm_unconfirmed_users.py list` で本日作成の未確認アカウントを一覧 → 本人に「登録しましたか」を確認（アドレスの所有確認ができていないため）→ `confirm --emails <address>` で確認済みにする → 本人へ「ログインできます」と連絡。利用者はサインアップ時に決めたパスワードでそのまま入れる（メール不要）
+  1. 問い合わせには「18時以降に確認画面の再送から。『登録が完了していません』と出た人だけ新規登録をやり直す」と案内
+  2. **上限に当たった人を個別に救う（推奨）**: `python scripts/ops/confirm_unconfirmed_users.py list` で未確認アカウントを一覧 → 正式な社内情報で対象メールと本人を照合し、確認者・日時・根拠・結果を社内記録へ残す → `confirm --emails <address> --verified-by <担当者> --evidence-ref <社内記録参照>` で確認済みにする。自己申告だけでは実行しない。
   3. 登録が集中する見込みなら **事前発行**（`scripts/ops/provision_users.py`、CSV から招待メールなしで作成し初期パスワードを配布。PR #101）
   4. 恒久対策は SES への切替（送信元ドメイン検証 + 本番アクセス申請 + Cognito の `DEVELOPER` 設定）。issue #99
 - 初回に到達したときは、SNS 本文のエラーコードと本文を issue #99 に記録し、画面側の判定（`classifyAuthError`）と一致しているか確認する
