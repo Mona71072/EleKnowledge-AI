@@ -86,6 +86,9 @@ Resources:
               CustomResponse:
                 ResponseCode: 429
                 CustomResponseBodyKey: TooManyRequests
+                ResponseHeaders:
+                  - Name: Access-Control-Allow-Origin
+                    Value: "*"
           Statement:
             RateBasedStatement:
               Limit: !Ref PerUserRateLimit
@@ -147,9 +150,9 @@ Resources:
       MetricName: BlockedRequests
       Dimensions:
         - Name: WebACL
-          Value: EleKnowledge-dev-RegionalWebAcl
+          Value: EleKnowledgeDevRegionalWebAcl
         - Name: Rule
-          Value: PerUserRateLimit
+          Value: EleKnowledgePerUserRateLimit
         - Name: Region
           Value: !Ref AWS::Region
       Statistic: Sum
