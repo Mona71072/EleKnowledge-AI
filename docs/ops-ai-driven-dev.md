@@ -200,17 +200,18 @@ Approve（内容OK）と **マージボタンを誰が押すか** は別であ�
 
 ## 6c. なぜ会話が壊れるか（2026-09-10）
 
-詳細: `docs/decisions-2026-09-10-pr-conversation.md`
+詳細: `docs/decisions-2026-09-10-pr-conversation.md`（#103 で正本を `AGENTS.md` へ移した）
 
-起きやすいずれ:
+**直す前**に起きていたずれ（#103 後の現行ルールではない）:
 
-- Claude Code は `CLAUDE.md` → `AGENTS.md` を読む。Cursor の `pr-clarity` / `joint-pr-review` は見ない
-- `AGENTS.md` の「細かく分ける」と Cursor 側の「同種はまとめる」が食い違う
-- `CLAUDE.md` に古い docs 一覧や「PR は細かめ」を置くと、Claude Code だけが古い運用に従う
+- Claude Code は `CLAUDE.md` → `AGENTS.md` を読む。当時、会話ルールは Cursor の `pr-clarity` / `joint-pr-review` にしか無かった
+- 当時の `AGENTS.md` は「細かく分ける」、Cursor 側は「同種はまとめる」で食い違っていた（現行は「相手が判断できる単位。同種は寄せる」）
+- `CLAUDE.md` に古い docs 一覧や「PR は細かめ」があると、Claude Code だけが古い運用に従う（現行の `CLAUDE.md` はポインタのみ）
 - マージ担当欄だけ埋めて Yes/No を書かないと、相手は何を認めればよいか分からない
 - 進行中の相手 PR 本文をテンプレ是正で書き直すと、レビューが壊れる
+- スキル／テンプレの「マージ可の条件」に Approve だけを書くと、直したあとも同じ本文が量産される
 
-直す場所は **`AGENTS.md` の「PR の会話」**。Cursor 短則だけ直しても再発する。
+直す場所は **`AGENTS.md` の「PR の会話」**。Cursor 短則やスキルのテンプレだけ直しても、正本と食い違えば再発する。
 
 ---
 
