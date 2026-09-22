@@ -116,7 +116,7 @@ Approve（内容OK）と **マージボタンを誰が押すか** は別。PR �
 ## 禁止・注意
 
 - `develop` / `main` へ直接 push しない（デプロイ PR 経由）
-- デプロイ PR に `@yukiworkspace` メンションを忘れない
+- PR 本文で **相手を呼ぶ**（mona→itai なら `@yukiworkspace`。itai→mona なら mona 向け。自分宛てメンションは不要）
 - 「push したからデプロイ完了」と誤解しない — Lambda / API Gateway は itai の `sam deploy` 待ち
 - AWS コンソールで Lambda を直接編集しない（CloudFormation ドリフトの原因）
 - マージ担当・「マージ可」条件を書かず open を溜めない

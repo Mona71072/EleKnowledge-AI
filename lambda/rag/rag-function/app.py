@@ -651,7 +651,7 @@ def needs_clarify(query: str, filters: dict = None, chat_history: list = None) -
 
     questions = []
     if not has_model:
-        questions.append('機種（または工事番号）※分かれば精度が上がります')
+        questions.append('機種 ※分かれば精度が上がります')
     if not has_part:
         questions.append('何が／どの部位ですか？（かご／ドア／巻上機／制御盤など）')
     if not has_situation:

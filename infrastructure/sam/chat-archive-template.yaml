@@ -60,6 +60,13 @@ Resources:
       NotificationConfiguration:
         EventBridgeConfiguration:
           EventBridgeEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
 
   ArchiveFunctionRole:
     Type: AWS::IAM::Role
@@ -105,6 +112,10 @@ Resources:
       Timeout: 60
       MemorySize: 256
       Role: !GetAtt ArchiveFunctionRole.Arn
+      Tags:
+        Project: !Ref ProjectName
+        Env: !Ref Environment
+        ManagedBy: SAM
       Environment:
         Variables:
           ARCHIVE_BUCKET: !Ref ArchiveBucket
@@ -161,6 +172,13 @@ Resources:
           - Id: expire-query-results
             Status: Enabled
             ExpirationInDays: 30
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
 
   AnalyticsWorkGroup:
     Type: AWS::Athena::WorkGroup
@@ -168,6 +186,13 @@ Resources:
       Name: !Sub eleknowledge-analytics-${Environment}
       Description: EleKnowledge chat analytics workgroup
       State: ENABLED
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
       WorkGroupConfiguration:
         EnforceWorkGroupConfiguration: true
         PublishCloudWatchMetricsEnabled: true

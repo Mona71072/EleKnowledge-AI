@@ -11,7 +11,7 @@ import json
 import os
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 from botocore.exceptions import ClientError
 
 from timeutil import normalize_utc_iso, now_utc_iso
@@ -68,6 +68,35 @@ def _query_by_status(status: str, now_iso: str, fetch_limit: int) -> list:
         kwargs['ExclusiveStartKey'] = lek
         kwargs['Limit'] = min(50, fetch_limit - len(items))
     return items[:fetch_limit]
+
+
+def get_active_maintenance(now_iso: str) -> list:
+    """現在有効なメンテナンス告知を、通常一覧の件数に依存せず全件返す（issue #94 B1）。
+
+    published と期限到来の scheduled を publishAt <= now で全ページ走査し、
+    type=maintenance かつ startAt <= now <= endAt のものだけを返す。
+    メンテ告知は少数のため FilterExpression 付きの全走査で足りる。
+    """
+    now_iso = normalize_utc_iso(now_iso) or now_iso
+    found = {}
+    for status in ('published', 'scheduled'):
+        kwargs = {
+            'IndexName': 'status-publishAt-index',
+            'KeyConditionExpression': Key('status').eq(status) & Key('publishAt').lte(now_iso),
+            'FilterExpression': Attr('type').eq('maintenance'),
+        }
+        while True:
+            resp = table.query(**kwargs)
+            for it in resp.get('Items') or []:
+                start = _ts_key(it.get('startAt')) if it.get('startAt') else ''
+                end = _ts_key(it.get('endAt')) if it.get('endAt') else ''
+                if start and end and start <= now_iso <= end:
+                    found[it['announcementId']] = it
+            lek = resp.get('LastEvaluatedKey')
+            if not lek:
+                break
+            kwargs['ExclusiveStartKey'] = lek
+    return sorted(found.values(), key=lambda x: _ts_key(x.get('startAt')), reverse=True)
 
 
 def get_published(limit: int, now_iso: str) -> list:
@@ -128,9 +157,11 @@ def lambda_handler(event, context):
 
         now_iso = _now_iso()
         announcements = get_published(limit, now_iso)
+        active_maintenance = get_active_maintenance(now_iso)
 
         return _response(200, {
             'announcements': announcements,
+            'activeMaintenance': active_maintenance,
             'serverTime': now_iso,
         })
 
