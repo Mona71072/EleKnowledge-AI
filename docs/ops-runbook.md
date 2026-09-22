@@ -113,7 +113,7 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 ## 7. 生成モデルと推論プロファイル
 
 ### 7.1 現在の構成
-- 生成モデル: **Sonnet 5**（`global.anthropic.claude-sonnet-5`、2026-09-09 23:02 JST 切替）。環境変数 `BEDROCK_MODEL_ID` で指定
+- 生成モデル: **Sonnet 5**（`global.anthropic.claude-sonnet-5`、2026-09-09 23:02 JST 切替）。環境変数 `BEDROCK_MODEL_ID` で指定。採用条件・見直し条件の正本は PR #119
 - Sonnet 5 / Opus 4.7 以降は `temperature` 指定を 400 で拒否し、既定で適応思考が動くため、`app.py` がモデル世代に応じて本文を組み立てる（`thinking: disabled` 明示）。`BEDROCK_REQUEST_STYLE=auto|new|legacy`
 - Fable 系は対象外（adaptive のみ対応）
 
