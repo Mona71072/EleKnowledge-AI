@@ -49,7 +49,7 @@ GSI `scope-metricDate-index` はそのまま使える。
 | 項目 | 定義 | 出典 |
 |---|---|---|
 | `queries`, `sessions`, `activeUsers` | 既存どおり | chatlogs |
-| `userIds` | 期間内に発話した Cognito sub の一覧（週・月のユニーク数を read 側で和集合するため。個人情報ではない） | chatlogs |
+| `userIds` | 期間内に発話した Cognito sub の一覧。週・月のユニーク数を read 側で和集合するためだけに持つ。管理者画面には出さない | chatlogs |
 | `newUsers` | その日に初めて発話した sub の数（scan 対象の 60 日内で最古の日付がその日） | chatlogs |
 | `notFound`, `clarify`, `pages` | assistant の `responseType` 件数 | chatlogs |
 | `feedbackGood`, `feedbackBad`, `likeRate` | 既存 | chatlogs |
@@ -69,7 +69,7 @@ GSI `scope-metricDate-index` はそのまま使える。
 ## 6. read API（`GET /admin/metrics`）の変更
 
 - `period=today|week|month|custom` はそのまま。`today` は当日の `overall`（partial）+ `hourly` の当日分を `series.queriesByHour` などで返す
-- `kpi.activeUsers.value` = 期間内の `userIds` の和集合の数（`userIds` 自体は返さない）
+- `kpi.activeUsers.value` = 期間内の `userIds` の和集合の数（`userIds` 自体は返さない。管理者画面にも出さない）
 - `delta` = 「当期間 vs 直前の同じ長さの期間」（today は前日、week は前週、month は前月）
 - 追加: `kpi.notFoundRate`, `kpi.clarifyRate`, `kpi.estimatedBedrockCostUsd`（月累計）, `breakdown.feedbackReasons`, `breakdown.byModelType`, `breakdown.byCategory`, `series.notFoundByDay`
 - `health` の出典を §5 に合わせる。`openIncidents` は **現在 ALARM 状態の P1 アラーム数**（`DescribeAlarms` をリアルタイムに 1 回）
@@ -112,5 +112,5 @@ GSI `scope-metricDate-index` はそのまま使える。
 ## 12. 決めておくこと（実装前）
 
 - `incidents` を P1 のみにするか P1+P2 にするか → **P1 のみで決定**（itai 2026-09-10）。P1 / P2 は監視スタックのアラーム名に付けた重要度で、定義は `docs/ops-runbook.md` §1（P1 = 利用者影響あり・即対応、P2 = 翌営業日）と §2（各アラームの分類）にある
-- `userIds` を日次行に持つことの可否（sub のリスト。最大 100 人 × 36 文字 = 4 KB） → **可で決定**（itai 2026-09-10）
+- `userIds` を日次行に持つことの可否（sub のリスト。最大 100 人 × 36 文字 = 4 KB） → **可で決定**（itai 2026-09-10）。期間ユニークの算出にだけ使い、管理者画面には出さない
 - 推定コストの表示単位（USD のみか、円換算も出すか） → **USD のみで決定**（itai 2026-09-10。為替は扱わない）
