@@ -11,7 +11,7 @@ import sys
 import time
 
 import pytest
-from botocore.exceptions import ReadTimeoutError
+from botocore.exceptions import ClientError, ReadTimeoutError
 
 BASE = os.path.join(os.path.dirname(__file__), "../..")
 
@@ -212,6 +212,8 @@ def test_handler_enqueues_title_after_saving_user_message(rag):
     """通常・聞き返し・該当なしの全経路で、回答を待たずに非同期化する。"""
     src = inspect.getsource(rag.lambda_handler)
     assert src.count("enqueue_session_title(session_id, user_message_id, user_id, query)") == 3
+    assert src.count("session_title=session_title") == 0
+    assert src.count("'sessionTitle': session_title") == 3
     assert "generate_session_title(query, deadline=request_deadline)" not in src
     assert "event.get('_internalTask') == 'session-title'" in src
 
@@ -250,3 +252,76 @@ def test_save_message_persists_session_title(rag, monkeypatch):
     )
 
     assert saved["sessionTitle"] == "溶接脚長の判断基準"
+
+
+def test_async_title_update_succeeds_when_initial_put_omits_it(rag, monkeypatch):
+    """初回 put に sessionTitle が無いとき、非同期更新が条件を満たして書く。"""
+    items = {}
+
+    class _Table:
+        def put_item(self, Item=None):
+            items[Item["messageId"]] = dict(Item)
+
+        def update_item(self, **kwargs):
+            assert "attribute_not_exists(sessionTitle)" in kwargs["ConditionExpression"]
+            message_id = kwargs["Key"]["messageId"]
+            item = items[message_id]
+            values = kwargs["ExpressionAttributeValues"]
+            if item.get("userId") != values[":uid"] or "sessionTitle" in item:
+                raise ClientError(
+                    {"Error": {"Code": "ConditionalCheckFailedException", "Message": "no"}},
+                    "UpdateItem",
+                )
+            item["sessionTitle"] = values[":title"]
+
+    monkeypatch.setattr(rag, "chatlogs_table", _Table())
+    monkeypatch.setattr(rag, "generate_session_title", lambda query: "溶接脚長の判断基準")
+
+    message_id = rag.save_message_to_dynamodb(
+        session_id="s1",
+        user_id="u1",
+        role="user",
+        content="溶接の脚長が基準外となる判断基準は？",
+    )
+    assert "sessionTitle" not in items[message_id]
+
+    result = rag.handle_session_title_task({
+        "sessionId": "s1",
+        "messageId": message_id,
+        "userId": "u1",
+        "query": "溶接の脚長が基準外となる判断基準は？",
+    })
+
+    assert result == {"ok": True}
+    assert items[message_id]["sessionTitle"] == "溶接脚長の判断基準"
+
+
+def test_async_title_update_skips_when_session_title_already_exists(rag, monkeypatch):
+    """先に sessionTitle があると条件が外れ、一覧用の値は上書きしない。"""
+    items = {}
+
+    class _Table:
+        def update_item(self, **kwargs):
+            message_id = kwargs["Key"]["messageId"]
+            item = items[message_id]
+            values = kwargs["ExpressionAttributeValues"]
+            if "sessionTitle" in item:
+                raise ClientError(
+                    {"Error": {"Code": "ConditionalCheckFailedException", "Message": "no"}},
+                    "UpdateItem",
+                )
+            item["sessionTitle"] = values[":title"]
+
+    items["m1"] = {"userId": "u1", "sessionTitle": "質問の先頭"}
+    monkeypatch.setattr(rag, "chatlogs_table", _Table())
+    monkeypatch.setattr(rag, "generate_session_title", lambda query: "溶接脚長の判断基準")
+
+    result = rag.handle_session_title_task({
+        "sessionId": "s1",
+        "messageId": "m1",
+        "userId": "u1",
+        "query": "溶接の脚長は？",
+    })
+
+    assert result == {"ok": True}
+    assert items["m1"]["sessionTitle"] == "質問の先頭"

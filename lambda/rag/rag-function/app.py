@@ -421,7 +421,11 @@ def generate_session_title(query: str, deadline=None) -> str:
 
 
 def update_session_title(session_id: str, message_id: str, user_id: str, title: str) -> None:
-    """最初のユーザーメッセージだけを条件付きで更新する。"""
+    """最初のユーザーメッセージへ見出しを初めて書く。
+
+    初回の put では sessionTitle を付けない。ここで attribute_not_exists を
+    条件にしているため、フォールバックを先に保存すると更新が必ず失敗する。
+    """
     chatlogs_table.update_item(
         Key={'sessionId': session_id, 'messageId': message_id},
         UpdateExpression='SET sessionTitle = :title',
@@ -1525,7 +1529,6 @@ def lambda_handler(event, context):
             session_title = _fallback_session_title(query) if not chat_history else None
             user_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='user', content=query,
-                session_title=session_title,
             )
             if not chat_history:
                 enqueue_session_title(session_id, user_message_id, user_id, query)
@@ -1601,7 +1604,6 @@ def lambda_handler(event, context):
             session_title = _fallback_session_title(query) if not chat_history else None
             user_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='user', content=query,
-                session_title=session_title,
             )
             if not chat_history:
                 enqueue_session_title(session_id, user_message_id, user_id, query)
@@ -1658,7 +1660,6 @@ def lambda_handler(event, context):
             user_id=user_id,
             role='user',
             content=query,
-            session_title=session_title,
         )
         if not chat_history:
             enqueue_session_title(session_id, user_message_id, user_id, query)
