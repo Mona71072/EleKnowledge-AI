@@ -1,12 +1,12 @@
 ---
 status: draft
-last-verified: 2026-09-10
+last-verified: 2026-09-23
 related-code: lambda/metrics/aggregator/app.py, lambda/metrics/read/app.py, frontend/src/app/admin/dashboard/page.tsx, frontend/src/lib/metrics.ts, frontend/src/components/dashboard/charts.tsx, infrastructure/sam/monitoring-template.yaml, infrastructure/sam/phase2-template.yaml, infrastructure/sam/announcements-monitoring-template.yaml, lambda/rag/rag-function/app.py
 ---
 
 # 設計: 運用ダッシュボード v2 — 毎朝の判断・健全性・切り分け・コスト
 
-> **状態:** 設計（実装前・共同確認用）。実装コードは含まない。
+> **状態:** 実装は #106 / #110 / #111 / #112 / #114。API の正は `docs/api/`。この骨子と違う箇所は API 文書と実装の型を正とする。
 > **前提:** データ源は [telemetry-inventory-2026-09-10.md](./telemetry-inventory-2026-09-10.md) に列挙したものが上限。棚卸しに無いものは「足す提案」として作業量つきで書く。
 > **上書き対象:** [design-2026-09-10-metrics-v2.md](./design-2026-09-10-metrics-v2.md) の §6（read API）・§7（UI）・§11（PR 分割）は本書で置き換える。§3〜§5（JST 境界・毎時集計・日次行）は本書の §6 の差分を足したうえで **そのまま生かす**。[design-2026-09-10-retrieval-trace.md](./design-2026-09-10-retrieval-trace.md) は変更しない（§5.1 でコスト算出の役割だけ変える）。
 > **記法:** 外部仕様への言及は ◎ = 公式仕様・実測で確度が高い、△ = 記憶に頼っており実装時に一次情報で確認、の 2 段で書き分ける。
@@ -481,7 +481,7 @@ export interface DashboardResponse {
   funnel: { yesterday: FunnelRow; last7d: FunnelRow };
   trend: { days: number; queriesByDay: { date: string; total: number; unreached: number }[];
            latencyByDay: { date: string; p90Ms: number | null; maxMs: number | null }[] };
-  events: { at: string; kind: 'alarm' | 'deploy'; title: string; durationSec?: number;
+  events: { at: string; kind: 'alarm' | 'ok'; title: string; durationSec?: number;
             logGroup?: string; from?: string; to?: string; queryName?: string }[];
   reference: { topDocuments: { name: string; count: number }[]; lastEval: { date: string; hit: number; n: number } | null };
 }
@@ -489,11 +489,11 @@ interface FunnelRow { signIns: Count; queries: Count; pages: Count; opened: Coun
 
 export interface CostResponse {
   month: string; settledThrough: string;          // UTC
-  confirmed: { bedrockSonnet5: { total: number; input: number; output: number; cache: number }; budgetUsd: number };
+  confirmed: { bedrock: { service: string; total: number; input: number; output: number; cache: number; other: number }; budgetUsd: number };
   unattributed: { total: number; byService: Record<string, number>; note: 'tag_pending' };
   shared: { total: number; byService: Record<string, number> };
   checks: { soleUser: { ok: boolean; detail: string }; actualVsEstimate: { actual: number; estimate: number; diffPct: number; status: HealthStatus } };
-  daily: { date: string; sonnet5Usd: number; settled: boolean }[];    // UTC 日
+  daily: { date: string; bedrockUsd: number; totalUsd: number; settled: boolean }[];    // UTC 日
   queriesDaily: { date: string; queries: number }[];                  // JST 日（別チャート）
   perQuery: { actualUsd: number | null; traceMedianUsd: number | null; traceP90Usd: number | null; perAnswerUsd: number | null };
   projection: { queriesPerDay: number; monthlyUsd: number }[];
@@ -506,10 +506,10 @@ export interface CostResponse {
 
 | API | 変更 |
 |---|---|
-| `GET /chat/admin/failures` | `since` / `until`（JST 日付）、`triage=open\|in_progress\|done\|all`、`kind` に `reformulated` を追加。各項目に `traceSummary`・`opened`・`reformulated`・`triage`・`hints` |
+| `GET /chat/admin/failures` | `since` / `until`（JST 日付）、`triage=open\|in_progress\|done\|wontfix\|all`、`kind` に `reformulated` を追加。各項目に `traceSummary`・`opened`・`reformulated`・`triage`・`hints` |
 | `PUT /chat/admin/messages/{sessionId}/{messageId}/triage` | 新設（admin）。`{status, cause?, note?, ref?}` |
 | `GET /chat/admin/messages/{sessionId}/{messageId}/trace` | トレース設計 §5 のまま。一覧のドロワーで使う |
-| `GET /admin/metrics` | `now.activeNotices: [{id, title, severity, since, showInChat}]` を追加 |
+| `GET /admin/metrics/dashboard` | `now.activeNotices: [{id, title, severity, since, showInChat}]`。旧 `GET /admin/metrics` には足さない |
 | `POST` / `PUT /admin/announcements` | `showInChat` を受ける。`endAt` は全種別で既に保存されている（UI 側の変更のみ） |
 | `GET /announcements` | 変更なし（`showInChat` が項目に増えるだけ） |
 
@@ -667,7 +667,7 @@ chatlogs の assistant 行と `product_wish` 行に属性を足す。未設定 =
 
 ### 9.5 API
 
-`GET /chat/admin/failures` に `since` / `until` / `triage` を足し、各項目に `traceSummary`・`opened`（`DocumentOpen` の `messageId` と突合）・`reformulated`・`triage`・`hints` を付ける。Scan は今のままで、`since` は FilterExpression に入るだけ（読み取り量は減らない）。25 ページ打ち切りは据え置き、1 日 1,000 件に近づいたら GSI か Athena（別立て A14）。改善提案の集計はクライアントのまま（期間と `triage` で絞った結果を集計）。
+`GET /chat/admin/failures` に `since` / `until` / `triage` を足し、各項目に `traceSummary`・`opened`（行の `documentOpens`。0 は未開封）・`reformulated`・`triage`・`hints` を付ける。Scan は今のままで、`since` は FilterExpression に入るだけ（読み取り量は減らない）。25 ページ打ち切りは据え置き、1 日 1,000 件に近づいたら GSI か Athena（別立て A14）。改善提案の集計はクライアントのまま（期間と `triage` で絞った結果を集計）。
 
 ---
 
