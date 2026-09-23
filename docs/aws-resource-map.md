@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-09-10
+last-verified: 2026-08-21
 related-code: infrastructure/sam/, amplify.yml
 ---
 
@@ -88,7 +88,7 @@ Use [AWS Migration Runbook](aws-migration-runbook.md) for deployment order, Bedr
 | `eleknowledge-security-waf-dev` | `infrastructure/sam/security-waf-template.yaml` | WAFv2 regional `EleKnowledge-dev-RegionalWebAcl` + IPSet, associated with the 4 REST API stages |
 | `eleknowledge-monitoring-dev` | `infrastructure/sam/monitoring-template.yaml` | SNS `eleknowledge-alerts-dev` (2 email subscriptions, passed at deploy), 22 CloudWatch alarms (`EleKnowledge-dev-P1-*` / `P2-*`), 2 metric filters, 3 Logs Insights saved queries. Runbook: `docs/ops-runbook.md` |
 
-Not in IaC: Bedrock application inference profile `EleKnowledge-rag-dev-sonnet5-20260909` (created 2026-09-09, unused until the SCP allows global-based profiles; see issue #86). Log group retention is set by `scripts/ops/set_log_retention.py` (Lambda 365 d / API Gateway 90 d).
+Not in IaC: Bedrock application inference profile `EleKnowledge-rag-dev-sonnet5-20260909` (created 2026-09-09). SCP denies InvokeModel on this application profile. The current call is the system profile `global.anthropic.claude-sonnet-5` directly (acceptance conditions: PR #119). Log group retention is set by `scripts/ops/set_log_retention.py` (Lambda 365 d / API Gateway 90 d).
 
 ## Not Recreated by Current IaC
 
