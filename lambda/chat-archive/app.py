@@ -44,6 +44,14 @@ class _Enc(json.JSONEncoder):
 
 
 def handler(event, context):
+    # The event-source mapping retries and then writes the complete invocation
+    # record to its S3 OnFailure destination. A handler-level best-effort write
+    # cannot cover timeouts or initialization errors, so it is deliberately not
+    # part of the recovery guarantee.
+    return _archive(event, context)
+
+
+def _archive(event, context):
     records = event.get("Records", [])
     if not records:
         return {"archived": 0}
@@ -69,4 +77,5 @@ def handler(event, context):
     key = f"{PREFIX}/dt={dt:%Y-%m-%d}/{dt:%Y%m%dT%H%M%S}-{context.aws_request_id}.jsonl.gz"
     s3.put_object(Bucket=BUCKET, Key=key, Body=body,
                   ContentType="application/json", ContentEncoding="gzip")
+    print(f"[chat-archive] archived={len(lines)} key={key}")
     return {"archived": len(lines), "key": key}
