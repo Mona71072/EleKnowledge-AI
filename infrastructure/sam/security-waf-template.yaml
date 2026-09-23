@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   EleKnowledge dev WAF - allow only the office IP ranges (same set as GenU),
   block everything else. Associated with the auth / rag / chat / troubleshooting
-  API Gateway stages. Reflects resources created out-of-band on 2026-07-21.
+  / announcements-monitoring API Gateway stages and the users-dev Cognito User Pool.
+  Reflects resources created out-of-band on 2026-07-21.
 
 Parameters:
   Environment:
@@ -15,6 +16,14 @@ Parameters:
     Type: CommaDelimitedList
     Description: Office egress /32 CIDRs allowed to reach the APIs (same as GenU)
     Default: "203.178.81.200/32,210.172.233.198/32,210.172.233.219/32,210.172.233.220/32,192.218.140.236/32,192.218.140.237/32,192.218.140.238/32,192.218.140.239/32,192.218.140.240/32,192.218.140.241/32"
+  PerUserRateLimit:
+    Type: Number
+    Default: 300
+    Description: Requests per user (Authorization header) per 5 minutes before blocking (issue #99)
+  ProjectNameForAlerts:
+    Type: String
+    Default: EleKnowledge
+    Description: Prefix of the monitoring stack export (<ProjectName>-<Environment>-AlertTopicArn)
   AuthApiId:
     Type: String
     Default: mqsyka1v9j
@@ -27,8 +36,82 @@ Parameters:
   TroubleshootingApiId:
     Type: String
     Default: zh4kbz8bb1
+  AppApiId:
+    Type: String
+    Default: 0q3vewys59
+  CognitoUserPoolId:
+    Type: String
+    Default: ap-northeast-1_DN17ekXik
+  WafAlertEmailItai:
+    Type: String
+    NoEcho: true
+    Description: itai の WAF Block アラーム通知先メールアドレス（デプロイ時に指定）
+  WafAlertEmailMona:
+    Type: String
+    NoEcho: true
+    Description: mona の WAF Block アラーム通知先メールアドレス（デプロイ時に指定）
+  WafBlockAlarmThreshold:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    Description: 5 分間の Block 件数アラーム閾値。初月の実測後に見直す。
+  WafWebAclMetricName:
+    Type: String
+    Default: EleKnowledgeDevRegionalWebAcl
+    Description: RegionalWebAcl の CloudWatch metric name。環境ごとに明示する。
 
 Resources:
+  WafLogBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub aws-waf-logs-eleknowledge-${Environment}-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveAfter90Days
+            Status: Enabled
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 90
+            ExpirationInDays: 365
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+
+  WafAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${ProjectName}-${Environment}-waf-alerts
+      Subscription:
+        - Endpoint: !Ref WafAlertEmailItai
+          Protocol: email
+        - Endpoint: !Ref WafAlertEmailMona
+          Protocol: email
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+
   AllowedIPSet:
     Type: AWS::WAFv2::IPSet
     Properties:
@@ -53,6 +136,10 @@ Resources:
       Scope: REGIONAL
       DefaultAction:
         Block: {}
+      CustomResponseBodies:
+        TooManyRequests:
+          ContentType: APPLICATION_JSON
+          Content: '{"error": "TooManyRequests", "message": "短時間にリクエストが集中したため一時的に制限しています。数分おいて再度お試しください。"}'
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -65,6 +152,33 @@ Resources:
         CloudWatchMetricsEnabled: true
         MetricName: EleKnowledgeDevRegionalWebAcl
       Rules:
+        # 利用者（Cognito トークン = Authorization ヘッダ）単位のレート制限。IP 許可（Priority 1, Allow）より前に評価する
+        # 必要がある（Allow に一致した時点で後続ルールは評価されない）。同一 NAT の社内 IP 全体を巻き込まないため IP 単位では制限しない。
+        - Name: PerUserRateLimit
+          Priority: 0
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 429
+                CustomResponseBodyKey: TooManyRequests
+                ResponseHeaders:
+                  - Name: Access-Control-Allow-Origin
+                    Value: "*"
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref PerUserRateLimit
+              EvaluationWindowSec: 300
+              AggregateKeyType: CUSTOM_KEYS
+              CustomKeys:
+                - Header:
+                    Name: authorization
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: EleKnowledgePerUserRateLimit
         - Name: IpV4SetRuleRegionalWaf
           Priority: 1
           Action:
@@ -76,6 +190,89 @@ Resources:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
             MetricName: EleKnowledgeAllowIPv4
+
+  # BucketOwnerEnforced のため ACL は無効。公式サンプルの s3:x-amz-acl 条件は付けない。
+  # 付けると PutObject が条件不一致で落ちる。根拠:
+  # https://docs.aws.amazon.com/waf/latest/developerguide/logging-s3.html
+  WafLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WafLogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AWSLogDeliveryWrite
+            Effect: Allow
+            Principal:
+              Service: delivery.logs.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "arn:${AWS::Partition}:s3:::${WafLogBucket}/AWSLogs/${AWS::AccountId}/*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+          - Sid: AWSLogDeliveryAclCheck
+            Effect: Allow
+            Principal:
+              Service: delivery.logs.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+              - s3:ListBucket
+            Resource: !Sub "arn:${AWS::Partition}:s3:::${WafLogBucket}"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  WafLoggingConfiguration:
+    Type: AWS::WAFv2::LoggingConfiguration
+    DependsOn: WafLogBucketPolicy
+    Properties:
+      ResourceArn: !GetAtt RegionalWebAcl.Arn
+      LogDestinationConfigs:
+        - !GetAtt WafLogBucket.Arn
+      RedactedFields:
+        - SingleHeader:
+            Name: authorization
+        - SingleHeader:
+            Name: cookie
+        - QueryString: {}
+      LoggingFilter:
+        DefaultBehavior: DROP
+        Filters:
+          - Behavior: KEEP
+            Requirement: MEETS_ALL
+            Conditions:
+              - ActionCondition:
+                  Action: BLOCK
+
+  WafBlockedRequestsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-waf-blocked-requests-P1
+      AlarmDescription: !Sub >-
+        P1: WAF が 5 分間に ${WafBlockAlarmThreshold} 件以上を遮断しました。
+        S3 の WAF ログと AWS/WAFV2 の BlockedRequests を確認してください。
+      Namespace: AWS/WAFV2
+      MetricName: BlockedRequests
+      Dimensions:
+        - Name: Region
+          Value: !Ref AWS::Region
+        - Name: Rule
+          Value: ALL
+        - Name: WebACL
+          Value: !Ref WafWebAclMetricName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: !Ref WafBlockAlarmThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref WafAlertTopic
 
   AuthApiAssociation:
     Type: AWS::WAFv2::WebACLAssociation
@@ -101,8 +298,50 @@ Resources:
       ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${TroubleshootingApiId}/stages/${Environment}
       WebACLArn: !GetAtt RegionalWebAcl.Arn
 
+  AppApiAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${AppApiId}/stages/${Environment}
+      WebACLArn: !GetAtt RegionalWebAcl.Arn
+
+  CognitoUserPoolAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
+      WebACLArn: !GetAtt RegionalWebAcl.Arn
+
+  # 利用者単位のレート制限が発動したら P2 で通知（監視スタックの SNS トピックを参照）
+  PerUserRateLimitAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectNameForAlerts}-${Environment}-P2-waf-per-user-rate-limit
+      AlarmDescription: WAF blocked requests from a single user token (PerUserRateLimit). Check who and why; raise the limit if legitimate.
+      Namespace: AWS/WAFV2
+      MetricName: BlockedRequests
+      Dimensions:
+        - Name: WebACL
+          Value: EleKnowledgeDevRegionalWebAcl
+        - Name: Rule
+          Value: EleKnowledgePerUserRateLimit
+        - Name: Region
+          Value: !Ref AWS::Region
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Fn::ImportValue: !Sub ${ProjectNameForAlerts}-${Environment}-AlertTopicArn
+      OKActions:
+        - Fn::ImportValue: !Sub ${ProjectNameForAlerts}-${Environment}-AlertTopicArn
+
 Outputs:
   WebAclArn:
     Value: !GetAtt RegionalWebAcl.Arn
   IPSetId:
     Value: !GetAtt AllowedIPSet.Id
+  WafLogBucketName:
+    Value: !Ref WafLogBucket
+  WafAlertTopicArn:
+    Value: !Ref WafAlertTopic

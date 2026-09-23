@@ -1,6 +1,6 @@
 ---
 status: production
-last-verified: 2026-07-29
+last-verified: 2026-09-09
 related-code: infrastructure/, lambda/rag/, lambda/chat/
 ---
 
@@ -27,6 +27,8 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/
 
 ### eleknowledge-chatlogs テーブル（ホットウィンドウ）
 
+> 最終検証: 2026-09-22 — #84 実装（sessionTitle は非同期更新で初めて付く）
+
 ```typescript
 {
   sessionId: string;        // Partition Key
@@ -42,6 +44,8 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/
   pageCandidates?: object[];
   clarifyQuestions?: string[];
   queryFilters?: object;    // 当時の機種・カテゴリ等
+  // --- 2026-09-09 履歴一覧の見出し（最初の user メッセージのみ）---
+  sessionTitle?: string;    // 非同期の見出し生成が書いてから存在する。初回 put では付けない。一覧 API はこれを最優先で使う
   // --- フィードバック ---
   feedback?: 'good' | 'bad';
   feedbackReason?: 'wrong_doc' | 'unresolved' | 'bad_answer' | 'other' | 'wrong_page';
