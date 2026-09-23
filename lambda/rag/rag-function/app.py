@@ -14,6 +14,7 @@ from decimal import Decimal
 from urllib.parse import urlparse
 from botocore.exceptions import ClientError
 from botocore.config import Config
+from botocore.config import Config as BotoConfig
 
 
 def _utc_now_iso() -> str:
@@ -65,7 +66,17 @@ MAX_IMAGE_BLOCKS = 3
 
 # Initialize AWS clients with region from environment
 bedrock_agent = boto3.client('bedrock-agent-runtime', region_name=AWS_REGION)
-bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
+# ThrottlingException / 一時障害に備えたリトライ（issue #86 P0）。adaptive はクライアント側で
+# レート制御も行う。read_timeout は Sonnet 5 の生成（最大 17 秒実測）と API Gateway 29 秒制限の間。
+bedrock_runtime = boto3.client(
+    'bedrock-runtime',
+    region_name=AWS_REGION,
+    config=BotoConfig(
+        retries={'max_attempts': int(os.environ.get('BEDROCK_MAX_ATTEMPTS', '4')), 'mode': 'adaptive'},
+        read_timeout=int(os.environ.get('BEDROCK_READ_TIMEOUT', '25')),
+        connect_timeout=5,
+    ),
+)
 dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 
 # DynamoDB table
@@ -771,7 +782,7 @@ def needs_clarify(query: str, filters: dict = None, chat_history: list = None) -
 
     questions = []
     if not has_model:
-        questions.append('機種（または工事番号）※分かれば精度が上がります')
+        questions.append('機種 ※分かれば精度が上がります')
     if not has_part:
         questions.append('何が／どの部位ですか？（かご／ドア／巻上機／制御盤など）')
     if not has_situation:
@@ -964,6 +975,61 @@ def build_claude_messages(query: str, selected_results: list, chat_history: list
     return messages
 
 
+
+# Claude 4.7 以降 / Sonnet 5 / Fable 系は temperature 等のサンプリング指定を 400 で拒否し、
+# 既定で適応思考が動く。RAG の短い整理には思考は不要なので明示的に無効化する。
+# 判定はモデル ID（推論プロファイル ID / ARN のどちらでも可）の部分一致で行う。
+# 経緯: docs/eval-2026-09-09-model-bakeoff.md（Haiku 4.5 → Sonnet 5 切替）
+# 対応範囲は Sonnet 5 / Opus 4.7 以降（thinking を disabled にできるモデル）。
+# Fable 系は adaptive のみ対応で disabled を送ると 400 になるため対象外（PR #90 レビュー）。
+NEW_API_MODEL_MARKERS = ("sonnet-5", "opus-4-7", "opus-4-8", "opus-5")
+GENERATION_MAX_TOKENS = 4096
+LEGACY_GENERATION_TEMPERATURE = 0.3
+# auto: モデル ID の部分一致で判定 / new: 常に新 API 形式 / legacy: 常に旧形式。
+# アプリケーション推論プロファイルの ARN には元モデル名が含まれないため、
+# ARN を指定する場合は new / legacy を明示する。
+BEDROCK_REQUEST_STYLE = os.environ.get('BEDROCK_REQUEST_STYLE', 'auto').lower()
+
+
+def is_new_api_model(model_id: str, request_style: str = None) -> bool:
+    style = (request_style or BEDROCK_REQUEST_STYLE or 'auto').lower()
+    if style == 'new':
+        return True
+    if style == 'legacy':
+        return False
+    mid = (model_id or "").lower()
+    return any(marker in mid for marker in NEW_API_MODEL_MARKERS)
+
+
+def build_generation_request(system_prompt: str, messages: list, model_id: str,
+                             max_tokens: int = None, temperature: float = None) -> dict:
+    """InvokeModel 用のリクエスト本文をモデル世代に合わせて組み立てる。
+
+    本文生成以外（例: 見出し生成）も同じ関数を使い、max_tokens / temperature だけ変える。
+    新 API 世代では temperature は常に送らない（400 になる）。
+    """
+    body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_tokens or GENERATION_MAX_TOKENS,
+        "messages": messages,
+    }
+    if system_prompt:
+        body["system"] = system_prompt
+    if is_new_api_model(model_id):
+        body["thinking"] = {"type": "disabled"}
+    else:
+        body["temperature"] = LEGACY_GENERATION_TEMPERATURE if temperature is None else temperature
+    return body
+
+
+def extract_response_text(response_body: dict) -> str:
+    """content から最初の text ブロックを返す（thinking ブロックが先頭に来る場合に備える）。"""
+    for block in response_body.get("content") or []:
+        if block.get("type") == "text" and block.get("text"):
+            return block["text"]
+    return ""
+
+
 def generate_response_with_claude(query: str, kb_results: dict, chat_history: list = None,
                                   mode: str = "normal", search_query: str = None) -> str:
     """
@@ -1006,22 +1072,15 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
             query, selected_results, chat_history, search_query=search_query
         )
 
-        # Call Claude 4
-        request_body = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "system": system_prompt,
-            "max_tokens": 4096,
-            "temperature": 0.3,
-            "messages": messages
-        }
-        
+        request_body = build_generation_request(system_prompt, messages, BEDROCK_MODEL_ID)
+
         response = bedrock_runtime.invoke_model(
             modelId=BEDROCK_MODEL_ID,
             body=json.dumps(request_body)
         )
         
         response_body = json.loads(response['body'].read())
-        assistant_message = response_body['content'][0]['text']
+        assistant_message = extract_response_text(response_body)
         
         return assistant_message
         

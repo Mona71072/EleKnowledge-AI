@@ -6,11 +6,11 @@ Description: >
   out-of-band on 2026-07-21 (Step 2 of the soft-delete / analytics work).
 
 # ---------------------------------------------------------------------------
-# NOTE: The live resources were first created via the AWS API on 2026-07-21.
-# To manage them with this template you must reconcile first, e.g. either:
-#   (a) delete the API-created resources, then `sam deploy` this template, or
-#   (b) CloudFormation resource import.
-# Deploying as-is into a fresh account/stack just works.
+# NOTE: Deployed as CloudFormation stack `eleknowledge-chat-archive-dev`
+# (UPDATE_COMPLETE, verified 2026-09-09). Earlier note about out-of-band
+# creation is obsolete. Deploy with:
+#   sam build --template chat-archive-template.yaml
+#   sam deploy --stack-name eleknowledge-chat-archive-dev --s3-bucket <artifacts bucket> --no-resolve-s3 ...
 # ---------------------------------------------------------------------------
 
 Parameters:
@@ -32,6 +32,9 @@ Resources:
     # PublicAccessBlock is enforced org-wide by SCP; do not set it here.
     Properties:
       BucketName: !Sub eleknowledge-chat-archive-${Environment}-${AWS::AccountId}
+      # 永久保存の正本のため誤削除・上書きに備える（issue #86 P0）
+      VersioningConfiguration:
+        Status: Enabled
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -46,6 +49,24 @@ Resources:
                 TransitionInDays: 60
               - StorageClass: GLACIER
                 TransitionInDays: 180
+          - Id: transition-failed-invocations
+            Status: Enabled
+            Prefix: aws/lambda/
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 60
+              - StorageClass: GLACIER
+                TransitionInDays: 180
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
 
   ArchiveFunctionRole:
     Type: AWS::IAM::Role
@@ -76,6 +97,10 @@ Resources:
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub arn:aws:s3:::${ArchiveBucket}/*
+              - Sid: S3DestinationList
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt ArchiveBucket.Arn
 
   ArchiveFunction:
     Type: AWS::Serverless::Function
@@ -87,6 +112,10 @@ Resources:
       Timeout: 60
       MemorySize: 256
       Role: !GetAtt ArchiveFunctionRole.Arn
+      Tags:
+        Project: !Ref ProjectName
+        Env: !Ref Environment
+        ManagedBy: SAM
       Environment:
         Variables:
           ARCHIVE_BUCKET: !Ref ArchiveBucket
@@ -100,6 +129,35 @@ Resources:
             BatchSize: 100
             MaximumBatchingWindowInSeconds: 30
             MaximumRetryAttempts: 3
+            # 3 回失敗したバッチは S3 OnFailure に呼出しレコード全体を残す（issue #86 P0）
+            BisectBatchOnFunctionError: true
+            DestinationConfig:
+              OnFailure:
+                Type: S3
+                Destination: !GetAtt ArchiveBucket.Arn
+
+  # 失敗宛先にメッセージが入ったら通知（監視スタックの SNS トピックを参照）
+  ArchiveFailureEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub eleknowledge-chat-archive-${Environment}-failure-notification
+      Description: Notify when Lambda writes a failed DynamoDB Streams invocation to the archive bucket.
+      EventPattern:
+        source: [aws.s3]
+        detail-type: [Object Created]
+        detail:
+          bucket:
+            name: [!Ref ArchiveBucket]
+          object:
+            key:
+              - prefix: aws/lambda/
+      State: ENABLED
+      Targets:
+        - Arn:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
+          Id: ArchiveFailureAlertTopic
+      # SNS の TopicPolicy は監視スタックが持つ。ここで置き換えると CloudWatch 向けの許可が消える。
+      # 監視スタックの AllowEventBridgeRules（rule/*）がこのルールの sns:Publish を許可する。
 
   AthenaResultsBucket:
     Type: AWS::S3::Bucket
@@ -114,6 +172,13 @@ Resources:
           - Id: expire-query-results
             Status: Enabled
             ExpirationInDays: 30
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
 
   AnalyticsWorkGroup:
     Type: AWS::Athena::WorkGroup
@@ -121,6 +186,13 @@ Resources:
       Name: !Sub eleknowledge-analytics-${Environment}
       Description: EleKnowledge chat analytics workgroup
       State: ENABLED
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
       WorkGroupConfiguration:
         EnforceWorkGroupConfiguration: true
         PublishCloudWatchMetricsEnabled: true
