@@ -15,7 +15,7 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 
 ## GET /chat/sessions
 
-> 最終検証: 2026-09-17 — #84 実装・CI（sessionTitle の優先順位とフォールバック）
+> 最終検証: 2026-09-22 — #84 実装（sessionTitle は非同期完了後。それまでは最初のユーザー質問）
 
 セッション一覧取得（自分の分のみ）
 
@@ -23,7 +23,7 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 
 **`title` の決め方**（優先順に採用。2026-09-09 更新）:
 
-1. メッセージに保存された `sessionTitle` — RAG が**最初のやりとりで生成**した見出し（[`docs/api/rag.md`](./rag.md) の `sessionTitle` 参照）
+1. メッセージに保存された `sessionTitle` — RAG が**最初のやりとりの非同期処理で書いた**見出し（完了前は未保存。その間は 2。[`docs/api/rag.md`](./rag.md) の `sessionTitle` 参照）
 2. そのセッションの**最初のユーザー質問**（見出し生成前の既存セッション・生成失敗時）
 3. 最古メッセージの本文 — 先頭の「※」注意書き段落と Markdown の見出し・強調記号を除いて先頭50文字
 

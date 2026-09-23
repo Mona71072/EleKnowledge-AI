@@ -13,7 +13,7 @@ related-code: lambda/rag/, frontend/src/app/chat/
 
 ## POST /rag/query
 
-> 最終検証: 2026-09-17 — #84 実装・CI（非同期 sessionTitle / Sonnet 5 互換）
+> 最終検証: 2026-09-22 — #84 実装（応答はフォールバック、sessionTitle は非同期が初めて書く）
 
 RAGクエリ実行
 
@@ -93,10 +93,11 @@ RAGクエリ実行
 - `responseType`: `clarify`（検索せず聞き返し）/ `pages`（候補あり）/ `not_found`（弱い検索で作文停止）。実装理由は [impl-log-2026-07-29-clarify-and-page.md](../impl-log-2026-07-29-clarify-and-page.md)。
 - `pageCandidates`: UI 上部用。`pageNumber` は KB メタにあるときだけ付与（無ければキー省略＝ページ不明）。`not_found` 時は最大2件の参考候補に `lowConfidence: true` を付ける（作文はしない）。
 - `clarifyQuestions`: `clarify` 時の追加質問リスト。
-- `sessionTitle`: **セッション最初のやりとりのみ**付く履歴一覧用の見出し。応答では質問文を切り詰めたフォールバックを返し、最初の user メッセージへ先に保存する。
-  - 見出し生成は回答返却後の非同期Lambdaタスクで行うため、Bedrockの接続・本文読取が通常回答、聞き返し、該当なしの応答時間を延ばさない。生成後は、同一 `userId` の最初の user メッセージだけを条件付き更新する。
-  - モデルは `SESSION_TITLE_MODEL_ID`（未設定時は `BEDROCK_MODEL_ID`）。Sonnet 5系では `temperature` を送らず `thinking: {type: disabled}` を指定し、本文生成と同じ互換形式を使う。
-  - `SESSION_TITLE_LLM=false`、非同期起動失敗、Bedrock例外、空応答ではフォールバック見出しを維持する。見出し生成の失敗で回答は落とさない。
+- `sessionTitle`: **セッション最初のやりとりのみ**付く履歴一覧用の見出し。応答 JSON では質問文を切り詰めたフォールバックを返す。DynamoDB の `sessionTitle` は初回の put では書かない。
+  - 見出し生成は回答返却後の非同期 Lambda タスクで行う。Bedrock の接続・本文読取は、通常回答・聞き返し・該当なしの応答時間に入れない。生成後は、同一 `userId` で `sessionTitle` がまだ無い最初の user メッセージだけを更新する。
+  - 初回 put にフォールバックを書いておくと、`attribute_not_exists(sessionTitle)` が外れ、LLM 見出しが保存されない。一覧は質問の先頭 50 文字のままになる。
+  - モデルは `SESSION_TITLE_MODEL_ID`（未設定時は `BEDROCK_MODEL_ID`）。Sonnet 5 系では `temperature` を送らず `thinking: {type: disabled}` を指定し、本文生成と同じ互換形式を使う。
+  - `SESSION_TITLE_LLM=false` や非同期起動の失敗のあいだ、一覧は優先順 2（最初のユーザー質問。フォールバックと同じ切り詰め）になる。Bedrock 例外・空応答のときは、非同期タスクがフォールバック文字列を `sessionTitle` として書く。見出し生成の失敗で回答は落とさない。
   - **SECURITY:** 質問文は `<question>` タグで囲み、システムプロンプトで資料扱いを明示する。タスクは同一LambdaのIAM権限でのみ起動される。
   - 現行チャット UI はこのフィールドを直接使わず、一覧 API を再取得して表示する。
 
