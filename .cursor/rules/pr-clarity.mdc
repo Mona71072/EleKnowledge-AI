@@ -5,8 +5,11 @@ alwaysApply: true
 
 # PR のわかりやすさ（合格線）
 
-テンプレの見出しを埋めただけでは不十分。  
+テンプレの見出しを埋めただけでは不十分。
 **レビュアー（itai / mona）が冒頭30秒で「何のPRか・何を Yes/No するか・どこを読めばよいか」が分かること**を合格線とする。
+目的は良い開発。テンプレ一致そのものが目的ではない。
+
+Claude Code / Codex / GitHub の PR 機能も同じ。正本は `AGENTS.md` の「PR の会話」。`.cursor/rules` だけを見て対象外にしない。
 
 詳細: `docs/ops-ai-driven-dev.md` §PRわかりやすさ ／ 手順は `joint-pr-review` / `working-branch.mdc`
 
@@ -29,6 +32,9 @@ alwaysApply: true
 - テンプレをコピペしただけで、今回の差分に触れない
 - 「一式」「など」で範囲をぼかす（何が核か書け）
 - マージ担当を書かず、Approve 後に誰もボタンを押さない状態を作る
+- 「mona の Approve」だけ書いて、何を Yes/No するか書かない
+- 自分宛てにメンションする（itai の PR に `@yukiworkspace` だけ、など）
+- 進行中の相手 PR 本文を、テンプレ是正のために書き直す
 
 ## PR 数と巨大差分
 

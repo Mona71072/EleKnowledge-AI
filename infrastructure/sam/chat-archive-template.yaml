@@ -60,6 +60,13 @@ Resources:
       NotificationConfiguration:
         EventBridgeConfiguration:
           EventBridgeEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
 
   ArchiveFunctionRole:
     Type: AWS::IAM::Role
@@ -105,6 +112,10 @@ Resources:
       Timeout: 60
       MemorySize: 256
       Role: !GetAtt ArchiveFunctionRole.Arn
+      Tags:
+        Project: !Ref ProjectName
+        Env: !Ref Environment
+        ManagedBy: SAM
       Environment:
         Variables:
           ARCHIVE_BUCKET: !Ref ArchiveBucket
@@ -118,7 +129,7 @@ Resources:
             BatchSize: 100
             MaximumBatchingWindowInSeconds: 30
             MaximumRetryAttempts: 3
-            # 3 回失敗したバッチを黙って捨てず、失敗レコードのキー情報を SQS に残す（issue #86 P0）
+            # 3 回失敗したバッチは S3 OnFailure に呼出しレコード全体を残す（issue #86 P0）
             BisectBatchOnFunctionError: true
             DestinationConfig:
               OnFailure:
@@ -145,32 +156,8 @@ Resources:
         - Arn:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
           Id: ArchiveFailureAlertTopic
-
-  ArchiveFailureAlertTopicPolicy:
-    Type: AWS::SNS::TopicPolicy
-    Properties:
-      Topics:
-        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: AllowAccountOwner
-            Effect: Allow
-            Principal:
-              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
-            Action: sns:*
-            Resource:
-              Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
-          - Sid: AllowEventBridgeArchiveFailureNotifications
-            Effect: Allow
-            Principal:
-              Service: events.amazonaws.com
-            Action: sns:Publish
-            Resource:
-              Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
-            Condition:
-              ArnEquals:
-                aws:SourceArn: !GetAtt ArchiveFailureEventRule.Arn
+      # SNS の TopicPolicy は監視スタックが持つ。ここで置き換えると CloudWatch 向けの許可が消える。
+      # 監視スタックの AllowEventBridgeRules（rule/*）がこのルールの sns:Publish を許可する。
 
   AthenaResultsBucket:
     Type: AWS::S3::Bucket
@@ -185,6 +172,13 @@ Resources:
           - Id: expire-query-results
             Status: Enabled
             ExpirationInDays: 30
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
 
   AnalyticsWorkGroup:
     Type: AWS::Athena::WorkGroup
@@ -192,6 +186,13 @@ Resources:
       Name: !Sub eleknowledge-analytics-${Environment}
       Description: EleKnowledge chat analytics workgroup
       State: ENABLED
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
       WorkGroupConfiguration:
         EnforceWorkGroupConfiguration: true
         PublishCloudWatchMetricsEnabled: true

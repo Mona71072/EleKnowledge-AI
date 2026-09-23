@@ -1,4 +1,7 @@
-"""chat-archive Lambda: 失敗バッチの生レコード保全（PR #96 レビュー指摘）。"""
+"""chat-archive Lambda: 成功時の書込みと、失敗時は例外を外へ返すこと。
+
+復旧の正本は Lambda の S3 OnFailure（payload）であり、ハンドラ内の failed/ 保存ではない。
+"""
 import importlib.util
 import os
 import sys
