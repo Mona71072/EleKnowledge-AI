@@ -70,6 +70,16 @@ Parameters:
       not a bare foundation model ID. Sonnet 5 / Opus 4.7+ are handled by app.py
       (no temperature, thinking disabled). See docs/eval-2026-09-09-model-bakeoff.md.
   
+  SessionTitleLlm:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >-
+      Generate chat session titles with Claude (BedrockModelId) from the first question.
+      Set to false to fall back to truncating the raw question (no extra Bedrock call).
+
   BedrockRequestStyle:
     Type: String
     Default: auto
@@ -275,6 +285,14 @@ Resources:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*
                   - !Sub arn:aws:bedrock:*::foundation-model/*
+        - PolicyName: InvokeSelfForSessionTitle
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:rag-${Environment}
         - PolicyName: DynamoDBAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -336,6 +354,8 @@ Resources:
         Variables:
           KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          # 履歴一覧の見出し生成。既定は BEDROCK_MODEL_ID と同じモデル（追加の IAM 不要）
+          SESSION_TITLE_LLM: !Ref SessionTitleLlm
           BEDROCK_REQUEST_STYLE: !Ref BedrockRequestStyle
           RAG_SEARCH_TYPE: !Ref RagSearchType
           KB_SOURCE_BUCKET: !Ref KnowledgeBaseDataSourceBucket
