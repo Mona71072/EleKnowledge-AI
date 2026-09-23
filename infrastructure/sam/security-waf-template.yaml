@@ -16,6 +16,14 @@ Parameters:
     Type: CommaDelimitedList
     Description: Office egress /32 CIDRs allowed to reach the APIs (same as GenU)
     Default: "203.178.81.200/32,210.172.233.198/32,210.172.233.219/32,210.172.233.220/32,192.218.140.236/32,192.218.140.237/32,192.218.140.238/32,192.218.140.239/32,192.218.140.240/32,192.218.140.241/32"
+  PerUserRateLimit:
+    Type: Number
+    Default: 300
+    Description: Requests per user (Authorization header) per 5 minutes before blocking (issue #99)
+  ProjectNameForAlerts:
+    Type: String
+    Default: EleKnowledge
+    Description: Prefix of the monitoring stack export (<ProjectName>-<Environment>-AlertTopicArn)
   AuthApiId:
     Type: String
     Default: mqsyka1v9j
@@ -128,6 +136,10 @@ Resources:
       Scope: REGIONAL
       DefaultAction:
         Block: {}
+      CustomResponseBodies:
+        TooManyRequests:
+          ContentType: APPLICATION_JSON
+          Content: '{"error": "TooManyRequests", "message": "短時間にリクエストが集中したため一時的に制限しています。数分おいて再度お試しください。"}'
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -140,6 +152,33 @@ Resources:
         CloudWatchMetricsEnabled: true
         MetricName: EleKnowledgeDevRegionalWebAcl
       Rules:
+        # 利用者（Cognito トークン = Authorization ヘッダ）単位のレート制限。IP 許可（Priority 1, Allow）より前に評価する
+        # 必要がある（Allow に一致した時点で後続ルールは評価されない）。同一 NAT の社内 IP 全体を巻き込まないため IP 単位では制限しない。
+        - Name: PerUserRateLimit
+          Priority: 0
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 429
+                CustomResponseBodyKey: TooManyRequests
+                ResponseHeaders:
+                  - Name: Access-Control-Allow-Origin
+                    Value: "*"
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref PerUserRateLimit
+              EvaluationWindowSec: 300
+              AggregateKeyType: CUSTOM_KEYS
+              CustomKeys:
+                - Header:
+                    Name: authorization
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: EleKnowledgePerUserRateLimit
         - Name: IpV4SetRuleRegionalWaf
           Priority: 1
           Action:
@@ -234,6 +273,32 @@ Resources:
     Properties:
       ResourceArn: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
       WebACLArn: !GetAtt RegionalWebAcl.Arn
+
+  # 利用者単位のレート制限が発動したら P2 で通知（監視スタックの SNS トピックを参照）
+  PerUserRateLimitAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectNameForAlerts}-${Environment}-P2-waf-per-user-rate-limit
+      AlarmDescription: WAF blocked requests from a single user token (PerUserRateLimit). Check who and why; raise the limit if legitimate.
+      Namespace: AWS/WAFV2
+      MetricName: BlockedRequests
+      Dimensions:
+        - Name: WebACL
+          Value: EleKnowledgeDevRegionalWebAcl
+        - Name: Rule
+          Value: EleKnowledgePerUserRateLimit
+        - Name: Region
+          Value: !Ref AWS::Region
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Fn::ImportValue: !Sub ${ProjectNameForAlerts}-${Environment}-AlertTopicArn
+      OKActions:
+        - Fn::ImportValue: !Sub ${ProjectNameForAlerts}-${Environment}-AlertTopicArn
 
 Outputs:
   WebAclArn:
