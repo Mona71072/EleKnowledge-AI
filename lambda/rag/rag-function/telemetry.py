@@ -96,7 +96,7 @@ def log_request(event, response: dict, started_at: float) -> None:
             'latencyMs': elapsed_ms(started_at),
         })
     except Exception as e:  # noqa: BLE001
-        print(f"[telemetry] log_request failed: {e}")
+        print(f"[telemetry] log_request failed: {type(e).__name__}")
 
 
 def error_response(headers: dict, error: Exception, started_at: float, event) -> dict:
@@ -109,7 +109,8 @@ def error_response(headers: dict, error: Exception, started_at: float, event) ->
         stage = stage_of(error)
     else:
         code = type(error).__name__ or 'InternalServerError'
-        message = str(error)[:300]
+        # 例外文には応答本文や引用が混ざることがある。切り分けは型名と stage で足りる。
+        message = ''
         stage = 'unknown'
     _emit({
         'event': 'rag_error',

@@ -59,6 +59,18 @@ def test_error_response_hides_aws_message_and_logs_structured_line(capsys):
     assert "latencyMs" in line
 
 
+def test_error_response_omits_non_client_exception_text(capsys):
+    event = {"requestContext": {"requestId": "req-456"}}
+    secret = "引用チャンクの本文"
+    resp = telemetry.error_response({"h": "1"}, ValueError(secret), time.perf_counter(), event)
+    body = json.loads(resp["body"])
+    assert body["error"] == "InternalServerError" and secret not in resp["body"]
+    logged = capsys.readouterr().out
+    assert secret not in logged
+    line = json.loads(logged.strip().splitlines()[-1])
+    assert line["errorCode"] == "ValueError" and line["errorMessage"] == ""
+
+
 def test_log_request_emits_counts_not_bodies(capsys):
     event = {"httpMethod": "POST", "requestContext": {"requestId": "req-9"}}
     body = {"sessionId": "s1", "aiMessageId": "m2", "responseType": "pages", "content": "秘密の本文",
