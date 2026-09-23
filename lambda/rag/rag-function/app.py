@@ -1100,7 +1100,7 @@ def build_generation_request(system_prompt: str, messages: list, model_id: str,
 def extract_response_text(response_body: dict) -> str:
     """content から最初の text ブロックを返す（thinking ブロックが先頭に来る場合に備える）。"""
     for block in response_body.get("content") or []:
-        if block.get("type") == "text" and block.get("text"):
+        if block.get("text") and block.get("type", "text") == "text":
             return block["text"]
     return ""
 
