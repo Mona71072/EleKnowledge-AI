@@ -43,7 +43,9 @@ def _event(method, path, *, body=None, qs=None, sub="admin-1", groups="admin", p
 def test_jst_day_bounds():
     mod, _ = load_app()
     lo, hi = mod.jst_day_bounds("2026-09-23", "2026-09-23")
-    assert lo == "2026-09-22T15:00:00" and hi == "2026-09-23T14:59:59.999999"
+    assert lo == "2026-09-22T15:00:00" and hi == "2026-09-23T15:00:00"
+    assert lo <= "2026-09-23T14:59:59.999999Z" <= hi
+    assert not (lo <= "2026-09-23T15:00:00Z" <= hi)
     assert mod.jst_day_bounds(None, None) == (None, None)
     with pytest.raises(ValueError):
         mod.jst_day_bounds("2026/09/23", None)

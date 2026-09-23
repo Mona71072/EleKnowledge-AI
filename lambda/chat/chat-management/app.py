@@ -56,7 +56,8 @@ def jst_day_bounds(since: str = None, until: str = None) -> tuple:
         d = date.fromisoformat(day)
         return datetime(d.year, d.month, d.day, tzinfo=JST).astimezone(timezone.utc)
     lo = start_of(since).strftime('%Y-%m-%dT%H:%M:%S') if since else None
-    hi = (start_of(until) + timedelta(days=1) - timedelta(microseconds=1)).strftime('%Y-%m-%dT%H:%M:%S.%f') if until else None
+    # 終端は翌日 00:00 の秒まで。timestamp は Z 付きなので、この文字列より前が期間内に入る。
+    hi = (start_of(until) + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%S') if until else None
     return lo, hi
 
 

@@ -648,7 +648,7 @@ export default function AdminFailuresPage() {
                     <span className="text-gray-400">トレース実装後に表示</span>
                   )}
                   <span>
-                    資料を開いた <b className="font-mono">{item.opened ? `${item.opened} 件` : '—'}</b>
+                    資料を開いた <b className="font-mono">{item.opened != null ? `${item.opened} 件` : '—'}</b>
                   </span>
                 </div>
 
