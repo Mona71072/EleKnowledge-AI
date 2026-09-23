@@ -22,7 +22,7 @@ Bedrock の invocation logging は採用しない（Retrieve 結果が記録さ�
 | retrieve 件数 | `numberOfResults=30`、マージ後 平均 26・最大 30 |
 | 候補頁（UI に出す） | 最大 5（`build_page_candidates`） |
 | DynamoDB 項目上限 | 400 KB |
-| 保全経路 | chatlogs Stream → `eleknowledge-chat-archive-dev` → S3（バージョニング有効、failed/ 保全あり）→ Glue `chatlogs_archive` |
+| 保全経路 | chatlogs Stream → `eleknowledge-chat-archive-dev` → S3 → Glue `chatlogs_archive`。バージョニングと失敗保全は #96 の内容で、**未マージのあいだ develop には無い**（ハンドラの `failed/` 保存ではなく S3 OnFailure の `payload`） |
 | Bedrock 応答の `usage` | `input_tokens` / `output_tokens`（現在は破棄） |
 
 ## 3. データ設計
@@ -74,7 +74,7 @@ assistant メッセージ項目に属性 `retrievalTrace`（Map）を追加す�
 ## 4. 実装箇所（`lambda/rag/rag-function/app.py`）
 
 1. `time.perf_counter()` で retrieve（`retrieve_for_normal_query` 2 回分）と generate（`invoke_model`）を計測
-2. `generate_response_with_claude` が `usage` と `stop_reason` を返せるように、戻り値を `(text, meta)` に変更（呼び出し側 1 か所）。`extract_response_text` は #90 で導入済み
+2. `generate_response_with_claude` が `usage` と `stop_reason` を返せるように、戻り値を `(text, meta)` に変更（呼び出し側 1 か所）。`extract_response_text` は #90 の変更であり、**未マージのあいだ develop には無い**
 3. `query_knowledge_base` の機種スコープ除外で落とした候補を捨てずに `excludedBy="model_scope"` として返す（現在は無言で除外。トレースにだけ載せ、UI と生成には渡さない）
 4. `build_retrieval_trace(...)` を新設し、`save_message_to_dynamodb(..., retrieval_trace=...)` に渡す
 5. CloudWatch Logs には **本文を出さず** 1 行の JSON を出す: `{"event":"rag_request","messageId","sessionId","responseType","mergedCount","selectedCount","excludedByModelScope","topScore","inputTokens","outputTokens","latencyMs":{...},"modelId"}`（AGENTS.md「ログと秘匿」）
