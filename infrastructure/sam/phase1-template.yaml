@@ -50,14 +50,14 @@ Parameters:
   
   AuthApiThrottleBurst:
     Type: Number
-    Default: 50
+    Default: 100
     MinValue: 1
     MaxValue: 10000
     Description: Auth API Gateway throttle burst limit
   
   AuthApiThrottleRate:
     Type: Number
-    Default: 10
+    Default: 20
     MinValue: 1
     MaxValue: 10000
     Description: Auth API Gateway throttle rate limit
@@ -567,8 +567,8 @@ Resources:
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
-          ThrottlingBurstLimit: 50
-          ThrottlingRateLimit: 10
+          ThrottlingBurstLimit: !Ref AuthApiThrottleBurst
+          ThrottlingRateLimit: !Ref AuthApiThrottleRate
           LoggingLevel: INFO
           # DataTrace はリクエスト/レスポンスのボディ全文を実行ログに書き出す。
           # この API は /auth/login /auth/signup を持つため、
