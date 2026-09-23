@@ -7,6 +7,7 @@
     "build": "next build",
     "build:turbopack": "next build --turbopack",
     "start": "next start",
+    "audit:production": "node scripts/check-production-audit.mjs",
     "test:announcements": "node --test tests/announcement-publish.test.mjs",
     "test:safe-next-path": "node --test tests/safe-next-path.test.mjs"
   },
@@ -15,7 +16,7 @@
     "aws-amplify": "^6.15.7",
     "axios": "^1.13.2",
     "clsx": "^2.1.1",
-    "next": "15.5.4",
+    "next": "^15.5.24",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-markdown": "^10.1.0",

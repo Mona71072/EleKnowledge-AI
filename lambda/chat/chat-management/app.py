@@ -207,6 +207,35 @@ def calculate_days_until_deletion(ttl: int) -> int:
     return days_remaining
 
 
+SESSION_TITLE_MAX_LENGTH = 50
+
+
+def build_session_title(content) -> str:
+    """セッション一覧のタイトルをメッセージ本文から作る。
+
+    機種未指定時に RAG が回答の先頭へ付ける注意書き（「※機種未指定のため…」）や
+    Markdown の見出し記号をそのままタイトルにすると、どのセッションも同じ文字列になり
+    履歴を判別できなくなるため取り除く。
+    """
+    text = (content or '').strip()
+
+    # 先頭の注意書き段落（※ で始まる）は定型文なので落とす
+    while text.startswith('※'):
+        _, sep, rest = text.partition('\n\n')
+        if not sep:
+            _, sep, rest = text.partition('\n')
+        if not sep:
+            return 'Untitled'
+        text = rest.strip()
+
+    # Markdown の見出し・引用記号を落として素の文にする
+    text = text.lstrip('#>*- \t')
+    text = text.replace('**', '').strip()
+    if not text:
+        return 'Untitled'
+    return text[:SESSION_TITLE_MAX_LENGTH]
+
+
 def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
     """Get all sessions for a user"""
     try:
@@ -225,25 +254,53 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
         
         # Group by sessionId and get session metadata
         sessions_dict = {}
+        # タイトル採用済みメッセージの優先度（小さいほど優先）
+        title_rank = {}
         for msg in messages:
             session_id = msg['sessionId']
             # 改善要望（product_wish）はチャット履歴一覧に出さない
             if str(session_id).startswith('wish-'):
                 continue
-            if session_id not in sessions_dict:
-                sessions_dict[session_id] = {
+            timestamp = msg['timestamp']
+            session = sessions_dict.get(session_id)
+            if session is None:
+                session = {
                     'sessionId': session_id,
-                    'createdAt': msg['timestamp'],
-                    'lastMessageTime': msg['timestamp'],
-                    'messageCount': 1,
-                    'title': msg.get('content', 'Untitled')[:50],
+                    'createdAt': timestamp,
+                    'lastMessageTime': timestamp,
+                    'messageCount': 0,
+                    'title': 'Untitled',
                     'ttl': msg.get('ttl', 0)
                 }
+                sessions_dict[session_id] = session
+                title_rank[session_id] = None
+
+            session['messageCount'] += 1
+            if timestamp > session['lastMessageTime']:
+                session['lastMessageTime'] = timestamp
+            if timestamp < session['createdAt']:
+                session['createdAt'] = timestamp
+            # 残り日数は最後のメッセージが消えるまで（= 最大 TTL）で示す
+            if msg.get('ttl', 0) > session['ttl']:
+                session['ttl'] = msg.get('ttl', 0)
+
+            # タイトルは RAG が最初のやりとりで生成した sessionTitle を最優先で使う。
+            # 無い場合（生成前の既存セッション・生成失敗時）はそのセッションの
+            # 「最初のユーザー質問」を使う。直近メッセージ（多くは AI 回答）を使うと、
+            # 機種未指定の注意書きで一覧が埋まる。
+            stored_title = str(msg.get('sessionTitle') or '').strip()
+            # rank: 0=生成済み見出し / 1=ユーザー発言 / 2=それ以外、同順位なら古い方
+            if stored_title:
+                rank = (0, timestamp)
             else:
-                sessions_dict[session_id]['messageCount'] += 1
-                # Update last message time if newer
-                if msg['timestamp'] > sessions_dict[session_id]['lastMessageTime']:
-                    sessions_dict[session_id]['lastMessageTime'] = msg['timestamp']
+                rank = (1 if msg.get('role') == 'user' else 2, timestamp)
+            if title_rank[session_id] is None or rank < title_rank[session_id]:
+                title_rank[session_id] = rank
+                session['title'] = (
+                    stored_title[:SESSION_TITLE_MAX_LENGTH]
+                    if stored_title
+                    else build_session_title(msg.get('content'))
+                )
         
         # Convert to list and calculate days until deletion
         sessions = list(sessions_dict.values())
