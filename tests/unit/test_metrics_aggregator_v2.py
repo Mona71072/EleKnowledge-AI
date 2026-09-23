@@ -51,10 +51,13 @@ def test_jst_date_of_splits_at_utc_15h():
 def test_scan_bounds_cover_the_jst_day_in_utc_strings():
     lo, hi = agg.scan_bounds_for_jst_day(date(2026, 9, 10))
     assert lo == "2026-09-09T15:00:00"
-    assert hi == "2026-09-10T14:59:59.999999"
+    assert hi == "2026-09-10T15:00:00"
     # 文字列比較で境界の内外が正しく分かれる（chatlogs の timestamp は 'Z' 終端）
     assert lo <= "2026-09-09T15:00:00.000001Z" <= hi
+    assert lo <= "2026-09-10T14:59:59Z" <= hi
+    assert lo <= "2026-09-10T14:59:59.999999Z" <= hi
     assert not (lo <= "2026-09-09T14:59:59.999999Z" <= hi)
+    assert not (lo <= "2026-09-10T15:00:00Z" <= hi)
     assert not (lo <= "2026-09-10T15:00:00.000000Z" <= hi)
 
 

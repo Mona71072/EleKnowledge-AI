@@ -121,10 +121,14 @@ def utc_window_for_jst_day(day: date) -> tuple[datetime, datetime]:
 
 
 def scan_bounds_for_jst_day(day: date) -> tuple[str, str]:
-    """Scan の FilterExpression 用の文字列境界（chatlogs の timestamp は UTC ISO 文字列）。"""
+    """Scan の FilterExpression 用の文字列境界（chatlogs の timestamp は UTC ISO、終端は Z）。
+
+    hi は翌日 00:00 の秒までの文字列。Z や小数秒はこれより後ろに並ぶので、当日の最終時刻は入り、
+    翌日 00:00:00Z は入らない。マイクロ秒を引いた終端だと、Z 付きの最終 1 マイクロ秒が外れる。
+    """
     start, end = utc_window_for_jst_day(day)
     lo = start.strftime('%Y-%m-%dT%H:%M:%S')
-    hi = (end - timedelta(microseconds=1)).strftime('%Y-%m-%dT%H:%M:%S.%f')
+    hi = end.strftime('%Y-%m-%dT%H:%M:%S')
     return lo, hi
 
 

@@ -170,12 +170,20 @@ def _jst_hhmm(iso_value) -> str | None:
 
 # ============================================================================= queries
 def query_rows(scope: str, lo: str, hi: str) -> list:
-    resp = table.query(
-        IndexName='scope-metricDate-index',
-        KeyConditionExpression=Key('scope').eq(scope) & Key('metricDate').between(lo, hi),
-        ScanIndexForward=True,
-    )
-    return resp.get('Items', [])
+    """scope-metricDate の Query。1MB で切れても LastEvaluatedKey をたどる。"""
+    items = []
+    kwargs = {
+        'IndexName': 'scope-metricDate-index',
+        'KeyConditionExpression': Key('scope').eq(scope) & Key('metricDate').between(lo, hi),
+        'ScanIndexForward': True,
+    }
+    while True:
+        resp = table.query(**kwargs)
+        items.extend(resp.get('Items', []))
+        lek = resp.get('LastEvaluatedKey')
+        if not lek:
+            return items
+        kwargs['ExclusiveStartKey'] = lek
 
 
 def query_snapshots(scope: str, start_date, end_date) -> list:
