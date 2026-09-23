@@ -4,6 +4,8 @@ last-verified: 2026-09-09
 related-code: infrastructure/, lambda/rag/, lambda/chat/, lambda/metrics/, lambda/announcements/
 ---
 
+> **frontmatter の `status: production`:** 2026-09-10 以前から運用中の節を指す。2026-09-11 以降に追加した節は develop マージと SAM デプロイ前 — 各節の「最終検証」行を正とする。
+
 # データモデル
 
 > 出典: 旧 [spec.md](../spec.md) §6（PR #10 で本ファイルに切り出し）  

@@ -5,6 +5,8 @@ last-verified: 2026-09-09
 related-code: lambda/rag/, frontend/src/app/chat/
 ---
 
+> **frontmatter の `status: production`:** 2026-09-10 以前から運用中の節を指す。2026-09-11 以降に追加した節は develop マージと SAM デプロイ前 — 各節の「最終検証」行を正とする。
+
 # RAG処理API
 
 > spec.md §7.2 から切り出し。Phase 2 の RAG クエリエンドポイントを記載する。

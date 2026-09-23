@@ -5,6 +5,8 @@ last-verified: 2026-09-09
 related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failures/, frontend/src/lib/chat-failures.ts
 ---
 
+> **frontmatter の `status: production`:** 2026-09-10 以前から運用中の節を指す。2026-09-11 以降に追加した節は develop マージと SAM デプロイ前 — 各節の「最終検証」行を正とする。
+
 # チャット管理API
 
 > Phase 2 のチャットセッション管理エンドポイント。
