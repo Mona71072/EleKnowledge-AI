@@ -77,6 +77,9 @@ bedrock_runtime = boto3.client(
         connect_timeout=5,
     ),
 )
+# 非同期の見出しタスク起動は回答を待たせない短いクライアントで行う。
+lambda_client = boto3.client('lambda', region_name=AWS_REGION,
+    config=Config(connect_timeout=1, read_timeout=1, retries={'total_max_attempts': 1}))
 dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 
 # DynamoDB table
@@ -273,6 +276,45 @@ def expand_query_abbreviations(text: str) -> str:
     return expanded
 
 
+# #90 と同じモデル世代別のリクエスト形式。見出しも本文と同じSonnet 5互換処理を使う。
+NEW_API_MODEL_MARKERS = ("sonnet-5", "opus-4-7", "opus-4-8", "opus-5")
+LEGACY_GENERATION_TEMPERATURE = 0.3
+BEDROCK_REQUEST_STYLE = os.environ.get('BEDROCK_REQUEST_STYLE', 'auto').lower()
+
+
+def is_new_api_model(model_id: str, request_style: str = None) -> bool:
+    style = (request_style or BEDROCK_REQUEST_STYLE or 'auto').lower()
+    if style == 'new':
+        return True
+    if style == 'legacy':
+        return False
+    return any(marker in (model_id or '').lower() for marker in NEW_API_MODEL_MARKERS)
+
+
+def build_generation_request(system_prompt: str, messages: list, model_id: str,
+                             max_tokens: int, temperature: float = None) -> dict:
+    body = {
+        'anthropic_version': 'bedrock-2023-05-31',
+        'max_tokens': max_tokens,
+        'messages': messages,
+    }
+    if system_prompt:
+        body['system'] = system_prompt
+    if is_new_api_model(model_id):
+        body['thinking'] = {'type': 'disabled'}
+    else:
+        body['temperature'] = LEGACY_GENERATION_TEMPERATURE if temperature is None else temperature
+    return body
+
+
+def extract_response_text(response_body: dict) -> str:
+    for block in response_body.get('content') or []:
+        # 旧形式のテストスタブ／応答は type を省くことがある。text があれば本文として扱う。
+        if block.get('text') and block.get('type', 'text') == 'text':
+            return block['text']
+    return ''
+
+
 SESSION_TITLE_MAX_LENGTH = 30
 # 見出し生成は Claude（既定はチャットと同じ Haiku 4.5 の推論プロファイル）で行う。
 # 失敗・無効時は質問文の切り詰めにフォールバックするため、可用性は落とさない。
@@ -367,35 +409,68 @@ def generate_session_title(query: str, deadline=None) -> str:
         return _fallback_session_title(text)
 
     try:
-        request_body = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "system": SESSION_TITLE_SYSTEM_PROMPT,
-            "max_tokens": 64,
-            "temperature": 0,
-            "messages": [
-                {
-                    "role": "user",
-                    # SECURITY: 質問文は信頼できない入力。タグで囲み、指示として解釈させない
-                    "content": (
-                        "次の質問に見出しを付けてください。\n"
-                        f"<question>\n{text[:500]}\n</question>"
-                    ),
-                }
-            ],
-        }
+        messages = [{
+            "role": "user",
+            # SECURITY: 質問文は信頼できない入力。タグで囲み、指示として解釈させない
+            "content": "次の質問に見出しを付けてください。\n"
+                       f"<question>\n{text[:500]}\n</question>",
+        }]
+        request_body = build_generation_request(
+            SESSION_TITLE_SYSTEM_PROMPT, messages, SESSION_TITLE_MODEL_ID,
+            max_tokens=64, temperature=0,
+        )
         response = bedrock_runtime_title.invoke_model(
-            modelId=SESSION_TITLE_MODEL_ID,
-            body=json.dumps(request_body),
+            modelId=SESSION_TITLE_MODEL_ID, body=json.dumps(request_body),
         )
         response_body = json.loads(response['body'].read())
-        title = _normalize_session_title(
-            (response_body.get('content') or [{}])[0].get('text', '')
-        )
+        title = _normalize_session_title(extract_response_text(response_body))
         return title or _fallback_session_title(text)
     except Exception as e:  # noqa: BLE001 - 見出し生成の失敗で回答を落とさない
         print(f"Session title generation failed, falling back: {e}")
         return _fallback_session_title(text)
 
+
+
+def update_session_title(session_id: str, message_id: str, user_id: str, title: str) -> None:
+    """最初のユーザーメッセージへ見出しを初めて書く。
+
+    初回の put では sessionTitle を付けない。ここで attribute_not_exists を
+    条件にしているため、フォールバックを先に保存すると更新が必ず失敗する。
+    """
+    chatlogs_table.update_item(
+        Key={'sessionId': session_id, 'messageId': message_id},
+        UpdateExpression='SET sessionTitle = :title',
+        ConditionExpression='userId = :uid AND attribute_not_exists(sessionTitle)',
+        ExpressionAttributeValues={':title': title, ':uid': user_id},
+    )
+
+
+def handle_session_title_task(task: dict) -> dict:
+    """応答返却後に実行される見出し生成タスク。"""
+    title = generate_session_title(task.get('query', ''))
+    try:
+        update_session_title(task['sessionId'], task['messageId'], task['userId'], title)
+    except ClientError as error:
+        print(f"Session title update skipped: {error.response['Error']['Code']}")
+    return {'ok': True}
+
+
+def enqueue_session_title(session_id: str, message_id: str, user_id: str, query: str) -> None:
+    """見出し生成を非同期起動する。Bedrock待機は回答経路に入れない。"""
+    if not SESSION_TITLE_LLM_ENABLED or not SESSION_TITLE_MODEL_ID:
+        return
+    try:
+        lambda_client.invoke(
+            FunctionName=os.environ['AWS_LAMBDA_FUNCTION_NAME'],
+            InvocationType='Event',
+            Payload=json.dumps({
+                '_internalTask': 'session-title',
+                'sessionId': session_id, 'messageId': message_id,
+                'userId': user_id, 'query': (query or '')[:500],
+            }).encode('utf-8'),
+        )
+    except Exception as error:  # noqa: BLE001
+        print(f"Session title enqueue failed: {error}")
 
 def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: str,
                              citations: list = None, source_documents: list = None,
@@ -1412,7 +1487,10 @@ def lambda_handler(event, context):
     }
     """
     
-    # 応答期限（API Gateway の統合タイムアウトより手前）。補助処理はこれを見て自分を打ち切る。
+    if event.get('_internalTask') == 'session-title':
+        return handle_session_title_task(event)
+
+    # 見出し生成は非同期であり、通常応答はBedrock見出し生成を待たない。
     request_deadline = time.monotonic() + RESPONSE_TIME_BUDGET_SECONDS
 
     # CORS headers
@@ -1507,11 +1585,12 @@ def lambda_handler(event, context):
         if should_clarify:
             ai_response = build_clarify_content(clarify_questions)
             response_type = 'clarify'
-            session_title = generate_session_title(query, deadline=request_deadline) if not chat_history else None
+            session_title = _fallback_session_title(query) if not chat_history else None
             user_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='user', content=query,
-                session_title=session_title,
             )
+            if not chat_history:
+                enqueue_session_title(session_id, user_message_id, user_id, query)
             ai_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='assistant',
                 content=ai_response, response_type=response_type,
@@ -1581,11 +1660,12 @@ def lambda_handler(event, context):
             page_candidates = build_page_candidates(
                 weak_source, max_items=2, low_confidence=True
             )
-            session_title = generate_session_title(query, deadline=request_deadline) if not chat_history else None
+            session_title = _fallback_session_title(query) if not chat_history else None
             user_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='user', content=query,
-                session_title=session_title,
             )
+            if not chat_history:
+                enqueue_session_title(session_id, user_message_id, user_id, query)
             ai_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='assistant',
                 content=ai_response, citations=citations, source_documents=source_documents,
@@ -1632,15 +1712,16 @@ def lambda_handler(event, context):
 
         citations, source_documents = extract_citations(kb_results, mode)
 
-        session_title = generate_session_title(query, deadline=request_deadline) if not chat_history else None
+        session_title = _fallback_session_title(query) if not chat_history else None
 
         user_message_id = save_message_to_dynamodb(
             session_id=session_id,
             user_id=user_id,
             role='user',
             content=query,
-            session_title=session_title,
         )
+        if not chat_history:
+            enqueue_session_title(session_id, user_message_id, user_id, query)
 
         ai_message_id = save_message_to_dynamodb(
             session_id=session_id,
