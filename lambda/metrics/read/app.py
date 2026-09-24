@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import boto3
 from boto3.dynamodb.conditions import Key
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 REGION = os.environ.get('AWS_REGION', 'ap-northeast-1')
 dynamodb = boto3.resource('dynamodb', region_name=REGION)
@@ -103,7 +103,9 @@ def status_cost_spike(estimate, recent_estimates: list) -> str:
     return 'warning' if (estimate > med * COST_SPIKE_FACTOR and estimate > COST_SPIKE_FLOOR_USD) else 'good'
 
 
-def status_alarms(alarms: list) -> str:
+def status_alarms(alarms: list, available: bool = True) -> str:
+    if not available:
+        return 'unknown'
     if any(a['severity'] == 'P1' for a in alarms):
         return 'critical'
     if alarms:
@@ -219,7 +221,7 @@ def latest_eval() -> dict | None:
 
 
 # ============================================================================= live (CloudWatch)
-def live_alarms() -> list:
+def live_alarms() -> tuple[list, bool]:
     out = []
     kwargs = {'AlarmNamePrefix': ALARM_PREFIX, 'StateValue': 'ALARM', 'MaxRecords': 100}
     try:
@@ -234,12 +236,13 @@ def live_alarms() -> list:
             if not token:
                 break
             kwargs['NextToken'] = token
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
         print(f"[metrics-read] DescribeAlarms error: {e}")
-    return out
+        return out, False
+    return out, True
 
 
-def live_last_60min(now: datetime) -> dict:
+def live_last_60min(now: datetime) -> tuple[dict, bool]:
     start = now - timedelta(minutes=60)
     queries = []
     for i, name in enumerate(API_NAMES):
@@ -263,9 +266,9 @@ def live_last_60min(now: datetime) -> dict:
     out = {'requests': 0, 'http5xx': 0, 'ragP90Ms': None, 'ragMaxMs': None, 'ragCount': 0}
     try:
         resp = cloudwatch.get_metric_data(MetricDataQueries=queries, StartTime=start, EndTime=now, ScanBy='TimestampAscending')
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
         print(f"[metrics-read] GetMetricData error: {e}")
-        return out
+        return out, False
     for r in resp.get('MetricDataResults', []):
         values = r.get('Values') or []
         mid = r.get('Id', '')
@@ -279,10 +282,10 @@ def live_last_60min(now: datetime) -> dict:
             out['ragMaxMs'] = round(max(values), 1)
         elif mid == 'rag_count':
             out['ragCount'] = int(sum(values))
-    return out
+    return out, True
 
 
-def live_alarm_transitions(now: datetime, hours: int = 24) -> list:
+def live_alarm_transitions(now: datetime, hours: int = 24) -> tuple[list, bool]:
     out = []
     kwargs = {'HistoryItemType': 'StateUpdate', 'StartDate': now - timedelta(hours=hours), 'EndDate': now,
               'MaxRecords': 100, 'ScanBy': 'TimestampAscending'}
@@ -307,9 +310,10 @@ def live_alarm_transitions(now: datetime, hours: int = 24) -> list:
             if not token:
                 break
             kwargs['NextToken'] = token
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
         print(f"[metrics-read] DescribeAlarmHistory error: {e}")
-    return out
+        return out, False
+    return out, True
 
 
 def active_notices(now: datetime) -> list:
@@ -469,7 +473,8 @@ def month_actual(cost_rows: list) -> tuple[float | None, str | None]:
 
 
 def build_dashboard(now: datetime, rows: list, hourly_today: list, alarms: list, last60: dict,
-                    live_transitions: list, notices: list, cost_rows: list, eval_row: dict | None, trend_days: int) -> dict:
+                    live_transitions: list, notices: list, cost_rows: list, eval_row: dict | None, trend_days: int,
+                    cloudwatch_available: bool = True) -> dict:
     today = now.astimezone(JST).date()
     yesterday = today - timedelta(days=1)
     by = _by_date(rows)
@@ -482,7 +487,8 @@ def build_dashboard(now: datetime, rows: list, hourly_today: list, alarms: list,
         fresh_status = 'warning'
     now_block = {
         'alarms': alarms,
-        'status': status_alarms(alarms),
+        'status': status_alarms(alarms, available=cloudwatch_available),
+        'cloudwatchAvailable': cloudwatch_available,
         'last60min': last60,
         'freshness': {
             'yesterdayAggregatedAt': y.get('aggregatedAt') if y else None,
@@ -766,9 +772,13 @@ def handle_dashboard(qs: dict) -> dict:
     hourly_today = query_hourly(today)
     month = now.strftime('%Y-%m')
     cost_rows = query_cost_month(month)
+    alarms, alarms_available = live_alarms()
+    last60, last60_available = live_last_60min(now)
+    live_transitions, transitions_available = live_alarm_transitions(now)
     payload = build_dashboard(
-        now, rows, hourly_today, live_alarms(), live_last_60min(now), live_alarm_transitions(now),
+        now, rows, hourly_today, alarms, last60, live_transitions,
         active_notices(now), cost_rows, latest_eval(), trend_days,
+        cloudwatch_available=alarms_available and last60_available and transitions_available,
     )
     return payload
 
