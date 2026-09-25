@@ -15,6 +15,8 @@ related-code: lambda/metrics/read/, lambda/metrics/aggregator/, frontend/src/lib
 
 ## GET /admin/metrics/dashboard
 
+> 最終検証: 2026-09-25 — now.status / now.cloudwatchAvailable の仕様を PR #135 と照合
+
 朝の画面を、画面の並びと同じ形で返す。日付は JST。`?trend=14|30|90`（推移の日数、既定 14）。
 
 | キー | 内容 | 出典 | 更新 |
