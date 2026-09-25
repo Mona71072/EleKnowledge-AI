@@ -434,7 +434,7 @@ def generate_session_title(query: str, deadline=None) -> str:
         title = _normalize_session_title(extract_response_text(response_body))
         return title or _fallback_session_title(text)
     except Exception as e:  # noqa: BLE001 - 見出し生成の失敗で回答を落とさない
-        print(f"Session title generation failed, falling back: {e}")
+        print(f"[rag] stage=session_title_generation {telemetry._exception_label(e)}")
         return _fallback_session_title(text)
 
 
@@ -459,7 +459,7 @@ def handle_session_title_task(task: dict) -> dict:
     try:
         update_session_title(task['sessionId'], task['messageId'], task['userId'], title)
     except ClientError as error:
-        print(f"Session title update skipped: {error.response['Error']['Code']}")
+        print(f"[rag] stage=session_title_update {telemetry._exception_label(error)}")
     return {'ok': True}
 
 
@@ -478,7 +478,7 @@ def enqueue_session_title(session_id: str, message_id: str, user_id: str, query:
             }).encode('utf-8'),
         )
     except Exception as error:  # noqa: BLE001
-        print(f"Session title enqueue failed: {error}")
+        print(f"[rag] stage=session_title_enqueue {telemetry._exception_label(error)}")
 
 def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: str,
                              citations: list = None, source_documents: list = None,
@@ -714,7 +714,7 @@ def query_knowledge_base(query: str, filters: dict = None, number_of_results: in
         return response
 
     except ClientError as e:
-        print(f"Knowledge Base query error: {e}")
+        print(f"[rag] stage=knowledge_base_query {telemetry._exception_label(e)}")
         raise
 
 
@@ -952,7 +952,7 @@ def build_page_candidates(selected_results: list, max_items: int = 5,
             try:
                 source_uri = presign_source_uri(s3_client, doc_uri)
             except Exception as e:
-                print(f"Error generating signed URL for page candidate {doc_uri}: {e}")
+                print(f"[rag] stage=page_candidate_presign {telemetry._exception_label(e)}")
         item = {
             'documentName': doc_name,
             'category': metadata.get('category', '') or '',
@@ -1168,7 +1168,7 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
         return assistant_message
         
     except ClientError as e:
-        print(f"Claude 4 generation error: {e}")
+        print(f"[rag] stage=generation {telemetry._exception_label(e)}")
         raise
 
 
@@ -1335,7 +1335,7 @@ def handle_document_request(event, headers):
         s3_client = boto3.client('s3', region_name=AWS_REGION)
         url = presign_source_uri(s3_client, doc_uri)
     except Exception as e:
-        print(f'[rag] presign failed for document request: {e}')
+        print(f"[rag] stage=document_presign {telemetry._exception_label(e)}")
         return {
             'statusCode': 502,
             'headers': headers,
@@ -1400,7 +1400,7 @@ def extract_citations_from_selected(selected_results: list) -> tuple:
             try:
                 source_uri = presign_source_uri(s3_client, doc_uri)
             except Exception as e:
-                print(f"Error generating signed URL for {doc_uri}: {e}")
+                print(f"[rag] stage=citation_presign {telemetry._exception_label(e)}")
 
         # byteContent は絶対に含めない。IMAGE チャンクは 1 件で最大 1.3MB あり、
         # DynamoDB の item 上限 400KB と API Gateway の応答上限 6MB を即座に破る。
@@ -1447,7 +1447,7 @@ def owns_session(session_id: str, user_id: str) -> bool:
             Limit=1
         )
     except ClientError as e:
-        print(f"Error verifying session ownership: {e}")
+        print(f"[rag] stage=session_ownership {telemetry._exception_label(e)}")
         return False
     items = response.get('Items', [])
     return bool(items) and items[0].get('userId') == user_id
@@ -1479,7 +1479,7 @@ def get_chat_history(session_id: str, limit: int = 10) -> list:
         return messages
 
     except ClientError as e:
-        print(f"Error getting chat history: {e}")
+        print(f"[rag] stage=chat_history {telemetry._exception_label(e)}")
         return []
 
 

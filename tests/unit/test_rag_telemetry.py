@@ -170,14 +170,18 @@ def test_document_endpoint_passes_session_and_message_to_telemetry(monkeypatch):
 
 def test_handler_500_returns_generic_body_with_request_id(monkeypatch, capsys):
     monkeypatch.setattr(rag, "get_caller_id", lambda event: "user-1")
-    monkeypatch.setattr(rag, "owns_session", lambda s, u: (_ for _ in ()).throw(_client_error("Query", code="ProvisionedThroughputExceededException", msg="internal detail")))
-    event = {"httpMethod": "POST", "requestContext": {"requestId": "req-500"},
-             "body": json.dumps({"sessionId": "s1", "query": "x"})}
+    monkeypatch.setattr(rag, "owns_session", lambda s, u: (_ for _ in ()).throw(_client_error("Query", code="ProvisionedThroughputExceededException", msg="s3://secret/path private question internal detail")))
+    event = {"httpMethod": "POST", "requestContext": {"requestId": "req-500", "authorizer": {"claims": {"sub": "sensitive-sub"}}},
+             "body": json.dumps({"sessionId": "sensitive-session-id", "query": "private question"})}
     resp = rag.lambda_handler(event, None)
     assert resp["statusCode"] == 500
     body = json.loads(resp["body"])
     assert body["requestId"] == "req-500" and "internal detail" not in resp["body"]
-    lines = [json.loads(l) for l in capsys.readouterr().out.strip().splitlines() if l.startswith("{")]
+    output = capsys.readouterr().out
+    for sensitive in ("s3://secret/path", "private question", "sensitive-session-id", "sensitive-sub"):
+        assert sensitive not in output
+        assert sensitive not in resp["body"]
+    lines = [json.loads(l) for l in output.strip().splitlines() if l.startswith("{")]
     kinds = [l["event"] for l in lines]
     assert "rag_error" in kinds and "rag_request" in kinds
     err = next(l for l in lines if l["event"] == "rag_error")
