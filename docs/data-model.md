@@ -29,7 +29,7 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/, lambda/metrics/, lambd
 
 ### eleknowledge-chatlogs テーブル（ホットウィンドウ）
 
-> 最終検証: 2026-09-22 — #84 実装（sessionTitle は非同期更新で初めて付く）
+> 最終検証: 2026-09-25 — telemetry の `reformulatedAt` 設定条件・後続集計の除外条件を実装と照合（未デプロイ。#111 / #114 のマージ・SAM デプロイ後に有効）
 
 ```typescript
 {
@@ -57,7 +57,7 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/, lambda/metrics/, lambd
   // --- 2026-09-11 運用テレメトリ・振り分け（PR #111 / #114。設計 design-2026-09-10-dashboard-v2.md §4.3 I3 / §9.4）---
   documentOpens?: number;   // 引用文書を開いた回数（GET /rag/document?uri=&s=&m= が所有者確認のうえ加算。assistant のみ）
   lastOpenedAt?: string;
-  reformulatedAt?: string;  // 回答（pages）直後 10 分以内に同じセッションで次の質問が来た印。👍 も資料クリックも無ければ「言い換え」＝暗黙の失敗として集計
+  reformulatedAt?: string;  // pages 回答時点で feedback 未設定の場合、同じセッションで10分以内に次の質問が来た印。後から good または documentOpens>0 になった行は集計時に言い換えから除外
   triage?: {                // 失敗・要望の振り分け（admin が PUT /chat/admin/messages/{sessionId}/{messageId}/triage で保存）。未設定 = open
     status: 'open' | 'in_progress' | 'done' | 'wontfix';
     cause?: 'search' | 'snippet' | 'writing' | 'clarify' | 'kb_missing' | 'scope' | 'user' | 'other';
@@ -103,16 +103,18 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/, lambda/metrics/, lambd
 
 ### metrics テーブル（日次 KPI）
 
-> 最終検証: 2026-09-11 — 設計 design-2026-09-10-dashboard-v2.md と実装 PR #110 / #111 / #112 / #114 のコードと突合（実環境は未デプロイ）
+> 最終検証: 2026-09-25 — 日次集計の `messagesWithOpen` を #111 実装と照合（未デプロイ。#111 のマージ・デプロイ後に有効）
 
 PK `metricDate` / SK `scope`。GSI `scope-metricDate-index`（PK=scope, SK=metricDate）で範囲を Query する。**TTL は無効**（前年比較のため自動削除しない。PR #93）。日付は **JST**（固定オフセット +09:00）。ただし `scope=cost` だけは Cost Explorer に合わせて **UTC 日**。
 
 | scope | metricDate | 内容 | 書き込み |
 |---|---|---|---|
-| `overall` | `YYYY-MM-DD` | 日次 KPI。chatlogs 由来（queries / userIds / notFound / clarify / pages / unreached / triageOpen / documentOpens / reformulated / feedbackReasons / topDocuments …）と CloudWatch 由来（API Gateway 4 本の Count / 5xx / 4xx、rag-api の Latency、Amplify、Cognito SignInSuccesses、Bedrock トークン、アラーム遷移 `alarmTransitions`、推定 Bedrock 費 `estimatedBedrockCostUsd`、`soleUserOk`）。当日は `partial: true` | 毎時（当日を上書き）+ 02:00 JST に D-1〜D-3 を再集計（後付けの 👍👎・資料クリックを回答日の行へ） |
+| `overall` | `YYYY-MM-DD` | 日次 KPI。chatlogs 由来（queries / userIds / notFound / clarify / pages / unreached / triageOpen / documentOpens / `messagesWithOpen` / reformulated / feedbackReasons / topDocuments …）と CloudWatch 由来（API Gateway 4 本の Count / 5xx / 4xx、rag-api の Latency、Amplify、Cognito SignInSuccesses、Bedrock トークン、アラーム遷移 `alarmTransitions`、推定 Bedrock 費 `estimatedBedrockCostUsd`、`soleUserOk`）。当日は `partial: true` | 毎時（当日を上書き）+ 02:00 JST に D-1〜D-3 を再集計（後付けの 👍👎・資料クリックを回答日の行へ） |
 | `hourly` | `YYYY-MM-DDTHH` | その 1 時間の件数（queries / notFound / clarify / pages / feedbackGood / feedbackBad / unreached / activeUsers） | 毎時 |
 | `cost` | `YYYY-MM-DD`（UTC） | Cost Explorer のサービス別実額 `byService`、Bedrock 行の使用タイプ別 `bedrock.{input,output,cache}`、`settled`（D-2 以前で true） | 02:00 JST に直近 3 日を上書き |
 | `eval` | `YYYY-MM-DD` | 週次ゴールデン評価（別設計。未実装） | — |
+
+`messagesWithOpen` は `documentOpens > 0` の assistant 行数です。funnel の `opened` は資料を開いた回答数であり、クリック総数ではありません。
 
 集計ロジックの版は `logicVersion`。定義は [`design-2026-09-10-metrics-v2.md`](./design-2026-09-10-metrics-v2.md) §4〜§5 と [`design-2026-09-10-dashboard-v2.md`](./design-2026-09-10-dashboard-v2.md) §6.1 / §6.2。
 

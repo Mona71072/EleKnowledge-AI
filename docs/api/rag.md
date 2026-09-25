@@ -15,7 +15,7 @@ related-code: lambda/rag/, frontend/src/app/chat/
 
 ## POST /rag/query
 
-> 最終検証: 2026-09-22 — #84 実装（応答はフォールバック、sessionTitle は非同期が初めて書く）
+> 最終検証: 2026-09-25 — 検索設定の上書きと既定値を実装設定と照合
 
 RAGクエリ実行
 
@@ -35,7 +35,7 @@ RAGクエリ実行
 - **カテゴリ未指定時**: `category` の**許可リスト**（実カテゴリ全10種 = `CATEGORY_MAP` の値 = `ALLOWED_CATEGORY_VALUES`）を**常時適用**する。ユーザー視点では従来どおり「未指定＝全検索」だが、web-crawler（GenU ドキュメント）・quick-start（引用 presign 不能バケット）データソース由来のノイズ文書と `TEST` 文書は category が許可リスト外のため遮断される。カテゴリ指定時も許可リスト外の値は通らない。根拠: [verification-2026-08-26-kb-vqv-metadata.md](../verification-2026-08-26-kb-vqv-metadata.md)（PR #55）。
 - `filters.modelType`: UI 機種絞り込み項目（6項目）。サーバー側 `UI_MODEL_FILTERS` が対象機種へ展開し（例 `AXIEZ` → `AXIEZ` / `AXIEZ(KE-WF・KE-HF)` / `駅舎エレ`）、`model_type` に対する **`listContains`（リスト要素の完全一致）** の `orAll` で検索前に絞り込む。KB の `model_type` は list 型 / string 型が混在するが、string 型はスカラー＝単要素リスト扱いで `listContains` に一致する（2026-08-26 実機確認）。旧実装の `stringContains`（部分一致。`AXIEZ` が `AXIEZ-LINKs` にも一致していた）は廃止。機種を指定した場合でも、全機種共通文書（`model_type` が `*` / `general`）は常に検索対象に含める（**展開機種 OR `*` OR `general`**）。空文字・空配列・キー欠落は実データ 0 件のため空文字句は持たない。加えて取得後に要素完全一致の post-filter と取扱機種スコープ（`HANDLED_MODEL_TYPES`）を安全弁として適用する。根拠: [verification-2026-08-26-kb-vqv-metadata.md](../verification-2026-08-26-kb-vqv-metadata.md) §4/§5.4（PR #55）、[rag-model-filter-mapping-2026-08-26.md](../rag-model-filter-mapping-2026-08-26.md) §1/§4（PR #54）。
 - `mode: spec` のとき `category` はサーバー側 `SPEC_CATEGORIES`（`C資料` / `テクニカルインフォメーション` / `据付基準`）で上書きされる。
-- **検索方式**: Knowledge Base の `overrideSearchType` は環境変数 `RAG_SEARCH_TYPE` で制御する（既定 `HYBRID` / `SEMANTIC` に切替可、不正値は `HYBRID` にフォールバック）。HYBRID はベクトル類似に加えキーワード/全文一致を併用し、型式コード・エラーコードのような完全一致寄りの語の取りこぼしを減らす。
+- **検索方式**: Knowledge Base の `overrideSearchType` は環境変数 `RAG_SEARCH_TYPE`（既定 `HYBRID` / `SEMANTIC` に切替可、不正値は `HYBRID` にフォールバック）で指定し、任意の `KB_PROFILE_JSON.search_type` で上書きできる。再ランキングとクエリ書換えはサーバー設定による任意機能で、既定では無効。HYBRID はベクトル類似に加えキーワード/全文一致を併用し、型式コード・エラーコードのような完全一致寄りの語の取りこぼしを減らす。
 
 ### `filters.category` 対応表
 
@@ -117,6 +117,8 @@ RAGクエリ実行
 
 ## GET /rag/document
 
+> 最終検証: 2026-09-25 — document_open の記録条件・失敗時の継続を #111 実装と照合（未デプロイ。#111 のマージ・デプロイ後に有効）
+
 引用文書の実体を開くための**短命プリサイン URL を都度発行する**エンドポイント。チャット応答の `sourceUri`（`s3://` URI）を、開く瞬間にだけ有効な HTTPS URL に解決する。呼び出し元は中継ページ `/doc`（`frontend/src/lib/documents.ts` の `resolveDocumentUrl`）。
 
 **認証:** Cognito Authorizer 必須（未ログインは API Gateway / ハンドラで 401）。これにより引用リンクを共有されても、開けるのは登録ユーザーのみ。未ログイン時はフロントの `/doc` が `next` 付きでログイン画面へ誘導し、ログイン後に復帰する（戻り先は `safeNextPath()` で正規化・origin 検証するオープンリダイレクト対策済み。`frontend/src/lib/safe-next-path.mjs`）。
@@ -128,9 +130,7 @@ GET /rag/document?uri=s3%3A%2F%2F<bucket>%2Fdocs%2F....pdf&s=<sessionId>&m=<mess
 Authorization: Bearer <IdToken>
 ```
 
-> 最終検証: 2026-09-11 — `s` / `m` と 500 応答の形は実装 PR #111 のコードと突合（実環境は未デプロイ）
-
-- `s`（sessionId）と `m`（messageId）は任意。**どの回答の引用から開いたか**を記録するためで、フロントの `/doc?uri=…&s=&m=` が引き継ぐ。両方あり、かつ `s` が呼び出し元の所有セッションなら、該当の assistant 行に `documentOpens` を加算し `lastOpenedAt` を記録する（到達ファネル「資料を開いた」。設計 [design-2026-09-10-dashboard-v2.md](../design-2026-09-10-dashboard-v2.md) §4.3 I3）。無くても文書は開ける。CloudWatch には `document_open` の構造化行（文書名のみ）が出る
+- `s`（sessionId）と `m`（messageId）は任意。**どの回答の引用から開いたか**を記録するためで、フロントの `/doc?uri=…&s=&m=` が引き継ぐ。両IDがあり、所有者確認後に同一セッションの assistant 行を更新できた場合に `documentOpens` を加算し `lastOpenedAt` を記録し、CloudWatch に `document_open` の構造化行（文書名のみ）を出す（到達ファネル「資料を開いた」。設計 [design-2026-09-10-dashboard-v2.md](../design-2026-09-10-dashboard-v2.md) §4.3 I3）。記録更新に失敗しても文書 URL の発行は継続します。ID が無くても文書は開けます。
 
 **Response (200):**
 
@@ -163,7 +163,7 @@ Authorization: Bearer <IdToken>
 
 ## 500 応答の形と構造化ログ（2026-09-11）
 
-> 最終検証: 2026-09-25 — #111 / #134 のログ項目と #133 の契約を照合（実環境は未デプロイ）
+> 最終検証: 2026-09-25 — #111 / #134 のログ項目、#133 の契約、#139 の最新アクセスログ形式を照合（未デプロイ。#111 / #139 のマージ・SAM デプロイ後に有効）
 
 `POST /rag/query` の 500 は AWS のエラーメッセージを返さず、一般化した本文と API Gateway のリクエスト ID だけを返す。
 
@@ -171,11 +171,11 @@ Authorization: Bearer <IdToken>
 { "error": "InternalServerError", "message": "処理に失敗しました。時間をおいて再度お試しください。", "requestId": "<apiRequestId>" }
 ```
 
-CloudWatch Logs には 1 リクエスト 1 行の構造化行が出る（本文・質問文は含まない）。API Gateway のアクセスログも本契約の対象とし、送信元 IP・User-Agent・利用者 ID（sub）は記録しない。
+CloudWatch Logs には 1 リクエスト 1 行の構造化行が出る（本文・質問文は含まない）。API Gateway のアクセスログも本契約の対象とし、`path` は含めず `resourcePath` を記録する。送信元 IP・User-Agent・利用者 ID（sub）は記録しない。
 
 | event | 主な項目 | 用途 |
 |---|---|---|
-| `rag_request` | `apiRequestId`, `statusCode`, `responseType`, `pageCandidates`, `sourceDocuments`, `latencyMs` | アクセスログの `requestId` と結合（保存クエリ `request-by-id`） |
-| `rag_error` | `apiRequestId`, `stage`（retrieve / generate / save / history）, `errorCode`, `exceptionClass`, `latencyMs` | 500 の段階と原因 |
+| `rag_request` | `apiRequestId`, `statusCode`, `responseType`, `pageCandidates`, `sourceDocuments`, `priorityExpanded`, `latencyMs`。`pageCandidates` / `sourceDocuments` は件数 | アクセスログの `requestId` と結合（保存クエリ `request-by-id`） |
+| `rag_error` | `apiRequestId`, `stage`（retrieve / generate / save / history / `unknown`）, `errorCode`, `exceptionClass`, `latencyMs` | 500 の段階と原因 |
 | `document_open` | `apiRequestId`, `documentName` | 資料到達の追跡 |
 | `reformulation` | なし（イベント名のみ） | 直前の回答に言い換えの印（`reformulatedAt`）を付けた |
