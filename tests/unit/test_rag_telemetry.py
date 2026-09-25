@@ -207,3 +207,4 @@ def test_api_gateway_access_logs_omit_user_and_device_identifiers(template_name,
         assert "$context.identity.sourceIp" not in format_line
         assert "$context.identity.userAgent" not in format_line
         assert "$context.authorizer.claims.sub" not in format_line
+        assert "$context.path" not in format_line
