@@ -171,11 +171,11 @@ Authorization: Bearer <IdToken>
 { "error": "InternalServerError", "message": "処理に失敗しました。時間をおいて再度お試しください。", "requestId": "<apiRequestId>" }
 ```
 
-CloudWatch Logs には 1 リクエスト 1 行の構造化行が出る（本文・質問文は含まない）。
+CloudWatch Logs には 1 リクエスト 1 行の構造化行が出る（本文・質問文は含まない）。API Gateway のアクセスログも本契約の対象とし、送信元 IP・User-Agent・利用者 ID（sub）は記録しない。
 
 | event | 主な項目 | 用途 |
 |---|---|---|
-| `rag_request` | `apiRequestId`, `statusCode`, `sessionId`, `messageId`, `responseType`, `pageCandidates`, `sourceDocuments`, `latencyMs` | アクセスログの `requestId` と結合（保存クエリ `request-by-id`） |
-| `rag_error` | `apiRequestId`, `stage`（retrieve / generate / save / history）, `errorCode`, `errorMessage`, `latencyMs` | 500 の段階と原因 |
-| `document_open` | `apiRequestId`, `sessionId`, `messageId`, `documentName` | 資料到達の追跡 |
-| `reformulation` | `sessionId`, `messageId` | 直前の回答に言い換えの印（`reformulatedAt`）を付けた |
+| `rag_request` | `apiRequestId`, `statusCode`, `responseType`, `pageCandidates`, `sourceDocuments`, `latencyMs` | アクセスログの `requestId` と結合（保存クエリ `request-by-id`） |
+| `rag_error` | `apiRequestId`, `stage`（retrieve / generate / save / history）, `errorCode`, `exceptionClass`, `latencyMs` | 500 の段階と原因 |
+| `document_open` | `apiRequestId`, `documentName` | 資料到達の追跡 |
+| `reformulation` | なし（イベント名のみ） | 直前の回答に言い換えの印（`reformulatedAt`）を付けた |
