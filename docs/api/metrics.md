@@ -20,7 +20,8 @@ related-code: lambda/metrics/read/, lambda/metrics/aggregator/, frontend/src/lib
 | キー | 内容 | 出典 | 更新 |
 |---|---|---|---|
 | `now.alarms[]` | 現在 `ALARM` の EleKnowledge アラーム（`name`, `severity` P1/P2, `since`） | `DescribeAlarms` | 表示時 |
-| `now.status` | P1 あり → `critical`、P2 のみ → `warning`、なし → `good` | 算出 | 表示時 |
+| `now.status` | CloudWatch 取得失敗 → `unknown`、P1 あり → `critical`、P2 のみ → `warning`、なし → `good` | 算出 | 表示時 |
+| `now.cloudwatchAvailable` | CloudWatch を取得できたか（失敗時は `false`） | CloudWatch 呼び出し | 表示時 |
 | `now.last60min` | `requests` / `http5xx`（4 API 合計）、rag-api `ragP90Ms` / `ragMaxMs` / `ragCount` | `GetMetricData`（5 分粒度 × 60 分） | 表示時 |
 | `now.freshness` | 前日行の `aggregatedAt`、当日 partial 行の `aggregatedAt`、`status`（09:00 JST に前日行が無ければ `warning`） | metrics テーブル | 表示時 |
 | `now.activeNotices[]` | 公開中かつ未終了の告知（`id`, `title`, `severity`, `since`, `showInChat`） | announcements テーブル | 表示時 |
