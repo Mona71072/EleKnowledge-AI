@@ -225,6 +225,51 @@ def test_put_triage_forbidden_and_not_found():
     assert resp["statusCode"] == 404
 
 
+@pytest.mark.parametrize("route", ["messages", "failures", "triage"])
+def test_client_errors_log_route_templates_and_return_generic_500(route, capsys):
+    mod, table = load_app()
+    failure = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "private AWS detail"}},
+        "Query",
+    )
+    sensitive_ids = ("sensitive-session-id", "sensitive-message-id")
+
+    if route == "messages":
+        table.query.return_value = {"Items": [{"userId": "user-1"}]}
+        mod.get_session_messages = MagicMock(side_effect=failure)
+        event = _event(
+            "GET", f"/chat/sessions/{sensitive_ids[0]}/messages",
+            path_params={"sessionId": sensitive_ids[0]},
+        )
+        expected_resource = "/chat/sessions/{sessionId}/messages"
+    elif route == "failures":
+        table.scan.side_effect = failure
+        event = _event("GET", "/chat/admin/failures")
+        expected_resource = "/chat/admin/failures"
+    else:
+        table.update_item.side_effect = failure
+        event = _event(
+            "PUT", f"/chat/admin/messages/{sensitive_ids[0]}/{sensitive_ids[1]}/triage",
+            body={"status": "done"},
+            path_params={"sessionId": sensitive_ids[0], "messageId": sensitive_ids[1]},
+        )
+        expected_resource = "/chat/admin/messages/{sessionId}/{messageId}/triage"
+
+    response = mod.lambda_handler(event, None)
+    output = capsys.readouterr().out
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == 500
+    assert body == {"error": "InternalServerError", "message": "An unexpected error occurred"}
+    assert f"method={event['httpMethod']}" in output
+    assert f"resource={expected_resource}" in output
+    assert "exception_type=ClientError" in output
+    assert "error_code=AccessDeniedException" in output
+    for sensitive in (*sensitive_ids, "private AWS detail", "user-1"):
+        assert sensitive not in output
+        assert sensitive not in response["body"]
+
+
 # ------------------------------------------------------------------ regression: unused expression names
 @pytest.mark.parametrize("kind", ["all", "bad", "not_found", "reformulated"])
 @pytest.mark.parametrize("triage", ["all", "open", "done"])
