@@ -536,8 +536,9 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
         values[':not_found'] = 'not_found'
     elif kind == 'reformulated':
         # 言い換え: 回答直後に次の質問が来て、👍 が無い（資料クリックの有無は項目側で判定）
-        filter_parts.append('attribute_exists(reformulatedAt) AND (attribute_not_exists(feedback) OR feedback <> :good)')
+        filter_parts.append('attribute_exists(reformulatedAt) AND (attribute_not_exists(feedback) OR feedback <> :good) AND (attribute_not_exists(documentOpens) OR documentOpens = :zero)')
         values[':good'] = 'good'
+        values[':zero'] = 0
     else:
         filter_parts.append('(feedback = :bad OR #rt = :not_found)')
         values[':bad'] = 'bad'
@@ -593,6 +594,8 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
 
     incomplete = bool(exclusive_start)
     collected.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
+    matched_count = len(collected)
+    truncated = matched_count > limit
     collected = collected[:limit]
 
     session_cache = {}
@@ -647,6 +650,8 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
     return {
         'failures': failures,
         'count': len(failures),
+        'matchedCount': matched_count,
+        'truncated': truncated,
         'scannedCount': scanned_count,
         'incomplete': incomplete,
         'kind': kind,

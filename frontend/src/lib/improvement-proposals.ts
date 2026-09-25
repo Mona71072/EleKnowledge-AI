@@ -1,4 +1,5 @@
 import type { FailureItem, FeedbackReason, FailureKind } from './chat-failures';
+import { isReformulatedFailure } from './failures-selection.mjs';
 
 /** しきい値以上で改善提案カードを出す（試用初期） */
 export const IMPROVEMENT_PROPOSAL_THRESHOLD = 3;
@@ -122,7 +123,7 @@ export function aggregateFailureSignals(items: FailureItem[], onlyUnresolved = t
     if (item.signals.includes('not_found') || item.responseType === 'not_found') {
       notFoundCount += 1;
     }
-    if (item.signals.includes('reformulated') || item.reformulated) {
+    if (isReformulatedFailure(item)) {
       reformulatedCount += 1;
     }
     if (item.feedback === 'bad' || item.signals.includes('bad')) {
@@ -192,7 +193,7 @@ export function filterFailureItems(
       (i) => i.responseType === 'not_found' || i.signals.includes('not_found'),
     );
   } else if (kind === 'reformulated') {
-    filtered = filtered.filter((i) => i.reformulated || i.signals.includes('reformulated'));
+    filtered = filtered.filter(isReformulatedFailure);
   }
 
   if (reasonFilter === 'all') return filtered;

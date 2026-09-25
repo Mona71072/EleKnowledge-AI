@@ -81,8 +81,45 @@ def test_failures_kind_reformulated_and_done_triage():
     mod.list_failure_messages(kind="reformulated", triage="done")
     fe = captured["FilterExpression"]
     assert "attribute_exists(reformulatedAt)" in fe and "feedback <> :good" in fe
+    assert "(attribute_not_exists(documentOpens) OR documentOpens = :zero)" in fe
+    assert captured["ExpressionAttributeValues"][":zero"] == 0
     assert "#tr.#st = :tst" in fe and captured["ExpressionAttributeValues"][":tst"] == "done"
     assert ":bad" not in captured["ExpressionAttributeValues"]
+
+
+def test_failures_reports_truncation_and_pre_limit_match_count():
+    mod, table = load_app()
+    table.query.return_value = {"Items": []}
+    table.scan.return_value = {
+        "Items": [
+            {"sessionId": "s1", "messageId": f"m{i}", "role": "assistant", "timestamp": f"2026-09-{i // 60 + 1:02d}T00:{i % 60:02d}:00Z", "feedback": "bad"}
+            for i in range(101)
+        ],
+        "ScannedCount": 101,
+    }
+
+    out = mod.list_failure_messages(kind="bad", limit=100)
+
+    assert out["count"] == 100
+    assert out["matchedCount"] == 101
+    assert out["truncated"] is True
+
+
+def test_failures_marks_exact_limit_as_not_truncated():
+    mod, table = load_app()
+    table.query.return_value = {"Items": []}
+    table.scan.return_value = {
+        "Items": [
+            {"sessionId": "s1", "messageId": f"m{i}", "role": "assistant", "timestamp": f"2026-09-{i // 60 + 1:02d}T00:{i % 60:02d}:00Z", "feedback": "bad"}
+            for i in range(100)
+        ],
+        "ScannedCount": 100,
+    }
+
+    out = mod.list_failure_messages(kind="bad", limit=100)
+
+    assert out["matchedCount"] == 100
+    assert out["truncated"] is False
 
 
 def test_failures_bad_request_on_invalid_date():
