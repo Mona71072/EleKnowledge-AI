@@ -18,6 +18,8 @@ related-issues:
 
 ## 目的と境界
 
+> 最終検証: 2026-09-25 — API Gateway アクセスログを契約対象に含める旨を追記
+
 この文書は、CloudWatch の構造化運用ログで何を取得・非取得とするかを定義する。目的は、1 リクエストを `requestId` で追跡し、検索・生成・保存のどこで失敗又は品質低下が起きたかを、利用者本文を保存せずに切り分けることである。 API Gateway のアクセスログも本契約の対象とし、送信元 IP・User-Agent・Cognito `sub` は記録しない。
 
 `retrievalTrace` は assistant 行とアーカイブに保存する詳細トレースの別設計であり、本契約の CloudWatch ログと混同しない。利用者本文、プロンプト、回答本文、引用本文を CloudWatch に出さない。
