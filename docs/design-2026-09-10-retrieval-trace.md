@@ -207,7 +207,7 @@ assistant メッセージ項目に属性 `retrievalTrace`（Map）を追加す�
 | 経路 | 扱い |
 |---|---|
 | `GET /chat/sessions/{id}/messages`（利用者） | `retrievalTrace` を **除外**（chat-management `get_session_messages` で pop） |
-| `GET /chat/admin/failures`（管理者） | 第 1 版では変更しない |
+| `GET /chat/admin/failures`（管理者） | 第 1 版では変更しない。#104 が予定する `traceSummary` は出さない。#104 側の記述を合わせるのは、本設計に Yes が出たあとの #104 への追記で行う |
 | 管理者向け専用 trace API／画面 | 後回し。第 1 版は Athena で参照 |
 | S3 アーカイブ / Athena | 全文を保持。バケットは既存のアクセス制御（管理者ロール・Athena ワークグループ） |
 | CloudWatch Logs | [RAG 運用ログ契約](./features/development/rag-observability-contract.md) のみ。詳細トレースとの相関には `requestId` を使う |
