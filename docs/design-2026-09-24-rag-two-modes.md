@@ -267,8 +267,12 @@ GET の期限切れ処理は、`running` ならジョブの `status`、期限、
 ## 7. 評価
 
 - **評価セット:** まず 20〜50 問。実際の質問と既存のモデル比較（GOLD / BAD / REAL）から、単一資料 / 機種横断の比較 / 複数資料の突合 / 会話の続き / 図表 / 対象外 / 見つからない、に分けてタグを付ける。評価と実験は並行で進め、問を増やしていく。
-- **比べ方:** 同じ質問・同じ KB・同じフィルタで、通常（現行）/ 通常（改善 ON）/ じっくり、を並べる。
-- **指標:** 期待資料への到達率、根拠のない主張の割合、機種の誤帰属率、資料間の違いの検出率、「分からない」と言うべき場面での保留率、p50 / p95 の時間、1 問あたり費用。
+- **比べ方:** Bedrock RAG Evaluations の retrieve-and-generate BYOI に、自前の Retrieve 結果と回答を S3 の JSONL で渡す（1 ジョブ最大 1,000 件）。通常 / 通常の改善 ON / じっくり / 設定変更前後は別ジョブにし、同じ設問 ID・指標で比較する。取得失敗の切り分けには retrieve-only も使う（[BYOI 入力形式](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-evaluation-prompt-retrieve-generate.html)）。
+- **指標:** 期待資料への到達率、根拠のない主張の割合、機種の誤帰属率、資料間の違いの検出率、「分からない」と言うべき場面での保留率、p50 / p95 の時間、1 問あたり費用に加え、Correctness / Completeness / Faithfulness / CitationPrecision / CitationCoverage / ContextRelevance を使う。必要なら「機種の誤帰属」などをカスタム指標にする（[指標一覧](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-evaluation-metrics.html)）。
+- **judge:** 評価モデルは対応表にあるものを使う。2026-09-25 時点では Claude Sonnet 4.6 が候補で、Sonnet 5 は一覧にない（[対応モデル](https://docs.aws.amazon.com/bedrock/latest/userguide/evaluation-kb.html)）。日本語品質は保証されていないため、初期は人の評価と照合する。
+- **費用:** 評価ジョブ自体の追加料金はなく、judge のトークン代のみ。50 問 × 6 指標で数ドル規模を見込む。
+- **判定・記録:** 自動評価は比較材料とし、採用判断は根拠確認を含む人のレビューで行う。設定版・モデル ID・プロンプト版・検索結果・回答・引用・trace ID を記録する。
+- **週次の失敗振り分け:** 1 件ずつの原因分類と人の承認は Bedrock Evaluations ではなく、#104 §9.5 の提案どおり Lambda から直接モデルを呼ぶ。
 - **判定:** じっくりモードは「比較・複数資料の質問で、根拠のない主張と機種誤帰属が減る」ことを確認する。単一資料の質問で通常モードより悪くならないことも見る。採点は LLM と人（現場代理人・品質担当）の両方。
 
 ## 8. 段階導入
