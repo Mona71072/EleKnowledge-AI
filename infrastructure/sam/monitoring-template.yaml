@@ -786,7 +786,7 @@ Resources:
         - !Sub '/aws/apigateway/auth-api-${Environment}'
       QueryString: |
         filter status >= 400 and status < 500
-        | stats count() as n, count_distinct(ip) as ips by errorType, status, resourcePath
+        | stats count() as n by errorType, status, resourcePath
         | sort n desc
 
   QueryRequestById:
@@ -798,10 +798,9 @@ Resources:
         - !Sub '/aws/apigateway/chat-api-${Environment}'
         - !Sub '/aws/apigateway/auth-api-${Environment}'
         - !Sub '/aws/lambda/${RagFunctionName}'
-        - !Sub '/aws/lambda/${ChatFunctionName}'
       QueryString: |
-        # REPLACE_ME をアクセスログの requestId（= Lambda の構造化行の apiRequestId）に置き換える
-        fields @timestamp, @log, @message
+        # REPLACE_ME をアクセスログの requestId（= RAG Lambda の構造化行の apiRequestId）に置き換える
+        fields @timestamp, @log, requestId, apiRequestId, status, statusCode, resourcePath, errorType, responseLatency, integrationLatency, latencyMs, event, stage, errorCode, exceptionClass
         | filter requestId = "REPLACE_ME" or apiRequestId = "REPLACE_ME"
         | sort @timestamp asc
 
