@@ -786,7 +786,7 @@ Resources:
         - !Sub '/aws/apigateway/auth-api-${Environment}'
       QueryString: |
         filter status >= 400 and status < 500
-        | stats count() as n, count_distinct(sub) as users, count_distinct(ip) as ips by errorType, status, resourcePath
+        | stats count() as n, count_distinct(ip) as ips by errorType, status, resourcePath
         | sort n desc
 
   QueryRequestById:
@@ -812,7 +812,7 @@ Resources:
       LogGroupNames:
         - !Sub '/aws/apigateway/rag-api-${Environment}'
       QueryString: |
-        fields @timestamp, resourcePath, status, responseLatency, integrationLatency, sub, requestId
+        fields @timestamp, resourcePath, status, responseLatency, integrationLatency, requestId
         | filter responseLatency > 20000
         | sort responseLatency desc
         | limit 50
