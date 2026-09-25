@@ -6,6 +6,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from botocore.exceptions import ClientError
 
 BASE = os.path.join(os.path.dirname(__file__), "../..")
 
@@ -68,6 +69,23 @@ def test_status_5xx_and_alarms():
     assert read.status_alarms([]) == "good"
     assert read.status_alarms([{"severity": "P2"}]) == "warning"
     assert read.status_alarms([{"severity": "P2"}, {"severity": "P1"}]) == "critical"
+
+
+def test_cloudwatch_client_error_is_unknown_instead_of_good(monkeypatch):
+    class CW:
+        def describe_alarms(self, **kw):
+            raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "denied"}}, "DescribeAlarms")
+
+    monkeypatch.setattr(read, "cloudwatch", CW())
+    alarms, available = read.live_alarms()
+    out = read.build_dashboard(NOW, _rows(), [], alarms, {
+        "requests": 0, "http5xx": 0, "ragP90Ms": None, "ragMaxMs": None, "ragCount": 0,
+    }, [], [], [], None, 14, cloudwatch_available=available)
+
+    assert alarms == []
+    assert available is False
+    assert out["now"]["status"] == "unknown"
+    assert out["now"]["cloudwatchAvailable"] is False
 
 
 def test_status_cost_spike_needs_factor_and_floor():
@@ -180,8 +198,9 @@ def test_live_last_60min_sums_and_percentiles(monkeypatch):
                 {"Id": "rag_p90", "Values": [12100.0]}, {"Id": "rag_max", "Values": [12100.0]}, {"Id": "rag_count", "Values": [6]},
             ]}
     monkeypatch.setattr(read, "cloudwatch", CW())
-    out = read.live_last_60min(NOW)
+    out, available = read.live_last_60min(NOW)
     assert out == {"requests": 14, "http5xx": 3, "ragP90Ms": 12100.0, "ragMaxMs": 12100.0, "ragCount": 6}
+    assert available is True
 
 
 def test_live_alarms_classifies_severity(monkeypatch):
@@ -193,7 +212,8 @@ def test_live_alarms_classifies_severity(monkeypatch):
                 {"AlarmName": "EleKnowledge-dev-P2-rag-api-4xx-spike", "StateUpdatedTimestamp": NOW},
             ]}
     monkeypatch.setattr(read, "cloudwatch", CW())
-    out = read.live_alarms()
+    out, available = read.live_alarms()
+    assert available is True
     assert [(a["name"], a["severity"]) for a in out] == [("P1-rag-api-5xx", "P1"), ("P2-rag-api-4xx-spike", "P2")]
     assert out[0]["since"] == "2026-09-23T23:41:00Z"
 
