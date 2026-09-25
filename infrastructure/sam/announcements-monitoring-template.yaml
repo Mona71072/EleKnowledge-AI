@@ -432,7 +432,7 @@ Resources:
       # 体感レイテンシ（responseLatency）が 1 行で読める。本文は含まない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
       AccessLogSetting:
         DestinationArn: !GetAtt AppApiLogGroup.Arn
-        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","errorMessage":"$context.error.message","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
+        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
