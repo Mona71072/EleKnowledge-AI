@@ -63,11 +63,21 @@ def stage_of(error: Exception) -> str:
     return _STAGE_BY_OPERATION.get(op, 'unknown')
 
 
+def _exception_label(error: Exception) -> str:
+    label = type(error).__name__
+    if isinstance(error, ClientError):
+        error_data = getattr(error, 'response', {}).get('Error', {})
+        code = error_data.get('Code')
+        if code:
+            return f'{label} code={code}'
+    return label
+
+
 def _emit(payload: dict) -> None:
     try:
         print(json.dumps(payload, ensure_ascii=False, default=str))
     except Exception as e:  # noqa: BLE001
-        print(f"[telemetry] emit failed: {e}")
+        print(f"[telemetry] emit failed: {_exception_label(e)}")
 
 
 def log_request(event, response: dict, started_at: float) -> None:
@@ -87,8 +97,6 @@ def log_request(event, response: dict, started_at: float) -> None:
             'event': 'rag_request',
             'apiRequestId': api_request_id(event),
             'statusCode': status,
-            'sessionId': body.get('sessionId'),
-            'messageId': body.get('aiMessageId'),
             'responseType': body.get('responseType'),
             'pageCandidates': len(body.get('pageCandidates') or []),
             'sourceDocuments': len(body.get('sourceDocuments') or []),
@@ -96,7 +104,7 @@ def log_request(event, response: dict, started_at: float) -> None:
             'latencyMs': elapsed_ms(started_at),
         })
     except Exception as e:  # noqa: BLE001
-        print(f"[telemetry] log_request failed: {type(e).__name__}")
+        print(f"[telemetry] log_request failed: {_exception_label(e)}")
 
 
 def error_response(headers: dict, error: Exception, started_at: float, event) -> dict:
@@ -105,19 +113,16 @@ def error_response(headers: dict, error: Exception, started_at: float, event) ->
     if isinstance(error, ClientError):
         err = error.response.get('Error', {}) if hasattr(error, 'response') else {}
         code = err.get('Code') or 'ClientError'
-        message = (err.get('Message') or '')[:300]
         stage = stage_of(error)
     else:
         code = type(error).__name__ or 'InternalServerError'
-        # 例外文には応答本文や引用が混ざることがある。切り分けは型名と stage で足りる。
-        message = ''
         stage = 'unknown'
     _emit({
         'event': 'rag_error',
         'apiRequestId': request_id,
         'stage': stage,
         'errorCode': code,
-        'errorMessage': message,
+        'exceptionClass': type(error).__name__,
         'latencyMs': elapsed_ms(started_at),
     })
     return {
@@ -151,16 +156,14 @@ def record_document_open(table, session_id: str, message_id: str, user_id: str, 
         )
     except ClientError as e:
         if e.response.get('Error', {}).get('Code') != 'ConditionalCheckFailedException':
-            print(f"[telemetry] document_open update failed: {e}")
+            print(f"[telemetry] document_open update failed: {_exception_label(e)}")
         return False
     except Exception as e:  # noqa: BLE001
-        print(f"[telemetry] document_open failed: {e}")
+        print(f"[telemetry] document_open failed: {_exception_label(e)}")
         return False
     _emit({
         'event': 'document_open',
         'apiRequestId': api_request_id(event) if event else '',
-        'sessionId': session_id,
-        'messageId': message_id,
         'documentName': (doc_uri or '').rsplit('/', 1)[-1],
     })
     return True
@@ -192,10 +195,10 @@ def stamp_reformulation(table, chat_history: list, now: datetime | None = None) 
         )
     except ClientError as e:
         if e.response.get('Error', {}).get('Code') != 'ConditionalCheckFailedException':
-            print(f"[telemetry] reformulation update failed: {e}")
+            print(f"[telemetry] reformulation update failed: {_exception_label(e)}")
         return False
     except Exception as e:  # noqa: BLE001
-        print(f"[telemetry] reformulation failed: {e}")
+        print(f"[telemetry] reformulation failed: {_exception_label(e)}")
         return False
-    _emit({'event': 'reformulation', 'sessionId': last.get('sessionId'), 'messageId': last.get('messageId')})
+    _emit({'event': 'reformulation'})
     return True

@@ -56,6 +56,8 @@ def test_error_response_hides_aws_message_and_logs_structured_line(capsys):
     line = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert line["event"] == "rag_error" and line["stage"] == "generate"
     assert line["errorCode"] == "ThrottlingException" and line["apiRequestId"] == "req-123"
+    assert line["exceptionClass"] == "ClientError"
+    assert "errorMessage" not in line and "Rate exceeded" not in json.dumps(line)
     assert "latencyMs" in line
 
 
@@ -68,7 +70,8 @@ def test_error_response_omits_non_client_exception_text(capsys):
     logged = capsys.readouterr().out
     assert secret not in logged
     line = json.loads(logged.strip().splitlines()[-1])
-    assert line["errorCode"] == "ValueError" and line["errorMessage"] == ""
+    assert line["errorCode"] == "ValueError" and line["exceptionClass"] == "ValueError"
+    assert "errorMessage" not in line
 
 
 def test_log_request_emits_counts_not_bodies(capsys):
@@ -79,7 +82,8 @@ def test_log_request_emits_counts_not_bodies(capsys):
     out = capsys.readouterr().out
     line = json.loads(out.strip().splitlines()[-1])
     assert line["event"] == "rag_request" and line["apiRequestId"] == "req-9"
-    assert line["messageId"] == "m2" and line["responseType"] == "pages"
+    assert "sessionId" not in line and "messageId" not in line
+    assert line["responseType"] == "pages"
     assert line["pageCandidates"] == 3 and line["sourceDocuments"] == 1
     assert "秘密の本文" not in out and "content" not in line
 
@@ -101,6 +105,7 @@ def test_record_document_open_updates_owned_assistant_message(capsys):
     assert "#role = :assistant" in kw["ConditionExpression"]
     line = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert line["event"] == "document_open" and line["documentName"] == "C-591124.pdf"
+    assert "sessionId" not in line and "messageId" not in line
 
 
 def test_record_document_open_refuses_foreign_session_and_missing_ids():
@@ -123,7 +128,7 @@ def _history(answered_at, **kw):
     return [{"role": "user", "sessionId": "s1", "messageId": "u1"}, row]
 
 
-def test_stamp_reformulation_marks_recent_unrated_pages_answer():
+def test_stamp_reformulation_marks_recent_unrated_pages_answer(capsys):
     table = MagicMock()
     now = datetime(2026, 9, 23, 1, 3, tzinfo=timezone.utc)
     assert telemetry.stamp_reformulation(table, _history("2026-09-23T01:00:00Z"), now) is True
@@ -131,6 +136,8 @@ def test_stamp_reformulation_marks_recent_unrated_pages_answer():
     assert kw["Key"] == {"sessionId": "s1", "messageId": "a1"}
     assert "attribute_not_exists(reformulatedAt)" in kw["ConditionExpression"]
     assert kw["ExpressionAttributeValues"][":now"] == "2026-09-23T01:03:00Z"
+    line = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert line == {"event": "reformulation"}
 
 
 @pytest.mark.parametrize("history", [
@@ -177,3 +184,26 @@ def test_handler_500_returns_generic_body_with_request_id(monkeypatch, capsys):
     assert err["stage"] == "history" and err["errorCode"] == "ProvisionedThroughputExceededException"
     req = next(l for l in lines if l["event"] == "rag_request")
     assert req["statusCode"] == 500 and req["apiRequestId"] == "req-500"
+
+
+@pytest.mark.parametrize("template_name, expected_count", [
+    ("phase1-template.yaml", 1),
+    ("phase2-template.yaml", 2),
+    ("announcements-monitoring-template.yaml", 1),
+])
+def test_api_gateway_access_logs_omit_user_and_device_identifiers(template_name, expected_count):
+    template = (ROOT / "infrastructure" / "sam" / template_name).read_text()
+    lines = template.splitlines()
+    format_lines = []
+    for index, line in enumerate(lines):
+        if line.strip() != "AccessLogSetting:":
+            continue
+        format_line = next((candidate for candidate in lines[index:index + 5] if "Format:" in candidate), None)
+        assert format_line is not None
+        format_lines.append(format_line)
+
+    assert len(format_lines) == expected_count
+    for format_line in format_lines:
+        assert "$context.identity.sourceIp" not in format_line
+        assert "$context.identity.userAgent" not in format_line
+        assert "$context.authorizer.claims.sub" not in format_line
