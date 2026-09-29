@@ -74,7 +74,7 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 
 ## GET /chat/admin/failures
 
-> 最終検証: 2026-09-11 — 設計 design-2026-09-10-dashboard-v2.md と実装 PR #110 / #111 / #112 / #114 のコードと突合（実環境は未デプロイ）
+> 最終検証: 2026-09-25 — failures 応答・走査上限・triage 未設定値を #142 最新実装と照合（未デプロイ。#111 / #114 / #142 のマージ・SAM デプロイ後に有効）
 
 失敗一覧（**admin グループのみ**。UI ガードだけでは不十分・サーバー側 403）
 
@@ -108,7 +108,10 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
     }
   ],
   "count": 1,
+  "matchedCount": 1,
+  "truncated": false,
   "scannedCount": 120,
+  "incomplete": false,
   "kind": "all",
   "since": "2026-09-23",
   "until": "2026-09-23",
@@ -122,9 +125,11 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 | `signals` | `bad` / `not_found` に `reformulated` が加わることがある |
 | `opened` | 引用文書を開いた回数（chatlogs `documentOpens`） |
 | `reformulated` | `reformulatedAt` があり、👍 も資料クリックも無い |
-| `triage` | 振り分け。未設定は `{ "status": "open" }` |
+| `triage` | 振り分け。未設定は `{ "status": "open", "cause": null, "note": null, "ref": null, "by": null, "at": null }` |
 | `traceSummary` | `retrievalTrace`（別設計、未実装）の要約。無ければ `null` |
 | `hints` | 機械的な手がかり（判断ではない）。機種スコープ除外 / 上位スコアが弱い（仮 0.45）/ 資料は開かれた / 言い換え後に評価なし / カテゴリ過絞り / 聞き返し後 |
+
+`count` は返却件数、`matchedCount` は今回の Scan で得た一致件数（`limit` 適用前）です。`truncated` は一致件数が `limit` を超えたこと、`incomplete` は25ページ上限で未走査分が残ることを示します。`incomplete=true` の場合、`matchedCount` は全件数ではありません。
 
 実装メモ: chatlogs に失敗専用 GSI は無いため Scan + Filter。試用初期向け。`queryFilters` は RAG Lambda が assistant 行に保存する（2026-07-29〜）。
 
@@ -197,4 +202,3 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 ```
 
 - `sessionId` と `triage` は 2026-09-11 に追加（PR #114）。要望の既読 / 対応済みは上記 PUT triage で保存する（`in_progress` = 既読）
-

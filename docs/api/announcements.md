@@ -13,7 +13,11 @@ related-code: lambda/announcements/, frontend/src/lib/announcements.ts, frontend
 
 ## GET /announcements?limit=10
 
+> 最終検証: 2026-09-25 — `limit` の省略時・指定範囲を実装と照合（draft。未デプロイ）
+
 認証済み利用者向け。表示中（`status=published`、または期限到来の `scheduled`）で `endAt` 未経過の告知を、固定 → 公開日時の新しい順で返す。`activeMaintenance` は期間中のメンテナンス告知を一覧の件数とは独立に返す（issue #94 B1）。
+
+`limit` は省略時10、指定時は1〜50の範囲に制限します。
 
 ```json
 { "announcements": [ { "announcementId": "anc_...", "type": "notice", "title": "…", "body": "…", "severity": "critical",
