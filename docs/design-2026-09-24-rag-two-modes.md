@@ -10,6 +10,8 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 
 ## 1. 目的
 
+> 最終検証: 2026-09-29 — Phase 2 SAM の生成モデル既定値を照合
+
 利用者が質問の重さに応じて選べる 2 つのモードを持つ。
 
 | | 通常モード | じっくりモード（新設） |
@@ -21,7 +23,7 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 | 回数 | 制限なし | **1 人 1 日 10 回（決定済み）** |
 | 費用の概算 | 約 $0.01〜0.03 / 問 | 約 $0.2〜0.6 / 問（公表単価からの概算。実測で置き換える） |
 
-採用モデルは運用上 Sonnet 5（[decisions-2026-09-17-global-sonnet5-user-verification.md](./decisions-2026-09-17-global-sonnet5-user-verification.md)）。SAM テンプレートの `BedrockModelId` 既定値は Haiku 4.5 のままなので、デプロイ時のパラメータが実際のモデルを決める。
+採用モデルは運用上 Sonnet 5（[decisions-2026-09-17-global-sonnet5-user-verification.md](./decisions-2026-09-17-global-sonnet5-user-verification.md)）。SAM テンプレートの `BedrockModelId` 既定値も `global.anthropic.claude-sonnet-5` に揃えている。
 
 ## 2. なぜ 2 モードか（要点。詳細は survey）
 

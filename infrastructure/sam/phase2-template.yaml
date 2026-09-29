@@ -63,12 +63,24 @@ Parameters:
 
   BedrockModelId:
     Type: String
-    Default: jp.anthropic.claude-haiku-4-5-20251001-v1:0
+    Default: global.anthropic.claude-sonnet-5
     Description: >-
       Bedrock LLM Model ID. Must be an inference profile ID (jp.* / apac.* / global.*)
       or an application inference profile ARN (arn:aws:bedrock:...:application-inference-profile/xxx),
-      not a bare foundation model ID. Sonnet 5 / Opus 4.7+ are handled by app.py
-      (no temperature, thinking disabled). See docs/eval-2026-09-09-model-bakeoff.md.
+      not a bare foundation model ID. Request capabilities are selected by model_profile.py;
+      unknown models use a minimal request unless MODEL_PROFILE_JSON supplies capabilities.
+
+  BedrockRequestStyle:
+    Type: String
+    Default: auto
+    AllowedValues:
+      - auto
+      - new
+      - legacy
+    Description: >-
+      Deprecated compatibility fallback for models not recognized by model_profile.py.
+      auto uses model_profile.py defaults; new uses a minimal request; legacy sends temperature.
+      MODEL_PROFILE_JSON is recommended for explicit model capabilities.
   
   SessionTitleLlm:
     Type: String
@@ -79,15 +91,6 @@ Parameters:
     Description: >-
       Generate chat session titles with Claude (BedrockModelId) from the first question.
       Set to false to fall back to truncating the raw question (no extra Bedrock call).
-
-  BedrockRequestStyle:
-    Type: String
-    Default: auto
-    AllowedValues: [auto, new, legacy]
-    Description: >-
-      Request body style for InvokeModel. auto = detect from BedrockModelId
-      (sonnet-5 / opus-4-7+ / fable => new). Set explicitly when BedrockModelId
-      is an application inference profile ARN (model name not visible).
 
   RagSearchType:
     Type: String
@@ -103,6 +106,11 @@ Parameters:
     Type: String
     Default: ''
     Description: Optional JSON overrides for the Knowledge Base metadata profile
+
+  ModelProfileJson:
+    Type: String
+    Default: ''
+    Description: Optional JSON overrides for model generation capabilities
 
   RerankModelArn:
     Type: String
@@ -325,6 +333,7 @@ Resources:
                 Resource:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*
+                  # The Region wildcard also covers the regionless foundation-model ARN used by Global inference.
                   - !Sub arn:aws:bedrock:*::foundation-model/*
         - !If
           - HasRerankModelArn
@@ -410,11 +419,12 @@ Resources:
         Variables:
           KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_REQUEST_STYLE: !Ref BedrockRequestStyle
           # 履歴一覧の見出し生成。既定は BEDROCK_MODEL_ID と同じモデル（追加の IAM 不要）
           SESSION_TITLE_LLM: !Ref SessionTitleLlm
-          BEDROCK_REQUEST_STYLE: !Ref BedrockRequestStyle
           RAG_SEARCH_TYPE: !Ref RagSearchType
           KB_PROFILE_JSON: !Ref KbProfileJson
+          MODEL_PROFILE_JSON: !Ref ModelProfileJson
           RERANK_MODEL_ARN: !Ref RerankModelArn
           RERANK_MAX_CANDIDATES: !Ref RerankMaxCandidates
           QUERY_REWRITE_MODEL_ID: !Ref QueryRewriteModelId

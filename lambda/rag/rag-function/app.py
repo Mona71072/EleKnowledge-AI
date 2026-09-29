@@ -32,6 +32,19 @@ except ModuleNotFoundError as exc:
     sys.modules[_kb_profile_spec.name] = _kb_profile_module
     _kb_profile_spec.loader.exec_module(_kb_profile_module)
     load_kb_profile = _kb_profile_module.load_kb_profile
+try:
+    from model_profile import get_model_profile, log_unknown_model_once
+except ModuleNotFoundError as exc:
+    if exc.name != 'model_profile':
+        raise
+    _model_profile_spec = importlib.util.spec_from_file_location(
+        'rag_model_profile_runtime', os.path.join(os.path.dirname(__file__), 'model_profile.py')
+    )
+    _model_profile_module = importlib.util.module_from_spec(_model_profile_spec)
+    sys.modules[_model_profile_spec.name] = _model_profile_module
+    _model_profile_spec.loader.exec_module(_model_profile_module)
+    get_model_profile = _model_profile_module.get_model_profile
+    log_unknown_model_once = _model_profile_module.log_unknown_model_once
 
 
 def _utc_now_iso() -> str:
@@ -351,49 +364,13 @@ def expand_query_abbreviations(text: str) -> str:
     return expanded
 
 
-# #90 と同じモデル世代別のリクエスト形式。見出しも本文と同じSonnet 5互換処理を使う。
-NEW_API_MODEL_MARKERS = ("sonnet-5", "opus-4-7", "opus-4-8", "opus-5")
-LEGACY_GENERATION_TEMPERATURE = 0.3
-BEDROCK_REQUEST_STYLE = os.environ.get('BEDROCK_REQUEST_STYLE', 'auto').lower()
-
-
-def is_new_api_model(model_id: str, request_style: str = None) -> bool:
-    style = (request_style or BEDROCK_REQUEST_STYLE or 'auto').lower()
-    if style == 'new':
-        return True
-    if style == 'legacy':
-        return False
-    return any(marker in (model_id or '').lower() for marker in NEW_API_MODEL_MARKERS)
-
-
-def build_generation_request(system_prompt: str, messages: list, model_id: str,
-                             max_tokens: int, temperature: float = None) -> dict:
-    body = {
-        'anthropic_version': 'bedrock-2023-05-31',
-        'max_tokens': max_tokens,
-        'messages': messages,
-    }
-    if system_prompt:
-        body['system'] = system_prompt
-    if is_new_api_model(model_id):
-        body['thinking'] = {'type': 'disabled'}
-    else:
-        body['temperature'] = LEGACY_GENERATION_TEMPERATURE if temperature is None else temperature
-    return body
-
-
-def extract_response_text(response_body: dict) -> str:
-    for block in response_body.get('content') or []:
-        # 旧形式のテストスタブ／応答は type を省くことがある。text があれば本文として扱う。
-        if block.get('text') and block.get('type', 'text') == 'text':
-            return block['text']
-    return ''
-
-
 SESSION_TITLE_MAX_LENGTH = 30
 # 見出し生成は Claude（既定はチャットと同じ Haiku 4.5 の推論プロファイル）で行う。
 # 失敗・無効時は質問文の切り詰めにフォールバックするため、可用性は落とさない。
 SESSION_TITLE_MODEL_ID = os.environ.get('SESSION_TITLE_MODEL_ID') or BEDROCK_MODEL_ID
+for _configured_model_id in (BEDROCK_MODEL_ID, SESSION_TITLE_MODEL_ID, QUERY_REWRITE_MODEL_ID):
+    if _configured_model_id:
+        log_unknown_model_once(_configured_model_id)
 SESSION_TITLE_LLM_ENABLED = os.environ.get('SESSION_TITLE_LLM', 'true').lower() != 'false'
 # 見出し生成は補助処理で、通常回答だけでなく聞き返し・該当なしでもメッセージ保存と応答返却の
 # 前に同期実行される。既定クライアント（read 60 秒・legacy リトライ）で Bedrock が停滞すると、
@@ -1309,38 +1286,17 @@ def build_claude_messages(query: str, selected_results: list, chat_history: list
 
 
 
-# Claude 4.7 以降 / Sonnet 5 / Fable 系は temperature 等のサンプリング指定を 400 で拒否し、
-# 既定で適応思考が動く。RAG の短い整理には思考は不要なので明示的に無効化する。
-# 判定はモデル ID（推論プロファイル ID / ARN のどちらでも可）の部分一致で行う。
-# 経緯: docs/eval-2026-09-09-model-bakeoff.md（Haiku 4.5 → Sonnet 5 切替）
-# 対応範囲は Sonnet 5 / Opus 4.7 以降（thinking を disabled にできるモデル）。
-# Fable 系は adaptive のみ対応で disabled を送ると 400 になるため対象外（PR #90 レビュー）。
-NEW_API_MODEL_MARKERS = ("sonnet-5", "opus-4-7", "opus-4-8", "opus-5")
 GENERATION_MAX_TOKENS = 4096
 LEGACY_GENERATION_TEMPERATURE = 0.3
-# auto: モデル ID の部分一致で判定 / new: 常に新 API 形式 / legacy: 常に旧形式。
-# アプリケーション推論プロファイルの ARN には元モデル名が含まれないため、
-# ARN を指定する場合は new / legacy を明示する。
-BEDROCK_REQUEST_STYLE = os.environ.get('BEDROCK_REQUEST_STYLE', 'auto').lower()
-
-
-def is_new_api_model(model_id: str, request_style: str = None) -> bool:
-    style = (request_style or BEDROCK_REQUEST_STYLE or 'auto').lower()
-    if style == 'new':
-        return True
-    if style == 'legacy':
-        return False
-    mid = (model_id or "").lower()
-    return any(marker in mid for marker in NEW_API_MODEL_MARKERS)
 
 
 def build_generation_request(system_prompt: str, messages: list, model_id: str,
                              max_tokens: int = None, temperature: float = None,
                              apply_generation_settings: bool = True) -> dict:
-    """InvokeModel 用のリクエスト本文をモデル世代に合わせて組み立てる。
+    """InvokeModel payload using capabilities of the selected model family.
 
-    本文生成以外（例: 見出し生成）も同じ関数を使い、max_tokens / temperature だけ変える。
-    新 API 世代では temperature は常に送らない（400 になる）。
+    Supplemental calls such as title generation use the same conservative
+    settings as a response with thinking disabled.
     """
     body = {
         "anthropic_version": "bedrock-2023-05-31",
@@ -1349,14 +1305,17 @@ def build_generation_request(system_prompt: str, messages: list, model_id: str,
     }
     if system_prompt:
         body["system"] = system_prompt
-    if is_new_api_model(model_id):
-        if apply_generation_settings and GENERATION_THINKING == 'adaptive':
-            body["thinking"] = {"type": "adaptive"}
-            body["output_config"] = {"effort": GENERATION_EFFORT}
-        else:
-            body["thinking"] = {"type": "disabled"}
-    else:
+    profile = get_model_profile(model_id)
+    if profile.sampling:
         body["temperature"] = LEGACY_GENERATION_TEMPERATURE if temperature is None else temperature
+    elif apply_generation_settings and GENERATION_THINKING == 'adaptive' and profile.adaptive:
+        body["thinking"] = {"type": "adaptive"}
+        if profile.effort:
+            body["output_config"] = {"effort": GENERATION_EFFORT}
+    elif profile.thinking_disable:
+        body["thinking"] = {"type": "disabled"}
+    elif profile.effort:
+        body["output_config"] = {"effort": "low"}
     return body
 
 
