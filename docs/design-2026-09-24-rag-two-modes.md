@@ -187,6 +187,8 @@ GET の期限切れ処理は、`running` ならジョブの `status`、期限、
 
 ### 4.9 API（案。実装 PR で `docs/api/rag-research.md` として正本化する）
 
+> 最終検証: 2026-09-29 — `GET /rag/research/{jobId}` の `pollAfterMs` を §4.11 の確認の規則・`frontend/src/lib/research-polling.mjs`（#148）と照合
+
 | メソッド・パス | 要点 |
 |---|---|
 | `POST /rag/research` | body `{ query, clientRequestId, sessionId?, filters? }`。`202 { jobId, sessionId, userMessageId, status, quota }`。聞き返し時は `200 { responseType: "clarify", … }`（回数を消費しない）。実行中 409、上限 429、起動失敗 503 |
