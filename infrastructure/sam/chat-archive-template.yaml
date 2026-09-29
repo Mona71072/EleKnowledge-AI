@@ -242,8 +242,8 @@ Resources:
             - { Name: eventid, Type: string }
             - { Name: approximatecreationdatetime, Type: double }
             - { Name: keys, Type: 'struct<sessionid:string,messageid:string>' }
-            - { Name: newimage, Type: 'struct<sessionid:string,messageid:string,userid:string,timestamp:string,content:string,role:string,deleted:boolean,deletedat:string,ttl:bigint,feedback:string>' }
-            - { Name: oldimage, Type: 'struct<sessionid:string,messageid:string,userid:string,timestamp:string,content:string,role:string,deleted:boolean,deletedat:string,ttl:bigint,feedback:string>' }
+            - { Name: newimage, Type: 'struct<sessionid:string,messageid:string,userid:string,timestamp:string,content:string,role:string,deleted:boolean,deletedat:string,ttl:bigint,feedback:string,responsetype:string,feedbackreason:string,queryfilters:struct<modeltype:string>>' }
+            - { Name: oldimage, Type: 'struct<sessionid:string,messageid:string,userid:string,timestamp:string,content:string,role:string,deleted:boolean,deletedat:string,ttl:bigint,feedback:string,responsetype:string,feedbackreason:string,queryfilters:struct<modeltype:string>>' }
             - { Name: useridentity, Type: 'struct<principalid:string,type:string>' }
 
 Outputs:
