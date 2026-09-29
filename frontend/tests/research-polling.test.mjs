@@ -106,6 +106,45 @@ test('完了しなければ 6 分で打ち切り、確認は 53 回で止まる'
   assert.equal(clock.pending(), 0);
 });
 
+test('通信中でも期限で打ち切り、タイマーを残さない', async () => {
+  const { clock, events, poller } = setup(() => new Promise(() => {}));
+  poller.start('job-1');
+  await clock.advance(2000);
+  await clock.advance(POLL_GIVE_UP_MS - 2000);
+  assert.equal(events.giveUp, 1);
+  assert.equal(clock.pending(), 0);
+});
+
+test('期限直前に送った確認が期限後に返った場合は更新しない', async () => {
+  let release;
+  const { clock, calls, updates, events, poller } = setup((jobId, n) => {
+    if (n < 53) return running();
+    return new Promise((resolve) => {
+      release = () => resolve({ status: 'running' });
+    });
+  });
+  poller.start('job-1');
+  await clock.advance(POLL_GIVE_UP_MS - 10000);
+  assert.equal(calls.length, 53);
+  const updatesBeforeDelayedResponse = updates.length;
+  await clock.advance(10000);
+  release();
+  await flush();
+  assert.equal(updates.length, updatesBeforeDelayedResponse);
+  assert.equal(events.giveUp, 1);
+  assert.equal(clock.pending(), 0);
+});
+
+test('terminal 応答で停止した後は期限タイマーが発火しない', async () => {
+  const { clock, events, poller } = setup(async () => ({ status: 'completed' }));
+  poller.start('job-1');
+  await clock.advance(2000);
+  assert.equal(clock.pending(), 0);
+  await clock.advance(POLL_GIVE_UP_MS);
+  assert.equal(events.giveUp, 0);
+  assert.equal(clock.pending(), 0);
+});
+
 test('completed / failed を受け取ったら更新を通知して止まる', async () => {
   for (const finalStatus of ['completed', 'failed']) {
     const { clock, calls, updates, poller } = setup(async (jobId, n) => ({ status: n < 3 ? 'running' : finalStatus }));
@@ -121,7 +160,7 @@ test('同じ jobId を二重に start しても確認は 1 本だけ', async () 
   const { clock, calls, poller } = setup(running);
   assert.equal(poller.start('job-1'), true);
   assert.equal(poller.start('job-1'), false);
-  assert.equal(clock.pending(), 1);
+  assert.equal(clock.pending(), 2);
   await clock.advance(2000);
   assert.equal(calls.length, 1);
 });
@@ -130,14 +169,14 @@ test('非表示の間は確認せず、表示に戻ったらすぐ 1 回確認�
   const { clock, calls, poller } = setup(running);
   poller.start('job-1');
   poller.setVisible(false);
-  assert.equal(clock.pending(), 0);
+  assert.equal(clock.pending(), 1);
   await clock.advance(100000);
   assert.equal(calls.length, 0);
 
   poller.setVisible(true);
   assert.deepEqual(calls, [100000]);
   await flush();
-  assert.equal(clock.pending(), 1);
+  assert.equal(clock.pending(), 2);
   await clock.advance(10000);
   assert.deepEqual(calls, [100000, 110000]);
 });
@@ -151,7 +190,7 @@ test('確認中に非表示になったら、その応答のあとは次の確�
   release();
   await flush();
   assert.equal(calls.length, 1);
-  assert.equal(clock.pending(), 0);
+  assert.equal(clock.pending(), 1);
 
   poller.setVisible(true);
   assert.equal(calls.length, 2);
