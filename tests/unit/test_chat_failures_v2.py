@@ -81,8 +81,45 @@ def test_failures_kind_reformulated_and_done_triage():
     mod.list_failure_messages(kind="reformulated", triage="done")
     fe = captured["FilterExpression"]
     assert "attribute_exists(reformulatedAt)" in fe and "feedback <> :good" in fe
+    assert "(attribute_not_exists(documentOpens) OR documentOpens = :zero)" in fe
+    assert captured["ExpressionAttributeValues"][":zero"] == 0
     assert "#tr.#st = :tst" in fe and captured["ExpressionAttributeValues"][":tst"] == "done"
     assert ":bad" not in captured["ExpressionAttributeValues"]
+
+
+def test_failures_reports_truncation_and_pre_limit_match_count():
+    mod, table = load_app()
+    table.query.return_value = {"Items": []}
+    table.scan.return_value = {
+        "Items": [
+            {"sessionId": "s1", "messageId": f"m{i}", "role": "assistant", "timestamp": f"2026-09-{i // 60 + 1:02d}T00:{i % 60:02d}:00Z", "feedback": "bad"}
+            for i in range(101)
+        ],
+        "ScannedCount": 101,
+    }
+
+    out = mod.list_failure_messages(kind="bad", limit=100)
+
+    assert out["count"] == 100
+    assert out["matchedCount"] == 101
+    assert out["truncated"] is True
+
+
+def test_failures_marks_exact_limit_as_not_truncated():
+    mod, table = load_app()
+    table.query.return_value = {"Items": []}
+    table.scan.return_value = {
+        "Items": [
+            {"sessionId": "s1", "messageId": f"m{i}", "role": "assistant", "timestamp": f"2026-09-{i // 60 + 1:02d}T00:{i % 60:02d}:00Z", "feedback": "bad"}
+            for i in range(100)
+        ],
+        "ScannedCount": 100,
+    }
+
+    out = mod.list_failure_messages(kind="bad", limit=100)
+
+    assert out["matchedCount"] == 100
+    assert out["truncated"] is False
 
 
 def test_failures_bad_request_on_invalid_date():
@@ -186,6 +223,51 @@ def test_put_triage_forbidden_and_not_found():
     resp = mod.lambda_handler(_event("PUT", "/chat/admin/messages/s1/missing/triage", body={"status": "done"},
                                      path_params={"sessionId": "s1", "messageId": "missing"}), None)
     assert resp["statusCode"] == 404
+
+
+@pytest.mark.parametrize("route", ["messages", "failures", "triage"])
+def test_client_errors_log_route_templates_and_return_generic_500(route, capsys):
+    mod, table = load_app()
+    failure = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "private AWS detail"}},
+        "Query",
+    )
+    sensitive_ids = ("sensitive-session-id", "sensitive-message-id")
+
+    if route == "messages":
+        table.query.return_value = {"Items": [{"userId": "user-1"}]}
+        mod.get_session_messages = MagicMock(side_effect=failure)
+        event = _event(
+            "GET", f"/chat/sessions/{sensitive_ids[0]}/messages",
+            path_params={"sessionId": sensitive_ids[0]},
+        )
+        expected_resource = "/chat/sessions/{sessionId}/messages"
+    elif route == "failures":
+        table.scan.side_effect = failure
+        event = _event("GET", "/chat/admin/failures")
+        expected_resource = "/chat/admin/failures"
+    else:
+        table.update_item.side_effect = failure
+        event = _event(
+            "PUT", f"/chat/admin/messages/{sensitive_ids[0]}/{sensitive_ids[1]}/triage",
+            body={"status": "done"},
+            path_params={"sessionId": sensitive_ids[0], "messageId": sensitive_ids[1]},
+        )
+        expected_resource = "/chat/admin/messages/{sessionId}/{messageId}/triage"
+
+    response = mod.lambda_handler(event, None)
+    output = capsys.readouterr().out
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == 500
+    assert body == {"error": "InternalServerError", "message": "An unexpected error occurred"}
+    assert f"method={event['httpMethod']}" in output
+    assert f"resource={expected_resource}" in output
+    assert "exception_type=ClientError" in output
+    assert "error_code=AccessDeniedException" in output
+    for sensitive in (*sensitive_ids, "private AWS detail", "user-1"):
+        assert sensitive not in output
+        assert sensitive not in response["body"]
 
 
 # ------------------------------------------------------------------ regression: unused expression names

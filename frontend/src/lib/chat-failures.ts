@@ -71,6 +71,8 @@ export interface FailureItem {
 export interface FailuresResponse {
   failures: FailureItem[];
   count: number;
+  matchedCount?: number;
+  truncated?: boolean;
   scannedCount: number;
   incomplete?: boolean;
   kind: string;

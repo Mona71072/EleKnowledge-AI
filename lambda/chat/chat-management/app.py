@@ -50,6 +50,39 @@ TRIAGE_REF_MAX = 100
 WEAK_SCORE_THRESHOLD = 0.45
 
 
+def _safe_error_label(error: Exception) -> str:
+    """Return exception metadata without exposing its message or traceback."""
+    label = f"exception_type={type(error).__name__}"
+    if isinstance(error, ClientError):
+        error_data = error.response.get('Error') or {}
+        code = error_data.get('Code') if isinstance(error_data, dict) else None
+        if code:
+            label += f" error_code={code}"
+    return label
+
+
+def _chat_resource(path: str) -> str:
+    """Map a request path to a route template without retaining path identifiers."""
+    route = (path or '').rstrip('/')
+    if route.endswith('/chat/sessions'):
+        return '/chat/sessions'
+    if '/chat/sessions/' in route and route.endswith('/messages'):
+        return '/chat/sessions/{sessionId}/messages'
+    if '/chat/sessions/' in route:
+        return '/chat/sessions/{sessionId}'
+    if '/chat/messages/' in route and route.endswith('/feedback'):
+        return '/chat/messages/{messageId}/feedback'
+    if '/chat/admin/messages/' in route and route.endswith('/triage'):
+        return '/chat/admin/messages/{sessionId}/{messageId}/triage'
+    if route.endswith('/chat/admin/failures'):
+        return '/chat/admin/failures'
+    if route.endswith('/chat/admin/suggestions'):
+        return '/chat/admin/suggestions'
+    if route.endswith('/chat/suggestions'):
+        return '/chat/suggestions'
+    return 'unknown'
+
+
 def jst_day_bounds(since: str = None, until: str = None) -> tuple:
     """JST の日付（YYYY-MM-DD）を chatlogs の timestamp（UTC ISO 文字列）の境界に変換する。"""
     def start_of(day: str) -> datetime:
@@ -145,7 +178,7 @@ def emit_feedback_metric(feedback: str) -> None:
         }
         print(json.dumps(emf))
     except Exception as e:  # noqa: BLE001 - metrics must never break the request
-        print(f"[chat] Failed to emit feedback EMF: {e}")
+        print(f"[chat] method=internal resource=feedback_metric {_safe_error_label(e)}")
 
 
 def get_caller_id(event) -> str:
@@ -186,7 +219,6 @@ def owns_session(session_id: str, user_id: str) -> bool:
             Limit=1
         )
     except ClientError as e:
-        print(f"Error verifying session ownership: {e}")
         return False
     items = response.get('Items', [])
     return bool(items) and items[0].get('userId') == user_id
@@ -314,7 +346,6 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
         return sessions[:limit]
         
     except ClientError as e:
-        print(f"Error getting sessions: {e}")
         raise
 
 
@@ -369,7 +400,6 @@ def get_session_messages(session_id: str, limit: int = 100, fetch_all: bool = Fa
         return messages
 
     except ClientError as e:
-        print(f"Error getting messages: {e}")
         raise
 
 
@@ -403,7 +433,6 @@ def delete_session(session_id: str) -> int:
         return deleted_count
 
     except ClientError as e:
-        print(f"Error deleting session: {e}")
         raise
 
 
@@ -465,7 +494,6 @@ def update_message_feedback(
     except ClientError as e:
         if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
             return False
-        print(f"Error updating feedback: {e}")
         raise
 
 
@@ -536,8 +564,9 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
         values[':not_found'] = 'not_found'
     elif kind == 'reformulated':
         # 言い換え: 回答直後に次の質問が来て、👍 が無い（資料クリックの有無は項目側で判定）
-        filter_parts.append('attribute_exists(reformulatedAt) AND (attribute_not_exists(feedback) OR feedback <> :good)')
+        filter_parts.append('attribute_exists(reformulatedAt) AND (attribute_not_exists(feedback) OR feedback <> :good) AND (attribute_not_exists(documentOpens) OR documentOpens = :zero)')
         values[':good'] = 'good'
+        values[':zero'] = 0
     else:
         filter_parts.append('(feedback = :bad OR #rt = :not_found)')
         values[':bad'] = 'bad'
@@ -593,6 +622,8 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
 
     incomplete = bool(exclusive_start)
     collected.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
+    matched_count = len(collected)
+    truncated = matched_count > limit
     collected = collected[:limit]
 
     session_cache = {}
@@ -647,6 +678,8 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
     return {
         'failures': failures,
         'count': len(failures),
+        'matchedCount': matched_count,
+        'truncated': truncated,
         'scannedCount': scanned_count,
         'incomplete': incomplete,
         'kind': kind,
@@ -825,10 +858,13 @@ def lambda_handler(event, context):
         'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
     }
     
+    http_method = 'unknown'
+    resource = 'unknown'
     try:
         # Get route info
         http_method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method'))
         path = event.get('path', event.get('rawPath', ''))
+        resource = _chat_resource(path)
         path_parameters = event.get('pathParameters', {})
         query_parameters = event.get('queryStringParameters', {}) or {}
         
@@ -1138,22 +1174,19 @@ def lambda_handler(event, context):
             }
         
     except ClientError as e:
-        error_code = e.response['Error']['Code']
-        error_message = e.response['Error']['Message']
-        # 500 を返す経路は必ずログに残す（アクセスログの requestId で突き合わせる）
-        print(f"[chat] ClientError {error_code} on {event.get('httpMethod')} {event.get('path')}: {error_message}")
+        print(f"[chat] method={http_method or 'unknown'} resource={resource} {_safe_error_label(e)}")
 
         return {
             'statusCode': 500,
             'headers': headers,
             'body': json.dumps({
-                'error': error_code,
-                'message': error_message
+                'error': 'InternalServerError',
+                'message': 'An unexpected error occurred'
             })
         }
     
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
+        print(f"[chat] method={http_method or 'unknown'} resource={resource} {_safe_error_label(e)}")
         return {
             'statusCode': 500,
             'headers': headers,
