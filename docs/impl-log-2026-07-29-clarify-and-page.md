@@ -3,7 +3,8 @@
 > **目的:** 「なぜこう直したか」を後から辿れるようにする。  
 > **設計:** [design-2026-07-29-clarify-and-page.md](./design-2026-07-29-clarify-and-page.md)  
 > **前提合意:** [decisions-2026-07-29-rag-nuance.md](./decisions-2026-07-29-rag-nuance.md)（共同確認ブランチ）  
-> **成功定義（訂正）:** 該当**資料**到達＋疑問解決。頁は副次（共同確認側 `decisions-2026-07-29-success-document-reach.md`）
+> **成功定義（訂正）:** 該当**資料**到達＋疑問解決。頁は副次（共同確認側 `decisions-2026-07-29-success-document-reach.md`）  
+> **2026-09 以降の話題索引:** [impl-log-2026-09-index.md](./impl-log-2026-09-index.md)（本文は写さない）
 
 ---
 

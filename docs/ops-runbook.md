@@ -64,8 +64,9 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 
 ### 5.1 「使えない」「開けない」と言われたら
 1. 接続元が社内ネットワーク / VPN か確認。許可リスト外の IP からは **API が 403**（WAF の IP 許可リスト）。画面は開くが質問すると失敗する、が典型
-2. ログインして長時間経過していれば **401（トークン失効）**。再ログインで直る
-3. どちらでもなければ 5XX アラームの有無を確認
+2. **429** は WAF の利用者レート（数字の正は [docs/api/common.md](./api/common.md)）。WAF ログ用 S3 配信は `security-waf-template.yaml` の `WafLogBucketPolicy`
+3. ログインして長時間経過していれば **401（トークン失効）**。再ログインで直る
+4. どちらでもなければ 5XX アラームの有無を確認
 
 ### 5.2 回答が返らない・遅い
 1. `P1-rag-duration-max` / `P2-rag-duration-p90` の状態
