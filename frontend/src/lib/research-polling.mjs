@@ -59,6 +59,12 @@ export function createJobPoller({
 }) {
   const jobs = new Map();
 
+  function giveUp(jobId, job) {
+    if (jobs.get(jobId) !== job) return;
+    stop(jobId);
+    onGiveUp?.(jobId);
+  }
+
   function schedule(jobId, job) {
     const delayMs = nextPollDelayMs({
       elapsedMs: now() - job.startedAt,
@@ -73,13 +79,13 @@ export function createJobPoller({
     if (!job || job.inFlight) return;
     job.timer = null;
     if (isPollingExpired(now() - job.startedAt)) {
-      stop(jobId);
-      onGiveUp?.(jobId);
+      giveUp(jobId, job);
       return;
     }
 
     job.inFlight = true;
     let result;
+    let rateLimited = false;
     try {
       result = await fetchJob(jobId);
       job.failures = 0;
@@ -87,13 +93,18 @@ export function createJobPoller({
     } catch (error) {
       job.failures += 1;
       job.pollAfterMs = undefined;
-      if (error?.status === 429) onRateLimited?.(jobId);
+      rateLimited = error?.status === 429;
     } finally {
       job.inFlight = false;
     }
 
     // 待っている間に stop されていたら何もしない（同じ jobId の再 start とも区別する）
     if (jobs.get(jobId) !== job) return;
+    if (isPollingExpired(now() - job.startedAt)) {
+      giveUp(jobId, job);
+      return;
+    }
+    if (rateLimited) onRateLimited?.(jobId);
     if (result) {
       onUpdate?.(jobId, result);
       if (TERMINAL_STATUSES.has(result.status)) {
@@ -107,8 +118,18 @@ export function createJobPoller({
   /** 同じ jobId が確認中なら何もせず false を返す。 */
   function start(jobId, { visible = true } = {}) {
     if (jobs.has(jobId)) return false;
-    const job = { startedAt: now(), failures: 0, pollAfterMs: undefined, timer: null, inFlight: false, paused: !visible };
+    const startedAt = now();
+    const job = {
+      startedAt,
+      failures: 0,
+      pollAfterMs: undefined,
+      timer: null,
+      expirationTimer: null,
+      inFlight: false,
+      paused: !visible,
+    };
     jobs.set(jobId, job);
+    job.expirationTimer = setTimer(() => giveUp(jobId, job), Math.max(0, POLL_GIVE_UP_MS - (now() - startedAt)));
     if (!job.paused) schedule(jobId, job);
     return true;
   }
@@ -117,6 +138,7 @@ export function createJobPoller({
     const job = jobs.get(jobId);
     if (!job) return;
     if (job.timer !== null) clearTimer(job.timer);
+    if (job.expirationTimer !== null) clearTimer(job.expirationTimer);
     jobs.delete(jobId);
   }
 
