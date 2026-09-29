@@ -5,7 +5,7 @@
 > **きっかけ:** 2026-07-29 の整合確認で、同期ルールが無かったために docs 先行・実装ギャップが残った  
 > **関連:** `.cursor/rules/ai-collaboration.mdc` / `.cursor/rules/docs-code-sync.mdc` / `.cursor/skills/joint-pr-review/SKILL.md`
 
-最終更新: 2026-09-22
+最終更新: 2026-09-23
 
 ---
 
@@ -43,8 +43,10 @@
 | 種類 | 正本 | メモ |
 |---|---|---|
 | API 契約 | `docs/api/*.md` | フロント／Lambda 変更時に必ず見る |
-| なぜ変えたか | `docs/impl-log-*.md` | 変更理由の追跡。設計案の代替ではない |
 | 合意・微妙な前提 | `docs/decisions-*.md` | 繰り返し防止。必要なら `.cursor/rules` に短く転記 |
+| 運用手順 | `docs/ops-runbook.md` | 障害切り分け・デプロイ・Cognito 上限など |
+| 実装の経緯（上記に入らないとき） | `docs/impl-log-*.md` | 設計案の代替ではない。同じ理由を他正本に写さない |
+| 話題索引 | `docs/impl-log-YYYY-MM-index.md` 等 | 対象月に変更がある場合だけ作成し、正本へのリンクのみを置く。数値・理由・仕様本文は再掲しない |
 | 毎回の AI 動作 | `.cursor/rules/*.mdc` | alwaysApply は少なく・具体的に |
 | 繰り返し手順 | `.cursor/skills/**/SKILL.md` | 共同確認は `joint-pr-review` |
 | 製品意図 | `docs/PRODUCT_INTENT.md` | ドラフト。ここだけ見てアプリを一気に実装しない |
@@ -57,11 +59,15 @@
 - 未更新の `data-model.md` セクション（更新するまで API／コードを正とする）
 - 会話だけの口頭合意（必ず decisions / rules / 本メモへ残す）
 
+### 理由の置き場（1 変更につき 1 正本）
+
+`.cursor/rules/docs-code-sync.mdc` と同じ。**同じ「なぜ」を impl-log と API / decisions / ランブックに二重掲載しない。** `AGENTS.md` に経緯やパラメータ値を増やさない。
+
 ---
 
 ## 4. 作業単位でのチェックリスト（エージェント必須）
 
-- [ ] 変更した挙動に対応する **正本** を更新した
+- [ ] 変更した挙動に対応する **正本を 1 か所** 更新した（写しを増やしていない）
 - [ ] 「実装済 / 未実装 / 後続」の表記がコードと一致する
 - [ ] 出荷判断・受け入れ条件に、未実装の指標を“使える前提”で書いていない
 - [ ] 設計と実装のズレを放置していない

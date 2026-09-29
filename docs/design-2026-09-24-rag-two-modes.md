@@ -6,7 +6,7 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 
 # 設計: RAG の 2 モード化（通常モード＋じっくりモード）
 
-> **状態:** ドラフト（共同確認前）。実装はまだない。決定事項は [decisions-2026-09-24-rag-two-modes.md](./decisions-2026-09-24-rag-two-modes.md)、根拠となる調査は [survey-2026-09-24-agentic-rag.md](./survey-2026-09-24-agentic-rag.md)、KB 側への修正依頼は [kb-change-requests.md](./kb-change-requests.md) を正本とする。本書の数値のうち「1 人 1 日 10 回」以外はすべて **暫定値**（評価後に見直す。SAM パラメータで変更可能にする）。
+> **状態:** 共同確認済み（2026-09-29、mona・itai）。実装はまだない。決定事項は [decisions-2026-09-24-rag-two-modes.md](./decisions-2026-09-24-rag-two-modes.md)、根拠となる調査は [survey-2026-09-24-agentic-rag.md](./survey-2026-09-24-agentic-rag.md)、KB 側への修正依頼は [kb-change-requests.md](./kb-change-requests.md) を正本とする。本書の数値のうち「1 人 1 日 10 回」以外はすべて **暫定値**（評価後に見直す。SAM パラメータで変更可能にする）。
 
 ## 1. 目的
 
@@ -39,7 +39,7 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
  ├─ 通常    → POST /rag/query（既存。rag-{env}、同期）
  └─ じっくり → POST /rag/research（新設。rag-research-api-{env} が受付 → 202）
                │   └─ rag-research-worker-{env} を非同期起動（InvocationType=Event、jobId だけ渡す）
-               ├─ GET /rag/research/{jobId}         進捗・結果（画面が 2 秒間隔で問い合わせ）
+               ├─ GET /rag/research/{jobId}         進捗・結果（画面が 2〜10 秒間隔で問い合わせ。§4.11）
                ├─ GET /rag/research?sessionId=…     そのセッションの実行中ジョブ（画面復帰用）
                └─ GET /rag/research/quota           残り回数
 ```
@@ -64,6 +64,7 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 | 非同期ジョブ（受付 Lambda → ワーカー Lambda の非同期起動＋DynamoDB＋ポーリング） | **第 1 版で採用** | 既存の見出し生成と同じ考え方で作れる。API Gateway・Cognito Authorizer・WAF をそのまま使える。電波が切れても結果を取り戻せる |
 | 同期＋REST API レスポンスストリーミング | 後続 | Python Lambda は Lambda Web Adapter かカスタムランタイムが必要。画面も一括受信からストリーム受信へ作り替えになる。正確さは上がらず、待ち時間の体感だけが良くなる |
 | Step Functions | 後続（必要になったら） | 第 1 版の検索は最大 8 回で、1 つの Lambda 内の並列実行で足りる。段ごとの再試行や長時間処理が必要になったら移す |
+| SQS の待ち行列で順番待ち | 後続（起動待ちの失敗 `DispatchTimeout` が多いとき） | 第 1 版は 1 人 1 日 5 回の想定で、同時実行の枠（ワーカー 5）が埋まることは少ない。頻発したら、受付とワーカーの間に SQS を入れて順番待ちにする |
 | API Gateway のタイムアウト引き上げだけ | 不採用 | 進捗表示・再開・二重投入防止を解決しない |
 
 ## 4. じっくりモード
@@ -78,9 +79,9 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
    - `QUOTA#<userId>#<JST 日付>` の成功回数を 1 増やす: 10 未満のときだけ成功
    - `ATTEMPT#<userId>#<JST 日付>` の起動回数を 1 増やす: 20 未満のときだけ成功（失敗時の返金を悪用した無制限実行を防ぐ）
    - `REQ#<userId>#<clientRequestId>` を `attribute_not_exists(pk)` で作成し、`jobId` を記録（二重送信の防止）
-   - `JOB#<jobId>` を `attribute_not_exists(pk)` で作成。`dispatchDeadline` は作成時刻から例 30 秒後にする
+   - `JOB#<jobId>` を `attribute_not_exists(pk)` で作成。`userMessageId`（利用者メッセージの ID）は受付が先に採番してジョブに書き、質問文そのものはジョブに持たない（§4.6）。`dispatchDeadline` は作成時刻から 120 秒後にする（同時実行の枠が埋まったとき、順番が来るまで待てる時間。§4.3）
 5. トランザクションが `REQ` の条件で失敗したら、同じ `REQ#<userId>#<clientRequestId>` を強整合性で読み、そこから既存 `jobId` を引く。そのジョブを 202 で返し、回数・ロック・ジョブを追加作成しない。同じ `clientRequestId` の同時送信でもこの経路にする。その他の失敗の応答は、実行中 → 409、回数上限 → 429 `{ error: "DailyLimitExceeded", quota }`。
-6. トランザクション後に利用者メッセージを chatlogs へ条件付きで保存（`researchJobId` を付ける）。保存に失敗したら、`queued` かつ未返金のジョブだけを条件付きで `failed` にし、回数を返して `ACTIVE#<userId>` を自分の `jobId` のときだけ解除し、503 を返す。途中停止時は `dispatchDeadline` による受付時・GET 時の回収に任せ、保存済みメッセージは削除しない。
+6. トランザクション後に利用者メッセージを chatlogs へ条件付きで保存（`messageId` はジョブの `userMessageId`、`researchJobId` を付ける）。保存に失敗したら、`queued` かつ未返金のジョブだけを条件付きで `failed` にし、回数を返して `ACTIVE#<userId>` を自分の `jobId` のときだけ解除し、503 を返す。途中停止時は `dispatchDeadline` による受付時・GET 時の回収に任せ、保存済みメッセージは削除しない。
 7. 利用者メッセージ保存後にワーカーを非同期起動（ペイロードは `{ jobId }` だけ）。起動 API が失敗したら、`queued` の条件付きトランザクションで回数・ロックを戻し、ジョブを `failed` にして 503 を返す。受付 Lambda がその前に停止しても、期限超過時に同じ回収を行う。
 8. `202 { jobId, sessionId, userMessageId, status: "queued", quota }` を返す。
 
@@ -88,7 +89,7 @@ JST 日付は `zoneinfo.ZoneInfo("Asia/Tokyo")` で算出する（Lambda の既�
 
 ### 4.2 ワーカー（固定ワークフロー）
 
-**開始時:** イベントの `jobId` だけを信用し、DynamoDB からジョブを読む。`userId` / `sessionId` / 入力はジョブ項目の値を使う。`dispatchDeadline` を過ぎていれば開始しない。ワーカー自身が一意な `leaseToken` を発行し、`status=queued AND dispatchDeadline>=now` の条件付き更新で `queued → running`、`leaseToken`、`runningUntil` を同時に書き、同じトランザクションの `ConditionCheck` で `ACTIVE#<userId>` の `jobId=<jobId>` を確認する。失敗したら（すでに running・完了、期限超過、または自分のロックでない）何もせず終わる。以後のジョブ更新・進捗・chatlogs 保存・完了更新・ロック解除・返金は、すべて `status=running AND leaseToken=<自分のトークン>` の条件を満たす場合だけ行う。
+**開始時:** イベントの `jobId` だけを信用し、DynamoDB からジョブを読む。`userId` / `sessionId` / `userMessageId` / `filters` はジョブ項目の値を使い、質問文は chatlogs の利用者メッセージ（`sessionId` と `userMessageId`）から読む。メッセージが無い、または削除済み（`deleted`）なら開始せず、`failed`（`errorCode: "QuestionUnavailable"`）にして回数を返す。`dispatchDeadline` を過ぎていれば開始しない。ワーカー自身が一意な `leaseToken` を発行し、`status=queued AND dispatchDeadline>=now` の条件付き更新で `queued → running`、`leaseToken`、`runningUntil` を同時に書き、同じトランザクションの `ConditionCheck` で `ACTIVE#<userId>` の `jobId=<jobId>` を確認する。失敗したら（すでに running・完了、期限超過、または自分のロックでない）何もせず終わる。以後のジョブ更新・進捗・chatlogs 保存・完了更新・ロック解除・返金は、すべて `status=running AND leaseToken=<自分のトークン>` の条件を満たす場合だけ行う。
 
 | 段 | 処理 | 設定（暫定） | 失敗時 |
 |---|---|---|---|
@@ -110,12 +111,12 @@ JST 日付は `zoneinfo.ZoneInfo("Asia/Tokyo")` で算出する（Lambda の既�
 
 | 事象 | 対策 |
 |---|---|
-| Lambda の非同期起動の自動再試行（既定で最大 2 回） | ワーカーの非同期起動設定で `MaximumRetryAttempts=0`、`MaximumEventAgeInSeconds` を短く（例 300 秒）。失敗イベントは OnFailure 先（SQS）へ送る |
+| Lambda の非同期起動の自動再試行（既定で最大 2 回） | ワーカーの非同期起動設定で `MaximumRetryAttempts=0`（関数エラーでは再試行しない）、`MaximumEventAgeInSeconds=120`（`dispatchDeadline` と同じ長さ。同時実行の枠が埋まって起動できないイベントは、Lambda がこの時間まで再試行して起動を待つ）。失敗イベントは OnFailure 先（SQS）へ送る |
 | それでも二重に動いた場合 | 状態遷移（`queued → running → completed / failed`）はすべて条件付き更新。assistant メッセージの `messageId` はジョブから決定的に作り（例 `research-<jobId>`）、存在しないときだけ保存する。chatlogs 保存は同じ `leaseToken` 条件の `ConditionCheck` と一緒に行う |
-| `queued` のまま受付 Lambda が停止・起動 API が未受理 | ジョブの `dispatchDeadline`（例 30 秒）を過ぎたものを受付時または GET 時に、`status=queued AND dispatchDeadline<now AND refunded=false` の条件付きトランザクションで `failed`（`errorCode: "DispatchTimeout"`）化・返金・ロック解除を行う。`ACTIVE#<userId>` は jobId が自分のときだけ解除する。第 1 版は OnFailure SQS を運用アラームの対象とするだけで消費処理を持たず、GET 時回収で整合させる。EventBridge 定期回収は後続とする |
+| `queued` のまま起動されない（受付 Lambda の停止、起動 API の未受理、同時実行の枠が埋まったままの順番待ち） | ジョブの `dispatchDeadline`（120 秒）を過ぎたものを受付時または GET 時に、`status=queued AND dispatchDeadline<now AND refunded=false` の条件付きトランザクションで `failed`（`errorCode: "DispatchTimeout"`）化・返金・ロック解除を行う。`ACTIVE#<userId>` は jobId が自分のときだけ解除する。第 1 版は OnFailure SQS を運用アラームの対象とするだけで消費処理を持たず、GET 時回収で整合させる。EventBridge 定期回収は後続とする |
 | ワーカーのタイムアウト・異常終了で `running` のまま残る | `running` に期限（開始＋ジョブ上限時間＋余裕）を持たせる。GET 時の期限切れ処理は、取得した `leaseToken` と `status=running` を条件に `failed`（`errorCode: "Timeout"`）へ更新し、同じ条件付き処理でロックを外し、回数を返す。条件が外れた元ワーカーの後続書き込みはすべて無効になる |
 | 回数の返却 | 返すのは利用者の入力に起因しない失敗（Bedrock の 5xx・タイムアウト・スロットリング、起動失敗、タイムアウト）だけ。ジョブの `refunded` 属性で 1 回だけ返す。起動回数（ATTEMPT）は返さない |
-| ロック | `ACTIVE#<userId>` の有効期限は 300 秒（ジョブ上限 180 秒＋余裕）。完了・失敗時に、`ACTIVE#<userId>` の jobId が自分のときだけ明示的に外す |
+| ロック | `ACTIVE#<userId>` の有効期限は 360 秒（起動待ち 120 秒＋ジョブ上限 180 秒＋余裕 60 秒。起動待ちの間にロックが切れて、同じ利用者の 2 本目が動かないようにする）。完了・失敗時に、`ACTIVE#<userId>` の jobId が自分のときだけ明示的に外す |
 
 assistant 保存から完了処理までは、**assistant メッセージを条件付きで保存（存在しないときだけ）→ ジョブを `completed`（`leaseToken` 一致かつ `status=running` のときだけ）→ ロック解除**の順にする。途中で落ちた場合は、failed 化（GET 回収を含む）の前に決定的な `messageId`（`research-<jobId>`）の assistant メッセージが存在するか確認し、存在すれば同じトークン条件で `completed` に補正してからロックを解除する。回答が保存済みなら `completed` を優先する。
 
@@ -146,9 +147,12 @@ GET の期限切れ処理は、`running` ならジョブの `status`、期限、
 | 検索の観点 | 最大 5 | |
 | Retrieve の回数 | 最大 8 | |
 | 根拠の件数 | 最大 20 件（1 資料 3 件まで、各 2,000 文字） | 長い文脈は 32k〜64k トークン超で劣化の報告 |
+| 起動待ち（順番待ち）の上限 | 120 秒 | ワーカーの同時実行の枠が埋まっているとき、この時間まで待つ。超えたら失敗（`DispatchTimeout`）にして回数を返す。`dispatchDeadline` と `MaximumEventAgeInSeconds` を同じ値にする |
 | ジョブの時間 | 180 秒で打ち切り | ワーカー Lambda のタイムアウト設定は 300 秒（AWS の上限は 900 秒） |
 | 1 ジョブの推定費用 | $0.60 を超えたら以降の段を打ち切る | トークン数×単価で逐次計算 |
 | ワーカーの予約同時実行 | 5 | 組織全体の費用・負荷の上限。受付 Lambda には予約を付けない |
+
+想定利用は 1 人 1 日 5 回（itai、2026-09-29）で、10 回は上限。1 回 約 $0.2〜0.6 の概算だと、毎日使う人 1 人で月 $20〜60。Bedrock の予算アラートは、利用が少ない間の暫定値として月 $100（#106）。本番を `beta` にするとき、想定回数×人数で見直す。
 
 ### 4.6 保存するデータ
 
@@ -156,13 +160,14 @@ GET の期限切れ処理は、`running` ならジョブの `status`、期限、
 
 | 項目 | キー | 主な属性 | TTL |
 |---|---|---|---|
-| ジョブ | `JOB#<jobId>` | `userId`、`sessionId`、`clientRequestId`、`query`、`filters`、`status`、`stage`、`progress`、`createdAt` / `updatedAt` / `dispatchDeadline` / `runningUntil`、`leaseToken`、`errorCode`、`refunded`、`resultMessageId`、`researchTrace` | 60 日 |
+| ジョブ | `JOB#<jobId>` | `userId`、`sessionId`、`userMessageId`、`clientRequestId`、`filters`、`status`、`stage`、`progress`、`createdAt` / `updatedAt` / `dispatchDeadline` / `runningUntil`、`leaseToken`、`errorCode`、`refunded`、`resultMessageId`、`researchTrace` | 60 日 |
 | 二重送信の防止 | `REQ#<userId>#<clientRequestId>` | `jobId` | 1 日 |
 | 成功回数 | `QUOTA#<userId>#<JST 日付>` | `count` | 3 日 |
 | 起動回数 | `ATTEMPT#<userId>#<JST 日付>` | `count` | 3 日 |
 | 同時実行ロック | `ACTIVE#<userId>` | `jobId`、`expiresAt` | 1 日 |
 | セッションの実行中ジョブ | GSI（パーティションキー `userId`、ソートキー `createdAt`） | userId で Query して sessionId で絞る画面復帰用 | 60 日 |
 
+- **質問文はジョブに持たない。** 利用者メッセージ（chatlogs）を `sessionId` と `userMessageId` で参照する。質問文の保存場所・削除・保持期間を chatlogs の 1 か所に保つため（検索トレース #146 の「質問本文はコピーせず、user メッセージを参照する」と同じ方針）。利用者がセッションを削除すると（`deleted`）、順番待ちのジョブは開始されない（§4.2）。
 - `researchTrace` は検索語、選んだ根拠の URI・ページ・score だけを持ち、**根拠の本文は持たない**。
 - 回答は既存の chatlogs に assistant メッセージとして保存する（`responseType: "research"`、`sourceDocuments`、`pageCandidates`、`research`（主張と根拠 ID、資料間の違い、確認できなかった点、統計））。既存の 60 日 TTL と Stream→S3 保全にそのまま乗る。
 
@@ -185,7 +190,7 @@ GET の期限切れ処理は、`running` ならジョブの `status`、期限、
 | メソッド・パス | 要点 |
 |---|---|
 | `POST /rag/research` | body `{ query, clientRequestId, sessionId?, filters? }`。`202 { jobId, sessionId, userMessageId, status, quota }`。聞き返し時は `200 { responseType: "clarify", … }`（回数を消費しない）。実行中 409、上限 429、起動失敗 503 |
-| `GET /rag/research/{jobId}` | `{ jobId, status, stage, progress: { step, totalSteps, searchesDone, searchesTotal }, message?, error? }`。完了時の `message` はチャット履歴と同じ形 |
+| `GET /rag/research/{jobId}` | `{ jobId, status, stage, progress: { step, totalSteps, searchesDone, searchesTotal }, pollAfterMs, message?, error? }`。完了時の `message` はチャット履歴と同じ形。`pollAfterMs` は次の確認までの目安（ミリ秒）で、サーバーが混雑時に延ばせるようにする |
 | `GET /rag/research?sessionId=…` | Cognito の userId で `userId-createdAt` GSI を Query し、`sessionId` で絞った実行中ジョブ（画面復帰用）。他人のセッションは結果に出さず 404 |
 | `GET /rag/research/quota` | `{ limit, used, remaining, resetsAt }` |
 
@@ -224,9 +229,26 @@ GET の期限切れ処理は、`running` ならジョブの `status`、期限、
 - じっくりを選ぶと説明を表示:「複数の観点で検索し、資料間の違いを確認します。1〜3 分かかります。1 日 10 回まで」。
 - 通常モードの回答で **根拠が弱い・見つからない・👎 のあと** に「じっくり調べる」ボタンを出す（同じ質問で起動）。自動では切り替えない。
 - 実行中は進捗カード:「観点を整理中 → 検索中 3/6 → 根拠を選定中 → まとめ中 → 照合中」。
+- 開始待ち（`queued`）の間は「受付済みです。混み合っているときは、順番が来るまで最大 2 分お待ちください」と表示する（20 秒を過ぎたら混雑の説明を足す）。120 秒で開始できず失敗（`DispatchTimeout`）したときは「混み合っていて開始できませんでした。回数は消費していません。しばらくしてからもう一度お試しください」と表示し、「通常モードで質問する」ボタンを出す。
 - ページを離れて戻ったときは、`GET /rag/research?sessionId=…` で実行中ジョブを見つけて進捗表示を再開する。完了していればチャット履歴に回答が入っている。
 - 送信ボタンは実行中は無効。`clientRequestId` は送信ごとに作り、通信エラーで再送するときは同じ値を使う。
 - 結果は「じっくり調査」の印つきカードで §4.4 の形に表示。既存の 👍👎 と理由を使う。
+
+#### 進捗の確認間隔
+
+> 最終検証: 2026-09-29 — WAF の利用者レート制限（`security-waf-template.yaml`）、API Gateway のステージ上限（`phase2-template.yaml`）、既存の画面に定期確認の処理がないこと（`frontend/src`）を確認
+
+2 秒ごとに確認し続けると、1 回のジョブ（3 分）で約 90 回、2 つのタブで 180 回になる。次の 2 つの上限に近づくため、間隔を延ばす。
+
+- WAF の利用者レート制限: 同じトークンで 5 分 300 回まで。rag・chat・auth などの API の合計で数え、超えると質問や履歴の表示も 429 で止まる。
+- RAG API のステージ上限: 既定で 1 秒 5 回（バースト 20）で、全利用者の合計。2 秒間隔だと 10 人が同時に待つだけで使い切る。
+
+確認の規則（第 1 版）:
+
+- 間隔は、開始から 30 秒は 2 秒、90 秒までは 5 秒、以降は 10 秒（3 分で約 36 回）。応答の `pollAfterMs` があればそれを優先する。
+- タブが非表示の間は確認を止め、表示に戻ったらすぐ 1 回確認して再開する（`document.visibilityState`）。
+- 429 やネットワークエラーのときは間隔を倍にし（上限 30 秒）、429 のときは「アクセスが多いため、しばらくお待ちください」と表示する。
+- 確認のタイマーはジョブごとに 1 本だけ持つ（画面の再描画で二重に動かさない）。
 
 #### 開発中の表示（`beta` のとき）
 
@@ -285,15 +307,17 @@ GET の期限切れ処理は、`running` ならジョブの `status`、期限、
 | 3 | 評価セットで通常 / じっくりを比較し、問題がなければ `on`（開発中表示を外す）にする。通常モードの ON 項目とじっくりモードの暫定値も見直す | 記録＋設定変更 |
 | 4 | 必要なら: ストリーミング、前後ページの取り直し、Managed KB の比較、切り替えの自動提案 | 都度 |
 
-### 当面の優先順位（mona 決定 2026-09-25）
+### 当面の優先順位（mona 決定 2026-09-25。3・5 は 2026-09-29 に mona・itai 合意で更新）
 
 1. 初期評価セット 20〜30 問を作る（AI が候補を出し、mona・itai が正解を確認）。
 2. 検索トレースを最小限実装する。
-3. KB 修正依頼を開始する（KB-01・02・12。現況を再確認してから）。
+3. KB 台帳（[kb-change-requests.md](./kb-change-requests.md)）に、失敗一覧や評価セットで見つけた実例の記録を始める（KB-01・02・12 は先に現況を再確認）。所有部門へは、実例を貯めてからまとめて一度に伝える（D4）。
 4. dev 環境で比較し、その結果を見て通常モードの改善を ON にするか判断する。
-5. じっくりモードの本実装は、評価で必要性を確認してから着手する。
+5. じっくりモードは、評価を待たず dev の `beta` で試行実装する（D8）。効果が見られなければ `off` にして止める。
 
 理由: 利用者の資料到達・疑問解決の改善を測れる状態を先に作るため。
+
+試行の進め方（mona・itai 合意 2026-09-29）: じっくりモードは使ってみないと分からない点（待ち時間、回答の質、費用）が多く、機能フラグ（D7）で戻せるため、評価と並行して dev の `beta` で試す。有用でなければ `off` にし、必要なら削除する（`research-jobs` テーブル、Lambda 2 本、API の経路 4 本、画面の切り替え）。本番は `off` のままにする。
 
 ## 9. 実装で production 文書を変える予定（各実装 PR で事前確認する）
 
@@ -304,7 +328,7 @@ GET の期限切れ処理は、`running` ならジョブの `status`、期限、
 ## 10. この文書で決まること / 決まらないこと
 
 **決まること（共同確認の対象）**
-- 2 モード構成、じっくりモードの処理・画面の方針、非同期ジョブ方式（受付とワーカーの分離、二重実行・取り残し対策を含む）、通常モードの改善を既定 OFF で入れる方針、KB プロファイルで KB を差し替えやすくする方針、開発中（`beta`）も利用者を限定せず全員が使える方針
+- 2 モード構成、じっくりモードの処理・画面の方針、非同期ジョブ方式（受付とワーカーの分離、二重実行・取り残し対策を含む）、通常モードの改善を既定 OFF で入れる方針、KB プロファイルで KB を差し替えやすくする方針、開発中（`beta`）も利用者を限定せず全員が使える方針、評価を待たずに dev の `beta` で試行し、効果がなければ止める進め方（D8）
 
 **決まらないこと（後で決める）**
 - 回数以外の上限の最終値（評価後）、通常モードで ON にする項目（評価後）、本番を `beta` にする時期、KB を自前にするか・Managed KB に移るか（所有部門との調整と比較試験の後）、ストリーミング化の時期

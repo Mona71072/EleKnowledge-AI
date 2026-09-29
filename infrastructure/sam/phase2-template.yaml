@@ -99,6 +99,44 @@ Parameters:
       Knowledge Base retrieve search type. HYBRID (vector + keyword) improves exact-term
       matching (model codes, error codes). SEMANTIC is vector-only. Wired to RAG_SEARCH_TYPE.
 
+  KbProfileJson:
+    Type: String
+    Default: ''
+    Description: Optional JSON overrides for the Knowledge Base metadata profile
+
+  RerankModelArn:
+    Type: String
+    Default: ''
+    Description: Optional Bedrock reranker model ARN. Empty disables post-retrieval reranking
+
+  RerankMaxCandidates:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    Description: Maximum number of text chunks sent to the optional reranker
+
+  QueryRewriteModelId:
+    Type: String
+    Default: ''
+    Description: Optional Bedrock model ID for conversation-aware query rewriting
+
+  GenerationThinking:
+    Type: String
+    Default: disabled
+    AllowedValues:
+      - disabled
+      - adaptive
+    Description: Thinking mode for normal responses on supported new API models
+
+  GenerationEffort:
+    Type: String
+    Default: low
+    AllowedValues:
+      - low
+      - medium
+      - high
+    Description: Adaptive thinking effort for normal responses on supported new API models
+
   RagLambdaTimeout:
     Type: Number
     Default: 300
@@ -210,6 +248,9 @@ Parameters:
       environment and the new frontend is live on Amplify; from then on raw
       s3:// URIs are stored and resolved per click via GET /rag/document.
 
+Conditions:
+  HasRerankModelArn: !Not [!Equals [!Ref RerankModelArn, '']]
+
 Globals:
   Function:
     Timeout: 300
@@ -285,6 +326,21 @@ Resources:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*
                   - !Sub arn:aws:bedrock:*::foundation-model/*
+        - !If
+          - HasRerankModelArn
+          - PolicyName: RerankAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - bedrock:Rerank
+                  Resource: '*'
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !Ref RerankModelArn
+          - !Ref AWS::NoValue
         - PolicyName: InvokeSelfForSessionTitle
           PolicyDocument:
             Version: '2012-10-17'
@@ -358,6 +414,12 @@ Resources:
           SESSION_TITLE_LLM: !Ref SessionTitleLlm
           BEDROCK_REQUEST_STYLE: !Ref BedrockRequestStyle
           RAG_SEARCH_TYPE: !Ref RagSearchType
+          KB_PROFILE_JSON: !Ref KbProfileJson
+          RERANK_MODEL_ARN: !Ref RerankModelArn
+          RERANK_MAX_CANDIDATES: !Ref RerankMaxCandidates
+          QUERY_REWRITE_MODEL_ID: !Ref QueryRewriteModelId
+          GENERATION_THINKING: !Ref GenerationThinking
+          GENERATION_EFFORT: !Ref GenerationEffort
           KB_SOURCE_BUCKET: !Ref KnowledgeBaseDataSourceBucket
           KB_SOURCE_PREFIX: !Ref KnowledgeBaseSourcePrefix
           CHATLOGS_TABLE:
