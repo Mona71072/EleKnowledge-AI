@@ -20,7 +20,7 @@ import {
   isVisibleNow,
 } from '@/lib/announcements';
 import { ANNOUNCEMENT_TEMPLATES, getTemplate, fillTemplate, templatePlaceholders } from '@/lib/announcement-templates.mjs';
-import { resolveAnnouncementPublishFields } from '@/lib/announcement-publish.mjs';
+import { canEndAnnouncementNow, resolveAnnouncementPublishFields } from '@/lib/announcement-publish.mjs';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 
@@ -330,9 +330,20 @@ export default function AdminAnnouncementsPage() {
                     <Button variant="outline" size="sm" onClick={() => startEdit(a)}>
                       編集
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => endNow(a)}>
-                      表示終了
-                    </Button>
+                    {canEndAnnouncementNow(a, now.getTime()) ? (
+                      <Button variant="outline" size="sm" onClick={() => endNow(a)}>
+                        表示終了
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        title="開始前のメンテナンスは表示終了できません。取りやめる場合は削除してください"
+                        onClick={() => setConfirmDelete(a)}
+                      >
+                        削除（開始前）
+                      </Button>
+                    )}
                   </span>
                 </div>
               );
@@ -639,7 +650,10 @@ export default function AdminAnnouncementsPage() {
           <div className="relative w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200 p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-gray-900 mb-2">お知らせを削除しますか？</h3>
             <p className="text-sm text-gray-600 mb-6">
-              「{confirmDelete.title}」を削除します。この操作は取り消せません。表示だけ止めたい場合は「表示終了」を使ってください。
+              「{confirmDelete.title}」を削除します。この操作は取り消せません。
+              {canEndAnnouncementNow(confirmDelete)
+                ? '表示だけ止めたい場合は「表示終了」を使ってください。'
+                : '開始前のメンテナンスは表示終了できないため、取りやめる場合は削除します。'}
             </p>
             <div className="flex justify-end gap-3">
               <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
