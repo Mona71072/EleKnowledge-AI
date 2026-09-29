@@ -223,9 +223,9 @@ SLO は **p90 20 s** と決めた（Q1、itai 2026-09-10）。`AGENTS.md` の「
 
 4xx の一次情報になるはずのものが 3 つとも欠けている。
 
-1. **アクセスログが無い**（G1）。5 ステージすべて未設定で、受け皿のロググループは 0 バイト。誰が・どのパスを・どの結果で叩いたかの 1 行が存在しない
-2. **実行ログには内訳が出ない**。`loggingLevel=INFO` の実行ログは「Method completed with status: 403」は残すが、送信元 IP と失敗種別（WAF ブロック／認可拒否／トークン失効）を 1 行で読めない。△ WAF がブロックした要求は実行ログ自体に残らず、アクセスログにだけ `wafResponseCode` 付きで残る
-3. **Lambda のエラー行にリクエスト ID が無い**。`rag-function` の 500 経路は `ClientError` を握って 500 を返すだけで、API Gateway のリクエスト ID・失敗した段階（retrieve / generate / save）・`messageId` を出さない。アクセスログがあっても Lambda ログと突き合わせられない
+1. **アクセスログが無い**（G1）。5 ステージすべて未設定で、受け皿のロググループは 0 バイト。どのリソース（`resourcePath`）でどの結果になったかを示す 1 行が存在しない
+2. **実行ログには内訳が出ない**。`loggingLevel=INFO` の実行ログは「Method completed with status: 403」は残すが、失敗種別（WAF ブロック／認可拒否／トークン失効）を 1 行で読めない。△ WAF がブロックした要求は実行ログ自体に残らず、アクセスログにだけ `wafResponseCode` 付きで残る
+3. **Lambda のエラー行にリクエスト ID が無い**。`rag-function` の 500 経路は `ClientError` を握って 500 を返すだけで、API Gateway のリクエスト ID・失敗した段階（retrieve / generate / save）を出さない。アクセスログがあっても Lambda ログと突き合わせられない
 
 4xx アラームの閾値は 5 分 30 件なので 5 件は鳴っていない。それでも「後から追える」状態にしておくのが役割 3 の要件で、それにはまず記録が要る。
 
@@ -237,7 +237,7 @@ SLO は **p90 20 s** と決めた（Q1、itai 2026-09-10）。`AGENTS.md` の「
 |---|---|---|---|---|
 | Amplify（画面配信） | 画面が開かない | `AWS/AmplifyHosting 5xxErrors / Requests`（G3、未参照。**アラームも無い**） | Amplify コンソール | **Amplify 5xx アラーム**（P1）、日次行に `amplifyRequests / amplify5xx` |
 | WAF（IP 許可リスト） | 403 | `AWS/WAFV2 BlockedRequests` | — | **アクセスログ `wafResponseCode`** |
-| API Gateway 認可 | 401 / 403 | `4XXError`（内訳なし） | 実行ログ | **アクセスログ `error.responseType`** |
+| API Gateway 認可 | 401 / 403 | `4XXError`（内訳なし） | 実行ログ | **アクセスログ `errorType`** |
 | Lambda rag / chat | 500 | `5XXError`、メトリクスフィルタのエラー行 | 保存クエリ `rag-error-lines` | **構造化エラー行（`apiRequestId`・段階・エラーコード）** |
 | Knowledge Base / OpenSearch | retrieve 失敗・遅延 | `print("Knowledge Base query error")` のみ | 同上 | トレースの `latencyMs.retrieve`（別設計） |
 | Bedrock | スロットル・遅延・5xx | `AWS/Bedrock InvocationThrottles / InvocationServerErrors / InvocationLatency`（G2、未参照） | CloudWatch メトリクス（ModelId） | 日次行に `bedrockThrottles / bedrockServerErrors`。切り分け時は直接見る |
@@ -248,24 +248,24 @@ SLO は **p90 20 s** と決めた（Q1、itai 2026-09-10）。`AGENTS.md` の「
 
 | # | 何を | どこに | 何が分かるようになるか | 作業量 | 優先 |
 |---|---|---|---|---|---|
-| I1 | **API Gateway アクセスログ**（JSON 1 行/リクエスト）を 4 ステージ（rag / chat / auth / app）に設定。項目: リクエスト ID、時刻、メソッド、パス、ステータス、応答時間、統合時間、送信元 IP、UA、`error.responseType`、`error.message`、`wafResponseCode`、`authorizer.claims.sub`（△ 変数名は公式の `$context` 一覧で確認） | 既存の `/aws/apigateway/*-api-dev`（保持 90 日） | 4xx の内訳（WAF / 認可 / 失効 / スロットル）、利用者体感レイテンシ、利用者別の利用、**引用文書を開いた回数**（`GET /rag/document` の件数） | 小（`AccessLogSetting` を Stage に足すだけ。既存ログ群へ流す） | **P0** |
-| I2 | **rag / chat の 1 リクエスト 1 行の構造化ログ**（トレース設計 §4-5 の行に `apiRequestId` = `event.requestContext.requestId` を追加）と、**500 経路の構造化エラー行**（`apiRequestId`, `stage: retrieve / generate / save`, `errorCode`, `messageId`）。あわせて 500 応答本文から AWS のエラーメッセージを外す（現在は `ClientError` の本文をそのまま返している） | Lambda ログ | アクセスログ ↔ Lambda ログ ↔ chatlogs を ID で結べる。アラーム本文だけで「どの段階で何のエラーか」が読める | 小 | **P0** |
+| I1 | **API Gateway アクセスログ**（JSON 1 行/リクエスト）を 4 ステージ（rag / chat / auth / app）に設定。項目: リクエスト ID、時刻、メソッド、`resourcePath`、ステータス、応答時間、統合時間、`errorType`、`wafResponseCode` など。送信元 IP・User-Agent・Cognito `sub`・生の `path`・エラー本文（`$context.error.message`。削除は #139）は記録しない | 既存の `/aws/apigateway/*-api-dev`（保持 90 日） | 4xx の内訳（WAF / 認可 / 失効 / スロットル）、利用者体感レイテンシ、**引用文書を開いた回数**（`GET /rag/document` の件数） | 小（`AccessLogSetting` を Stage に足すだけ。既存ログ群へ流す） | **P0** |
+| I2 | **rag / chat の 1 リクエスト 1 行の構造化ログ**（`apiRequestId`、`responseType`、件数・スコア・トークン数・レイテンシ・モデル ID）と、**500 経路の構造化エラー行**（`apiRequestId`, `stage: retrieve / generate / save`, `errorCode`）。CloudWatch に出す項目は契約（`rag-observability-contract.md`）に従い、`sessionId` / `messageId` は出さない。相関は API Gateway の `requestId` とし、RAG ログでは `apiRequestId` という名前で出す（契約の `requestId` に相当）。あわせて 500 応答本文から AWS のエラーメッセージを外す（現在は `ClientError` の本文をそのまま返している） | Lambda ログ | アクセスログと Lambda ログを `apiRequestId` で照合し、アラーム本文だけで「どの段階で何のエラーか」が読める | 小 | **P0** |
 | I3 | **引用文書を開いた回数を回答の行に加算**。フロントは `/doc?uri=…` に `&s=<sessionId>&m=<messageId>` を足し、`GET /rag/document?uri=&s=&m=` が所有者を確認したうえで該当の assistant 行に `documentOpens` を加算し `lastOpenedAt` を記録する。あわせて `document_open` の構造化行（本文なし）を出す | chatlogs（`documentOpens` 属性）+ Lambda ログ | ファネル F4「資料を開いた」。日次集計は chatlogs の走査で数えるので EMF は要らない（実装時に EMF 案から変更。後付けのクリックも D-1〜D-3 の再集計で回答日の行に乗る） | 小（Lambda に 1 関数、フロントのリンク生成 1 か所、aggregator に集計 1 項目） | **P0** |
 | I4 | **アラーム遷移の保存**（`alarmTransitions: [{alarm, state, at}]`）と **P1 遷移回数**（metrics-v2 §5 の `incidents` を拡張） | 日次行 | 「出来事」の一覧 | 小（metrics-v2 PR-2 に含める） | P1 |
 | I5 | **AlarmDescription にランブック節と保存クエリ名を入れる**（Cognito ルールは既にやっている。28 本に揃える） | monitoring-template | 通知メールだけで「最初に見る場所」に着ける | 小 | P1 |
-| I6 | **アクセスログ用の保存クエリ**を監視スタックに追加: `api-4xx-breakdown`（`stats count() by error.responseType, status, resourcePath`）、`request-by-id`（ID で 3 ロググループ横断）、`slow-requests`（`responseLatency` 降順） | monitoring-template | 切り分けの手順がクエリ名で固定される | 小 | P1 |
+| I6 | **アクセスログ用の保存クエリ**を監視スタックに追加: `api-4xx-breakdown`（`stats count() by errorType, status, resourcePath`）、`request-by-id`（ID で 3 ロググループ横断）、`slow-requests`（`responseLatency` 降順） | monitoring-template | 切り分けの手順がクエリ名で固定される | 小 | P1 |
 | I7 | **デプロイ・設定変更のマーカー**（CloudTrail `LookupEvents` で `UpdateStack` / `UpdateFunctionCode*` / `UpdateFunctionConfiguration*` を EleKnowledge のリソース名で絞る） | 日次行 `changes` | 「出来事」に変更が並び、障害と変更の前後関係が画面で分かる | 中（IAM `cloudtrail:LookupEvents`、名前での絞り込み、2 TPS 制限） | P2 |
 
-I1 の送信元 IP と `sub` は AGENTS.md「ログと秘匿」の禁止対象（トークン・個人情報・引用全文）には当たらないと判断したが、確認事項として §8 Q4 に残す。
+利用者単位の集計が必要なら、CloudWatch ではなく認可済み DynamoDB 側で行う。
 
 ### 4.4 ダッシュボードからの導線
 
 1. アラームのメールが来る → 件名でアラーム名と P1/P2 が分かる（現状どおり）
 2. `/admin/dashboard` を開く → 「いま」に現在の ALARM、「出来事」に遷移時刻が並ぶ
 3. 行の「→ ログ」で Logs Insights を該当ロググループ・前後 15 分で開く。4xx なら `api-4xx-breakdown`、5xx なら `rag-error-lines`、遅延なら `slow-requests`
-4. `apiRequestId` を `request-by-id` に貼れば、アクセスログ・Lambda ログ・（トレース実装後は）`messageId` 経由で chatlogs まで辿れる
+4. `apiRequestId` を `request-by-id` に貼れば、アクセスログと Lambda ログを照合できる。利用者単位の記録は認可済み DynamoDB 側で確認する
 
-**○ 任意の拡張「行内の内訳」**: 出来事の行を開くと、read API がその時間帯（前後 15 分）について Logs Insights の `StartQuery` を 1 本流し（5〜10 秒）、結果の**集計だけ**を行内に出す。4xx なら `error.responseType × status × path`、5xx なら `stage × errorCode`、いずれも影響した `sub` の数と `apiRequestId` の上位 5 件。ログ本文は出さず、本文が要るときは同じ条件で Logs Insights を開く。アプリ内ログビューアを作らずに「どこで何が」の 8 割を画面で済ませられる。費用は走査量課金（△ 1 GB あたり数セント）で、この規模では無視できる。I1・I2 が入った後に足す。
+**○ 任意の拡張「行内の内訳」**: 出来事の行を開くと、read API がその時間帯（前後 15 分）について Logs Insights の `StartQuery` を 1 本流し（5〜10 秒）、結果の**集計だけ**を行内に出す。4xx なら `errorType × status × resourcePath`、5xx なら `stage × errorCode`、いずれも `apiRequestId` の上位 5 件。ログ本文は出さず、本文が要るときは同じ条件で Logs Insights を開く。アプリ内ログビューアを作らずに「どこで何が」の 8 割を画面で済ませられる。費用は走査量課金（△ 1 GB あたり数セント）で、この規模では無視できる。I1・I2 が入った後に足す。
 
 ランブック §2「最初に見る場所」は、I1〜I6 が入った時点で上記に書き換える。
 
@@ -577,7 +577,7 @@ export interface CostResponse {
 | Q1 | SLO「p95 < 3 s」と Sonnet 5 の実測が両立しない | **p90 20 s を妥協ライン（SLO）とする** | §2.8 の閾値を 20 / 25 / 29 s に改めた。`AGENTS.md` の SLO は別 PR（AI ルール同期の手順）で「RAG 応答 p90 < 20 s」に改定する |
 | Q2 | WAF・Amplify は EleKnowledge 専用か | **Amplify は専用。WAF は他システムも使うが Web ACL は別（共用ではない）** | Amplify は「実額・確定」へ。WAF は Cost Explorer の使用タイプが Web ACL 単位に分かれないため、タグ有効化までは「推定（構成 × 料金表）」、有効化後に「実額・確定」（§5.2 / §5.3 C10） |
 | Q3 | OpenSearch の OCU を追えるか。EleKnowledge 由来か区別できるか | **取れるなら取りたい。由来の区別ができれば最高** | §5.9 を追加。`AWS/AOSS` の OCU と検索リクエスト数を日次行に取り、EleKnowledge 自身の retrieve 回数（I2）との比で「リクエスト按分」を推定として出す。由来の区別は EleKnowledge 側の回数でしかできない |
-| Q4 | アクセスログに IP と `sub` を残してよいか | **残してよい** | I1 のまま |
+| Q4 | アクセスログに IP と `sub` を残してよいか | **残さない** | I1 は `requestId`、`status`、`resourcePath`、`latency`、`errorType` などで相関・集計する。利用者単位の集計が必要なら、CloudWatch ではなく認可済み DynamoDB 側で行う。2026-09-25 に PR #133 のログ契約へ合わせて変更 |
 | Q5 | `ce:GetCostAndUsage` を Lambda から呼べるかの確認方法 | （質問） | §8.1 |
 | Q6 | 他システムの Sonnet 5 利用の事前連絡 | **打ち合わせで聞く** | C5 の自動検知は前提どおり残す。連絡が取れれば降格時の説明に使う |
 | Q7 | metrics-dev の TTL | **無効化する（またはアーカイブ）** | **TTL 無効化で確定**。**訂正（2026-09-11）**: `origin/develop` のテンプレートは PR #93 で既に `Enabled: false` になっていた。有効に見えたのは設計時の作業ブランチが develop より古かったため。実環境で有効のままなのは未デプロイだから。実装 PR-1 で `METRIC_TTL_DAYS` と `ttl` 属性の書き込みを削除した。テーブルは KB 規模で PITR 有効のため、別途アーカイブは要らない（別立て A5） |
