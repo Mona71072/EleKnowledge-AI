@@ -187,10 +187,12 @@ GET の期限切れ処理は、`running` ならジョブの `status`、期限、
 
 ### 4.9 API（案。実装 PR で `docs/api/rag-research.md` として正本化する）
 
+> 最終検証: 2026-09-29 — `GET /rag/research/{jobId}` の `pollAfterMs` を §4.11 の確認の規則・`frontend/src/lib/research-polling.mjs`（#148）と照合
+
 | メソッド・パス | 要点 |
 |---|---|
 | `POST /rag/research` | body `{ query, clientRequestId, sessionId?, filters? }`。`202 { jobId, sessionId, userMessageId, status, quota }`。聞き返し時は `200 { responseType: "clarify", … }`（回数を消費しない）。実行中 409、上限 429、起動失敗 503 |
-| `GET /rag/research/{jobId}` | `{ jobId, status, stage, progress: { step, totalSteps, searchesDone, searchesTotal }, pollAfterMs, message?, error? }`。完了時の `message` はチャット履歴と同じ形。`pollAfterMs` は次の確認までの目安（ミリ秒）で、サーバーが混雑時に延ばせるようにする |
+| `GET /rag/research/{jobId}` | `{ jobId, status, stage, progress: { step, totalSteps, searchesDone, searchesTotal }, pollAfterMs?, message?, error? }`。完了時の `message` はチャット履歴と同じ形。`pollAfterMs` は次の確認までの目安（ミリ秒）で、開始待ち（`queued`）は 5000、最後の段（照合中）は 3000、それ以外は省略する（省略時は画面の規則で決める。§4.11） |
 | `GET /rag/research?sessionId=…` | Cognito の userId で `userId-createdAt` GSI を Query し、`sessionId` で絞った実行中ジョブ（画面復帰用）。他人のセッションは結果に出さず 404 |
 | `GET /rag/research/quota` | `{ limit, used, remaining, resetsAt }` |
 
@@ -243,12 +245,16 @@ GET の期限切れ処理は、`running` ならジョブの `status`、期限、
 - WAF の利用者レート制限: 同じトークンで 5 分 300 回まで。rag・chat・auth などの API の合計で数え、超えると質問や履歴の表示も 429 で止まる。
 - RAG API のステージ上限: 既定で 1 秒 5 回（バースト 20）で、全利用者の合計。2 秒間隔だと 10 人が同時に待つだけで使い切る。
 
-確認の規則（第 1 版）:
+確認の規則（第 1 版。実装は `frontend/src/lib/research-polling.mjs`。画面・API への接続は、じっくりモードの実装 PR で行う）:
 
-- 間隔は、開始から 30 秒は 2 秒、90 秒までは 5 秒、以降は 10 秒（3 分で約 36 回）。応答の `pollAfterMs` があればそれを優先する。
+- 間隔は、開始から 30 秒は 2 秒、90 秒までは 5 秒、以降は 10 秒（3 分で 36 回）。応答の `pollAfterMs` があれば、それを 1〜30 秒に丸めて優先する。
 - タブが非表示の間は確認を止め、表示に戻ったらすぐ 1 回確認して再開する（`document.visibilityState`）。
-- 429 やネットワークエラーのときは間隔を倍にし（上限 30 秒）、429 のときは「アクセスが多いため、しばらくお待ちください」と表示する。
+- 429 やネットワークエラーのときは、連続した回数ぶん間隔を倍にし（上限 30 秒、成功すれば元に戻す）、429 のときは「アクセスが多いため、しばらくお待ちください」と表示する。
 - 確認のタイマーはジョブごとに 1 本だけ持つ（画面の再描画で二重に動かさない）。
+- 送信から 6 分（起動待ち 120 秒＋実行 180 秒＋余裕。同時実行ロックの 360 秒と同じ）で確認を打ち切り、「結果を確認できませんでした。画面を再読み込みしてください。回答はチャット履歴に保存されている場合があります」と表示する。
+- 複数のタブで確認を 1 本にまとめることはしない。2 つのタブでも 5 分あたり約 96 回で、WAF の 300 回に収まる。実測で問題が出たら見直す。
+
+実装のテストで確認する項目: 3 分で 36 回、6 分で打ち切り（53 回で停止）、`pollAfterMs` の優先と丸め、429・通信エラーでの倍化と回復、非表示で停止・復帰で即時確認、同じジョブは 1 本、完了・失敗で停止、確認中の停止・非表示で次を予約しない。
 
 #### 開発中の表示（`beta` のとき）
 
