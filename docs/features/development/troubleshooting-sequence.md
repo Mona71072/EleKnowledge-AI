@@ -1,11 +1,15 @@
 ---
-status: production
+status: development
 phase: 3
 last-verified: 2026-05-26
-related-code: lambda/troubleshooting/, frontend/src/app/troubleshooting/, infrastructure/cdk/stacks/troubleshooting_stack.py
+related-code: lambda/troubleshooting/, frontend/src/app/troubleshooting/, infrastructure/sam/phase3-template.yaml
 ---
 
 # トラブルシュートエージェント 処理シーケンス
+
+> **状態:** Phase 3 の開発・参照資料。2026-09-30 に AWS stack / API / Lambda / table の存在は確認したが、利用者向け提供と現在の全フローは未確認。過去の PoC E2E 記録はその確認時点の結果であり、現在の提供状態を示さない。
+
+> 最終検証: 2026-09-30 — AWS CloudFormation による Phase 3 リソース存在のみ。シーケンスの全機能・利用者向け E2E は未検証。
 
 ## 概要
 

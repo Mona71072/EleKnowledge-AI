@@ -1,104 +1,53 @@
 ---
-status: production
-last-verified: 2026-04-24
-related-code: infrastructure/, frontend/, lambda/
+status: draft
+last-verified: 2026-09-30
+related-code: infrastructure/sam/, frontend/src/, lambda/
 ---
 
-# アーキテクチャ概要（システム全体図）
+# アーキテクチャ概要
 
-> 出典: 旧 [spec.md](../../spec.md) §2.1（PR #10 で本ファイルに切り出し）
+> 最終検証: 2026-09-30 — リポジトリの SAM / frontend / Lambda と、同日確認した開発環境の CloudFormation 構成を照合。production 環境と Phase 3 の利用者向け E2E は未確認のため、本書は draft とする。
 
-## システム全体図
+## 開発環境の構成
 
-> 最終検証: 2026-09-02 — AWS 実査（図中の VPC 層のみ。他の層は 2026-04-24 時点のまま）
+```text
+利用者
+  │ HTTPS
+  ▼
+AWS Amplify Hosting (Next.js App Router)
+  │ Cognito User Pool の JWT
+  ▼
+API Gateway REST API
+  ├─ Cognito 認証・RAG・チャット・管理 API
+  ├─ Regional WAF Web ACL（API の IP / rate 制御）
+  └─ Lambda (Python 3.13)
+       ├─ 認証・ユーザー管理 ───────────────► Cognito / DynamoDB
+       ├─ RAG ─────────────────────────────► Bedrock Knowledge Base / Bedrock model
+       ├─ チャット・履歴 ───────────────────► DynamoDB chatlogs
+       ├─ お知らせ・日次 KPI ───────────────► DynamoDB / EventBridge
+       └─ Phase 3 troubleshooting ─────────► Bedrock Agent / DynamoDB
+            (AWS リソースを確認。利用者向け E2E は未確認)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     社内ネットワーク                          │
-│                   (IP: x.x.x.0/24)                       │
-└─────────────────┬───────────────────────────────────────────┘
-                  │ HTTPS
-                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│               AWS Amplify Hosting                            │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │              AWS WAF (統合)                           │   │
-│  │  • IP制限: x.x.x.x/32 のみ許可                   │   │
-│  │  • レート制限: 2000 req/5min                         │   │
-│  │  • マネージドルール: SQL Injection 防御               │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │           Next.js Application                         │   │
-│  │  • ホーム画面                                         │   │
-│  │  • RAGチャット画面                                    │   │
-│  │  • トラブルシューティング画面                         │   │
-│  │  • 品質書類チェック画面                               │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────┬───────────────────────────────────────────┘
-                  │ HTTPS + Cognito Token
-                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Amazon API Gateway (3つのAPI)                   │
-│  ┌──────────────┬──────────────┬──────────────────────┐     │
-│  │ 認証API      │ RAG処理API   │ チャット管理API      │     │
-│  └──────────────┴──────────────┴──────────────────────┘     │
-│  • Cognito認証統合                                           │
-│  • Gateway Response設定                                      │
-│  • レート制限 (Throttling)                                   │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-┌─────────────────▼───────────────────────────────────────────┐
-│                  AWS Lambda Functions                       │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ 認証Lambda群                                         │    │
-│  │  • login-function                                   │    │
-│  │  • signup-function                                  │    │
-│  │  • verify-function                                  │    │
-│  └─────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ RAG処理Lambda                                        │    │
-│  │  • rag-function                                     │    │
-│  │  • KB検索 + Claude 4.5Haiku応答生成                  │    │
-│  └─────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ チャット管理Lambda                                   │    │
-│  │  • chat-management-function                         │    │
-│  └─────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ 新機能Lambda (Phase 3で追加)                         │    │
-│  │  • troubleshooting-lambda                           │    │
-│  │  • quality-check-lambda                             │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-┌─────────────────▼───────────────────────────────────────────┐
-│  【未実装・将来構想】VPC: eleknowledge-vpc (x.x.x.0/24)      │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ Private Subnets                                     │    │
-│  │  • eleknowledge-private-1a (x.x.x.0/26)        │    │
-│  │  • eleknowledge-private-1b (x.x.x.64/26)       │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-┌─────────────────▼───────────────────────────────────────────┐
-│                    AWS Services                             │
-│  ┌──────────┬──────────┬──────────┬──────────┬─────────┐    │
-│  │ Cognito  │ DynamoDB │ Bedrock  │ S3       │ Secrets │    │
-│  │ User Pool│ Tables   │ KB+Agent │ Storage  │ Manager │    │
-│  └──────────┴──────────┴──────────┴──────────┴─────────┘    │
-└─────────────────────────────────────────────────────────────┘
+チャット履歴: DynamoDB Streams ─► archive Lambda ─► S3 ─► Glue / Athena
+運用監視: CloudWatch Logs / metrics / alarms ─► SNS email
 ```
 
-> **図中の VPC 層について（2026-09-02 実査）**
-> VPC・NAT Gateway・Private Subnet は**実装されていない**（VPC 0 件 / NAT Gateway 0 件 /
-> Lambda 全 42 関数で `VpcConfig` 未設定）。Lambda は VPC 外で実行される。
-> 将来の拡張候補として図に残しているが、実装済みの構成として読まないこと。
-> 実測値・再現コマンド・VPC 化のトレードオフは
-> [../security.md](../security.md) §ネットワークセキュリティ を参照。
+上図は開発環境の構成スナップショットである。Amplify の `develop` ブランチでは自動ビルドが有効だった。開発環境の RAG Lambda は `global.anthropic.claude-sonnet-5` を参照していたが、モデル設定は環境ごとに確認する。
+
+## WAF・監視の状態
+
+Regional Web ACL と API の関連付けは確認済み。一方、EleKnowledge 向け WAF ログ配信、WAF アラーム、専用通知 SNS は確認できていない。SAM テンプレートに記載があっても、環境で確認するまでは構成図上の実装済みリソースとみなさない。詳細は [AWS Resource Map](../aws-resource-map.md) を参照。
+
+## ネットワーク境界
+
+> 最終検証: 2026-09-02 — AWS 実査（VPC / NAT Gateway / Lambda VpcConfig）。
+
+VPC、NAT Gateway、Private Subnet は存在せず、Lambda に `VpcConfig` は設定されていない。Lambda は VPC 外で実行される。ネットワークの確認記録と設計上の影響は [security.md](../security.md) を参照。
 
 ## 関連ドキュメント
 
-- [components.md](components.md) — 各層のコンポーネント詳細（フロント / バックエンド / AI/ML / データストア）
-- [../tech-stack.md](../tech-stack.md) — 採用技術とバージョン一覧
+- [components.md](components.md) — コンポーネントと役割
+- [../tech-stack.md](../tech-stack.md) — 技術スタック
 - [../security.md](../security.md) — 認証・暗号化・ネットワーク制御
 - [../data-model.md](../data-model.md) — DynamoDB / S3 のデータモデル
+- [../aws-resource-map.md](../aws-resource-map.md) — AWS リソースと IaC / 実環境の差

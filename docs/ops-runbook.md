@@ -8,6 +8,16 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 
 正本の経緯は issue #86（監視・改善ループの棚卸し）。本書は「アラームが鳴ったら何を見るか」「毎日何を見るか」「戻すときどうするか」を 1 枚にまとめたもの。設計判断そのものは issue のコメントを参照する。
 
+## 0. 開発環境の確認スナップショット
+
+> 最終検証: 2026-09-30 — AWS CLI 読み取り専用確認（CloudFormation / CloudWatch / SNS / EventBridge / DynamoDB / WAF。通知到達・機能 E2E は未確認）
+
+この節は確認日時点の開発環境の観測記録であり、恒久的な保証ではない。監視スタックには 27 アラームと 6 件の保存クエリがあり、別スタックのアーカイブ失敗アラームを含む EleKnowledge アラーム 28 件はすべて `OK`、アクション有効だった。監視 SNS のメール購読 2 件は確認済みだが、メール到達試験はしていない。AWS Budget 通知も存在したが、IaC 定義外であり通知到達は未確認。
+
+`origin/develop` の `monitoring-template.yaml` は 26 アラーム・クエリ定義 3 件、`announcements-monitoring-template.yaml` は日次集計ルールのみを定義する。AWS では毎時ルールも有効だったが、現行 aggregator は event の `date` がなければ前日の UTC 日付を集計する。毎時ルールの存在を時間単位 KPI の実装・更新とみなさない。`metrics-dev` の DynamoDB TTL は無効だった。
+
+EleKnowledge の WAF ログ配信・WAF アラーム・専用通知 SNS は確認できなかった。テンプレートに定義されているリソースも、環境で確認できるまでは運用手順として利用しない。
+
 ## 1. 体制と通知
 
 | 項目 | 内容 |
@@ -17,6 +27,7 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 | 件名の読み方 | `ALARM: "EleKnowledge-dev-P1-rag-api-5xx" in Asia Pacific (Tokyo)`。**P1 = 利用者影響あり・気づいたら即対応**、**P2 = 翌営業日でよい**。復旧時は `OK:` で始まる同名メール |
 | 購読の有効化 | SNS の購読は受信者が「AWS Notification - Subscription Confirmation」のリンクを押すまで無効（3 日で失効）。新しい受信者を足したら必ず押してもらう |
 | 通知先の変更 | 監視スタックを `AlertEmailPrimary` / `AlertEmailSecondary` を変えて再デプロイ（アドレスはリポジトリに書かない） |
+| AWS Budget 通知 | 2026-09-30 の開発環境では設定を確認。現在の監視 SAM テンプレート管理外であり、通知到達・閾値は未確認。変更前に AWS Budgets 側を確認する |
 
 ## 2. アラーム一覧と最初に見る場所
 
@@ -37,6 +48,7 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 | P2-chatlogs-read/write-throttle / P2-sessions-write-throttle | DynamoDB スロットル | DynamoDB コンソールのメトリクス | オンデマンドのため通常は起きない。起きたら急激な負荷 |
 | **P1-cognito-email-errors** | Cognito のサインアップ・再送・再設定が上限 / 配信失敗 / スロットルで失敗（CloudTrail 経由） | SNS 本文（API 名・エラーコード・本文） | §5.6 |
 | P2-cognito-signups-40 / **P1-cognito-signups-45・50** | その日のサインアップ数が 40 / 45 / 50 に到達（メール 50 通/日の接近） | Cognito ユーザー一覧（作成日） | §5.6。40 で受付停止の告知を検討 |
+| 未設定（WAF Block / per-user rate limit） | Web ACL による遮断。2026-09-30 時点で EleKnowledge 用 CloudWatch アラーム・ログ配信・専用 SNS は未確認 | API Gateway の実行ログと WAF コンソールの Web ACL / メトリクス | 既存手順で S3 WAF ログや WAF 通知を探さない。過去の要求内容を WAF ログから追跡できる状態ではない |
 
 「INSUFFICIENT_DATA」は「その 5 分間にデータが無かった」だけで異常ではない（データ欠損は正常扱いの設定）。
 
@@ -46,7 +58,7 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 |---|---|
 | アラーム状態の一覧 | CloudWatch → アラーム → 名前で `EleKnowledge-dev-` を検索 |
 | エラーログ | CloudWatch Logs Insights → 保存クエリ `EleKnowledge/dev/rag-error-lines` / `chat-error-lines` / `rag-slow-requests` |
-| 利用状況・いいね率・not_found | 管理画面 `/admin/dashboard`（日次集計。当日分は毎時更新の予定、初週は翌日 02:00 反映） |
+| 利用状況・いいね率・not_found | 管理画面 `/admin/dashboard`。現行 aggregator は前日 UTC の日次データを作る。AWS で毎時 EventBridge ルールは確認したが、時間別・当日 KPI の更新は確認していない。 |
 | 失敗した回答・要望 | 管理画面 `/admin/failures` |
 | Bedrock の呼び出し・トークン・遅延 | CloudWatch → メトリクス → `AWS/Bedrock` → ModelId = `global.anthropic.claude-sonnet-5` |
 | 会話ログの長期分析 | Athena ワークグループ `eleknowledge-analytics-dev`、テーブル `eleknowledge_analytics.chatlogs_archive`（`dt=` で日付パーティション） |
@@ -64,7 +76,7 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 
 ### 5.1 「使えない」「開けない」と言われたら
 1. 接続元が社内ネットワーク / VPN か確認。許可リスト外の IP からは **API が 403**（WAF の IP 許可リスト）。画面は開くが質問すると失敗する、が典型
-2. **429** は WAF の利用者レート（数字の正は [docs/api/common.md](./api/common.md)）。WAF ログ用 S3 配信は `security-waf-template.yaml` の `WafLogBucketPolicy`
+2. **403 / 429** は WAF の IP 許可リストまたは利用者レート制限を確認する（閾値の正は [docs/api/common.md](./api/common.md)）。開発環境では EleKnowledge 向け WAF ログの S3 配信と WAF アラームは未確認のため、CloudWatch の専用通知や S3 ログを前提にしない。テンプレート定義は [security-waf-template.yaml](../infrastructure/sam/security-waf-template.yaml) にあるが、デプロイ済みとは扱わない。
 3. ログインして長時間経過していれば **401（トークン失効）**。再ログインで直る
 4. どちらでもなければ 5XX アラームの有無を確認
 
@@ -106,7 +118,7 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 |---|---|---|
 | 会話ログ（利用者に見える） | 60 日（TTL、不変条件） | DynamoDB `chatlogs-dev` |
 | 会話ログの正本 | 無期限（60 日で IA、180 日で Glacier）。バージョニング有効 | S3 アーカイブ + Athena |
-| 日次 KPI | 無期限（TTL 無効） | DynamoDB `metrics-dev` |
+| 日次 KPI | TTL 無効（2026-09-30 の AWS 観測）。aggregator が書く `ttl` 属性だけでは DynamoDB 項目は削除されない | DynamoDB `metrics-dev` |
 | Lambda ログ | 365 日 | CloudWatch Logs |
 | API Gateway 実行ログ | 90 日 | CloudWatch Logs |
 | 保持期間の再設定 | `python scripts/ops/set_log_retention.py --env dev`（対象は EleKnowledge の関数名・API 名に限定） | — |

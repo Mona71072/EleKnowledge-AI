@@ -16,6 +16,23 @@ The names below use `dev` as the example environment. For production, replace `-
 
 Use [AWS Migration Runbook](aws-migration-runbook.md) for deployment order, Bedrock ID updates, and Amplify environment variable setup.
 
+## Development environment observation (2026-09-30)
+
+> 最終検証: 2026-09-30 — AWS CLI 読み取り専用確認（東京リージョンの開発環境。通知到達と機能 E2E は未確認）
+
+This is a time-bounded observation, not a guarantee of current state. The AWS environment and the current `origin/develop` templates did not match in every resource count.
+
+| Area | AWS observation | `origin/develop` IaC / limitation |
+| --- | --- | --- |
+| Core and monitoring stacks | The Phase 1/2, troubleshooting, archive, monitoring, WAF, and announcements/metrics stacks were present and `UPDATE_COMPLETE`. | Stack presence does not prove that every user-facing flow is usable. |
+| CloudWatch monitoring | The monitoring stack had 27 alarms and 6 saved Logs Insights queries. Across EleKnowledge alarms, 28 were `OK` with actions enabled. Two monitoring SNS email subscriptions were confirmed. | `monitoring-template.yaml` defines 26 alarms, 3 query definitions, and 2 metric filters. Resolve the stack/template difference before describing the deployed set as reproducible from `develop`. |
+| Budget notification | A budget notification was present. | It is not defined in the current monitoring SAM template; notification delivery was not tested. |
+| KPI aggregation | Daily and hourly EventBridge rules were enabled and targeted the aggregator. `metrics-dev` TTL was disabled. | `announcements-monitoring-template.yaml` defines only the daily schedule. The aggregator code processes the previous UTC day on each invocation; an enabled hourly rule does not mean hourly KPI aggregation is implemented. |
+| WAF | The regional Web ACL and API associations were present. No EleKnowledge WAF log delivery, WAF alarm, or dedicated WAF notification topic was found. The single regional logging configuration was for another Web ACL. | `security-waf-template.yaml` defines S3 logging and WAF alarms/notifications, but those resources were absent from the deployed stack. Treat them as IaC-defined, not deployed. |
+| Phase 3 | Troubleshooting stack, API, Lambda functions, and tables were present. | User-facing availability and end-to-end behavior were not verified. See the development specification and sequence document. |
+
+These observations do not include delivery tests for SNS/Budget notifications or a user-facing E2E test. Do not copy account IDs, email addresses, or other secret values into this inventory.
+
 ## Phase 1 - Auth and Base Data
 
 | Resource name | Component type | Purpose | Managed by |
@@ -83,12 +100,12 @@ Use [AWS Migration Runbook](aws-migration-runbook.md) for deployment order, Bedr
 
 | Stack | Template | Key resources |
 |---|---|---|
-| `announcements-monitoring-dev` | `infrastructure/sam/announcements-monitoring-template.yaml` | DynamoDB `announcements-dev`, `metrics-dev` (TTL disabled 2026-09-09); Lambda `announcements-read/write/publisher-dev`, `metrics-read-dev`, `metrics-aggregator-dev`; API `announcements-monitoring-api-dev` (`0q3vewys59`, `GET /admin/metrics`, announcements routes); EventBridge `metrics-daily-agg-dev` (02:00 JST), `announcements-promote-dev` (5 min) |
+| `announcements-monitoring-dev` | `infrastructure/sam/announcements-monitoring-template.yaml` | DynamoDB `announcements-dev`, `metrics-dev` (TTL disabled in the 2026-09-30 observation); Lambda `announcements-read/write/publisher-dev`, `metrics-read-dev`, `metrics-aggregator-dev`; API `announcements-monitoring-api-dev` (`GET /admin/metrics`, announcements routes); AWS had daily and hourly metrics rules enabled plus `announcements-promote-dev` (5 min). Current `develop` template defines only the daily metrics rule. |
 | `eleknowledge-chat-archive-dev` | `infrastructure/sam/chat-archive-template.yaml` | Lambda `eleknowledge-chat-archive-dev` (chatlogs stream -> S3); S3 `eleknowledge-chat-archive-dev-<account>` (versioned; OnFailure invocation records), `eleknowledge-athena-results-dev-<account>`; EventBridge→SNS failure notification; Athena workgroup `eleknowledge-analytics-dev`; Glue `eleknowledge_analytics.chatlogs_archive` |
 | `eleknowledge-security-waf-dev` | `infrastructure/sam/security-waf-template.yaml` | WAFv2 regional `EleKnowledge-dev-RegionalWebAcl` + IPSet, associated with the 4 REST API stages |
-| `eleknowledge-monitoring-dev` | `infrastructure/sam/monitoring-template.yaml` | SNS `eleknowledge-alerts-dev` (2 email subscriptions, passed at deploy), 22 CloudWatch alarms (`EleKnowledge-dev-P1-*` / `P2-*`), 2 metric filters, 3 Logs Insights saved queries. Runbook: `docs/ops-runbook.md` |
+| `eleknowledge-monitoring-dev` | `infrastructure/sam/monitoring-template.yaml` | AWS observation: SNS `eleknowledge-alerts-dev` (2 confirmed email subscriptions), 27 CloudWatch alarms, 6 saved Logs Insights queries. Current `develop` template: 26 alarms, 2 metric filters, 3 query definitions. See the dated observation above and [runbook](ops-runbook.md); notification delivery was not tested. |
 
-Not in IaC: Bedrock application inference profile `EleKnowledge-rag-dev-sonnet5-20260909` (created 2026-09-09). SCP denies InvokeModel on this application profile. The current call is the system profile `global.anthropic.claude-sonnet-5` directly (acceptance conditions: PR #119). Log group retention is set by `scripts/ops/set_log_retention.py` (Lambda 365 d / API Gateway 90 d).
+Not in IaC: the AWS budget notification and the Bedrock application inference profile referenced by the operational records. The 2026-09-30 read-only observation found the development RAG Lambda configured for `global.anthropic.claude-sonnet-5`; do not infer the state of other environments from this. Log group retention is set by `scripts/ops/set_log_retention.py` (Lambda 365 d / API Gateway 90 d).
 
 ## Not Recreated by Current IaC
 

@@ -1,59 +1,49 @@
 ---
-status: production
-last-verified: 2026-04-24
-related-code: frontend/package.json, lambda/, infrastructure/
+status: draft
+last-verified: 2026-09-30
+related-code: frontend/package.json, frontend/package-lock.json, infrastructure/sam/, lambda/
 ---
 
 # 技術スタック
 
-> 出典: 旧 [spec.md](../spec.md) §4（PR #10 で本ファイルに切り出し）
+> 最終検証: 2026-09-30 — package manifest / lockfile と SAM runtime を照合。AWS のモデル設定は開発環境に限られ、production の実環境確認は未実施のため draft とする。
 
 ## フロントエンド
 
-| カテゴリ | 技術 | バージョン | 用途 |
-|---------|------|-----------|------|
-| Framework | Next.js | 14.x | App Router、SSR/SSG |
-| UI Library | React | 18.x | コンポーネント開発 |
-| スタイリング | Tailwind CSS | 3.x | ユーティリティファースト |
-| UI Components | shadcn/ui | latest | 再利用可能コンポーネント |
-| 状態管理 | Zustand | 4.x | 軽量状態管理 |
-| フォーム | React Hook Form | 7.x | フォーム検証 |
-| HTTP Client | Axios | 1.x | API通信 |
-| 認証 | AWS Amplify | 6.x | Cognito統合 |
+| 技術 | リポジトリ上の指定 | 用途 |
+|---|---|---|
+| Next.js | `^15.5.24` | App Router |
+| React / React DOM | `19.1.0` | UI |
+| AWS Amplify | `^6.15.7` | Cognito 認証統合 |
+| Axios | `^1.13.2` | API 通信 |
+| Tailwind CSS | `^4` | スタイリング |
+| TypeScript | `^5` | 型検査 |
 
-## バックエンド
+バージョンは `frontend/package.json` の指定範囲であり、環境ごとのデプロイ済み成果物を示すものではない。
 
-| カテゴリ | 技術 | バージョン | 用途 |
-|---------|------|-----------|------|
-| Lambda Runtime | Python | 3.11 | RAG処理、DB操作 |
-| Lambda Runtime | Node.js | 18.x | 認証処理 |
-| API Gateway | REST API | v1 | APIエンドポイント |
-| 認証 | AWS Cognito | - | ユーザー管理 |
-| パッケージ管理 | pip / npm | - | 依存関係管理 |
+## バックエンド・AWS
 
-## AI/ML
+| 技術 | 用途 |
+|---|---|
+| AWS SAM / Lambda Python 3.13 | 認証・RAG・チャット・管理 API の handler |
+| API Gateway REST API | Cognito 認証と Lambda API の公開 |
+| Amazon Cognito User Pool | ユーザー認証・JWT 発行 |
+| Amazon DynamoDB | ユーザー、チャット履歴、管理・集計データ |
+| Amazon S3 / Glue / Athena | チャットアーカイブと分析 |
+| Amazon CloudWatch / SNS | ログ、メトリクス、アラーム、通知 |
+| AWS WAF | Regional Web ACL による API の IP / rate 制御 |
+| AWS Amplify Hosting | Next.js フロントエンド配信 |
 
-| カテゴリ | 技術 | モデル | 用途 |
-|---------|------|--------|------|
-| LLM | Amazon Bedrock | Claude 4 Sonnet | RAG応答生成 |
-| Embedding | Amazon Bedrock | Titan Embeddings G1 | ベクトル化 |
-| Vector DB | OpenSearch Serverless | - | Knowledge Base |
-| Multi-Agent | Bedrock Agent | - | 複雑タスク処理（Phase 3） |
+## AI / ML
 
-## インフラ
-
-| カテゴリ | サービス | 用途 |
-|---------|---------|------|
-| ホスティング | AWS Amplify | フロントエンド配信 |
-| セキュリティ | AWS WAF | IP制限、攻撃防御 |
-| データベース | DynamoDB | ユーザー、チャット履歴 |
-| ストレージ | S3 | ドキュメント保存 |
-| シークレット | Secrets Manager | API Key管理 |
-| ログ | CloudWatch Logs | ログ集約 |
-| 監視 | CloudWatch | メトリクス、アラート |
+- Amazon Bedrock Knowledge Base が RAG 検索を提供する。
+- 開発環境では 2026-09-30 時点の RAG Lambda が `global.anthropic.claude-sonnet-5` を参照していた。モデルは環境設定で指定されるため、他環境へ一般化しない。
+- Bedrock Agent を使うトラブルシューティングの AWS リソースは確認済みだが、利用者向け E2E は未確認。
+- Knowledge Base の embedding model は今回再確認していない。過去のモデル名を現行環境へ適用しない。
 
 ## 関連ドキュメント
 
 - [architecture/overview.md](architecture/overview.md) — システム全体図
 - [architecture/components.md](architecture/components.md) — コンポーネント構成
 - [security.md](security.md) — セキュリティ設計
+- [aws-resource-map.md](aws-resource-map.md) — AWS 実環境と IaC の確認記録

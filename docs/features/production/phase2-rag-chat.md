@@ -1,20 +1,16 @@
 ---
-status: production
+status: draft
 phase: 2
 last-verified: 2026-04-24
-related-code: frontend/src/app/, lambda/rag/, lambda/chat/
+related-code: frontend/src/app/, lambda/rag/, lambda/chat/, infrastructure/sam/phase2-template.yaml
 ---
 
-# Phase 2: RAGチャット機能（2ヶ月）
+# Phase 2: RAGチャット機能 — 旧仕様（再検証中）
 
 > [!WARNING]
-> **本書の「Knowledge Base設定」「メタデータスキーマ」「RAG処理フロー」「プロンプトテンプレート」
-> および `SearchFilters` / `SourceDocument` の定義は、現在の実装と乖離している**（2026-07-17 確認、2026-07-29 再確認）。
-> 記載の `KB_ELEKNOWLEDGE_001` / `eleknowledge-documents` / Titan Embeddings G1、および
-> `documentType` / `product` / `model` というメタデータキーは**いずれも実在しない**。
-> 実態は Phase 2 で既存 KB `DF9XUCSPDM` を再利用する構成に変わっている。
+> **本書は現行仕様の正本ではない。** Knowledge Base、メタデータ、RAG 処理、プロンプト、`SearchFilters` / `SourceDocument` は現行コードと照合が完了していない。過去に記載された KB 名・ID・メタデータキーを現行環境へ適用しないこと。
 >
-> **正となる情報（本書を正本にしない）:**
+> **現行の契約・挙動を確認する参照先:**
 > - API 契約: [`docs/api/rag.md`](../../api/rag.md) / [`docs/api/chat.md`](../../api/chat.md)
 > - 聞き返し・頁候補・本命優先: [`docs/impl-log-2026-07-29-clarify-and-page.md`](../../impl-log-2026-07-29-clarify-and-page.md)
 > - データモデル（chatlogs）: [`docs/data-model.md`](../../data-model.md)
@@ -22,6 +18,8 @@ related-code: frontend/src/app/, lambda/rag/, lambda/chat/
 >
 > 本書の全面改訂は RAG 仕様の見直し時に別途行う。現行の `responseType` / `pageCandidates` /
 > 失敗一覧（`/admin/failures`）などは**ここには書かない**（上記正本を見る）。
+
+> 最終検証: 2026-09-30 — frontmatter / 索引と開発環境の Phase 2 stack・モデル設定の存在を部分照合。本文の全機能・RAG E2E は未検証。
 
 > 本ドキュメントは [spec.md](../../../spec.md) §3.2 から切り出された Phase 2 の機能仕様です。
 > 全体索引は [spec.md](../../../spec.md) を参照してください。
@@ -214,7 +212,7 @@ s3://eleknowledge-documents/
 5. Knowledge Base検索（ベクトル検索）
    ├─ Top 10件の関連文書取得
    ↓
-6. Claude 4による回答生成
+6. 生成モデルによる回答生成（この旧図はモデルを特定しない。開発環境の確認値は [運用ランブック](../../ops-runbook.md)を参照）
    ├─ プロンプト: システム指示 + 検索結果 + 履歴 + 質問
    ├─ Temperature: 0.3（安定性重視）
    └─ Max tokens: 4096
