@@ -63,6 +63,35 @@ def test_stratified_sample_respects_primary_stratum_quotas_and_seed():
     assert [row["question"] for row, _ in first] == [row["question"] for row, _ in second]
 
 
+def test_variable_target_scales_quotas_proportionally():
+    assert prepare._proportional_quotas(10) == {
+        "thumbs_down": 2,
+        "not_found": 2,
+        "ordinary_answered": 3,
+        "clarify_followup": 1,
+        "model_specified": 1,
+        "model_unspecified": 1,
+    }
+    assert prepare._proportional_quotas(21) == {
+        "thumbs_down": 4,
+        "not_found": 4,
+        "ordinary_answered": 6,
+        "clarify_followup": 3,
+        "model_specified": 2,
+        "model_unspecified": 2,
+    }
+
+
+def test_extract_sql_scans_previous_partition_but_filters_candidates_at_start_date():
+    sql_path = SCRIPT.parents[1] / "eval" / "extract_user_questions.sql"
+    sql = sql_path.read_text(encoding="utf-8")
+    latest_events = sql.split("latest_events AS (", 1)[1].split("removed_messages AS (", 1)[0]
+    eligible_questions = sql.split("eligible_questions AS (", 1)[1].split("limited_questions AS (", 1)[0]
+
+    assert "dt >= extraction_window.remove_start_dt" in latest_events
+    assert "substr(message_timestamp, 1, 10) >= extraction_window.start_dt" in eligible_questions
+
+
 def test_write_outputs_carries_model_type_to_review_csv_and_filters(tmp_path):
     review_path = tmp_path / "review.csv"
     jsonl_path = tmp_path / "draft.jsonl"

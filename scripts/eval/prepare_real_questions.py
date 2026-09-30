@@ -64,20 +64,22 @@ def classify(row: dict[str, str]) -> str:
     return "model_unspecified"
 
 
+def _proportional_quotas(target: int) -> dict[str, int]:
+    total_quota = sum(DEFAULT_QUOTAS.values())
+    scaled = {stratum: target * quota for stratum, quota in DEFAULT_QUOTAS.items()}
+    quotas = {stratum: value // total_quota for stratum, value in scaled.items()}
+    remainders = {stratum: value % total_quota for stratum, value in scaled.items()}
+    remaining = target - sum(quotas.values())
+    ranked_strata = sorted(DEFAULT_QUOTAS, key=remainders.get, reverse=True)
+    for stratum in ranked_strata[:remaining]:
+        quotas[stratum] += 1
+    return quotas
+
+
 def stratified_sample(rows: list[dict[str, str]], target: int = 20,
                       seed: int = 20260929) -> list[tuple[dict[str, str], str]]:
     """Sample without replacement from exclusive, documented primary strata."""
-    quotas = dict(DEFAULT_QUOTAS)
-    if target != sum(quotas.values()):
-        # Scale quotas proportionally, assigning rounding remainder by stable order.
-        base = {key: target * quota // sum(quotas.values()) for key, quota in quotas.items()}
-        remainder = target - sum(base.values())
-        for key in quotas:
-            if remainder == 0:
-                break
-            base[key] += 1
-            remainder -= 1
-        quotas = base
+    quotas = _proportional_quotas(target)
     buckets: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         if row.get("question", "").strip():

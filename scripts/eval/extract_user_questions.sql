@@ -30,7 +30,8 @@ latest_events AS (
         ) AS revision_rank
     FROM chatlogs_archive
     CROSS JOIN extraction_window
-    WHERE dt >= extraction_window.start_dt
+        WHERE dt >= extraction_window.remove_start_dt
+            -- dt may be one day before a record when its stream batch crosses midnight.
       -- TTL REMOVE records must not replace the last message image.
       AND (eventname <> 'REMOVE'
            OR coalesce(useridentity.principalid, '') <> 'dynamodb.amazonaws.com')
@@ -122,8 +123,10 @@ eligible_questions AS (
             ORDER BY message_timestamp DESC, internal_session_key, internal_message_key
         ) AS extract_rank
     FROM sequenced
+        CROSS JOIN extraction_window
     WHERE role = 'user'
       AND next_role = 'assistant'
+            AND substr(message_timestamp, 1, 10) >= extraction_window.start_dt
 ),
 limited_questions AS (
     SELECT *
