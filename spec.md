@@ -42,14 +42,14 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 
 | 機能 | 現行契約・状態 | 文書 |
 |------|--------------|------|
-| Phase 1: 認証・基盤 | AWS stack を確認。機能仕様書は全面再検証中 | [認証 API](docs/api/auth.md) ／ [Phase 1 旧仕様・draft](docs/features/production/phase1-foundation.md) |
-| Phase 2: RAG・チャット | AWS stack と開発環境のモデル設定を確認。API 文書を契約の参照先とし、機能仕様書は現行正本にしない | [RAG API](docs/api/rag.md) ／ [チャット API](docs/api/chat.md) ／ [Phase 2 旧仕様・draft](docs/features/production/phase2-rag-chat.md) |
+| Phase 1: 認証・基盤 | AWS stack を確認。機能仕様書は全面再検証中 | [認証 API](docs/api/auth.md) ／ [Phase 1 機能仕様（再検証中）](docs/features/production/phase1-foundation.md) |
+| Phase 2: RAG・チャット | AWS stack と開発環境のモデル設定を確認。API 文書を契約の参照先とし、機能仕様書は現行正本にしない | [RAG API](docs/api/rag.md) ／ [チャット API](docs/api/chat.md) ／ [Phase 2 機能仕様（再検証中）](docs/features/production/phase2-rag-chat.md) |
 
 ### 🟡 開発中の機能（Phase 3）
 
 | 機能 | 仕様 | 補足資料 |
 |------|------|---------|
-| トラブルシューティング | [docs/features/development/phase3-troubleshooting-spec.md](docs/features/development/phase3-troubleshooting-spec.md) | AWS リソースは存在するが利用者向け E2E 未確認。 [処理シーケンス](docs/features/development/troubleshooting-sequence.md) ／ PoC 設計: [docs/agent-spec.md](docs/agent-spec.md) ／ [実装ガイド](docs/features/development/phase3-troubleshooting-implementation-guide.md) |
+| トラブルシューティング | [docs/features/development/phase3-troubleshooting-spec.md](docs/features/development/phase3-troubleshooting-spec.md) | AWS リソースは存在するが利用者向け E2E 未確認。既存の[処理シーケンス](docs/features/production/troubleshooting-sequence.md)は現行との照合が必要。PoC 設計: [docs/agent-spec.md](docs/agent-spec.md) ／ [実装ガイド](docs/features/development/phase3-troubleshooting-implementation-guide.md) |
 | 品質書類チェック | [docs/features/development/phase3-quality-check-spec.md](docs/features/development/phase3-quality-check-spec.md) | 開発仕様のみ。実装・E2E は未確認。 |
 | RAG の 2 モード化 | [設計（合意済み・未実装）](docs/design-2026-09-24-rag-two-modes.md) | 決定: [docs/decisions-2026-09-24-rag-two-modes.md](docs/decisions-2026-09-24-rag-two-modes.md) ／ 調査: [docs/survey-2026-09-24-agentic-rag.md](docs/survey-2026-09-24-agentic-rag.md) ／ [KB 修正依頼台帳](docs/kb-change-requests.md) |
 
