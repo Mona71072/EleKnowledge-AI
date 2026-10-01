@@ -47,6 +47,7 @@ yarn-error.log*
 
 # Retrieve eval outputs (scripts/eval/run_retrieve_eval.py)
 eval-results/
+.eval-real-questions/
 
 # Local metadata configuration (contains confidential information)
 docs/metadata-schema-local.md
