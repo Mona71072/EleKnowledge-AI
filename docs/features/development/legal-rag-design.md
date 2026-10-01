@@ -107,8 +107,10 @@ e-Gov API / XML一括ダウンロード
 ```text
 s3://<law-rag-bucket>/
 ├── raw/egov/<law-id>/<version-folder>.xml
-├── kb/egov/<law-id>/<version-folder>.txt
-├── kb/egov/<law-id>/<version-folder>.txt.metadata.json
+├── kb/egov/<law-id>/<version-folder>/main/<provision-key>.txt
+├── kb/egov/<law-id>/<version-folder>/main/<provision-key>.txt.metadata.json
+├── kb/egov/<law-id>/<version-folder>/supplementary/<provision-key>.txt
+├── kb/egov/<law-id>/<version-folder>/supplementary/<provision-key>.txt.metadata.json
 ├── manifest/laws.csv
 └── quarantine/<run-id>/
 ```
@@ -177,6 +179,7 @@ Amazon Bedrock Knowledge BasesのS3データソースはXMLを対応する検索
 | `amending_law_id` | STRING | 改正法令ID。存在する場合 |
 | `legal_topics` | STRING_LIST | 建築、昇降機、消防、石綿等 |
 | `provision_type` | STRING | `main`、`supplementary`、`transitional` |
+| `provision_reference` | STRING | 条・項・号の表示用参照。例:`第129条の3第1項` |
 | `status` | STRING | `current`、`future`、`historical` |
 | `source_url` | STRING | e-Gov本文URL |
 | `retrieved_at` | STRING | 取得日時 |
