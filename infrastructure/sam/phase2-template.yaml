@@ -63,7 +63,7 @@ Parameters:
 
   BedrockModelId:
     Type: String
-    Default: global.anthropic.claude-sonnet-5
+    Default: jp.anthropic.claude-haiku-4-5-20251001-v1:0
     Description: >-
       Bedrock LLM Model ID. Must be an inference profile ID (jp.* / apac.* / global.*)
       or an application inference profile ARN (arn:aws:bedrock:...:application-inference-profile/xxx),
