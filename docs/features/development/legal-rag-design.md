@@ -43,6 +43,42 @@ e-Gov法令検索から取得した法令を、昇降機の設置・建築、据
 
 既存KBは外部スタック所有であり、社内資料、quick-start、web-crawler等のデータソースと共有されている。法令を同じKBへ追加すると検索境界、Sync、運用責任が混在するため、本番構成では分離する。
 
+### 2.2 推奨する初期Knowledge Base構成
+
+> 最終検証: 2026-10-01 — AWS公式Bedrock/S3/CloudFormation資料およびap-northeast-1のモデル可用性API
+
+| 項目 | 推奨値 | 根拠・注意 |
+|---|---|---|
+| Knowledge Base | Amazon Bedrock Managed Knowledge Base | 保存・索引・取得ストアをBedrockに任せ、別の常時稼働ベクトルDBを運用しない |
+| リージョン | `ap-northeast-1` | 既存の法令S3、RAG APIと同一リージョン |
+| Bedrock検索 | Managed KBのHybrid検索 | 管理KBは常にHybrid検索。法令番号・条文番号などの語句一致と意味検索を併用する |
+| 埋め込み | カスタム `amazon.titan-embed-text-v2:0`、1024次元、FLOAT | 東京で利用可能。日本語を含む多言語対応だが英語最適化モデルのため、法令の評価質問で品質確認を必須とする |
+| ベクトルストア | Bedrock管理ストア | 外部ストアのID、容量、更新、運用をアプリ側で管理しない。別途S3 Vectors/OpenSearchを作らない |
+| Knowledge Base名 | `eleknowledge-law-rag-dev` / `eleknowledge-law-rag-prod` | Nameは環境別に固定。Knowledge Base ID自体はAWS生成値を使う |
+| データソース名 | `egov-current-laws` | 環境ごとに1データソース。初期は手動/on-demand Sync |
+| S3対象 | 既存法令バケットの`kb/egov/`のみ | `raw/`、`manifest/`を検索索引へ混入させない |
+| ID連携 | CloudFormation Outputを`LawKnowledgeBaseId` / `LawDataSourceId`として公開 | Phase 2 Lambdaの環境変数へ明示的に渡す。IDをソースコードへ直書きしない |
+
+#### 選定理由と代替案
+
+- `AWS::Bedrock::KnowledgeBase`のCloudFormationリソースは`Type: MANAGED`をサポートし、`Ref`で生成されたKnowledge Base IDを取得できる。`AWS::Bedrock::DataSource`もManaged KB用S3 connectorと`inclusionPrefixes`を設定できるため、リソースの再現性を保ったまま既存バケットを参照できる。
+- Managed KBの標準埋め込みはモデルIDを選ばず、管理Rerankerも使えるが、サービス管理モデルの言語仕様をアプリ側で固定できない。法令本文が日本語であるため、初期は日本語を含む多言語対応とIDを明示できるTitan Text Embeddings V2をカスタム埋め込みとして採用する。
+- AWS公式仕様では、Managed KBにカスタム埋め込みモデルを使う場合は1024次元のFLOAT埋め込みが必要で、Managed Rerankerは利用できない。一方、Managed KBのHybrid検索は継続して利用できる。初期PoCではRerankerなしで検索品質を測定し、必要なら別途Rerankerを評価する。
+- Cohere Embed Multilingual v3は100以上の言語を対象とする候補だが、2026-10-01時点で現在の開発アカウントはモデルAgreementが`NOT_AVAILABLE`。第三者モデルのMarketplace課金もあるため、Agreement承認とTitanとの比較評価が済むまで採用しない。
+- S3 Vectorsは従量課金で低頻度検索に向く有力候補だが、今回優先するHybrid検索との組み合わせを避ける。AWS公式資料でHybrid検索が明記される顧客管理ストアはOpenSearch Serverless / RDS / MongoDBであり、OpenSearch ServerlessはPoCに対して運用・固定費が重い。将来、semantic-onlyで十分と実測できた場合はS3 Vectorsを再評価する。
+
+#### Knowledge Base IDとIaC
+
+- 法令S3バケットはCloudFormationスタック`eleknowledge-legal-rag-dev`が`ROLLBACK_COMPLETE`後にRetainした既存リソースである。Knowledge Base用の新規スタックは`eleknowledge-law-kb-dev`として分離し、このバケットをパラメータで参照する。失敗スタックの再デプロイや、既存バケットの再作成は行わない。
+- 新設テンプレート`infrastructure/sam/legal-rag-kb-template.yaml`にKnowledge Base、S3データソース、Bedrockサービスロールを定義する。BedrockロールのS3読み取り権限は`kb/egov/*`に限定し、KMS復号もソースバケットのキーに限定する。RAG Lambdaには`bedrock:Retrieve`の対象Knowledge Base IDだけを付与する。
+- `Ref`で得たIDをテンプレートOutputへ出し、RAG実行環境の`LAW_KNOWLEDGE_BASE_ID`へ接続する。開発と本番でID・役割・データソースを混ぜない。
+
+#### 取込本文の粒度
+
+初回Sync前に、検索用本文を法律全体の大きなファイルではなく、条・項・号を維持した条文単位のTXTへ分割する。各ファイルにBedrock sidecarを付け、`provision_reference`（例:`第129条の3第1項`）と`provision_type`を設定する。長い条文は固定サイズ300 tokens / 20% overlapで追加分割し、全チャンクに同じ条文メタデータを引き継ぐ。条番号を特定できない附則は`provision_reference`を省略し、番号を推測しない。
+
+現在のS3には法律ごとに本則/附則をまとめた検索本文106件が保存されている。Knowledge Baseの初回Sync前に条文単位へ再生成・差替えし、重複する旧派生本文を同じ`kb/egov/`内に残さない（S3 Versioningで旧オブジェクトの復旧可能性は保つ）。原文XMLとmanifestは変更しない。
+
 ## 3. 論理構成
 
 ```text
@@ -262,6 +298,7 @@ S3のTXT/Markdownは検索・引用生成の内部資料であり、法令の真
 | `filters.legalTopics` | 任意。文字列リストのいずれかに一致（OR）。`lawId`との併用はAND |
 
 - 法令モードでは`category` / `modelType`を使わず、サーバーが`source_type=law`と`status=current`を必須フィルターとして適用する。専用KB IDはサーバー設定から選び、リクエストからKB IDを受け取らない。
+- 法令モードの`Retrieve`は`managedSearchConfiguration`を指定し、既存KB向け`vectorSearchConfiguration`や`overrideSearchType`は渡さない。通常モードの既存検索設定には変更を加えない。
 - `userId`はリクエスト本文に含めず、Cognito IDトークンの`sub`から決定する。クライアントから送られた値を認可に使わない。
 - `asOfDate`は初期API契約に含めない。初期データは2026-10-01時点の現行版スナップショットで、過去時点の法令適用を保証しない。過去時点の法令を問われた場合は、対象版未収録の可能性を明示し、現行版から推測しない。
 - レスポンスの共通フィールド（`sessionId`、message ID、`responseType`、`content`、`sourceDocuments`等）は既存形式を維持する。法令出典の追加情報は`sourceDocuments[].lawCitation`に含める。
@@ -353,20 +390,19 @@ KB Sync失敗時は、失敗した版を現行版として扱わない。改正�
 - `mode=law`は法令専用KBだけを検索し、`mode=normal`の検索結果に法令が混入しない
 - 法令チャットと通常チャットでセッション一覧・会話履歴が相互に混ざらない
 - 法令チャットのカードから法令モードで開き、再読み込み後も法令モードを維持する
-- 引用条文を特定できない場合は条番号を捏造せず、e-Gov法令本文へのリンクを表示する
+- 条文単位ファイルのメタデータから条・項・号を出典表示でき、特定不能箇所は番号を捏造しない
 - 取得日時、施行日、改正法令、ハッシュを追跡できる
 - XML不正、未施行版、Sync失敗を現行検索へ反映しない
 
 ## 11. 未決事項
 
-- 法令専用KBのKnowledge Base ID、埋め込みモデル、ベクトルストア
 - 取得ジョブの実行基盤（Lambda、CodeBuild、Step Functions等）
 - e-Gov API移行時のレート制限・障害時リトライ
 - 国土交通省・消防庁の告示・通知の取得範囲
 - 自治体条例を対象にする自治体と取得方法
 - JIS・業界標準・メーカー資料の利用許諾
-- 条・項・号の参照箇所を検索チャンクから誤りなく抽出する方式（抽出不能時は条文番号を出さない）
 - 法令専用S3バケットを保持する失敗CloudFormationスタックの整理・リソース管理方法
+- Titan V2の日本語法令検索品質（代表質問の評価結果が不十分な場合は、Cohere Embed Multilingual v3のAgreement取得後に比較）
 - 法務・業務部門による代表質問と回答承認フロー
 
 ## 12. 参照
@@ -379,3 +415,12 @@ KB Sync失敗時は、失敗した版を現行版として扱わない。改正�
 - [Amazon Bedrock Knowledge Baseデータの前提条件](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-ds.html)
 - [Amazon Bedrockメタデータ](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-metadata.html)
 - [Amazon BedrockのS3データソース](https://docs.aws.amazon.com/bedrock/latest/userguide/s3-data-source-connector.html)
+- [Amazon Bedrock Managed Knowledge Base](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-build-managed.html)
+- [Managed Knowledge Baseのリージョン](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-managed-regions.html)
+- [Managed Knowledge BaseのS3コネクター](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-managed-ds-s3.html)
+- [Managed Knowledge Baseの検索](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-test-retrieve.html)
+- [Titan Text Embeddings V2](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-titan-text-embeddings-v2.html)
+- [Cohere Embed Multilingual](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-cohere-embed-multilingual.html)
+- [Amazon S3 Vectors](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors.html)
+- [CloudFormation: AWS::Bedrock::KnowledgeBase](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-bedrock-knowledgebase.html)
+- [CloudFormation: AWS::Bedrock::DataSource](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-bedrock-datasource.html)
