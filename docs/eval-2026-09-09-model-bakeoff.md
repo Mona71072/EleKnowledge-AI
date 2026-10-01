@@ -10,6 +10,27 @@ related-code: scripts/eval/run_model_bakeoff.py, scripts/eval/bakeoff_questions.
 
 # RAG 生成モデル 切替前比較（2026-09-09 21:25）
 
+## 再実行手順（2026-10-01）
+> 最終検証: 2026-10-01 — 比較スクリプトの API 分岐、単価、Retrieve キャッシュ引数を照合
+
+Anthropic の InvokeModel と Luna の Converse はスクリプトがモデル ID の能力表に従って選択する。同じ質問・同じ Retrieve 結果で比較をやり直す場合は、まず Retrieve を保存し、そのファイルを読み込んで再生成する。
+
+```sh
+python scripts/eval/run_model_bakeoff.py \
+  --questions scripts/eval/bakeoff_questions.jsonl \
+  --models "sonnet5=global.anthropic.claude-sonnet-5,luna=global.openai.gpt-6-luna" \
+  --save-retrieval eval-results/retrieval.json \
+  --out eval-results/luna-bakeoff.md
+
+python scripts/eval/run_model_bakeoff.py \
+  --questions scripts/eval/bakeoff_questions.jsonl \
+  --models "sonnet5=global.anthropic.claude-sonnet-5,luna=global.openai.gpt-6-luna" \
+  --load-retrieval eval-results/retrieval.json \
+  --out eval-results/luna-bakeoff-repeat.md
+```
+
+レポートには入力・出力トークン、レイテンシ、概算費用を記録する。Luna は Global の入力272Kトークン以下で $0.10/$0.50、超過時は全入力に $0.20/$0.75 を適用する。Sonnet 5 の $2/$10 は Anthropic 公式単価であり、Bedrock 単価は請求で確認する。料金は変わるため実施時に AWS のモデルカードを再確認する。
+
 同じ質問・同じ検索結果に対する回答を並べたもの。**検索（Retrieve）は共通**なので、差はすべて生成モデルによる。
 
 | ラベル | モデル ID |

@@ -105,9 +105,11 @@ RAGクエリ実行
 
 ### 生成モデルのリクエスト設定
 
-> 最終検証: 2026-09-29 — RAG Lambda のモデル能力プロファイルと SAM 設定を照合
+> 最終検証: 2026-10-01 — モデル能力プロファイル、InvokeModel / Converse 分岐、画像ブロック変換を照合
 
-本文生成・見出し生成・検索語書き換えは `model_profile.py` の能力表に従い、対応しない設定をリクエストへ含めない。`sonnet-5-5` / `opus-5-5` / `fable-5-1` は thinking を無効化できないため、本文生成で thinking 設定が無効のとき、および見出し生成・検索語書き換えでは、effort 対応モデルに `effort=low` を送る。モデル設定手順は [運用ランブック §7](../ops-runbook.md#7-生成モデルと推論プロファイル) を参照。
+本文生成・見出し生成・検索語書き換えは共通の `invoke_generation` を通し、`model_profile.py` の `api` に従って InvokeModel または Converse を選ぶ。既存の Anthropic モデルは InvokeModel の Anthropic 形式本文を維持する。Luna（`global.openai.gpt-6-luna`）は Converse を使い、Anthropic の text / base64 image ブロックを Converse の text / image bytes へ変換する。能力プロファイルが画像をサポートしないときは画像を除外し、本文を含めない構造化イベントだけを出力する。
+
+Anthropic モデルでは能力表に従い、対応しない sampling / thinking / effort 設定を本文へ含めない。Luna の reasoning effort はモデルカードに値の範囲は記載されているが、Converse で使うモデル固有フィールド名は確認できないため追加リクエストフィールドを送らず、モデル既定値を使う。能力表に `api: "invoke" | "converse"` を指定でき、`MODEL_PROFILE_JSON` でも上書きできる。未知の `api` 値はログを出して `invoke` にフォールバックする。モデル設定手順は [運用ランブック §7](../ops-runbook.md#7-生成モデルと推論プロファイル) を参照。
 
 - カテゴリ未指定時の**本命優先 2 段階 retrieve は 2026-08-26 に一時停止**（少数カテゴリが全検索でヒットしない副作用のため。mona 了承済み）。現在は未指定時も常に単一の retrieve（対象は実カテゴリ10種の許可リスト内）。後継方式の検討は [issue #61](https://github.com/yukiworkspace/EleKnowledge-AI/issues/61)。ユーザーが category を選んでいる場合はそれを尊重（従来どおり）。
 - 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。

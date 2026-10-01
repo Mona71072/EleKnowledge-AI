@@ -128,12 +128,21 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 - したがって当面は global を直接指定し、**推論コストはトークン数 × 単価で算出**する（P1 の検索トレースで実装）
 
 ### 7.3 モデルを切り替える手順
-> 最終検証: 2026-09-29 — `model_profile.py`・Phase 2 SAM 設定と切替手順を照合
+> 最終検証: 2026-10-01 — `MODEL_PROFILE_JSON` の API 指定を追記し実装と照合
 
-1. 新モデルが出たら `lambda/rag/rag-function/model_profile.py` の既知能力表に追加するか、SAM の `ModelProfileJson`（環境変数 `MODEL_PROFILE_JSON`）で能力を指定する。JSON の形式は `{"sonnet-5-5":{"sampling":false,"thinking_disable":false,"adaptive":true,"effort":true}}`。値はモデル名部分と能力ごとの boolean。モデル名を含まない application inference profile ARN の場合は、JSON キーに ARN 全体を指定する。
+1. 新モデルが出たら `lambda/rag/rag-function/model_profile.py` の既知能力表に追加するか、SAM の `ModelProfileJson`（環境変数 `MODEL_PROFILE_JSON`）で能力を指定する。JSON の形式は `{"sonnet-5-5":{"sampling":false,"thinking_disable":false,"adaptive":true,"effort":true},"gpt-6-luna":{"api":"converse"}}`。API は `invoke` / `converse`。モデル名を含まない application inference profile ARN の場合は、JSON キーに ARN 全体を指定する。
 2. 互換用の SAM パラメータ `BedrockRequestStyle`（環境変数 `BEDROCK_REQUEST_STYLE`）は非推奨。既定 `auto` は能力表の判定どおりにし、判定できないモデルでは最小リクエストを送る。`new` は判定できないモデルを新世代扱い（sampling なし、thinking を disabled にできるとは仮定せず最小リクエスト）、`legacy` は判定できないモデルに `temperature` を送る。既知能力表または `MODEL_PROFILE_JSON` で判定できるモデルはこの設定より優先される。新モデルの能力指定には `MODEL_PROFILE_JSON` を推奨する。
 3. `sam deploy`（phase2）で `BedrockModelId=<推論プロファイル ID>` を指定する。推論プロファイルと関連モデルの IAM 許可範囲は Phase 2 テンプレートで管理する（Global Cross-Region は Global foundation model ARN も認可対象）。詳細は [AWS の Global Cross-Region IAM 要件](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html) を参照。
 4. 本番の既定モデルはこの手順では変更しない。評価環境で評価セットを実行し、回答品質・引用・レイテンシ・Bedrock 費用を比較して記録する。採用判断後にだけ運用モデルの切替を別途行う。
+
+### 7.4 GPT-6 Luna を開発環境で試す
+> 最終検証: 2026-10-01 — Luna モデルカード、Converse API / IAM 要件、濫用検知のデータ保持説明を照合
+
+- デプロイ時に `BedrockModelId=global.openai.gpt-6-luna` を指定する。Phase 2 の既定値（Haiku 4.5）は変更しない。能力表で `api=converse` が選ばれ、本文・見出し・検索語書き換えが Converse 経由になる。
+- Lambda 実行ロールには `bedrock:InvokeModel` が必要。Converse は同じアクションで認可される。Global inference の inference-profile ARN、呼出元リージョンの foundation-model ARN、リージョンなし foundation-model ARN を許可する。既存のリージョンワイルドカードがリージョンなし ARN にも一致する。Converse 呼び出しに project/default ARN は追加しない。
+- Luna は画像入力に対応する。Converse で reasoning effort を設定するフィールド名はモデルカードで確認できなかったため、追加フィールドを送らずモデル既定値を使う。
+- `global.` は世界中の対応商用リージョンへ推論を振り分ける。**国内処理は保証されない**。濫用検知では classifier がフラグした入力・出力を自動検知用に最大30日保持する場合があり、Global 推論では処理先リージョンに保持される。投入データを選ぶ前に [AWS の濫用検知とデータ保持](https://docs.aws.amazon.com/bedrock/latest/userguide/abuse-detection.html) を確認する。
+- 比較時は [モデル比較手順](eval-2026-09-09-model-bakeoff.md#再実行手順2026-10-01) の `--save-retrieval` / `--load-retrieval` を使い、同じ Retrieve 結果を再利用する。
 
 ## 8. デプロイとロールバック
 
