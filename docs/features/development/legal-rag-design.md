@@ -69,7 +69,12 @@ e-Gov法令検索から取得した法令を、昇降機の設置・建築、据
 
 #### Knowledge Base IDとIaC
 
-- 法令S3バケットはCloudFormationスタック`eleknowledge-legal-rag-dev`が`ROLLBACK_COMPLETE`後にRetainした既存リソースである。Knowledge Base用の新規スタックは`eleknowledge-law-kb-dev`として分離し、このバケットをパラメータで参照する。失敗スタックの再デプロイや、既存バケットの再作成は行わない。
+> 最終検証: 2026-10-02 — 昨日の会話、AWS CLI read-only（ROLLBACK_COMPLETE / DELETE_SKIPPED bucket / HTTPS拒否policy / tags）、CloudFormation import公式資料を照合。AWS変更は未実施。
+
+- 法令S3バケットの旧CloudFormationスタック`eleknowledge-legal-rag-dev`は、2026-10-02のread-only確認で`ROLLBACK_COMPLETE`、唯一のstack resource `LawDataBucket`は`DELETE_SKIPPED`だった。既存bucketのownerはprofileのcaller accountと一致し、TLS必須のDeny policyが存在するが、stack resourcesには含まれていない。昨日の会話ではraw XML 53件、旧形式の派生本文106件とsidecar 106件、manifest 1件の保存が確認されている。既存データを維持し、同名bucketを新規作成しない。
+- 推奨は保持bucketをCloudFormation管理へimportすること。失敗stackは削除しかできないため、削除前に全resourceと`DeletionPolicy: Retain`を確認し、削除の明示承認後にのみstackを削除する。このstack削除・importはAWS上の変更であり、このPRでは実行しない。
+- 旧stackの削除後、既存bucketと現存するTLS policyを別名の新しい管理stack `eleknowledge-legal-data-dev-managed`へimportする。`AWS::S3::Bucket` / `AWS::S3::BucketPolicy`はimport対象としてサポートされる。import change setではresourceの作成・削除・property変更はできないため、resource import完了後にdrift detectionを行い、次のstack updateでタグを`Project=EleKnowledge`・`Env=dev`・`ManagedBy=SAM`へ揃える。bucket policyはimport前に実物とtemplateを照合する。
+- Knowledge Base用スタック`eleknowledge-law-kb-dev`はデータバケット管理スタックと分ける。KB用S3データソースは保持bucketの`kb/egov/`のみを参照する。import/change setは実bucket名と現在のpolicyをread-backしてから行い、AWS変更の前に共同レビューを得る。
 - 新設テンプレート`infrastructure/sam/legal-rag-kb-template.yaml`にKnowledge Base、S3データソース、Bedrockサービスロールを定義する。BedrockロールのS3読み取り権限は`kb/egov/*`に限定し、KMS復号もソースバケットのキーに限定する。RAG Lambdaには`bedrock:Retrieve`の対象Knowledge Base IDだけを付与する。
 - `Ref`で得たIDをテンプレートOutputへ出し、RAG実行環境の`LAW_KNOWLEDGE_BASE_ID`へ接続する。開発と本番でID・役割・データソースを混ぜない。
 
@@ -342,7 +347,10 @@ S3のTXT/Markdownは検索・引用生成の内部資料であり、法令の真
 
 ### 8.5 UI導線案
 
-- ホーム画面の既存「機能」カードに「法令チャット」を追加し、`/chat?mode=law`へ遷移する。カードは認証済み全利用者に表示し、導入直後はPoC利用可能状態を表示する。
+> 最終検証: 2026-10-02 — 昨日のUI設計依頼、PoC開発環境限定のレビュー指摘、会話にないテスト利用者情報を照合。
+
+- ホーム画面の既存「機能」カードに「法令チャット」を追加し、`/chat?mode=law`へ遷移する。PoCでは開発環境だけを対象とし、カード/APIの機能ゲートは既定OFF・本番OFFとする。ゲートがOFF、または許可されたテスト利用者でない場合はカードを表示せず、APIも`mode=law`を拒否する。
+- テスト利用者のCognito group/allowlistは昨日の会話で決めていない。具体的な許可対象は実装・有効化前にmona / itaiで確認し、クライアントだけでなくAPI側でも認可する。
 - 既存のチャット画面を再利用し、URLの`mode=law`を画面状態として固定する。ヘッダーに「法令チャット」を表示し、通常チャットへ戻る導線を用意する。modeはリロード・セッション再表示後も維持する。
 - 法令モードでは機種・資料カテゴリーフィルターを隠し、初期UIフィルターは「法令ID」「対象分野」のみとする。未指定は法令専用KB内の全対象を検索する。
 - 履歴は法令セッションだけを表示する。通常チャット画面も通常セッションだけを表示し、共通APIの`mode`クエリーを使う。
@@ -352,23 +360,26 @@ S3のTXT/Markdownは検索・引用生成の内部資料であり、法令の真
 
 ### 8.6 PoC E2Eシナリオ
 
-**実施範囲:** 開発環境`ap-northeast-1`のみ。PR #155の対象法令合意とPR #156の取込基盤レビュー後に実施し、本番KB・本番利用者は使わない。
+> 最終検証: 2026-10-02 — dev専用ゲート・テスト利用者未決・#155共同確認条件を反映。
+
+**実施範囲:** 開発環境`ap-northeast-1`のみ。PR #155の対象法令共同確認、費用上限、利用者ゲート、PR #156の取込基盤レビュー後に実施し、本番KB・本番利用者は使わない。
 
 **前提条件:**
 
 - 53法令の条文単位TXTと各`.metadata.json`を`kb/egov/`へ登録し、原文XMLは`raw/egov/`だけにある。
 - Bedrock Managed KBのManaged S3データソースが`kb/egov/`のみを対象とし、初回Ingestion jobの状態が`COMPLETE`。
 - CloudFormation出力のKB IDがRAG Lambdaの`LAW_KNOWLEDGE_BASE_ID`に設定済み。
-- Cognito認証済みのdevテストユーザーを使用し、ユーザー入力・ID token・法令引用全文をCloudWatch Logsに残さない。
+- 共同確認済みのdevテストユーザーだけを使い、機能ゲートはdevでのみ有効。テスト利用者の許可条件は有効化前に決める。
+- ユーザー入力・ID token・法令引用全文をCloudWatch Logsに残さない。
 
 | ID | 操作 | 合格条件 |
 |---|---|---|
-| LAW-E2E-01 | ログイン後、ホームの「法令チャット」カードを開く | `/chat?mode=law`となり、法令モード表示と収録範囲の注意書きが出る。機種/資料カテゴリーの通常フィルターは出ない |
+| LAW-E2E-01 | 許可されたdevテストユーザーでログイン後、ホームの「法令チャット」カードを開く | devでゲートONなら`/chat?mode=law`となり、法令モード表示と収録範囲の注意書きが出る。ゲートOFFまたは本番ではカードを表示しない |
 | LAW-E2E-02 | 収録済み法令について質問する | `POST /rag/query`の`mode=law`からManaged KBだけを取得し、`source_type=law` / `status=current`で絞る。通常KB IDへのフォールバックはしない |
 | LAW-E2E-03 | 条・項・号を含む代表質問を行い出典を開く | `provision_reference`、法令ID、施行日が同じTXTのsidecar/e-Gov本文と一致し、リンクはe-Govを開く。S3 URIを利用者にリンクしない |
 | LAW-E2E-04 | 同じテーマを通常チャットと法令チャットの両方で質問する | 通常結果に法令文書が混入せず、法令結果に社内KB文書が混入しない |
 | LAW-E2E-05 | lawセッションを作成し、一覧から再表示して追質問する | `GET /chat/sessions?mode=law`に表示され、law履歴だけが検索コンテキストになる。normalセッションIDの再利用は`409 SessionModeMismatch` |
-| LAW-E2E-06 | 未ログイン、別ユーザーのsessionId、改ざんしたmodeでAPIを呼ぶ | 未ログイン401、他ユーザーの履歴は既存の所有権ルールどおり拒否、未知modeは400。利用者間データが混ざらない |
+| LAW-E2E-06 | 未ログイン、許可されていないdevユーザー、別ユーザーsessionId、改ざんしたmodeでAPIを呼ぶ | 未ログイン401、allowlist外/ゲートOFFは拒否、他ユーザーの履歴は既存の所有権ルールどおり拒否、未知modeは400。利用者間データが混ざらない |
 | LAW-E2E-07 | 工事条件が不足した質問を送る | `clarify`となり、必要情報を聞き返す。検索・回答で適用法令を決め打ちしない |
 | LAW-E2E-08 | 法令一覧外、条例・告示、2026-10-01より過去時点の法令を質問する | 未収録範囲/版であることを明示し、現行版から過去の法的判断を推測しない |
 | LAW-E2E-09 | KBが未Sync、取得障害、0件の条件で質問する | 共通エラー形式または`not_found`を表示し、法令モードから通常KBへ暗黙fallbackしない |
@@ -376,6 +387,8 @@ S3のTXT/Markdownは検索・引用生成の内部資料であり、法令の真
 各ケースは実行者、日時、API request ID、結果、実際に参照した法令ID/条文/e-Gov URLを記録する。失敗時はrequest IDでCloudWatchを調べ、token・個人情報・引用全文は記録しない。
 
 ### 8.7 検索品質評価と合格基準
+
+> 最終検証: 2026-10-02 — 24問構成とDraft合格基準を昨日の会話に照合。費用上限・最終承認は未決。
 
 既存の[`docs/eval-2026-07-29-retrieve-golden-set.md`](../../eval-2026-07-29-retrieve-golden-set.md)の第1層機械評価を踏襲するが、通常RAGの正本`tests/eval/golden_set.jsonl`は変更しない。法令専用候補を`tests/eval/legal_golden_set_candidates.jsonl`に作り、既存ランナーをManaged KB / `mode=law` / 法令メタデータ用に拡張する。
 
@@ -395,6 +408,8 @@ S3のTXT/Markdownは検索・引用生成の内部資料であり、法令の真
 - 表示した法令ID・版・施行日・e-Gov URLが相互に一致する割合100%。条文番号の誤表示0件。
 - `clarify` / `not_found` / 対象外質問で根拠のない法的断定0件。
 - 既存プロジェクトSLOに合わせ、法令回答のp95を3秒未満とする。超過時は検索と生成を分けて計測する。
+
+KBとベクトルストアの見積もり、月額上限、PoC終了時の停止・片付け条件は昨日の会話で決まっていない。費用上限が共同合意されるまで、KB作成・初回Sync・実利用を開始しない。
 
 機械指標は取得到達・ゲートの評価であり、回答の法的妥当性を自動認定しない。代表質問の期待条文は業務確認し、回答文の正確性・断定回避は引用元本文に照らして人が承認する。
 
@@ -451,12 +466,17 @@ KB Sync失敗時は、失敗した版を現行版として扱わない。改正�
 
 ## 11. 未決事項
 
+> 最終検証: 2026-10-02 — 昨日の会話履歴とMonaの#155必須指摘を照合。
+
 - 取得ジョブの実行基盤（Lambda、CodeBuild、Step Functions等）
 - e-Gov API移行時のレート制限・障害時リトライ
 - 国土交通省・消防庁の告示・通知の取得範囲
 - 自治体条例を対象にする自治体と取得方法
 - JIS・業界標準・メーカー資料の利用許諾
 - 法令専用S3バケットを保持する失敗CloudFormationスタックの整理・リソース管理方法
+- 法令PoCの月額費用上限と終了時の片付け条件
+- devテスト利用者の特定方法・許可グループ/allowlist
+- 対象法令の選定に用いた元CSVの再保管、正式な選定根拠・所有部門の承認者名・見直し責任者/期限
 - Titan V2の日本語法令検索品質（代表質問の評価結果が不十分な場合は、Cohere Embed Multilingual v3のAgreement取得後に比較）
 - 現行`run_retrieve_eval.py`の法令Managed KB / `mode=law`対応、法令候補JSONL、API/UI E2Eハーネスの実装と実行結果
 - 法務・業務部門による代表質問と回答承認フロー
