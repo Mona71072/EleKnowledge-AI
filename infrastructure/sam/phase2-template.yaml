@@ -264,7 +264,10 @@ Parameters:
 
 Conditions:
   HasRerankModelArn: !Not [!Equals [!Ref RerankModelArn, '']]
-  HasLawKnowledgeBaseId: !Not [!Equals [!Ref LawKnowledgeBaseId, '']]
+  LawRagDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref LawRagEnabled, 'true']
+    - !Not [!Equals [!Ref LawKnowledgeBaseId, '']]
 
 Globals:
   Function:
@@ -333,7 +336,7 @@ Resources:
                 Resource:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
                   - !If
-                    - HasLawKnowledgeBaseId
+                    - LawRagDevEnabled
                     - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${LawKnowledgeBaseId}
                     - !Ref AWS::NoValue
               # jp.*  ARN
