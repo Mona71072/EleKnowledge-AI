@@ -1398,6 +1398,8 @@ def invoke_generation(client, model_id: str, system_prompt: str, messages: list,
         return text, {
             'inputTokens': usage.get('inputTokens'),
             'outputTokens': usage.get('outputTokens'),
+            'cacheReadInputTokens': usage.get('cacheReadInputTokens', 0),
+            'cacheWriteInputTokens': usage.get('cacheWriteInputTokens', 0),
         }, stop_reason
 
     response = client.invoke_model(

@@ -88,11 +88,41 @@ def price_for(model_id: str, input_tokens=None):
     return None, None
 
 
+def estimate_cost_usd(model_id: str, usage: dict) -> float | None:
+    input_tokens = usage.get("inputTokens")
+    output_tokens = usage.get("outputTokens")
+    if input_tokens is None or output_tokens is None:
+        return None
+
+    cache_read = usage.get("cacheReadInputTokens") or 0
+    cache_write = usage.get("cacheWriteInputTokens") or 0
+    if "gpt-6-luna" in model_id:
+        total_input = input_tokens + cache_read + cache_write
+        if total_input > 272000:
+            input_rate, cache_write_rate, cache_read_rate, output_rate = (0.20, 0.25, 0.02, 0.75)
+        else:
+            input_rate, cache_write_rate, cache_read_rate, output_rate = (0.10, 0.125, 0.01, 0.50)
+        cost = (
+            input_tokens * input_rate
+            + cache_write * cache_write_rate
+            + cache_read * cache_read_rate
+            + output_tokens * output_rate
+        ) / 1e6
+        return round(cost, 5)
+
+    input_rate, output_rate = price_for(model_id, input_tokens=input_tokens)
+    if input_rate is None:
+        return None
+    return round(
+        (input_tokens * input_rate + output_tokens * output_rate) / 1e6, 5
+    )
+
+
 def price_note(model_id: str) -> str:
     if "sonnet-5" in model_id:
         return "Anthropic 公式 $2/$10、Bedrock 単価は請求で確認"
     if "gpt-6-luna" in model_id:
-        return "Global: 入力272K以下 $0.10/$0.50、超過 $0.20/$0.75"
+        return "Global: 入力 $0.10/$0.50、cache write/read $0.125/$0.01 per 1M tokens。272K超は入力/出力 $0.20/$0.75、cache write/read $0.25/$0.02。"
     return "Anthropic 公式単価の概算。請求額は AWS 料金表が正"
 
 
@@ -154,6 +184,8 @@ class GenerationRecorder:
             "latencySec": round(elapsed, 2),
             "inputTokens": usage.get("inputTokens"),
             "outputTokens": usage.get("outputTokens"),
+            "cacheReadInputTokens": usage.get("cacheReadInputTokens"),
+            "cacheWriteInputTokens": usage.get("cacheWriteInputTokens"),
             "stopReason": stop_reason,
         }
         return text, usage, stop_reason
@@ -212,10 +244,12 @@ def run_question(mod, helpers, item: dict, models: list, retrieval_cache=None) -
             except Exception as e:  # noqa: BLE001 - 比較レポートに残す
                 text = f"[生成エラー] {type(e).__name__}: {e}"
                 stats = {"modelId": model_id, "error": str(e)}
-        pin, pout = price_for(model_id, input_tokens=stats.get("inputTokens"))
-        if pin is not None and stats.get("inputTokens") is not None:
-            stats["estCostUsd"] = round(
-                stats["inputTokens"] / 1e6 * pin + (stats.get("outputTokens") or 0) / 1e6 * pout, 5
+        est_cost = estimate_cost_usd(model_id, stats)
+        if est_cost is not None:
+            stats["estCostUsd"] = est_cost
+            stats["totalInputTokens"] = sum(
+                stats.get(key) or 0
+                for key in ("inputTokens", "cacheReadInputTokens", "cacheWriteInputTokens")
             )
         row["answers"][label] = {"text": text, **stats}
     return row
@@ -231,7 +265,7 @@ def summarize(rows: list, models: list) -> dict:
                 continue
             n += 1
             lat.append(a.get("latencySec") or 0)
-            tin.append(a.get("inputTokens") or 0)
+            tin.append(a.get("totalInputTokens", a.get("inputTokens")) or 0)
             tout.append(a.get("outputTokens") or 0)
             cost.append(a.get("estCostUsd") or 0)
         summary[label] = {
@@ -257,7 +291,7 @@ def render_markdown(rows: list, models: list, summary: dict, meta: dict) -> str:
     L.append(f"\nKB: `{meta['kbId']}` / 質問数: {len(rows)} / 生成対象（pages ゲート通過）: {sum(1 for r in rows if r.get('gate') == 'pages')}\n")
 
     L.append("## サマリ\n")
-    L.append("| ラベル | 回答数 | 平均レイテンシ(秒) | 最大(秒) | 平均入力トークン | 平均出力トークン | 1問あたり概算コスト(USD) | 合計概算(USD) |")
+    L.append("| ラベル | 回答数 | 平均レイテンシ(秒) | 最大(秒) | 平均入力トークン(cache含む) | 平均出力トークン | 1問あたり概算コスト(USD) | 合計概算(USD) |")
     L.append("|---|---|---|---|---|---|---|---|")
     for label, _ in models:
         s = summary[label]

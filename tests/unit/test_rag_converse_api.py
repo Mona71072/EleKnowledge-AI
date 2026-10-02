@@ -48,7 +48,12 @@ def test_converse_response_excludes_reasoning_and_returns_usage(rag_app, monkeyp
                     {"reasoningContent": {"reasoningText": {"text": "hidden"}}},
                     {"text": "回答"},
                 ]}},
-                "usage": {"inputTokens": 10, "outputTokens": 5},
+                "usage": {
+                    "inputTokens": 10,
+                    "outputTokens": 5,
+                    "cacheReadInputTokens": 120,
+                    "cacheWriteInputTokens": 30,
+                },
                 "stopReason": "end_turn",
             }
 
@@ -58,7 +63,12 @@ def test_converse_response_excludes_reasoning_and_returns_usage(rag_app, monkeyp
         [{"role": "user", "content": "q"}], 80,
     )
     assert text == "回答"
-    assert usage == {"inputTokens": 10, "outputTokens": 5}
+    assert usage == {
+        "inputTokens": 10,
+        "outputTokens": 5,
+        "cacheReadInputTokens": 120,
+        "cacheWriteInputTokens": 30,
+    }
     assert stop_reason == "end_turn"
     assert client.kwargs["inferenceConfig"] == {"maxTokens": 80}
     assert client.kwargs["system"] == [{"text": "sys"}]
@@ -100,7 +110,12 @@ def test_max_tokens_is_logged_for_converse_without_changing_text(rag_app, capsys
         [{"role": "user", "content": "秘密の質問"}], 80,
     )
     assert text == "途中までの回答"
-    assert usage == {"inputTokens": 12, "outputTokens": 80}
+    assert usage == {
+        "inputTokens": 12,
+        "outputTokens": 80,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+    }
     assert stop_reason == "max_tokens"
     event = json.loads(capsys.readouterr().out.strip())
     assert event == {

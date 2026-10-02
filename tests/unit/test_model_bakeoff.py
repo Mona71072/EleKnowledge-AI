@@ -20,6 +20,27 @@ def test_luna_pricing_uses_global_short_and_long_context_rates():
     )
 
 
+def test_luna_cost_includes_cached_input_tokens():
+    usage = {
+        "inputTokens": 2,
+        "cacheReadInputTokens": 2851,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 344,
+    }
+    assert BAKEOFF.estimate_cost_usd("global.openai.gpt-6-luna", usage) == 0.0002
+    assert usage["inputTokens"] + usage["cacheReadInputTokens"] == 2853
+
+
+def test_luna_cost_uses_long_context_rates_for_cached_tokens():
+    usage = {
+        "inputTokens": 2,
+        "cacheReadInputTokens": 272000,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 344,
+    }
+    assert BAKEOFF.estimate_cost_usd("global.openai.gpt-6-luna", usage) == 0.0057
+
+
 def test_retrieval_save_and_load_excludes_answers_and_restores_results(tmp_path):
     retrieval_results = [{"x": 1}]
     rows = [{"id": "q1", "query": "question", "gate": "pages",
