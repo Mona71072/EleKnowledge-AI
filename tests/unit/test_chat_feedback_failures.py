@@ -90,6 +90,43 @@ def test_get_sessions_filters_by_rag_mode():
     assert [session["sessionId"] for session in sessions] == ["law-session"]
 
 
+def test_get_sessions_paginates_until_requested_mode_is_found():
+    mod, table = load_app()
+
+    def query(**kwargs):
+        if "ExclusiveStartKey" not in kwargs:
+            return {
+                "Items": [{
+                    "sessionId": "normal-session",
+                    "userId": "user-1",
+                    "role": "user",
+                    "ragMode": "normal",
+                    "timestamp": "2026-10-02T02:00:00Z",
+                    "ttl": 1790900000,
+                    "content": "通常質問",
+                }],
+                "LastEvaluatedKey": {"userId": "user-1", "timestamp": "2"},
+            }
+        return {
+            "Items": [{
+                "sessionId": "law-session",
+                "userId": "user-1",
+                "role": "user",
+                "ragMode": "law",
+                "timestamp": "2026-10-02T01:00:00Z",
+                "ttl": 1790900000,
+                "content": "法令質問",
+            }]
+        }
+
+    table.query.side_effect = query
+
+    sessions = mod.get_sessions_by_user("user-1", limit=1, mode="law")
+
+    assert [session["sessionId"] for session in sessions] == ["law-session"]
+    assert table.query.call_count == 2
+
+
 def test_get_session_messages_rejects_different_rag_mode():
     mod, table = load_app()
     table.query.side_effect = [

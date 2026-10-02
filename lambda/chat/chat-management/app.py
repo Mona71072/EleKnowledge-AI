@@ -239,18 +239,37 @@ def build_session_title(content) -> str:
 def get_sessions_by_user(user_id: str, limit: int = 50, mode: str = None) -> list:
     """Get all sessions for a user"""
     try:
-        response = chatlogs_table.query(
-            IndexName='userId-timestamp-index',
-            KeyConditionExpression='userId = :uid',
-            # Hide logically-deleted messages (deleted flag null/false only)
-            FilterExpression='attribute_not_exists(#del) OR #del = :false',
-            ExpressionAttributeNames={'#del': 'deleted'},
-            ExpressionAttributeValues={':uid': user_id, ':false': False},
-            ScanIndexForward=False,
-            Limit=limit * 10  # Get more messages to find unique sessions
-        )
-        
-        messages = response.get('Items', [])
+        messages = []
+        matching_session_ids = set()
+        exclusive_start_key = None
+        while True:
+            query = {
+                'IndexName': 'userId-timestamp-index',
+                'KeyConditionExpression': 'userId = :uid',
+                # Hide logically-deleted messages (deleted flag null/false only)
+                'FilterExpression': 'attribute_not_exists(#del) OR #del = :false',
+                'ExpressionAttributeNames': {'#del': 'deleted'},
+                'ExpressionAttributeValues': {':uid': user_id, ':false': False},
+                'ScanIndexForward': False,
+                'Limit': limit * 10,
+            }
+            if exclusive_start_key:
+                query['ExclusiveStartKey'] = exclusive_start_key
+            response = chatlogs_table.query(**query)
+            page = response.get('Items', [])
+            messages.extend(page)
+            for message in page:
+                session_id = message.get('sessionId')
+                message_mode = message.get('ragMode') or 'normal'
+                if (
+                    session_id
+                    and not str(session_id).startswith('wish-')
+                    and (mode is None or message_mode == mode)
+                ):
+                    matching_session_ids.add(session_id)
+            exclusive_start_key = response.get('LastEvaluatedKey')
+            if not exclusive_start_key or len(matching_session_ids) >= limit:
+                break
         
         # Group by sessionId and get session metadata
         sessions_dict = {}
