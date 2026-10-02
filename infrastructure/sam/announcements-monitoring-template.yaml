@@ -428,8 +428,8 @@ Resources:
               Access-Control-Allow-Origin: "'*'"
               Access-Control-Allow-Headers: "'Content-Type,Authorization'"
               Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
-      # アクセスログ（JSON 1 行/リクエスト）。実行ログと違い、4xx の種別（errorType）・送信元 IP・利用者（sub）・
-      # 体感レイテンシ（responseLatency）が 1 行で読める。本文は含まない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
+      # アクセスログ（JSON 1 行/リクエスト）。requestId・時刻・resourcePath・status・latency・errorType 等を記録する。
+      # IP / userAgent / sub / 実リクエスト path / errorMessage / 本文は記録しない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
       AccessLogSetting:
         DestinationArn: !GetAtt AppApiLogGroup.Arn
         Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
