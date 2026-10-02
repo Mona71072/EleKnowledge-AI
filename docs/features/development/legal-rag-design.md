@@ -2,7 +2,7 @@
 status: development
 phase: 3
 last-verified: 2026-10-01
-related-code: infrastructure/sam/phase2-template.yaml, lambda/rag/rag-function/app.py
+related-code: infrastructure/sam/phase2-template.yaml, lambda/rag/rag-function/app.py, scripts/legal_rag/upload_egov_laws.py
 ---
 
 # 法令RAG データ基盤・検索設計
@@ -69,7 +69,7 @@ e-Gov法令検索から取得した法令を、昇降機の設置・建築、据
 
 #### Knowledge Base IDとIaC
 
-> 最終検証: 2026-10-02 — 昨日の会話、AWS CLI read-only（ROLLBACK_COMPLETE / DELETE_SKIPPED bucket / HTTPS拒否policy / tags）、CloudFormation import公式資料を照合。AWS変更は未実施。
+> 最終検証: 2026-10-02 — 昨日の会話、AWS CLI read-only（ROLLBACK_COMPLETE / DELETE_SKIPPED bucket / HTTPS拒否policy / tags）、CloudFormation import公式資料を照合。旧stack削除/bucket importは未実施。KB作成とdev反映の結果は後段に記録。
 
 - 法令S3バケットの旧CloudFormationスタック`eleknowledge-legal-rag-dev`は、2026-10-02のread-only確認で`ROLLBACK_COMPLETE`、唯一のstack resource `LawDataBucket`は`DELETE_SKIPPED`だった。既存bucketのownerはprofileのcaller accountと一致し、TLS必須のDeny policyが存在するが、stack resourcesには含まれていない。昨日の会話ではraw XML 53件、旧形式の派生本文106件とsidecar 106件、manifest 1件の保存が確認されている。既存データを維持し、同名bucketを新規作成しない。
 - 推奨は保持bucketをCloudFormation管理へimportすること。失敗stackは削除しかできないため、削除前に全resourceと`DeletionPolicy: Retain`を確認し、削除の明示承認後にのみstackを削除する。このstack削除・importはAWS上の変更であり、このPRでは実行しない。
@@ -80,11 +80,63 @@ e-Gov法令検索から取得した法令を、昇降機の設置・建築、据
 
 #### 取込本文の粒度
 
+> 最終検証: 2026-10-02 — 開発S3の本文・sidecar件数とmetadataを確認し、RAGのManaged KB filter/post-filterをコード照合
+
 初回Sync前に、検索用本文を法律全体の大きなファイルではなく、条・項・号を維持した条文単位のTXTへ分割する。各ファイルにBedrock sidecarを付け、`provision_reference`（例:`第129条の3第1項`）と`provision_type`を設定する。長い条文は固定サイズ300 tokens / 20% overlapで追加分割し、全チャンクに同じ条文メタデータを引き継ぐ。条番号を特定できない附則は`provision_reference`を省略し、番号を推測しない。
 
-> 最終検証: 2026-10-02 — PR #156の53 XML dry-runで派生件数とbytesを確認。AWS/S3への追加書き込みはしていない。
+取込開始前の記録: 2026-10-01時点のS3には旧形式の検索本文106件とsidecar 106件が保存されていた。2026-10-02のPR #156 dry-runでは、53 XMLから検索本文10,321件（15,374,504 bytes）と同数のsidecarを生成し、AWS/S3への追加書込み前に確認した。初期計画は既知の旧派生本文を明示フラグで整理し、費用上限/終了条件の合意までKB作成・初回Syncを待つものだった。以降のdev実施結果は下記に分けて記録し、業務対象範囲やmonaとの共同合意を実施済みと読み替えない。
 
-2026-10-01時点のS3には旧形式の検索本文106件とsidecar 106件が保存されている。条文・別表単位へ分割したPR #156のローカルdry-runでは、53 XMLから検索本文10,321件（15,374,504 bytes）と同数のsidecarが生成された。初回Sync前に旧形式の既知ファイルだけを明示フラグで整理し、原文XMLとmanifestは保持する。派生document数が大幅に増えるため、KB/ベクトルストアの費用上限と終了条件を合意するまでKB作成・初回Syncを行わない。
+開発S3の`kb/egov/`には、条文単位の検索本文10,321件とsidecar 10,321件に加え、旧aggregate本文・sidecarが各106件残る。Managed S3 connectorは`kb/egov/` prefixのみを対象にし、旧aggregateは削除しない。旧sidecarには`document_granularity=provision_unit`がないため、RAGは同属性をManaged KBの検索filterと取得後filterの両方で必須にし、条文単位以外を回答候補から除外する。S3 Versioningを維持し、原文XMLの内容を保持する。再upload時はXML・派生本文・sidecarの新versionと、upload時刻を反映したmanifestを記録する。
+
+2026-10-02の開発手動Sync `0SGJYH3M2F`は`COMPLETE`。本文・metadata各10,427件scan、新規索引10,427件、失敗・削除・skipは0件。完成した索引で代表3質問の法令本文とe-Gov出典を取得でき、旧aggregateは取得後filterでも除外する。認証UI E2Eと全法令の回答品質評価はこの検証に含めない。
+
+#### 条文直接リンクと正式見出し
+
+> 最終検証: 2026-10-02 — 53法令の本則7,229条と8階層を照合し、S3更新・KB再同期完了・認証済みitaiでの正式見出し/直接リンクとe-Gov対象条文への移動を確認
+
+- 本則の`Article`は、元の版指定URLにXML階層から生成したfragmentを付け、検索本文の出典とsidecarの`source_url`へ保存する。回答時の追加API呼出しは行わない。
+- アンカーは`MainProvision=Mp`、`Part=Pa`、`Chapter=Ch`、`Section=Se`、`Subsection=Ss`、`Division=Di`、`Article=At`とし、各`Num`の枝番号（`129_13_3`など）は変更しない。
+- 対応階層は、本則直下の条、章/条、章/節/条、章/節/款/条、章/節/款/目/条、編/章/条、編/章/節/条、編/章/節/款/条の8種類に限定する。未知の階層・番号欠損・不正な番号はアンカーを推測せず、元の法令全体URLを使用する。附則・経過措置・別表も法令全体URLを使用する。
+- `Num="29:31"`などの範囲指定は単一条のアンカーとして扱わず、全体URLへ戻す。対象本則7,229文書のうち24文書がこの形式であり、直接リンクは残る7,205文書が対象となる。範囲指定も正式な`ArticleTitle`を保持する。
+- 本則の`provision_reference`はXMLの`ArticleTitle`（例:`第百二十九条の十三の三`）を使用し、`Num`から表示文字列を組み立てない。見出し欠損時は同属性を省略する。
+- 既存のAPI/画面は`source_url`と`provision_reference`を引き継ぐ。新しいリンクの反映には派生本文・sidecarの再生成とS3更新、KB再同期が必要。原文XML・旧aggregate・保存済みの過去回答を削除または書き換えない。
+- e-Govアンカーは実ページで確認した形式であり、APIの永続的なURL契約とは扱わない。更新時は代表リンクを再検証する。ローカル実装完了とS3/KBへの反映完了を分けて記録する。
+
+2026-10-02にdev S3の10,321本文/sidecarを更新し、KB再同期 `DGXCWFHOWN`は`COMPLETE`。本文・metadata各10,427件scan、変更本文/metadata各10,321件、失敗・削除・skipは0件。認証済みitaiの新規回答で正式見出しと条文リンクを確認し、e-Govの対象条文へ移動できた。今回の反映はデータ更新であり、API/画面のコード再デプロイと本番変更、過去回答の書換えは行っていない。
+
+#### 既知の不具合: 収録済み条文の参照不足
+
+> 最終検証: 2026-10-02 — 同期統計・S3/XML・実KB検索・モデル参照生成を照合。案Bを採用し、実装後のdev動作確認を完了条件とする。
+
+収録済みの条文について「本参照資料に含まれていない」と回答する事象を確認した。最新同期は本文/metadata各10,321件更新、失敗・削除・skipは0件。建築基準法34条、施行令129条の13の2/13の3、労働基準法36条、消防法17条、労働安全衛生規則519条の6条文は、複数の条文指定検索結果を合わせるとS3全文を100%覆う（空白・表記幅を正規化）。この範囲で索引欠落はない。
+
+原因は、関連チャンク検索が全文読出しではないことと、法令モードにも適用された全体10チャンク・同一本文2チャンクの選別制限。施行令129条の13の3はKBで13チャンクを確認できるが、通常検索4・モデル参照2になった。他の3法令でも再現。1,200文字/チャンクの切詰めは今回の6サンプルでは発生していない。53法令の本則7,229文書中、3項以上は1,751文書/50法令であり、これは潜在リスクの指標で、実際の失敗件数ではない。2項でも複数チャンクに分かれるため短い条文も影響する。
+
+CloudWatchの当時のログはHTTP 200と出典件数を残すが、モデルへ渡した本文は保存していない。過去の入力は完全復元できず、以下は現KB・現コードの再取得とメモリ内試作による比較である。生成回答の正確性・Lambda遅延の評価は別に必要。
+
+| 案 | 比較結果 | 判断 |
+|---|---|---|
+| A: 取得100件、全体30/本文8チャンクへ拡大 | 6条文中5条文で参照が全文に届かない。例:施行令129条の13の2は38.48%、13の3は41.08%、労働基準法36条は55.74% | 単独採用しない |
+| B: 検索で採用した条文のS3全文を補完 | 対象6条文の全文を参照へ渡せる。上限付き試作で今回の関連3条文を補完 | 今回採用 |
+| C: 名指し条文・関連条文を追加取得 | 検索に当たらない条文も救えるが、番号解決・誤接続・取得範囲の制御が必要 | 別の次段階 |
+
+案Bの仕様:
+
+- devの法令モードだけで、採用済み結果をS3 URI単位で集約して全文補完する。通常RAGの検索・選別・権限は変更しない。生成と引用は同じ補完済み参照集合を使う。
+- 初期上限は全文6本文、単体8,000文字/32KB、参照本文合計20,000文字。巨大な本文は全文と称して切らず、既存検索断片を部分参照として渡す。合計枠がなくなった参照は生成・引用の両方から除外する。
+- 元の版・正式見出し・e-Gov出典を保持する。モデルへ全文/部分参照と部分化の理由を明示し、部分参照を「未収録」と断定させない。
+- S3読取りは構成済み法令bucket、同一account、`kb/egov/<law-id>/<version>/<provision_type>/<5桁>.txt`のみ。外部bucket・不正URIへのアクセスは禁止。dev有効時だけGetObject/KMS復号を追加し、書込み・ListBucket・raw XML読取りは追加しない。
+- 短い接続/読取りtimeout、retryなし、補完時間枠と生成に残す時間の確認を行う。権限不足・欠損・timeout時は部分参照へ戻し、質問本文・引用全文・個人情報をログへ出さない。ログは補完件数/状態/理由とrequest IDのみとする。
+- KBの再同期・チャンク設定変更・S3再uploadは不要。実装後は6条文の後半の項・要件、巨大本文・不正URI・読取り失敗/timeout、引用一致、通常RAG回帰、実Lambdaの遅延と生成量を確認する。費用の確定は実運用計測とし、試作のローカル読取り時間を本番p95と扱わない。
+
+2026-10-02の案B実装・dev確認結果:
+
+- 全unit tests 481件成功（既存deprecation warnings 6件）、cfn-lint成功。全文の末尾保持、引用集合一致、重複読取り抑止、単体/合計/件数上限、不正URI、権限不足・欠損・timeout・不正UTF8、時間不足、dev以外の拒否、本文を出さないログを確認。
+- 実KB/S3の6条文で最終項がモデル参照に残ることを確認。ローカル補完処理は約0.33〜1.19秒だが、実Lambdaのp95ではない。
+- `law-full-text-20261002` change setは`UPDATE_COMPLETE`。詳細評価の変更はRagFunctionのCode/EnvironmentとRagLambdaRoleのPoliciesのみ、置換なし。Sonnet5・KB ID・dev gate・既存パラメータを保持。法令派生本文GetObjectは許可、raw XML読取りと法令S3書込みは拒否。本番は変更していない。
+- 認証済みitaiの5送信で6条文を確認し、HTTP 200・対象本文`referenceCoverage=full`。施行令の除外条件/乗降ロビー/予備電源/第13項、労基法36条の後半、消防法17条の第2/3項、安衛則519条の第2項、建築基準法34条第2項が回答され、e-Gov出典を保持した。これは運用の参照不足修正の確認であり、法的判断・回答の完全性を認定するものではない。
+- 5送信のサーバー処理は9.57〜25.95秒、参照本文は3,455〜10,495文字、全文6本文/送信。速度目標p95 < 3秒は達成と扱わない。費用はS3/KMS読取りとモデル入力が増えるため実運用の利用量/請求で確認し、文字数から確定料金を推定しない。
+- 複合質問では検索から外れた34条が未提示になる例もあった。単独質問で全文を確認できたが、未取得の名指し条文/関連条文を救う案Cは未実装。過去回答は書き換えず、S3再upload・KB再同期は行っていない。ソース修正と共同確認用の本記録は別PRでレビューする。
 
 ## 3. 論理構成
 
