@@ -4,6 +4,9 @@ These tests intentionally assert existing public behavior rather than proposing
 new retrieval rules.  They provide a safety net while app.py is split into
 smaller modules.
 """
+import copy
+import json
+
 import pytest
 
 
@@ -119,6 +122,226 @@ def test_normalize_mode_keeps_explicit_category(rag):
 
     assert mode == "normal"
     assert filters == {"category": "drawing", "modelType": "AXIEZ"}
+
+
+def test_law_rag_requires_dev_flag_and_knowledge_base(rag):
+    assert rag.law_rag_is_enabled("dev", "true", "ABCDEFGHIJ")
+    assert not rag.law_rag_is_enabled("prd", "true", "ABCDEFGHIJ")
+    assert not rag.law_rag_is_enabled("dev", "false", "ABCDEFGHIJ")
+    assert not rag.law_rag_is_enabled("dev", "true", "")
+
+
+def test_law_filter_only_includes_current_law_documents(rag):
+    assert rag.build_law_kb_filter() == {
+        "andAll": [
+            {"equals": {"key": "source_type", "value": "law"}},
+            {"equals": {"key": "status", "value": "current"}},
+        ]
+    }
+
+
+def test_law_retrieval_uses_managed_search_and_law_kb_only(rag, monkeypatch):
+    calls = []
+    expected_response = {"retrievalResults": []}
+
+    def retrieve(**kwargs):
+        calls.append(kwargs)
+        return expected_response
+
+    monkeypatch.setattr(rag, "ENVIRONMENT", "dev")
+    monkeypatch.setattr(rag, "LAW_RAG_ENABLED", "true")
+    monkeypatch.setattr(rag, "LAW_KNOWLEDGE_BASE_ID", "ABCDEFGHIJ")
+    monkeypatch.setattr(rag.bedrock_agent, "retrieve", retrieve)
+
+    response = rag.query_law_knowledge_base("建築基準法の昇降機規定")
+
+    assert response is expected_response
+    assert calls[0]["knowledgeBaseId"] == "ABCDEFGHIJ"
+    assert calls[0]["retrievalConfiguration"] == {
+        "managedSearchConfiguration": {
+            "numberOfResults": 30,
+            "filter": rag.build_law_kb_filter(),
+            "rerankingModelType": "NONE",
+        }
+    }
+
+
+def test_law_mode_is_rejected_when_feature_gate_is_off(rag, monkeypatch):
+    monkeypatch.setattr(rag, "ENVIRONMENT", "dev")
+    monkeypatch.setattr(rag, "LAW_RAG_ENABLED", "false")
+    monkeypatch.setattr(rag, "LAW_KNOWLEDGE_BASE_ID", "ABCDEFGHIJ")
+    event = {
+        "httpMethod": "POST",
+        "body": '{"mode":"law","query":"建築基準法の昇降機規定"}',
+        "requestContext": {
+            "authorizer": {"claims": {"sub": "verified-user"}}
+        },
+    }
+
+    response = rag.lambda_handler(event, None)
+
+    assert response["statusCode"] == 403
+
+
+def test_law_mode_rejects_existing_normal_session(rag, monkeypatch):
+    monkeypatch.setattr(rag, "ENVIRONMENT", "dev")
+    monkeypatch.setattr(rag, "LAW_RAG_ENABLED", "true")
+    monkeypatch.setattr(rag, "LAW_KNOWLEDGE_BASE_ID", "ABCDEFGHIJ")
+    monkeypatch.setattr(rag, "owns_session", lambda session_id, user_id: True)
+    monkeypatch.setattr(rag, "get_session_rag_mode", lambda session_id: "normal")
+    monkeypatch.setattr(
+        rag.bedrock_agent, "retrieve",
+        lambda **kwargs: pytest.fail("mode-mismatched session must not retrieve"),
+    )
+    event = {
+        "httpMethod": "POST",
+        "body": '{"sessionId":"normal-session","mode":"law","query":"建築基準法"}',
+        "requestContext": {
+            "authorizer": {"claims": {"sub": "verified-user"}}
+        },
+    }
+
+    response = rag.lambda_handler(event, None)
+
+    assert response["statusCode"] == 409
+    assert json.loads(response["body"])["error"] == "SessionModeMismatch"
+
+
+def test_law_handler_uses_only_law_kb_and_returns_egov_citation(rag, monkeypatch):
+    saved_messages = []
+    retrieval_result = {
+        "score": 0.92,
+        "metadata": {
+            "x-amz-bedrock-kb-source-uri": "s3://law-bucket/kb/egov/123/2025/main/00001.txt",
+            "source_type": "law",
+            "source_url": "https://laws.e-gov.go.jp/law/123",
+            "law_id": "123",
+            "law_title": "建築基準法",
+            "law_number": "昭和二十五年法律第二百一号",
+            "effective_date": "2025-06-01",
+            "provision_type": "main",
+            "provision_reference": "第1条",
+        },
+        "content": {"text": "法令本文"},
+    }
+
+    monkeypatch.setattr(rag, "ENVIRONMENT", "dev")
+    monkeypatch.setattr(rag, "LAW_RAG_ENABLED", "true")
+    monkeypatch.setattr(rag, "LAW_KNOWLEDGE_BASE_ID", "ABCDEFGHIJ")
+    monkeypatch.setattr(rag, "get_chat_history", lambda *args, **kwargs: [])
+    monkeypatch.setattr(rag, "query_law_knowledge_base", lambda query: {
+        "retrievalResults": [retrieval_result]
+    })
+    monkeypatch.setattr(
+        rag, "retrieve_for_normal_query",
+        lambda *args, **kwargs: pytest.fail("law mode must not query the normal KB"),
+    )
+    monkeypatch.setattr(
+        rag, "generate_response_with_claude",
+        lambda query, results, history, mode, **kwargs: "法令本文から確認できる内容です。",
+    )
+    monkeypatch.setattr(rag, "enqueue_session_title", lambda *args: None)
+    monkeypatch.setattr(
+        rag,
+        "save_message_to_dynamodb",
+        lambda **kwargs: saved_messages.append(copy.deepcopy(kwargs)) or f"message-{len(saved_messages)}",
+    )
+    event = {
+        "httpMethod": "POST",
+        "body": '{"mode":"law","query":"建築基準法の規定"}',
+        "requestContext": {
+            "authorizer": {"claims": {"sub": "verified-user"}}
+        },
+    }
+
+    response = rag.lambda_handler(event, None)
+    response_body = json.loads(response["body"])
+
+    assert response["statusCode"] == 200
+    assert response_body["pageCandidates"] == []
+    assert response_body["sourceDocuments"][0]["sourceUri"] == "https://laws.e-gov.go.jp/law/123"
+    assert response_body["sourceDocuments"][0]["lawCitation"]["provisionReference"] == "第1条"
+    assert [message["rag_mode"] for message in saved_messages] == ["law", "law"]
+    assert saved_messages[1]["source_documents"][0]["relevance"] == rag.Decimal("0.92")
+
+
+def test_law_citations_link_only_to_egov_and_include_provision_metadata(rag):
+    result = {
+        "score": 0.82,
+        "metadata": {
+            "x-amz-bedrock-kb-source-uri": "s3://private-law-bucket/kb/egov/abc.txt",
+            "source_url": "https://laws.e-gov.go.jp/law/123",
+            "law_id": "123",
+            "law_title": "建築基準法",
+            "law_number": "昭和二十五年法律第二百一号",
+            "effective_date": "2025-06-01",
+            "provision_type": "main",
+            "provision_reference": "第1条",
+        },
+        "content": {"text": "法令本文"},
+    }
+
+    citations, source_documents = rag.extract_law_citations([result])
+
+    assert citations == ["昭和二十五年法律第二百一号 第1条"]
+    assert source_documents[0]["sourceUri"] == "https://laws.e-gov.go.jp/law/123"
+    assert source_documents[0]["lawCitation"]["provisionReference"] == "第1条"
+    assert "s3://" not in str(source_documents)
+    result["metadata"]["source_url"] = "https://example.com/law/123"
+    assert rag.extract_law_citations([result]) == ([], [])
+
+
+def test_law_reference_context_omits_internal_s3_uri(rag):
+    context = rag.build_references_block([{
+        "score": 0.9,
+        "metadata": {
+            "x-amz-bedrock-kb-source-uri": "s3://private-law-bucket/kb/egov/abc.txt",
+            "source_type": "law",
+            "law_id": "123",
+            "law_title": "建築基準法",
+            "law_number": "昭和二十五年法律第二百一号",
+            "effective_date": "2025-06-01",
+            "provision_type": "main",
+            "provision_reference": "第1条",
+        },
+        "content": {"text": "法令本文"},
+    }])
+
+    assert "建築基準法" in context
+    assert "第1条" in context
+    assert "2025-06-01" in context
+    assert "s3://" not in context
+
+
+def test_unknown_mode_is_rejected(rag):
+    event = {
+        "httpMethod": "POST",
+        "body": '{"mode":"unknown","query":"質問"}',
+        "requestContext": {
+            "authorizer": {"claims": {"sub": "verified-user"}}
+        },
+    }
+
+    response = rag.lambda_handler(event, None)
+
+    assert response["statusCode"] == 400
+
+
+def test_get_chat_history_filters_sessions_by_rag_mode(rag, monkeypatch):
+    class FakeChatLogsTable:
+        def query(self, **kwargs):
+            return {"Items": [
+                {"role": "assistant", "ragMode": "law", "content": "law answer", "timestamp": "4"},
+                {"role": "user", "ragMode": "law", "content": "law question", "timestamp": "3"},
+                {"role": "assistant", "content": "old answer", "timestamp": "2"},
+                {"role": "user", "content": "old question", "timestamp": "1"},
+            ]}
+
+    monkeypatch.setattr(rag, "chatlogs_table", FakeChatLogsTable())
+
+    history = rag.get_chat_history("session-1", mode="law")
+
+    assert [message["content"] for message in history] == ["law question", "law answer"]
 
 
 def test_caller_identity_comes_only_from_verified_claims(rag):

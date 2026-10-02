@@ -49,6 +49,20 @@ Parameters:
       only together with the app-side image-attachment rework).
       See docs/decisions-2026-08-26-kb-selection.md.
 
+  LawKnowledgeBaseId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[A-Z0-9]{10}$'
+    Description: Optional dev-only Managed Knowledge Base for current e-Gov laws
+
+  LawRagEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable law mode only when Environment is dev and a LawKnowledgeBaseId is configured
+
   KnowledgeBaseDataSourceBucket:
     Type: String
     Default: ragknowledgebasestackinst-datasourcebucket9fa93e04-ybbhm1efhyzb
@@ -250,6 +264,7 @@ Parameters:
 
 Conditions:
   HasRerankModelArn: !Not [!Equals [!Ref RerankModelArn, '']]
+  HasLawKnowledgeBaseId: !Not [!Equals [!Ref LawKnowledgeBaseId, '']]
 
 Globals:
   Function:
@@ -317,6 +332,10 @@ Resources:
                   - bedrock:Retrieve
                 Resource:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
+                  - !If
+                    - HasLawKnowledgeBaseId
+                    - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${LawKnowledgeBaseId}
+                    - !Ref AWS::NoValue
               # jp.*  ARN
               # foundation-model ARN  AccessDeniedException
               - Effect: Allow
@@ -409,6 +428,8 @@ Resources:
       Environment:
         Variables:
           KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+          LAW_KNOWLEDGE_BASE_ID: !Ref LawKnowledgeBaseId
+          LAW_RAG_ENABLED: !Ref LawRagEnabled
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           # 履歴一覧の見出し生成。既定は BEDROCK_MODEL_ID と同じモデル（追加の IAM 不要）
           SESSION_TITLE_LLM: !Ref SessionTitleLlm
