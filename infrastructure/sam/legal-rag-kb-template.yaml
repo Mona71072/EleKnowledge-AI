@@ -105,13 +105,6 @@ Resources:
             filterConfiguration:
               inclusionPrefixes:
                 - kb/egov/
-              inclusionPatterns:
-                - '.*\.txt$'
-              exclusionPatterns:
-                - '.*\.main\.txt$'
-                - '.*\.supplementary\.txt$'
-                - '.*\.transitional\.txt$'
-                - '.*\.annex\.txt$'
           DeletionProtectionConfiguration:
             DeletionProtectionStatus: ENABLED
             DeletionProtectionThreshold: 5
