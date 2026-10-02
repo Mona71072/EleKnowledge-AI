@@ -1,6 +1,7 @@
 import json
 import csv
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,18 @@ from scripts.legal_rag.upload_egov_laws import (
 )
 
 
+
+def test_metadata_sidecar_rejects_more_than_ten_kilobytes(tmp_path: Path) -> None:
+    source_dir, catalog, _ = _write_fixture(tmp_path)
+    document = build_documents(source_dir, catalog)[0]
+    search_document = build_search_documents(document)[0]
+    oversized_law = replace(search_document.law, law_title="法" * 12000)
+    oversized_document = replace(search_document, law=oversized_law)
+
+    with pytest.raises(ValueError, match="10 KB limit"):
+        build_metadata_sidecar(
+            oversized_document, "2026-10-01", "2026-10-02T00:00:00Z"
+        )
 FOLDER_NAME = "322AC0000000049_20260717_508AC0000000060"
 ACCOUNT_ID = "123456789012"
 
@@ -78,7 +91,17 @@ def test_build_search_documents_preserves_provision_structure(tmp_path: Path) ->
                         <ItemSentence><Sentence>安全を確保する。</Sentence></ItemSentence></Item>
                 </Paragraph>
             </Article>
-        </Chapter></MainProvision>
+            <Article Num="2"><ArticleTitle>（定義）</ArticleTitle>
+                <Paragraph Num="1"><ParagraphNum>１</ParagraphNum>
+                    <ParagraphSentence><Sentence>労働者とは、事業に使用される者をいう。</Sentence></ParagraphSentence>
+                </Paragraph>
+            </Article>
+        </Chapter>
+        <AppdxTable><AppdxTableTitle>別表第一</AppdxTableTitle>
+            <TableStruct><Table><TableRow><TableColumn>
+                <Sentence>別表の安全基準。</Sentence>
+            </TableColumn></TableRow></Table></TableStruct>
+        </AppdxTable></MainProvision>
         <SupplProvision><SupplProvisionLabel>附則</SupplProvisionLabel>
             <SupplProvisionArticle Num="1"><SupplProvisionArticleTitle>（施行期日）</SupplProvisionArticleTitle>
                 <Paragraph><ParagraphSentence><Sentence>この法律は公布の日から施行する。</Sentence></ParagraphSentence></Paragraph>
@@ -91,12 +114,22 @@ def test_build_search_documents_preserves_provision_structure(tmp_path: Path) ->
 
         search_documents = build_search_documents(document)
 
-        assert [search.provision_type for search in search_documents] == ["main", "supplementary"]
-        assert "第一章 総則" in search_documents[0].content
+        assert [search.provision_type for search in search_documents] == [
+            "main", "main", "annex", "supplementary"
+        ]
+        assert [search.provision_reference for search in search_documents] == [
+            "第1条", "第2条", None, "附則第1条"
+        ]
+        assert search_documents[0].filename.endswith(".main.00001.txt")
+        assert "【章節】第一章 総則" in search_documents[0].content
         assert "第1条" in search_documents[0].content
+        assert "（目的）" in search_documents[0].content
         assert "この法律は、労働条件を定める。" in search_documents[0].content
         assert "安全を確保する。" in search_documents[0].content
-        assert "この法律は公布の日から施行する。" in search_documents[1].content
+        assert "第2条" in search_documents[1].content
+        assert "別表第一" in search_documents[2].content
+        assert "別表の安全基準。" in search_documents[2].content
+        assert "この法律は公布の日から施行する。" in search_documents[3].content
 
 
 def test_metadata_sidecar_contains_typed_bedrock_attributes(tmp_path: Path) -> None:
@@ -105,7 +138,9 @@ def test_metadata_sidecar_contains_typed_bedrock_attributes(tmp_path: Path) -> N
         search_document = build_search_documents(document)[0]
 
         metadata = json.loads(
-                build_metadata_sidecar(search_document, "2026-10-01T00:00:00+00:00")
+            build_metadata_sidecar(
+                search_document, "2026-10-01", "2026-10-02T00:00:00Z"
+            )
         )
 
         attributes = metadata["metadataAttributes"]
@@ -113,13 +148,38 @@ def test_metadata_sidecar_contains_typed_bedrock_attributes(tmp_path: Path) -> N
         assert attributes["provision_type"]["value"]["stringValue"] == "main"
         assert attributes["law_id"]["value"]["stringValue"] == "322AC0000000049"
         assert attributes["promulgation_date"]["value"]["stringValue"] == "1947-04-07"
+        assert attributes["provision_reference"]["value"]["stringValue"] == "第1条"
+        assert attributes["retrieved_at"]["value"]["stringValue"] == "2026-10-01"
+        assert attributes["uploaded_at"]["value"]["stringValue"] == "2026-10-02T00:00:00Z"
+
+
+def test_metadata_sidecar_rejects_more_than_ten_kilobytes(tmp_path: Path) -> None:
+    source_dir, catalog, _ = _write_fixture(tmp_path)
+    document = build_documents(source_dir, catalog)[0]
+    search_document = build_search_documents(document)[0]
+    oversized_law = replace(search_document.law, law_title="法" * 12000)
+    oversized_document = replace(search_document, law=oversized_law)
+
+    with pytest.raises(ValueError, match="10 KB limit"):
+        build_metadata_sidecar(
+            oversized_document, "2026-10-01", "2026-10-02T00:00:00Z"
+        )
 
 
 class _S3Client:
-    def __init__(self, *, public_access: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        public_access: bool = True,
+        https_policy: bool = True,
+        existing_keys: list[str] | None = None,
+    ) -> None:
         self.public_access = public_access
+        self.https_policy = https_policy
+        self.existing_keys = existing_keys or []
         self.uploads: list[tuple[str, str, str, dict[str, object]]] = []
         self.objects: list[dict[str, object]] = []
+        self.deleted_keys: list[str] = []
         self.manifest: dict[str, object] | None = None
 
     def head_bucket(self, **kwargs: object) -> dict[str, object]:
@@ -153,6 +213,29 @@ class _S3Client:
     def get_bucket_ownership_controls(self, **kwargs: object) -> dict[str, object]:
         return {"OwnershipControls": {"Rules": [{"ObjectOwnership": "BucketOwnerEnforced"}]}}
 
+    def get_bucket_policy(self, **kwargs: object) -> dict[str, str]:
+        statements = []
+        if self.https_policy:
+            bucket = kwargs["Bucket"]
+            bucket_arn = f"arn:aws:s3:::{bucket}"
+            statements.append({
+                "Effect": "Deny",
+                "Action": "s3:*",
+                "Resource": [bucket_arn, f"{bucket_arn}/*"],
+                "Condition": {"Bool": {"aws:SecureTransport": "false"}},
+            })
+        return {"Policy": json.dumps({"Statement": statements})}
+
+    def list_objects_v2(self, **kwargs: object) -> dict[str, object]:
+        prefix = str(kwargs["Prefix"])
+        return {
+            "Contents": [{"Key": key} for key in self.existing_keys if key.startswith(prefix)],
+            "IsTruncated": False,
+        }
+
+    def delete_object(self, **kwargs: object) -> None:
+        self.deleted_keys.append(str(kwargs["Key"]))
+
     def upload_file(
         self,
         filename: str,
@@ -177,7 +260,7 @@ def test_upload_documents_writes_xml_then_manifest(tmp_path: Path) -> None:
         for document in documents
         for search_document in build_search_documents(document)
     ]
-    manifest = build_manifest(documents, "2026-10-01T00:00:00Z")
+    manifest = build_manifest(documents, "2026-10-01", "2026-10-02T00:00:00Z")
     s3_client = _S3Client()
 
     upload_documents(
@@ -188,7 +271,8 @@ def test_upload_documents_writes_xml_then_manifest(tmp_path: Path) -> None:
         manifest,
         prefix="raw/egov",
         kb_prefix="kb/egov",
-        retrieved_at="2026-10-01T00:00:00Z",
+        retrieved_at="2026-10-01",
+        uploaded_at="2026-10-02T00:00:00Z",
         expected_account_id=ACCOUNT_ID,
     )
 
@@ -201,6 +285,9 @@ def test_upload_documents_writes_xml_then_manifest(tmp_path: Path) -> None:
     assert s3_client.manifest["Body"].decode("utf-8") == manifest
     assert "労働基準法" in next(csv.DictReader(manifest.splitlines()))["law_title"]
     assert next(csv.DictReader(manifest.splitlines()))["promulgation_date"] == "1947-04-07"
+    manifest_row = next(csv.DictReader(manifest.splitlines()))
+    assert manifest_row["retrieved_at"] == "2026-10-01"
+    assert manifest_row["uploaded_at"] == "2026-10-02T00:00:00Z"
 
 
 def test_upload_documents_refuses_public_bucket_before_writing(tmp_path: Path) -> None:
@@ -217,9 +304,69 @@ def test_upload_documents_refuses_public_bucket_before_writing(tmp_path: Path) -
             "manifest",
             prefix="raw/egov",
             kb_prefix="kb/egov",
-            retrieved_at="2026-10-01T00:00:00Z",
+            retrieved_at="2026-10-01",
+            uploaded_at="2026-10-02T00:00:00Z",
             expected_account_id=ACCOUNT_ID,
         )
 
     assert not s3_client.uploads
     assert s3_client.manifest is None
+
+
+def test_upload_documents_refuses_bucket_without_tls_policy(tmp_path: Path) -> None:
+    source_dir, catalog, _ = _write_fixture(tmp_path)
+    documents = build_documents(source_dir, catalog)
+    s3_client = _S3Client(https_policy=False)
+
+    with pytest.raises(ValueError, match="deny insecure transport"):
+        upload_documents(
+            s3_client,
+            "law-rag-test",
+            documents,
+            [],
+            "manifest",
+            prefix="raw/egov",
+            kb_prefix="kb/egov",
+            retrieved_at="2026-10-01",
+            uploaded_at="2026-10-02T00:00:00Z",
+            expected_account_id=ACCOUNT_ID,
+        )
+
+    assert not s3_client.uploads
+    assert s3_client.manifest is None
+
+
+def test_upload_documents_prunes_only_known_legacy_aggregate_files(tmp_path: Path) -> None:
+    source_dir, catalog, _ = _write_fixture(tmp_path)
+    documents = build_documents(source_dir, catalog)
+    folder = documents[0].folder_name
+    law_id = documents[0].law_id
+    legacy_main = f"kb/egov/{law_id}/{folder}.main.txt"
+    legacy_main_metadata = f"{legacy_main}.metadata.json"
+    legacy_supplementary = f"kb/egov/{law_id}/{folder}.supplementary.txt"
+    unrelated = f"kb/egov/{law_id}/manual-notes.txt"
+    s3_client = _S3Client(
+        existing_keys=[legacy_main, legacy_main_metadata, legacy_supplementary, unrelated]
+    )
+    search_documents = [
+        item for law in documents for item in build_search_documents(law)
+    ]
+
+    upload_documents(
+        s3_client,
+        "law-rag-test",
+        documents,
+        search_documents,
+        "manifest",
+        prefix="raw/egov",
+        kb_prefix="kb/egov",
+        retrieved_at="2026-10-01",
+        uploaded_at="2026-10-02T00:00:00Z",
+        expected_account_id=ACCOUNT_ID,
+        prune_legacy_derived=True,
+    )
+
+    assert set(s3_client.deleted_keys) == {
+        legacy_main, legacy_main_metadata, legacy_supplementary,
+    }
+    assert unrelated not in s3_client.deleted_keys

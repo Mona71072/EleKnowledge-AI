@@ -9,6 +9,9 @@ Parameters:
       - dev
       - staging
       - prod
+  BucketName:
+    Type: String
+    Description: Existing retained law-data bucket to import into this stack.
 
 Resources:
   LawDataBucket:
@@ -16,6 +19,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      BucketName: !Ref BucketName
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -34,9 +38,11 @@ Resources:
         Status: Enabled
       Tags:
         - Key: Project
-          Value: EleKnowledge-AI
-        - Key: Environment
+          Value: EleKnowledge
+        - Key: Env
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
         - Key: DataClass
           Value: PublicLawSource
 
