@@ -1,6 +1,6 @@
 # e-Gov法令データ取込（開発PoC）
 
-本ツールは対象カタログの現行版53法令だけを処理します。原文XMLは`raw/egov/`へ不変保存し、検索本文は条・附則条文・別表単位で`kb/egov/`へ生成します。本文には章節、項・号構造を保持し、各ファイルの`.metadata.json`に`provision_reference`を記録します。Bedrock KB側では設計書どおり固定サイズ300 tokens / 20% overlapで長い条文を分割してください。このスクリプトはKB Syncを実行しません。
+本ツールは対象カタログの現行版53法令だけを処理します。原文XMLは`raw/egov/<law-id>/<version-folder>.xml`へ不変保存し、検索本文は`kb/egov/<law-id>/<version-folder>/<provision_type>/<unit-number>.txt`へ生成します。本文には章節、項・号構造を保持し、各ファイルの`.metadata.json`に条文の`provision_reference`を記録します。Bedrock KB側では設計書どおり固定サイズ300 tokens / 20% overlapで長い条文を分割してください。このスクリプトはKB Syncを実行しません。
 
 `retrieved_at`はXMLの取得日（ISO日付）で、アップロード時刻ではありません。`uploaded_at`は実行時にUTCで記録します。取得日が分からない場合、アップロード日を代用せず、取得記録を確認してから実行してください。
 
@@ -26,7 +26,7 @@ python .\scripts\legal_rag\upload_egov_laws.py `
 2. 明示承認後のみ旧stackを削除し、S3 bucketとpolicyが残っていることを再確認する。削除前に現在のデータとpolicyを別途確認する。
 3. 旧stackのlogical IDと実bucket名を取得し、`legal-rag-data-import-template.yaml`とresource identifierを使って、新stack `eleknowledge-legal-data-dev-managed` のIMPORT change setを作成する。import対象は`AWS::S3::Bucket`と`AWS::S3::BucketPolicy`。既存policyとtemplateが一致することを先に照合する。
 4. change setにImport以外の作成・削除・更新がないことを確認してから実行し、完了後drift detectionを行う。import change setではresourceの作成・削除・property変更はできない。各import resourceには`DeletionPolicy`が必要。
-5. import完了後、`legal-rag-data-template.yaml`で別stack updateを行い、bucket tagsを`Project=EleKnowledge`・`Env=dev`・`ManagedBy=SAM`に揃える。TLS policy、BPA、KMS、Versioning、ownership、tags、driftを再確認する。
+5. import完了後、`legal-rag-data-template.yaml`で別stack updateを行い、bucket tagsを`Project=EleKnowledge`・`Env=dev`・`ManagedBy=SAM`に揃える。このtemplateは`dev`のみを許し、新規bucketを作る用途には使わない。TLS policy、BPA、KMS、Versioning、ownership、tags、driftを再確認する。
 
 AWS公式資料: [CloudFormation resource import](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/import-resources-manually.html)、[import対応resource一覧](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/resource-import-supported-resources.html)。
 

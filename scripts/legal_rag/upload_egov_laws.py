@@ -54,10 +54,13 @@ class SearchDocument:
 
     @property
     def filename(self) -> str:
-        return f"{self.law.folder_name}.{self.provision_type}.{self.unit_index:05d}.txt"
+        return f"{self.unit_index:05d}.txt"
 
     def object_key(self, prefix: str) -> str:
-        return f"{prefix}/{self.law.law_id}/{self.filename}"
+        return (
+            f"{prefix}/{self.law.law_id}/{self.law.folder_name}/"
+            f"{self.provision_type}/{self.filename}"
+        )
 
     def metadata_key(self, prefix: str) -> str:
         return f"{self.object_key(prefix)}.metadata.json"

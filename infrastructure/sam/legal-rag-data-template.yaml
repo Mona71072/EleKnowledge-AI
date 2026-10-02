@@ -7,8 +7,6 @@ Parameters:
     Default: dev
     AllowedValues:
       - dev
-      - staging
-      - prod
   BucketName:
     Type: String
     Description: Existing retained law-data bucket to import into this stack.
@@ -48,6 +46,8 @@ Resources:
 
   LawDataBucketPolicy:
     Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Bucket: !Ref LawDataBucket
       PolicyDocument:

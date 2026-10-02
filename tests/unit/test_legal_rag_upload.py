@@ -120,7 +120,9 @@ def test_build_search_documents_preserves_provision_structure(tmp_path: Path) ->
         assert [search.provision_reference for search in search_documents] == [
             "第1条", "第2条", None, "附則第1条"
         ]
-        assert search_documents[0].filename.endswith(".main.00001.txt")
+        assert search_documents[0].object_key("kb/egov").endswith(
+            f"/{FOLDER_NAME}/main/00001.txt"
+        )
         assert "【章節】第一章 総則" in search_documents[0].content
         assert "第1条" in search_documents[0].content
         assert "（目的）" in search_documents[0].content

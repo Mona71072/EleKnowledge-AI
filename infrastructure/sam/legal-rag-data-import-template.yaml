@@ -7,8 +7,6 @@ Parameters:
     Default: dev
     AllowedValues:
       - dev
-      - staging
-      - prod
   BucketName:
     Type: String
     Description: Existing bucket name used as the import identifier.
