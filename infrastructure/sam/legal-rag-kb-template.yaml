@@ -38,20 +38,23 @@ Resources:
                 Action: s3:ListBucket
                 Resource: !Sub arn:${AWS::Partition}:s3:::${LawDataBucketName}
                 Condition:
-                  StringLike:
-                    s3:prefix:
-                      - kb/egov/
-                      - kb/egov/*
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
               - Sid: ReadLawSearchDocuments
                 Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub arn:${AWS::Partition}:s3:::${LawDataBucketName}/kb/egov/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
               - Sid: DecryptLawBucketObjects
                 Effect: Allow
                 Action:
                   - kms:Decrypt
-                  - kms:DescribeKey
                 Resource: !Ref LawDataBucketKmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
               - Sid: InvokeTitanTextEmbeddingsV2
                 Effect: Allow
                 Action: bedrock:InvokeModel
