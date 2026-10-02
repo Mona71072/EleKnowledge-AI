@@ -54,6 +54,105 @@ def test_is_admin_accepts_list_and_csv():
     assert not mod.is_admin(_event("GET", "/x", groups="user"))
 
 
+def test_get_sessions_filters_by_rag_mode():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [
+        {
+            "sessionId": "law-session",
+            "userId": "user-1",
+            "role": "user",
+            "ragMode": "law",
+            "timestamp": "2026-10-02T01:00:00Z",
+            "ttl": 1790900000,
+            "content": "建築基準法の質問",
+        },
+        {
+            "sessionId": "normal-session",
+            "userId": "user-1",
+            "role": "user",
+            "ragMode": "normal",
+            "timestamp": "2026-10-02T02:00:00Z",
+            "ttl": 1790900000,
+            "content": "通常質問",
+        },
+        {
+            "sessionId": "legacy-session",
+            "userId": "user-1",
+            "role": "user",
+            "timestamp": "2026-10-02T03:00:00Z",
+            "ttl": 1790900000,
+            "content": "旧形式の通常質問",
+        },
+    ]}
+
+    sessions = mod.get_sessions_by_user("user-1", mode="law")
+
+    assert [session["sessionId"] for session in sessions] == ["law-session"]
+
+
+def test_get_sessions_paginates_until_requested_mode_is_found():
+    mod, table = load_app()
+
+    def query(**kwargs):
+        if "ExclusiveStartKey" not in kwargs:
+            return {
+                "Items": [{
+                    "sessionId": "normal-session",
+                    "userId": "user-1",
+                    "role": "user",
+                    "ragMode": "normal",
+                    "timestamp": "2026-10-02T02:00:00Z",
+                    "ttl": 1790900000,
+                    "content": "通常質問",
+                }],
+                "LastEvaluatedKey": {"userId": "user-1", "timestamp": "2"},
+            }
+        return {
+            "Items": [{
+                "sessionId": "law-session",
+                "userId": "user-1",
+                "role": "user",
+                "ragMode": "law",
+                "timestamp": "2026-10-02T01:00:00Z",
+                "ttl": 1790900000,
+                "content": "法令質問",
+            }]
+        }
+
+    table.query.side_effect = query
+
+    sessions = mod.get_sessions_by_user("user-1", limit=1, mode="law")
+
+    assert [session["sessionId"] for session in sessions] == ["law-session"]
+    assert table.query.call_count == 2
+
+
+def test_get_session_messages_rejects_different_rag_mode():
+    mod, table = load_app()
+    table.query.side_effect = [
+        {"Items": [{"sessionId": "law-session", "userId": "user-1"}]},
+        {"Items": [{
+            "sessionId": "law-session",
+            "messageId": "message-1",
+            "role": "user",
+            "ragMode": "law",
+            "content": "法令質問",
+            "timestamp": "2026-10-02T01:00:00Z",
+        }]},
+    ]
+
+    response = mod.lambda_handler(_event(
+        "GET",
+        "/chat/sessions/law-session/messages",
+        qs={"mode": "normal"},
+        groups="user",
+        path_params={"sessionId": "law-session"},
+    ), None)
+
+    assert response["statusCode"] == 409
+    assert json.loads(response["body"])["error"] == "SessionModeMismatch"
+
+
 def test_feedback_bad_with_reason(monkeypatch):
     mod, table = load_app()
     table.query.return_value = {"Items": [{"userId": "user-1", "sessionId": "s1"}]}

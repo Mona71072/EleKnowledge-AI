@@ -153,21 +153,40 @@ def build_session_title(content) -> str:
     return text[:SESSION_TITLE_MAX_LENGTH]
 
 
-def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
+def get_sessions_by_user(user_id: str, limit: int = 50, mode: str = None) -> list:
     """Get all sessions for a user"""
     try:
-        response = chatlogs_table.query(
-            IndexName='userId-timestamp-index',
-            KeyConditionExpression='userId = :uid',
-            # Hide logically-deleted messages (deleted flag null/false only)
-            FilterExpression='attribute_not_exists(#del) OR #del = :false',
-            ExpressionAttributeNames={'#del': 'deleted'},
-            ExpressionAttributeValues={':uid': user_id, ':false': False},
-            ScanIndexForward=False,
-            Limit=limit * 10  # Get more messages to find unique sessions
-        )
-        
-        messages = response.get('Items', [])
+        messages = []
+        matching_session_ids = set()
+        exclusive_start_key = None
+        while True:
+            query = {
+                'IndexName': 'userId-timestamp-index',
+                'KeyConditionExpression': 'userId = :uid',
+                # Hide logically-deleted messages (deleted flag null/false only)
+                'FilterExpression': 'attribute_not_exists(#del) OR #del = :false',
+                'ExpressionAttributeNames': {'#del': 'deleted'},
+                'ExpressionAttributeValues': {':uid': user_id, ':false': False},
+                'ScanIndexForward': False,
+                'Limit': limit * 10,
+            }
+            if exclusive_start_key:
+                query['ExclusiveStartKey'] = exclusive_start_key
+            response = chatlogs_table.query(**query)
+            page = response.get('Items', [])
+            messages.extend(page)
+            for message in page:
+                session_id = message.get('sessionId')
+                message_mode = message.get('ragMode') or 'normal'
+                if (
+                    session_id
+                    and not str(session_id).startswith('wish-')
+                    and (mode is None or message_mode == mode)
+                ):
+                    matching_session_ids.add(session_id)
+            exclusive_start_key = response.get('LastEvaluatedKey')
+            if not exclusive_start_key or len(matching_session_ids) >= limit:
+                break
         
         # Group by sessionId and get session metadata
         sessions_dict = {}
@@ -175,6 +194,9 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
         title_rank = {}
         for msg in messages:
             session_id = msg['sessionId']
+            message_mode = msg.get('ragMode') or 'normal'
+            if mode and message_mode != mode:
+                continue
             # 改善要望（product_wish）はチャット履歴一覧に出さない
             if str(session_id).startswith('wish-'):
                 continue
@@ -187,7 +209,8 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
                     'lastMessageTime': timestamp,
                     'messageCount': 0,
                     'title': 'Untitled',
-                    'ttl': msg.get('ttl', 0)
+                    'ttl': msg.get('ttl', 0),
+                    'ragMode': message_mode,
                 }
                 sessions_dict[session_id] = session
                 title_rank[session_id] = None
@@ -657,7 +680,17 @@ def lambda_handler(event, context):
         # Route: GET /chat/sessions - List user sessions
         if http_method == 'GET' and path == '/chat/sessions':
             # userId クエリパラメータは廃止。自分のセッションのみ返す。
-            sessions = get_sessions_by_user(caller_id)
+            requested_mode = query_parameters.get('mode')
+            if requested_mode not in (None, 'normal', 'law'):
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'ValidationError',
+                        'message': 'Unsupported session mode',
+                    }),
+                }
+            sessions = get_sessions_by_user(caller_id, mode=requested_mode)
             
             return {
                 'statusCode': 200,
@@ -687,6 +720,30 @@ def lambda_handler(event, context):
                 return not_found
 
             messages = get_session_messages(session_id)
+            requested_mode = query_parameters.get('mode')
+            if requested_mode not in (None, 'normal', 'law'):
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'ValidationError',
+                        'message': 'Unsupported session mode',
+                    }),
+                }
+            session_modes = {
+                message.get('ragMode') or 'normal'
+                for message in messages
+                if message.get('role') in ('user', 'assistant')
+            }
+            if requested_mode and session_modes and session_modes != {requested_mode}:
+                return {
+                    'statusCode': 409,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'SessionModeMismatch',
+                        'message': 'このチャットモードでは既存セッションを開けません',
+                    }, ensure_ascii=False),
+                }
 
             return {
                 'statusCode': 200,

@@ -23,6 +23,24 @@ DEFAULT_REGION = "ap-northeast-1"
 FOLDER_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{8})_([A-Z0-9]+)$")
 ERA_START_YEARS = {"Meiji": 1867, "Taisho": 1911, "Showa": 1925, "Heisei": 1988, "Reiwa": 2018}
 MAX_SIDECAR_BYTES = 10 * 1024
+MAIN_PROVISION_ANCHOR_TOKENS = {
+    "Part": "Pa",
+    "Chapter": "Ch",
+    "Section": "Se",
+    "Subsection": "Ss",
+    "Division": "Di",
+    "Article": "At",
+}
+VERIFIED_MAIN_PROVISION_PATHS = {
+    ("Article",),
+    ("Chapter", "Article"),
+    ("Chapter", "Section", "Article"),
+    ("Chapter", "Section", "Subsection", "Article"),
+    ("Chapter", "Section", "Subsection", "Division", "Article"),
+    ("Part", "Chapter", "Article"),
+    ("Part", "Chapter", "Section", "Article"),
+    ("Part", "Chapter", "Section", "Subsection", "Article"),
+}
 
 
 @dataclass(frozen=True)
@@ -51,6 +69,7 @@ class SearchDocument:
     provision_reference: str | None
     unit_index: int
     content: str
+    source_url: str | None = None
 
     @property
     def filename(self) -> str:
@@ -197,6 +216,7 @@ def _render_provision(
     provision_type: str,
     provision_reference: str | None = None,
     context_headings: Sequence[str] = (),
+    source_url: str | None = None,
 ) -> str:
     labels = {
         "main": "本則",
@@ -211,7 +231,7 @@ def _render_provision(
         f"【区分】{labels[provision_type]}",
         *([f"【条文箇所】{provision_reference}"] if provision_reference else []),
         *([f"【章節】{heading}" for heading in context_headings]),
-        f"【出典】{document.source_url}",
+        f"【出典】{source_url or document.source_url}",
         "",
     ]
     title_tags = {
@@ -239,10 +259,6 @@ def _render_provision(
     }
 
     def visit(node: ET.Element) -> None:
-        if node.tag in {"Article", "SupplProvisionArticle"} and not provision_reference:
-            number = node.attrib.get("Num", "")
-            if number:
-                lines.append(f"第{number.replace('_', 'の')}条")
         if node.tag in title_tags or node.tag == "ParagraphNum" or node.tag.endswith("Title"):
             text = _element_text(node)
             if text:
@@ -304,12 +320,33 @@ def build_search_documents(document: LawDocument) -> list[SearchDocument]:
                 headings.append(_element_text(title))
         return headings
 
+    def get_article_source_url(element: ET.Element) -> str:
+        tokens = []
+        tags = []
+        node = element
+        while node is not None and node.tag != "MainProvision":
+            token = MAIN_PROVISION_ANCHOR_TOKENS.get(node.tag)
+            number = node.attrib.get("Num", "")
+            if token is None or not re.fullmatch(r"[0-9]+(?:_[0-9]+)*", number):
+                return document.source_url
+            tags.append(node.tag)
+            tokens.append(f"{token}_{number}")
+            node = parent_by_node.get(node)
+        if node is None or tuple(reversed(tags)) not in VERIFIED_MAIN_PROVISION_PATHS:
+            return document.source_url
+        return f"{document.source_url}#Mp-{'-'.join(reversed(tokens))}"
+
     def append_document(
         element: ET.Element,
         provision_type: str,
         provision_reference: str | None,
     ) -> None:
         indexes[provision_type] = indexes.get(provision_type, 0) + 1
+        source_url = (
+            get_article_source_url(element)
+            if provision_type == "main" and element.tag == "Article"
+            else document.source_url
+        )
         results.append(
             SearchDocument(
                 law=document,
@@ -322,14 +359,15 @@ def build_search_documents(document: LawDocument) -> list[SearchDocument]:
                     provision_type,
                     provision_reference,
                     context_headings=get_context_headings(element),
+                    source_url=source_url,
                 ),
+                source_url=source_url,
             )
         )
 
     main_articles = list(main_provision.iter("Article"))
     for article in main_articles:
-        number = article.attrib.get("Num", "")
-        reference = f"第{number.replace('_', 'の')}条" if number else None
+        reference = (article.findtext("ArticleTitle") or "").strip() or None
         append_document(article, "main", reference)
     if not main_articles:
         append_document(main_provision, "main", None)
@@ -397,8 +435,13 @@ def build_metadata_sidecar(
         "provision_type": _metadata_attribute(
             "STRING", stringValue=search_document.provision_type
         ),
+        "document_granularity": _metadata_attribute(
+            "STRING", stringValue="provision_unit"
+        ),
         "status": _metadata_attribute("STRING", stringValue="current"),
-        "source_url": _metadata_attribute("STRING", stringValue=document.source_url),
+        "source_url": _metadata_attribute(
+            "STRING", stringValue=search_document.source_url or document.source_url
+        ),
         "retrieved_at": _metadata_attribute("STRING", stringValue=retrieved_at),
         "uploaded_at": _metadata_attribute("STRING", stringValue=uploaded_at),
         "content_sha256": _metadata_attribute(
