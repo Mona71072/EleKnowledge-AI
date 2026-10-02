@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-09-30
+last-verified: 2026-09-02
 related-code: infrastructure/sam/, frontend/src/, lambda/
 ---
 
