@@ -20,9 +20,9 @@ python .\scripts\legal_rag\upload_egov_laws.py `
 
 法令PoCでは旧stack `eleknowledge-legal-rag-dev`を削除/再deployせず、保持済みbucketもCloudFormationへimportしません。KB用の独立stack `eleknowledge-law-kb-dev`が既存bucketを参照します。bucketは同じaccount/東京regionにあり、SSE-KMS、Versioning、全BPA、BucketOwnerEnforced、HTTPS拒否policyをupload前にread-back検証します。
 
-- `infrastructure/sam/legal-rag-kb-template.yaml`はTitan Text Embeddings V2、1024次元/FLOAT32、300 tokens/20% overlap、Managed S3 connectorを定義します。Connectorは`kb/egov/`だけを参照し、さらに`<version-folder>/<provision_type>/<5桁>.txt`の新形式のみを索引対象とします。旧形式106文書はS3に保持されますが、このPoC KBからは除外されます。
+- `infrastructure/sam/legal-rag-kb-template.yaml`はTitan Text Embeddings V2、1024次元/FLOAT32、300 tokens/20% overlap、Managed S3 connectorを定義します。Connectorは`kb/egov/`だけを参照し、新形式`<version-folder>/<provision_type>/<5桁>.txt`を索引対象とします。旧形式106文書はS3に保持され、DataSource側のexclude patternとRAGのkey post-filterでPoC検索から除外します。
 - `infrastructure/sam/phase2-template.yaml`の`LawKnowledgeBaseId`と`LawRagEnabled`でRAG Lambdaへ接続します。`LawRagEnabled`は既定false、Lambda gateは`Environment=dev`でなければ拒否します。Amplifyの`itai` branchだけ`NEXT_PUBLIC_LAW_RAG_ENABLED=true`を設定し、本番には設定しません。
-- CloudFormation resourcesにはRetainを設定し、DataSourceのdata deletion policyもRETAINです。終了時の削除は別途確認してから実施し、source bucket/XML/manifestは明示合意なしに削除しません。
+- CloudFormationのKnowledge Base/DataSource resourcesにはRetainを設定します。Managed Knowledge BaseのDataSourceは`DataDeletionPolicy=DELETE`のみ対応するため、DataSourceを明示削除するとmanaged index dataは削除されます。終了時の削除は別途確認してから実施し、source bucket/XML/manifestは明示合意なしに削除しません。
 
 CloudFormation change setを作成し、Law Knowledge Base、service role、S3 DataSource以外の意図しない変更がないことを確認してから実行します。旧stack/bucketの削除・importはこのPoCでは行いません。
 

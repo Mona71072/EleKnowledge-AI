@@ -89,7 +89,7 @@ Resources:
       KnowledgeBaseId: !Ref LawKnowledgeBase
       Name: egov-current-laws
       Description: Current e-Gov law search documents in kb/egov only
-      DataDeletionPolicy: RETAIN
+      DataDeletionPolicy: DELETE
       DataSourceConfiguration:
         Type: MANAGED_KNOWLEDGE_BASE_CONNECTOR
         ManagedKnowledgeBaseConnectorConfiguration:
