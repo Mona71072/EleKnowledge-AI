@@ -267,6 +267,8 @@ Amazon Bedrock Knowledge BasesのS3データソースはXMLを対応する検索
 
 S3のTXT/Markdownは検索・引用生成の内部資料であり、法令の真正性を示す一次情報URLにはしない。最終確認先としてe-Gov本文URLを案内する。
 
+e-Gov公共データ利用規約に沿い、回答/出典UIでは出典をe-Govと明示し、リンク先の原文を一次情報とする。S3検索本文を表示する場合は「e-Gov XMLから検索用に変換した本文」であることを示し、変換内容を原文と誤認させない。データ利用条件は[公共データ利用規約（第1.0版）](https://www.digital.go.jp/resources/open_data/public_data_license_v1.0)を参照する。
+
 ### 8.3 回答制御
 
 次の場合は断定を避ける。
