@@ -140,6 +140,24 @@ def test_law_filter_only_includes_current_law_documents(rag):
     }
 
 
+def test_law_results_reject_legacy_aggregate_keys(rag):
+    metadata = {
+        "source_type": "law",
+        "status": "current",
+        "x-amz-bedrock-kb-source-uri": "s3://bucket/kb/egov/123/version/main/00001.txt",
+    }
+    assert rag.is_current_law_article_result({"metadata": metadata})
+    legacy_metadata = {
+        **metadata,
+        "x-amz-bedrock-kb-source-uri": "s3://bucket/kb/egov/123/version.main.txt",
+    }
+    assert not rag.is_current_law_article_result({"metadata": legacy_metadata})
+    assert not rag.is_current_law_article_result({"metadata": {
+        **metadata,
+        "status": "superseded",
+    }})
+
+
 def test_law_retrieval_uses_managed_search_and_law_kb_only(rag, monkeypatch):
     calls = []
     expected_response = {"retrievalResults": []}

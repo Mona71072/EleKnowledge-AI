@@ -823,7 +823,7 @@ def query_law_knowledge_base(query: str, number_of_results: int = 30) -> dict:
     ):
         raise PermissionError('Law RAG is not enabled for this environment')
 
-    return bedrock_agent.retrieve(
+    response = bedrock_agent.retrieve(
         knowledgeBaseId=LAW_KNOWLEDGE_BASE_ID,
         retrievalQuery={'text': query},
         retrievalConfiguration={
@@ -834,6 +834,11 @@ def query_law_knowledge_base(query: str, number_of_results: int = 30) -> dict:
             }
         },
     )
+    response['retrievalResults'] = [
+        result for result in response.get('retrievalResults', [])
+        if is_current_law_article_result(result)
+    ]
+    return response
 
 
 def optional_feature_budget_allows(deadline, connect_timeout: float,
@@ -1136,6 +1141,30 @@ def build_law_kb_filter() -> dict:
             {'equals': {'key': 'status', 'value': 'current'}},
         ]
     }
+
+
+def is_current_law_article_result(result: dict) -> bool:
+    """Reject legacy aggregate objects even if a data-source filter includes them."""
+    metadata = result.get('metadata', {}) or {}
+    if (
+        _law_metadata_value(metadata, 'source_type') != 'law'
+        or _law_metadata_value(metadata, 'status') != 'current'
+    ):
+        return False
+
+    source_uri = _law_metadata_value(metadata, KB_PROFILE.source_uri_key)
+    parsed = urlparse(source_uri)
+    if parsed.scheme != 's3':
+        return False
+    key_parts = parsed.path.lstrip('/').split('/')
+    return (
+        len(key_parts) == 6
+        and key_parts[:2] == ['kb', 'egov']
+        and key_parts[4] in {'main', 'supplementary', 'transitional', 'annex'}
+        and len(key_parts[5]) == 9
+        and key_parts[5][:5].isdigit()
+        and key_parts[5].endswith('.txt')
+    )
 
 
 def needs_clarify(query: str, filters: dict = None, chat_history: list = None) -> tuple:
