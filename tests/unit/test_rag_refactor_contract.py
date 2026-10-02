@@ -189,16 +189,20 @@ def test_law_retrieval_uses_managed_search_and_law_kb_only(rag, monkeypatch):
     }
 
 
-def test_law_retrieval_normalizes_managed_metadata_and_rejects_aggregates(rag, monkeypatch):
+@pytest.mark.parametrize("source_prefix", [
+    "s3://bucket",
+    "https://bucket.s3.ap-northeast-1.amazonaws.com",
+])
+def test_law_retrieval_normalizes_managed_metadata_and_rejects_aggregates(rag, monkeypatch, source_prefix):
     metadata = {
         "source_type": "law",
         "status": "current",
         "document_granularity": "provision_unit",
-        "_source_uri": "s3://bucket/kb/egov/123/version/main/00001.txt",
+        "_source_uri": f"{source_prefix}/kb/egov/123/version/main/00001.txt",
         "_chunk_id": "managed-chunk-1",
     }
     article = {"metadata": metadata}
-    aggregate = {"metadata": {**metadata, "_source_uri": "s3://bucket/kb/egov/123/version.main.txt"}}
+    aggregate = {"metadata": {**metadata, "_source_uri": f"{source_prefix}/kb/egov/123/version.main.txt"}}
     monkeypatch.setattr(rag, "ENVIRONMENT", "dev")
     monkeypatch.setattr(rag, "LAW_RAG_ENABLED", "true")
     monkeypatch.setattr(rag, "LAW_KNOWLEDGE_BASE_ID", "ABCDEFGHIJ")
@@ -209,7 +213,7 @@ def test_law_retrieval_normalizes_managed_metadata_and_rejects_aggregates(rag, m
     response = rag.query_law_knowledge_base("労働基準法")
 
     assert response["retrievalResults"] == [article]
-    assert article["metadata"][rag.KB_PROFILE.source_uri_key] == metadata["_source_uri"]
+    assert article["metadata"][rag.KB_PROFILE.source_uri_key] == "s3://bucket/kb/egov/123/version/main/00001.txt"
     assert article["metadata"][rag.KB_PROFILE.chunk_id_key] == "managed-chunk-1"
 
 

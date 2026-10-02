@@ -842,6 +842,15 @@ def query_law_knowledge_base(query: str, number_of_results: int = 30) -> dict:
         ):
             if not metadata.get(target_key) and metadata.get(managed_key):
                 metadata[target_key] = metadata[managed_key]
+        source_uri = _law_metadata_value(metadata, KB_PROFILE.source_uri_key)
+        parsed_source = urlparse(source_uri)
+        s3_host_suffix = f'.s3.{AWS_REGION}.amazonaws.com'
+        if (
+            parsed_source.scheme == 'https'
+            and (parsed_source.hostname or '').endswith(s3_host_suffix)
+        ):
+            bucket_name = parsed_source.hostname[:-len(s3_host_suffix)]
+            metadata[KB_PROFILE.source_uri_key] = f's3://{bucket_name}{parsed_source.path}'
         result['metadata'] = metadata
     response['retrievalResults'] = [
         result for result in response.get('retrievalResults', [])
