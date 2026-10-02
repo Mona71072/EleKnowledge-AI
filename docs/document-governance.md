@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-09-29
+last-verified: 2026-10-01
 related-code: AGENTS.md, spec.md
 ---
 
