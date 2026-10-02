@@ -74,12 +74,12 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 
 ## GET /chat/admin/failures
 
-> 最終検証: 2026-09-25 — failures 応答・走査上限・triage 未設定値を #142 最新実装と照合（未デプロイ。#111 / #114 / #142 のマージ・SAM デプロイ後に有効）
+> 最終検証: 2026-10-02 — #104レビュー指摘を反映し、言い換え条件に資料クリックなし（`documentOpens = 0`）を追記（未デプロイ）
 
 失敗一覧（**admin グループのみ**。UI ガードだけでは不十分・サーバー側 403）
 
 **Query:**
-- `kind` = `all` \| `bad` \| `not_found` \| `reformulated`（既定 `all` = bad + not_found。`reformulated` は「言い換え」＝回答直後に次の質問が来て 👍 が無いもの）
+- `kind` = `all` \| `bad` \| `not_found` \| `reformulated`（既定 `all` = bad + not_found。`reformulated` は「言い換え」＝回答直後に次の質問が来て 👍 が無く、資料クリック（`documentOpens`）が 0 のもの）
 - `limit` = 1〜100（既定 50）
 - `since` / `until` = `YYYY-MM-DD`（**JST の日付**、両端含む。不正な形式は 400）
 - `triage` = `open` \| `in_progress` \| `done` \| `wontfix` \| `all`（既定 `all`。`open` は triage 未設定も含む）
