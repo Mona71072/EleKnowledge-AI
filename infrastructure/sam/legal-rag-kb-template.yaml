@@ -103,7 +103,7 @@ Resources:
               inclusionPrefixes:
                 - kb/egov/
               inclusionPatterns:
-                - '.*/(main|supplementary|transitional|annex)/[0-9]{5}\.txt'
+                - '.*[0-9]{5}\.txt$'
           DeletionProtectionConfiguration:
             DeletionProtectionStatus: ENABLED
             DeletionProtectionThreshold: 5
