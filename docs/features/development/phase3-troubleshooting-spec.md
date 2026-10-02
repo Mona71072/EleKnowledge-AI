@@ -14,7 +14,7 @@ related-code: lambda/troubleshooting/, frontend/src/app/troubleshooting/
 > - エージェント詳細仕様: [docs/agent-spec.md](../../agent-spec.md)
 > - API 仕様: [docs/api/troubleshooting.md](../../api/troubleshooting.md)
 > - 実装ガイド: [phase3-troubleshooting-implementation-guide.md](phase3-troubleshooting-implementation-guide.md)
-> - 処理シーケンス図: [troubleshooting-sequence.md](./troubleshooting-sequence.md)
+> - 処理シーケンス図: [troubleshooting-sequence.md](../production/troubleshooting-sequence.md)
 >
 > **PoC 検証状況（2026-05-21）:** E2E テスト完了。orchestrator → Bedrock Agent → 4 action groups の全フロー動作確認済み。
 
