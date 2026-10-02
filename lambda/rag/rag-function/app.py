@@ -834,6 +834,15 @@ def query_law_knowledge_base(query: str, number_of_results: int = 30) -> dict:
             }
         },
     )
+    for result in response.get('retrievalResults', []):
+        metadata = result.get('metadata', {}) or {}
+        for target_key, managed_key in (
+            (KB_PROFILE.source_uri_key, '_source_uri'),
+            (KB_PROFILE.chunk_id_key, '_chunk_id'),
+        ):
+            if not metadata.get(target_key) and metadata.get(managed_key):
+                metadata[target_key] = metadata[managed_key]
+        result['metadata'] = metadata
     response['retrievalResults'] = [
         result for result in response.get('retrievalResults', [])
         if is_current_law_article_result(result)
