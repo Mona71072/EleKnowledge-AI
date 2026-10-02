@@ -1139,6 +1139,7 @@ def build_law_kb_filter() -> dict:
         'andAll': [
             {'equals': {'key': 'source_type', 'value': 'law'}},
             {'equals': {'key': 'status', 'value': 'current'}},
+            {'equals': {'key': 'document_granularity', 'value': 'provision_unit'}},
         ]
     }
 
@@ -1149,6 +1150,7 @@ def is_current_law_article_result(result: dict) -> bool:
     if (
         _law_metadata_value(metadata, 'source_type') != 'law'
         or _law_metadata_value(metadata, 'status') != 'current'
+        or _law_metadata_value(metadata, 'document_granularity') != 'provision_unit'
     ):
         return False
 

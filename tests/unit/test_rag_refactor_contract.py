@@ -136,6 +136,7 @@ def test_law_filter_only_includes_current_law_documents(rag):
         "andAll": [
             {"equals": {"key": "source_type", "value": "law"}},
             {"equals": {"key": "status", "value": "current"}},
+            {"equals": {"key": "document_granularity", "value": "provision_unit"}},
         ]
     }
 
@@ -144,6 +145,7 @@ def test_law_results_reject_legacy_aggregate_keys(rag):
     metadata = {
         "source_type": "law",
         "status": "current",
+        "document_granularity": "provision_unit",
         "x-amz-bedrock-kb-source-uri": "s3://bucket/kb/egov/123/version/main/00001.txt",
     }
     assert rag.is_current_law_article_result({"metadata": metadata})
@@ -156,6 +158,9 @@ def test_law_results_reject_legacy_aggregate_keys(rag):
         **metadata,
         "status": "superseded",
     }})
+    assert not rag.is_current_law_article_result({
+        "metadata": {key: value for key, value in metadata.items() if key != "document_granularity"}
+    })
 
 
 def test_law_retrieval_uses_managed_search_and_law_kb_only(rag, monkeypatch):
@@ -233,6 +238,7 @@ def test_law_handler_uses_only_law_kb_and_returns_egov_citation(rag, monkeypatch
             "x-amz-bedrock-kb-source-uri": "s3://law-bucket/kb/egov/123/2025/main/00001.txt",
             "source_type": "law",
             "source_url": "https://laws.e-gov.go.jp/law/123",
+            "document_granularity": "provision_unit",
             "law_id": "123",
             "law_title": "建築基準法",
             "law_number": "昭和二十五年法律第二百一号",

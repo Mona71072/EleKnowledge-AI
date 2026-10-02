@@ -148,6 +148,7 @@ def test_metadata_sidecar_contains_typed_bedrock_attributes(tmp_path: Path) -> N
         attributes = metadata["metadataAttributes"]
         assert attributes["source_type"]["value"] == {"type": "STRING", "stringValue": "law"}
         assert attributes["provision_type"]["value"]["stringValue"] == "main"
+        assert attributes["document_granularity"]["value"]["stringValue"] == "provision_unit"
         assert attributes["law_id"]["value"]["stringValue"] == "322AC0000000049"
         assert attributes["promulgation_date"]["value"]["stringValue"] == "1947-04-07"
         assert attributes["provision_reference"]["value"]["stringValue"] == "第1条"

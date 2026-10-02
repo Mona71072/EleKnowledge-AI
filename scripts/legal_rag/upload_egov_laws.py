@@ -397,6 +397,9 @@ def build_metadata_sidecar(
         "provision_type": _metadata_attribute(
             "STRING", stringValue=search_document.provision_type
         ),
+        "document_granularity": _metadata_attribute(
+            "STRING", stringValue="provision_unit"
+        ),
         "status": _metadata_attribute("STRING", stringValue="current"),
         "source_url": _metadata_attribute("STRING", stringValue=document.source_url),
         "retrieved_at": _metadata_attribute("STRING", stringValue=retrieved_at),
