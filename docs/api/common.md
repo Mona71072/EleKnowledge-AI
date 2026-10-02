@@ -80,6 +80,6 @@ interface ErrorDisplay {
 | RAG処理API | 20 req/sec | 5 req/sec | RAGクエリ |
 | チャット管理API | 50 req/sec | 10 req/sec | 履歴取得 |
 
-**WAF レート制限:**
-- IPベース: 500 req/5min（社内IP全体）
-- ユーザーベース: 100 req/5min（1ユーザー）
+**WAF レート制限**（正: `infrastructure/sam/security-waf-template.yaml` の `PerUserRateLimit`）:
+- **利用者（Authorization ヘッダ）:** 既定 **300 req / 5 min**（超過時 **429**）。同一 NAT の社内 IP 全体を巻き込まないため **IP 単位のレート制限は設けない**（許可 IP リストで 403 のみ）
+- 2026-09-23: 上記テンプレートと突合。実環境でパラメータを上書きしている場合はデプロイ記録を正とする

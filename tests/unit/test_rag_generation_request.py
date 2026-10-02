@@ -52,3 +52,36 @@ def test_extract_response_text_skips_thinking_block(rag_app):
     body = {"content": [{"type": "thinking", "thinking": ""}, {"type": "text", "text": "回答"}]}
     assert rag_app.extract_response_text(body) == "回答"
     assert rag_app.extract_response_text({"content": []}) == ""
+
+
+def test_adaptive_thinking_uses_output_config_for_new_api_model(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "adaptive")
+    monkeypatch.setattr(rag_app, "GENERATION_EFFORT", "medium")
+
+    body = rag_app.build_generation_request(
+        "sys", [], "global.anthropic.claude-sonnet-5"
+    )
+
+    assert body["thinking"] == {"type": "adaptive"}
+    assert body["output_config"] == {"effort": "medium"}
+
+
+def test_thinking_setting_is_not_added_to_old_model(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "adaptive")
+
+    body = rag_app.build_generation_request("sys", [], "jp.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+    assert "thinking" not in body
+    assert "output_config" not in body
+
+
+def test_session_title_keeps_disabled_thinking_even_when_generation_is_adaptive(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "adaptive")
+    monkeypatch.setattr(rag_app, "GENERATION_EFFORT", "high")
+
+    body = rag_app.build_generation_request(
+        None, [], "global.anthropic.claude-sonnet-5", apply_generation_settings=False
+    )
+
+    assert body["thinking"] == {"type": "disabled"}
+    assert "output_config" not in body

@@ -31,7 +31,7 @@ alwaysApply: true
 | 決まったこと | 更新先 |
 |---|---|
 | やりたいこと・製品思想 | `docs/PRODUCT_INTENT.md` |
-| 毎回守る運用 | `.cursor/rules/*.mdc` |
+| 毎回守る運用 | `AGENTS.md`（全ツール正本）。Cursor 短則は `.cursor/rules/*.mdc` |
 | 繰り返し手順 | `.cursor/skills/` の該当スキル |
 | **微妙な前提・訂正**（誤解しやすい合意） | `docs/decisions-*.md` に残し、必要なら `.cursor/rules` にも短く書く |
 | **AI 駆動の共同運用（mona↔itai）** | `docs/ops-ai-driven-dev.md` |

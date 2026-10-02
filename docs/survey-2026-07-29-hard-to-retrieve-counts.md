@@ -1,6 +1,6 @@
 # 調査メモ: 検索で引っ掛けにくいもの・各種件数（2026-07-29）
 
-> **状態:** カタログ集計メモ（正本: `docs/kb-metadata-catalog.tsv`）  
+> **状態:** 2026-07-29 時点の旧カタログ集計メモ（入力: `docs/kb-metadata-catalog.tsv`。現行KBの正本ではない。2026-08-26 のS3実測との差は [検証記録](./verification-2026-08-26-kb-vqv-metadata.md) を参照）
 > **件数:** 行 3,492 / ユニーク `file_name` 2,816  
 > **関連:** [verify-checklist-2026-07-29-kb-filter.md](./verify-checklist-2026-07-29-kb-filter.md) / [kb-metadata-catalog-2026-08-26.md](./kb-metadata-catalog-2026-08-26.md)
 

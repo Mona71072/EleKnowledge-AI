@@ -33,12 +33,60 @@ related-code: infrastructure/, lambda/, waf-rules.json
 
 ## ネットワークセキュリティ
 
-**VPC構成:**
-- Private Subnet内にLambda配置
-- NAT Gateway経由で外部API接続
-- Security Groupで通信制限
+> 最終検証: 2026-09-02 — AWS 実査（VPC / NAT Gateway / Lambda `VpcConfig`）。§IP 制限 は本検証の対象外
 
-**IP制限:**
+### 現行の実体
+
+**Lambda は VPC 外で実行される。** VPC・NAT Gateway は存在しない。
+
+| 項目 | 実測値 |
+|---|---|
+| VPC | 0 件（デフォルト VPC も存在しない） |
+| NAT Gateway | 0 件 |
+| Lambda の `VpcConfig` | 全 42 関数で未設定（`rag-dev` / `chat-dev` を含む） |
+| IaC 上の定義 | `infrastructure/` 配下に `VpcConfig` / `NatGateway` / `AWS::EC2::VPC` の記述なし（0 件） |
+
+実査コマンド（リージョン `ap-northeast-1`。読み取りのみ）:
+
+```bash
+aws ec2 describe-vpcs           --region ap-northeast-1
+aws ec2 describe-nat-gateways   --region ap-northeast-1
+aws lambda list-functions       --region ap-northeast-1 --query 'Functions[].{Name:FunctionName,Vpc:VpcConfig.VpcId}'
+```
+
+したがって Lambda のアウトバウンド通信に経路上の制限はない。現状の外向き通信は
+AWS API（Bedrock / DynamoDB / S3）宛のみで、インターネット上の第三者ドメインへ
+能動的に通信する処理は存在しない。
+
+### VPC 構成【未実装・将来構想】
+
+> 最終検証: 2026-09-11 — AWS 公式ドキュメント照合（Lambda VPC の Hyperplane ENI・NAT Gateway の機能範囲）。AWS 実査は 2026-09-02 のまま
+
+> ⚠️ **以下は将来の拡張候補であり、2026-09-02 時点で実装されていない。**
+> 実装済みの統制として扱わないこと。将来 VPC 化する際の設計意図として記載を残す。
+
+- Private Subnet 内に Lambda を配置
+- NAT Gateway 経由で外部 API へ接続
+- Security Group で通信制限
+
+**VPC 化を判断する際の材料**
+
+VPC なし構成のトレードオフ:
+
+| | VPC なし（現行） | VPC + NAT（将来構想） |
+|---|---|---|
+| アウトバウンドのフロー記録（VPC Flow Logs） | Flow Logs の対象外のため、**ネットワークフローとしては追跡不可**（AWS API 呼び出しは CloudTrail、処理内容は Lambda ログで追跡できる） | Flow Logs で送信元・宛先・ポート単位に追跡可能 |
+| egress の宛先制限 | **なし**（侵害時のデータ持ち出し経路が無制御） | Security Group / NACL / Network Firewall 等の設定で宛先を限定可能（NAT Gateway 自体に宛先 allowlist 機能はない） |
+| 常時コスト | NAT Gateway 課金なし | NAT Gateway の時間課金が発生 |
+| Lambda コールドスタート | ENI 不要 | Hyperplane ENI は関数の VPC 設定（サブネット × Security Group の組）ごとに作成・共有・再利用されるため、通常のコールドスタートごとに ENI 割り当ては発生しない。ENI の初回作成（VPC 設定の新規追加・変更直後）時のみ作成待ちが生じる |
+
+出典: [AWS Lambda — VPC 内リソースへのアクセス（Hyperplane ENI）](https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html)
+
+**外部インターネットへ能動的に通信する処理を追加する場合は、この構成の是非を先に判断すること。**
+（例: 外部 API からのデータ取り込み。→ issue #79）
+
+### IP 制限
+
 - AWS WAF IP Set: 192.168.28.0/24
 - 社内ネットワークからのみアクセス可能
 

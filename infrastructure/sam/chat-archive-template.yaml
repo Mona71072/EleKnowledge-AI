@@ -49,6 +49,17 @@ Resources:
                 TransitionInDays: 60
               - StorageClass: GLACIER
                 TransitionInDays: 180
+          - Id: transition-failed-invocations
+            Status: Enabled
+            Prefix: aws/lambda/
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 60
+              - StorageClass: GLACIER
+                TransitionInDays: 180
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -86,10 +97,10 @@ Resources:
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub arn:aws:s3:::${ArchiveBucket}/*
-              - Sid: DlqWrite
+              - Sid: S3DestinationList
                 Effect: Allow
-                Action: sqs:SendMessage
-                Resource: !GetAtt ArchiveFailureQueue.Arn
+                Action: s3:ListBucket
+                Resource: !GetAtt ArchiveBucket.Arn
 
   ArchiveFunction:
     Type: AWS::Serverless::Function
@@ -109,7 +120,6 @@ Resources:
         Variables:
           ARCHIVE_BUCKET: !Ref ArchiveBucket
           ARCHIVE_PREFIX: chatlogs
-          ARCHIVE_FAILED_PREFIX: failed
       Events:
         ChatLogsStream:
           Type: DynamoDB
@@ -119,48 +129,35 @@ Resources:
             BatchSize: 100
             MaximumBatchingWindowInSeconds: 30
             MaximumRetryAttempts: 3
-            # 3 回失敗したバッチを黙って捨てず、失敗レコードのキー情報を SQS に残す（issue #86 P0）
+            # 3 回失敗したバッチは S3 OnFailure に呼出しレコード全体を残す（issue #86 P0）
             BisectBatchOnFunctionError: true
             DestinationConfig:
               OnFailure:
-                Type: SQS
-                Destination: !GetAtt ArchiveFailureQueue.Arn
-
-  ArchiveFailureQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub eleknowledge-chat-archive-${Environment}-failures
-      MessageRetentionPeriod: 1209600  # 14 days
-      SqsManagedSseEnabled: true
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: SAM
+                Type: S3
+                Destination: !GetAtt ArchiveBucket.Arn
 
   # 失敗宛先にメッセージが入ったら通知（監視スタックの SNS トピックを参照）
-  ArchiveFailureQueueAlarm:
-    Type: AWS::CloudWatch::Alarm
+  ArchiveFailureEventRule:
+    Type: AWS::Events::Rule
     Properties:
-      AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-archive-dlq
-      AlarmDescription: chatlogs -> S3 archive failed a batch after retries. Raw records are preserved under s3://<archive bucket>/failed/ (best effort); the queue holds shard/sequence metadata only. Replay per docs/ops runbook within 24h of the stream event.
-      Namespace: AWS/SQS
-      MetricName: ApproximateNumberOfMessagesVisible
-      Dimensions:
-        - Name: QueueName
-          Value: !GetAtt ArchiveFailureQueue.QueueName
-      Statistic: Maximum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 1
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
-      OKActions:
-        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
+      Name: !Sub eleknowledge-chat-archive-${Environment}-failure-notification
+      Description: Notify when Lambda writes a failed DynamoDB Streams invocation to the archive bucket.
+      EventPattern:
+        source: [aws.s3]
+        detail-type: [Object Created]
+        detail:
+          bucket:
+            name: [!Ref ArchiveBucket]
+          object:
+            key:
+              - prefix: aws/lambda/
+      State: ENABLED
+      Targets:
+        - Arn:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-AlertTopicArn
+          Id: ArchiveFailureAlertTopic
+      # SNS の TopicPolicy は監視スタックが持つ。ここで置き換えると CloudWatch 向けの許可が消える。
+      # 監視スタックの AllowEventBridgeRules（rule/*）がこのルールの sns:Publish を許可する。
 
   AthenaResultsBucket:
     Type: AWS::S3::Bucket
@@ -245,8 +242,8 @@ Resources:
             - { Name: eventid, Type: string }
             - { Name: approximatecreationdatetime, Type: double }
             - { Name: keys, Type: 'struct<sessionid:string,messageid:string>' }
-            - { Name: newimage, Type: 'struct<sessionid:string,messageid:string,userid:string,timestamp:string,content:string,role:string,deleted:boolean,deletedat:string,ttl:bigint,feedback:string>' }
-            - { Name: oldimage, Type: 'struct<sessionid:string,messageid:string,userid:string,timestamp:string,content:string,role:string,deleted:boolean,deletedat:string,ttl:bigint,feedback:string>' }
+            - { Name: newimage, Type: 'struct<sessionid:string,messageid:string,userid:string,timestamp:string,content:string,role:string,deleted:boolean,deletedat:string,ttl:bigint,feedback:string,responsetype:string,feedbackreason:string,queryfilters:struct<modeltype:string>>' }
+            - { Name: oldimage, Type: 'struct<sessionid:string,messageid:string,userid:string,timestamp:string,content:string,role:string,deleted:boolean,deletedat:string,ttl:bigint,feedback:string,responsetype:string,feedbackreason:string,queryfilters:struct<modeltype:string>>' }
             - { Name: useridentity, Type: 'struct<principalid:string,type:string>' }
 
 Outputs:

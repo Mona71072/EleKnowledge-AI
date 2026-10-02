@@ -27,7 +27,7 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/, lambda/metrics/, lambd
 
 ### eleknowledge-chatlogs テーブル（ホットウィンドウ）
 
-> 最終検証: 2026-09-11 — 設計 design-2026-09-10-dashboard-v2.md と実装 PR #110 / #111 / #112 / #114 のコードと突合（実環境は未デプロイ）
+> 最終検証: 2026-09-22 — #84 実装（sessionTitle は非同期更新で初めて付く）
 
 ```typescript
 {
@@ -45,7 +45,7 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/, lambda/metrics/, lambd
   clarifyQuestions?: string[];
   queryFilters?: object;    // 当時の機種・カテゴリ等
   // --- 2026-09-09 履歴一覧の見出し（最初の user メッセージのみ）---
-  sessionTitle?: string;    // Claude 生成の短い見出し。一覧 API はこれを最優先で使う
+  sessionTitle?: string;    // 非同期の見出し生成が書いてから存在する。初回 put では付けない。一覧 API はこれを最優先で使う
   // --- フィードバック ---
   feedback?: 'good' | 'bad';
   feedbackReason?: 'wrong_doc' | 'unresolved' | 'bad_answer' | 'other' | 'wrong_page';

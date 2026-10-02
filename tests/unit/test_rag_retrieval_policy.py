@@ -105,3 +105,17 @@ def test_threshold_boundaries_match_existing_behavior(modules, mode, score):
         results, mode
     )
     assert new.is_weak_retrieval(results, mode) == legacy.is_weak_retrieval(results, mode)
+
+
+def test_rank_key_is_optional_and_only_changes_order(modules):
+    legacy, new = modules
+    results = [
+        {**_text_result("s3://b/a.pdf", 0.9, "a"), "rerankScore": 0.1},
+        {**_text_result("s3://b/b.pdf", 0.8, "b"), "rerankScore": 0.9},
+        _text_result("s3://b/c.pdf", 0.7, "c"),
+    ]
+
+    assert new.select_retrieval_results(results) == legacy.select_retrieval_results(results)
+    selected = new.select_retrieval_results(results, rank_key="rerankScore")
+    assert [item["content"]["text"] for item in selected] == ["b", "a", "c"]
+    assert [item["score"] for item in selected] == [0.8, 0.9, 0.7]
