@@ -16,6 +16,9 @@ from botocore.exceptions import ClientError
 
 from timeutil import normalize_utc_iso, now_utc_iso
 
+ANNOUNCEMENT_QUERY_PAGE_SIZE = 50
+MAX_ANNOUNCEMENT_QUERY_PAGES = 5
+
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'ap-northeast-1'))
 
 ANNOUNCEMENTS_TABLE = os.environ.get('ANNOUNCEMENTS_TABLE')
@@ -50,23 +53,39 @@ def _response(status: int, body: dict) -> dict:
 
 
 def _query_by_status(status: str, now_iso: str, fetch_limit: int) -> list:
-    """Page until we collect fetch_limit items or the GSI is exhausted."""
+    """期限切れを除外し、必要件数まで最大ページ数の範囲で取得する。"""
     items = []
     kwargs = {
         'IndexName': 'status-publishAt-index',
         'KeyConditionExpression': Key('status').eq(status) & Key('publishAt').lte(now_iso),
+        'FilterExpression': (
+            Attr('endAt').not_exists()
+            | Attr('endAt').eq(None)
+            | Attr('endAt').eq('')
+            | Attr('endAt').gte(now_iso)
+        ),
         'ScanIndexForward': False,  # newest first
-        'Limit': min(50, max(1, fetch_limit)),
+        'Limit': ANNOUNCEMENT_QUERY_PAGE_SIZE,
     }
-    while len(items) < fetch_limit:
+    page_count = 0
+    while len(items) < fetch_limit and page_count < MAX_ANNOUNCEMENT_QUERY_PAGES:
         resp = table.query(**kwargs)
+        page_count += 1
         batch = resp.get('Items') or []
-        items.extend(batch)
+        for item in batch:
+            pub = _ts_key(item.get('publishAt'))
+            end = _ts_key(item.get('endAt')) if item.get('endAt') else ''
+            if pub and pub > now_iso:
+                continue
+            if end and end < now_iso:
+                continue
+            items.append(item)
         lek = resp.get('LastEvaluatedKey')
-        if not lek or not batch:
+        if not lek:
             break
         kwargs['ExclusiveStartKey'] = lek
-        kwargs['Limit'] = min(50, fetch_limit - len(items))
+        # Limit はフィルター前に評価される件数なので、空ページでも次ページへ進む。
+        kwargs['Limit'] = ANNOUNCEMENT_QUERY_PAGE_SIZE
     return items[:fetch_limit]
 
 
@@ -110,10 +129,10 @@ def get_published(limit: int, now_iso: str) -> list:
     Legacy rows with non-canonical timestamps are filtered with normalized compares.
     """
     now_iso = normalize_utc_iso(now_iso) or now_iso
-    fetch = max(limit * 5, 50)
-    items = _query_by_status('published', now_iso, fetch)
+    fetch_limit = max(limit * 5, 50)
+    items = _query_by_status('published', now_iso, fetch_limit)
     # Due scheduled items must appear even before the 5-min publisher runs.
-    items.extend(_query_by_status('scheduled', now_iso, fetch))
+    items.extend(_query_by_status('scheduled', now_iso, fetch_limit))
 
     # Drop items whose display window has ended (endAt < now); dedupe by id.
     # Also drop legacy rows whose publishAt is still in the future after normalize
