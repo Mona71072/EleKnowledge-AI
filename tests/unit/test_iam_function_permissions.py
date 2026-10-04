@@ -1,0 +1,229 @@
+"""SAM の Lambda 実行ロールが機能ごとの権限境界を保つことを確認する。"""
+
+from pathlib import Path
+
+import yaml
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+class CloudFormationLoader(yaml.SafeLoader):
+    """CloudFormation intrinsic tag の内容を通常の YAML 値として読み込む。"""
+
+
+def _construct_tagged_value(loader, _tag_suffix, node):
+    if isinstance(node, yaml.ScalarNode):
+        return loader.construct_scalar(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    return loader.construct_mapping(node)
+
+
+CloudFormationLoader.add_multi_constructor("!", _construct_tagged_value)
+
+
+def _template(name):
+    path = ROOT / "infrastructure" / "sam" / name
+    return yaml.load(path.read_text(), Loader=CloudFormationLoader)
+
+
+def _role_for_function(template, function_name):
+    role = template["Resources"][function_name]["Properties"]["Role"]
+    return role.split(".")[0]
+
+
+def _policies(template, role_name):
+    return template["Resources"][role_name]["Properties"].get("Policies", [])
+
+
+def _policy_actions(policies):
+    actions = set()
+
+    def collect(value):
+        if isinstance(value, list):
+            for item in value:
+                collect(item)
+        elif isinstance(value, dict):
+            if "PolicyDocument" in value:
+                collect(value["PolicyDocument"].get("Statement", []))
+            elif "Action" in value:
+                action = value["Action"]
+                actions.update(action if isinstance(action, list) else [action])
+            else:
+                for item in value.values():
+                    collect(item)
+
+    collect(policies)
+    return actions
+
+
+def _find_policy(policies, policy_name):
+    if isinstance(policies, list):
+        for policy in policies:
+            found = _find_policy(policy, policy_name)
+            if found:
+                return found
+    elif isinstance(policies, dict):
+        if policies.get("PolicyName") == policy_name:
+            return policies
+        for value in policies.values():
+            found = _find_policy(value, policy_name)
+            if found:
+                return found
+    return None
+
+
+def _policy_statements(policies):
+    statements = []
+    if isinstance(policies, list):
+        for policy in policies:
+            statements.extend(_policy_statements(policy))
+    elif isinstance(policies, dict):
+        if "PolicyDocument" in policies:
+            statements.extend(_policy_statements(policies["PolicyDocument"].get("Statement", [])))
+        elif "Action" in policies:
+            statements.append(policies)
+        else:
+            for value in policies.values():
+                statements.extend(_policy_statements(value))
+    return statements
+
+
+def test_auth_functions_have_only_their_users_table_operations():
+    template = _template("phase1-template.yaml")
+    resources = template["Resources"]
+
+    signup_role = _role_for_function(template, "SignupFunction")
+    login_role = _role_for_function(template, "LoginFunction")
+    verify_role = _role_for_function(template, "VerifyFunction")
+
+    assert len({signup_role, login_role, verify_role}) == 3
+    assert _policy_actions(_policies(template, signup_role)) == {"dynamodb:PutItem"}
+    assert _policy_actions(_policies(template, login_role)) == {"dynamodb:UpdateItem"}
+    assert _policy_actions(_policies(template, verify_role)) == set()
+    for role_name in (signup_role, login_role, verify_role):
+        properties = resources[role_name]["Properties"]
+        assert properties["ManagedPolicyArns"] == [
+            "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ]
+        assert "ChatLogsTable" not in str(properties.get("Policies", []))
+        assert "s3:" not in str(properties.get("Policies", []))
+        assert "cognito-idp:" not in str(properties.get("Policies", []))
+
+    signup_resources = resources[signup_role]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"][0]["Resource"]
+    login_resources = resources[login_role]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"][0]["Resource"]
+    assert signup_resources == login_resources == ["UsersTable.Arn"]
+
+
+def test_rag_and_chat_roles_are_separate_and_restrict_api_actions():
+    template = _template("phase2-template.yaml")
+    rag_role = _role_for_function(template, "RagFunction")
+    chat_role = _role_for_function(template, "ChatManagementFunction")
+
+    assert rag_role != chat_role
+    rag_actions = _policy_actions(_policies(template, rag_role))
+    chat_actions = _policy_actions(_policies(template, chat_role))
+
+    assert rag_actions == {
+        "bedrock:Retrieve", "bedrock:InvokeModel", "bedrock:Rerank",
+        "lambda:InvokeFunction", "dynamodb:PutItem", "dynamodb:UpdateItem",
+        "dynamodb:Query", "s3:GetObject",
+    }
+    rerank_policy = _find_policy(_policies(template, rag_role), "RerankAccess")
+    assert rerank_policy is not None
+    rerank_policy = rerank_policy["PolicyDocument"]["Statement"][0]
+    assert rerank_policy["Resource"] == "*"
+
+    rag_statements = _policy_statements(_policies(template, rag_role))
+    rag_resources = [statement.get("Resource") for statement in rag_statements]
+    assert all(
+        resource != "*" or statement.get("Action") == ["bedrock:Rerank"]
+        for statement in rag_statements
+        for resource in [statement.get("Resource")]
+    )
+    assert any("knowledge-base/${KnowledgeBaseId}" in str(resource) for resource in rag_resources)
+    assert any("inference-profile/*" in str(resource) for resource in rag_resources)
+    assert any("application-inference-profile/*" in str(resource) for resource in rag_resources)
+    assert any("foundation-model/*" in str(resource) for resource in rag_resources)
+    assert any("${KnowledgeBaseSourcePrefix}*" in str(resource) for resource in rag_resources)
+    assert all("/index/" not in str(resource) for resource in rag_resources)
+
+    assert chat_actions == {
+        "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query", "dynamodb:Scan"
+    }
+    assert not any(action.startswith("bedrock:") or action.startswith("s3:") or action.startswith("lambda:") for action in chat_actions)
+    chat_statements = _policy_statements(_policies(template, chat_role))
+    table_arn = "ChatLogsTableArn"
+    index_arn = "${TableArn}/index/userId-timestamp-index"
+    assert all(statement.get("Resource") != "*" for statement in chat_statements)
+    assert any("Scan" in str(statement.get("Action")) and table_arn in str(statement.get("Resource")) for statement in chat_statements)
+    table_query = next(
+        statement for statement in chat_statements
+        if "dynamodb:Query" in statement.get("Action", [])
+        and isinstance(statement.get("Resource"), list)
+        and any(isinstance(resource, dict) and "Fn::ImportValue" in resource for resource in statement["Resource"])
+    )
+    index_query = next(
+        statement for statement in chat_statements
+        if statement.get("Action") == ["dynamodb:Query"]
+        and index_arn in str(statement.get("Resource"))
+    )
+    assert set(table_query["Action"]) == {
+        "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query", "dynamodb:Scan"
+    }
+    assert table_query["Resource"] == [{"Fn::ImportValue": "${ProjectName}-${Environment}-ChatLogsTableArn"}]
+    assert index_arn in str(index_query["Resource"])
+    assert all(index_arn not in str(statement.get("Resource")) for statement in chat_statements if statement.get("Action") != ["dynamodb:Query"])
+
+    rag_policy_names = {policy["PolicyName"] for policy in _policies(template, rag_role) if isinstance(policy, dict)}
+    chat_policy_names = {policy["PolicyName"] for policy in _policies(template, chat_role) if isinstance(policy, dict)}
+    assert "InvokeSelfForSessionTitle" in rag_policy_names
+    assert "InvokeSelfForSessionTitle" not in chat_policy_names
+
+
+def test_archive_and_metrics_roles_match_their_data_paths():
+    archive_template = _template("chat-archive-template.yaml")
+    archive_role = _role_for_function(archive_template, "ArchiveFunction")
+    archive_policies = _policies(archive_template, archive_role)
+    archive_actions = _policy_actions(archive_policies)
+
+    assert archive_actions == {
+        "dynamodb:GetRecords", "dynamodb:GetShardIterator", "dynamodb:DescribeStream",
+        "dynamodb:ListStreams", "s3:PutObject", "s3:ListBucket",
+    }
+    archive_s3 = next(
+        statement for statement in _policy_statements(archive_policies)
+        if statement.get("Action") == "s3:PutObject"
+    )
+    assert archive_s3["Resource"] == [
+        "arn:aws:s3:::${ArchiveBucket}/chatlogs/*",
+        "arn:aws:s3:::${ArchiveBucket}/aws/lambda/*",
+    ]
+    archive_list = next(
+        statement for statement in _policy_statements(archive_policies)
+        if statement.get("Action") == "s3:ListBucket"
+    )
+    assert archive_list["Resource"] == "ArchiveBucket.Arn"
+
+    metrics_template = _template("announcements-monitoring-template.yaml")
+    aggregator_role = _role_for_function(metrics_template, "MetricsAggregatorFunction")
+    reader_role = _role_for_function(metrics_template, "MetricsReadFunction")
+    aggregator_actions = _policy_actions(_policies(metrics_template, aggregator_role))
+    reader_actions = _policy_actions(_policies(metrics_template, reader_role))
+
+    assert aggregator_actions == {
+        "dynamodb:Scan", "dynamodb:PutItem",
+        "cloudwatch:GetMetricStatistics", "cloudwatch:GetMetricData",
+    }
+    assert reader_actions == {"dynamodb:Query"}
+    aggregator_resources = [
+        statement.get("Resource")
+        for statement in _policy_statements(_policies(metrics_template, aggregator_role))
+    ]
+    reader_resources = [
+        statement.get("Resource")
+        for statement in _policy_statements(_policies(metrics_template, reader_role))
+    ]
+    assert all("/index/" not in str(resource) for resource in aggregator_resources)
+    assert reader_resources == [["${MetricsTable.Arn}/index/scope-metricDate-index"]]

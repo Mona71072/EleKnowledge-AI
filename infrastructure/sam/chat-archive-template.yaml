@@ -96,7 +96,9 @@ Resources:
               - Sid: S3Write
                 Effect: Allow
                 Action: s3:PutObject
-                Resource: !Sub arn:aws:s3:::${ArchiveBucket}/*
+                Resource:
+                  - !Sub arn:aws:s3:::${ArchiveBucket}/chatlogs/*
+                  - !Sub arn:aws:s3:::${ArchiveBucket}/aws/lambda/*
               - Sid: S3DestinationList
                 Effect: Allow
                 Action: s3:ListBucket

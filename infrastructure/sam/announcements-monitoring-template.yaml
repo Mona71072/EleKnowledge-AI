@@ -218,8 +218,7 @@ Resources:
               - Effect: Allow
                 Action: [dynamodb:Query]
                 Resource:
-                  - !GetAtt MetricsTable.Arn
-                  - !Sub ${MetricsTable.Arn}/index/*
+                  - !Sub ${MetricsTable.Arn}/index/scope-metricDate-index
 
   MetricsAggregatorRole:
     Type: AWS::IAM::Role
@@ -240,20 +239,17 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [dynamodb:Scan, dynamodb:Query]
+                Action: [dynamodb:Scan]
                 Resource:
                   - !Sub
                     - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}
-                    - TableName:
-                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
-                  - !Sub
-                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/*
                     - TableName:
                         Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
               - Effect: Allow
                 Action: [dynamodb:PutItem]
                 Resource: !GetAtt MetricsTable.Arn
               - Effect: Allow
+                # GetMetricData は develop の aggregator では未使用だが、#110 が同じ行を拡張する。
                 Action: [cloudwatch:GetMetricStatistics, cloudwatch:GetMetricData]
                 Resource: '*'
 
