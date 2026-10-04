@@ -499,6 +499,13 @@ Resources:
             RestApiId: !Ref ChatApi
             Path: /chat/admin/failures
             Method: GET
+        # 失敗・要望の振り分け（状態・原因・メモ・参照）。設計 docs/design-2026-09-10-dashboard-v2.md §9.4
+        UpdateAdminTriage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /chat/admin/messages/{sessionId}/{messageId}/triage
+            Method: PUT
         SubmitSuggestion:
           Type: Api
           Properties:
