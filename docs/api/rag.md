@@ -98,10 +98,16 @@ RAGクエリ実行
 - `sessionTitle`: **セッション最初のやりとりのみ**付く履歴一覧用の見出し。応答 JSON では質問文を切り詰めたフォールバックを返す。DynamoDB の `sessionTitle` は初回の put では書かない。
   - 見出し生成は回答返却後の非同期 Lambda タスクで行う。Bedrock の接続・本文読取は、通常回答・聞き返し・該当なしの応答時間に入れない。生成後は、同一 `userId` で `sessionTitle` がまだ無い最初の user メッセージだけを更新する。
   - 初回 put にフォールバックを書いておくと、`attribute_not_exists(sessionTitle)` が外れ、LLM 見出しが保存されない。一覧は質問の先頭 50 文字のままになる。
-  - モデルは `SESSION_TITLE_MODEL_ID`（未設定時は `BEDROCK_MODEL_ID`）。Sonnet 5 系では `temperature` を送らず `thinking: {type: disabled}` を指定し、本文生成と同じ互換形式を使う。
+  - モデルは `SESSION_TITLE_MODEL_ID`（未設定時は `BEDROCK_MODEL_ID`）。生成リクエストはモデルの capability profile に従い、sampling / thinking / effort のうち対応する設定だけを送る。
   - `SESSION_TITLE_LLM=false` や非同期起動の失敗のあいだ、一覧は優先順 2（最初のユーザー質問。フォールバックと同じ切り詰め）になる。Bedrock 例外・空応答のときは、非同期タスクがフォールバック文字列を `sessionTitle` として書く。見出し生成の失敗で回答は落とさない。
   - **SECURITY:** 質問文は `<question>` タグで囲み、システムプロンプトで資料扱いを明示する。タスクは同一LambdaのIAM権限でのみ起動される。
   - 現行チャット UI はこのフィールドを直接使わず、一覧 API を再取得して表示する。
+
+### 生成モデルのリクエスト設定
+
+> 最終検証: 2026-09-29 — RAG Lambda のモデル能力プロファイルと SAM 設定を照合
+
+本文生成・見出し生成・検索語書き換えは `model_profile.py` の能力表に従い、対応しない設定をリクエストへ含めない。`sonnet-5-5` / `opus-5-5` / `fable-5-1` は thinking を無効化できないため、本文生成で thinking 設定が無効のとき、および見出し生成・検索語書き換えでは、effort 対応モデルに `effort=low` を送る。モデル設定手順は [運用ランブック §7](../ops-runbook.md#7-生成モデルと推論プロファイル) を参照。
 
 - カテゴリ未指定時の**本命優先 2 段階 retrieve は 2026-08-26 に一時停止**（少数カテゴリが全検索でヒットしない副作用のため。mona 了承済み）。現在は未指定時も常に単一の retrieve（対象は実カテゴリ10種の許可リスト内）。後継方式の検討は [issue #61](https://github.com/yukiworkspace/EleKnowledge-AI/issues/61)。ユーザーが category を選んでいる場合はそれを尊重（従来どおり）。
 - 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。
