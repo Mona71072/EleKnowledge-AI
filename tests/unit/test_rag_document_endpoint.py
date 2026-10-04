@@ -105,16 +105,23 @@ def test_missing_uri_is_400():
     assert res["statusCode"] == 400
 
 
-def test_presign_failure_is_502():
+def test_presign_failure_is_502_and_does_not_log_uri_or_exception(capsys):
     fake_s3 = MagicMock()
-    fake_s3.generate_presigned_url.side_effect = RuntimeError("boom")
+    fake_s3.generate_presigned_url.side_effect = RuntimeError(
+        "s3://private-bucket/private-key confidential query text"
+    )
     with patch.object(rag.boto3, "client", return_value=fake_s3):
         res = rag.handle_document_request(
-            _event("s3://documents-test/manual.pdf"), dict(HEADERS)
+            _event("s3://documents-test/private-manual.pdf"), dict(HEADERS)
         )
+    output = capsys.readouterr().out
     assert res["statusCode"] == 502
-    # 内部の例外文をそのまま返さない
-    assert "boom" not in res["body"]
+    for sensitive in (
+        "private-bucket", "private-key", "private-manual.pdf", "confidential query text",
+    ):
+        assert sensitive not in output
+        assert sensitive not in res["body"]
+    assert "RuntimeError" in output
 
 
 # --- CITATION_URI_MODE（段階移行スイッチ） -----------------------------------

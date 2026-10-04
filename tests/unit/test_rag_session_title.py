@@ -210,7 +210,7 @@ def test_session_title_budget_allows_boundary(rag):
 
 def test_handler_enqueues_title_after_saving_user_message(rag):
     """通常・聞き返し・該当なしの全経路で、回答を待たずに非同期化する。"""
-    src = inspect.getsource(rag.lambda_handler)
+    src = inspect.getsource(rag.handle_rag_request)
     assert src.count("enqueue_session_title(session_id, user_message_id, user_id, query)") == 3
     assert src.count("session_title=session_title") == 0
     assert src.count("'sessionTitle': session_title") == 3

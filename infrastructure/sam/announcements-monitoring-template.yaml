@@ -428,6 +428,11 @@ Resources:
               Access-Control-Allow-Origin: "'*'"
               Access-Control-Allow-Headers: "'Content-Type,Authorization'"
               Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      # アクセスログ（JSON 1 行/リクエスト）。requestId・時刻・resourcePath・status・latency・errorType 等を記録する。
+      # IP / userAgent / sub / 実リクエスト path / errorMessage / 本文は記録しない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
+      AccessLogSetting:
+        DestinationArn: !GetAtt AppApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
@@ -439,6 +444,13 @@ Resources:
         Project: !Ref ProjectName
         Env: !Ref Environment
         Feature: announcements-monitoring
+
+  # API Gateway アクセスログの受け皿（rag / chat / auth と同じ命名）
+  AppApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/announcements-monitoring-api-${Environment}
+      RetentionInDays: 90
 
 Outputs:
   AppApiUrl:

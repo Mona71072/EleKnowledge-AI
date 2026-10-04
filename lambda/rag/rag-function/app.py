@@ -50,6 +50,14 @@ AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-1')
 # 短い TTL は流出時の露出窓を最小化する。
 PRESIGNED_URL_EXPIRES_IN = int(os.environ.get('PRESIGNED_URL_EXPIRES_IN', '300'))
 
+# 運用テレメトリ（構造化ログ・資料クリック・言い換え）。本処理を止めない設計。
+# Lambda では関数ディレクトリが sys.path にあるが、テストが importlib で直接読むときは無いので補う
+import sys as _sys  # noqa: E402
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in _sys.path:
+    _sys.path.insert(0, _HERE)
+import telemetry  # noqa: E402
+
 # 引用 sourceUri の保存・返却形式（段階移行用スイッチ）:
 #   'presigned' … 従来どおり署名付き HTTPS URL（既定）。受付
 #                 （GET /rag/document と /doc）だけを先に本番反映し、既存フロント
@@ -501,7 +509,7 @@ def generate_session_title(query: str, deadline=None) -> str:
         title = _normalize_session_title(extract_response_text(response_body))
         return title or _fallback_session_title(text)
     except Exception as e:  # noqa: BLE001 - 見出し生成の失敗で回答を落とさない
-        print(f"Session title generation failed, falling back: {e}")
+        print(f"[rag] stage=session_title_generation {telemetry._exception_label(e)}")
         return _fallback_session_title(text)
 
 
@@ -526,7 +534,7 @@ def handle_session_title_task(task: dict) -> dict:
     try:
         update_session_title(task['sessionId'], task['messageId'], task['userId'], title)
     except ClientError as error:
-        print(f"Session title update skipped: {error.response['Error']['Code']}")
+        print(f"[rag] stage=session_title_update {telemetry._exception_label(error)}")
     return {'ok': True}
 
 
@@ -545,7 +553,7 @@ def enqueue_session_title(session_id: str, message_id: str, user_id: str, query:
             }).encode('utf-8'),
         )
     except Exception as error:  # noqa: BLE001
-        print(f"Session title enqueue failed: {error}")
+        print(f"[rag] stage=session_title_enqueue {telemetry._exception_label(error)}")
 
 def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: str,
                              citations: list = None, source_documents: list = None,
@@ -800,7 +808,7 @@ def query_knowledge_base(query: str, filters: dict = None, number_of_results: in
         return response
 
     except ClientError as e:
-        print(f"Knowledge Base query error: {e}")
+        print(f"[rag] stage=knowledge_base_query {telemetry._exception_label(e)}")
         raise
 
 
@@ -1202,7 +1210,7 @@ def build_page_candidates(selected_results: list, max_items: int = 5,
             try:
                 source_uri = presign_source_uri(s3_client, doc_uri)
             except Exception as e:
-                print(f"Error generating signed URL for page candidate {doc_uri}: {e}")
+                print(f"[rag] stage=page_candidate_presign {telemetry._exception_label(e)}")
         item = {
             'documentName': doc_name,
             'category': metadata.get(KB_PROFILE.category_key, '') or '',
@@ -1426,7 +1434,7 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
         return assistant_message
         
     except ClientError as e:
-        print(f"Claude 4 generation error: {e}")
+        print(f"[rag] stage=generation {telemetry._exception_label(e)}")
         raise
 
 
@@ -1591,6 +1599,9 @@ def handle_document_request(event, headers):
 
     params = event.get('queryStringParameters') or {}
     doc_uri = params.get('uri') or ''
+    # どの回答の引用から開いたか（/doc が &s=&m= で渡す。無くても文書の解決はする）
+    open_session_id = params.get('s') or ''
+    open_message_id = params.get('m') or ''
 
     if not is_allowed_document_uri(doc_uri):
         # 許可外バケットと不正な URI は区別せず 400 に丸める
@@ -1605,13 +1616,16 @@ def handle_document_request(event, headers):
         s3_client = boto3.client('s3', region_name=AWS_REGION)
         url = presign_source_uri(s3_client, doc_uri)
     except Exception as e:
-        print(f'[rag] presign failed for document request: {e}')
+        print(f"[rag] stage=document_presign {telemetry._exception_label(e)}")
         return {
             'statusCode': 502,
             'headers': headers,
             'body': json.dumps({'error': 'PresignFailed', 'message': '文書の取得に失敗しました'})
         }
 
+    telemetry.record_document_open(
+        chatlogs_table, open_session_id, open_message_id, get_caller_id(event), owns_session, doc_uri, event,
+    )
     return {
         'statusCode': 200,
         'headers': {**headers, 'Cache-Control': 'no-store'},
@@ -1667,7 +1681,7 @@ def extract_citations_from_selected(selected_results: list) -> tuple:
             try:
                 source_uri = presign_source_uri(s3_client, doc_uri)
             except Exception as e:
-                print(f"Error generating signed URL for {doc_uri}: {e}")
+                print(f"[rag] stage=citation_presign {telemetry._exception_label(e)}")
 
         # byteContent は絶対に含めない。IMAGE チャンクは 1 件で最大 1.3MB あり、
         # DynamoDB の item 上限 400KB と API Gateway の応答上限 6MB を即座に破る。
@@ -1714,7 +1728,7 @@ def owns_session(session_id: str, user_id: str) -> bool:
             Limit=1
         )
     except ClientError as e:
-        print(f"Error verifying session ownership: {e}")
+        print(f"[rag] stage=session_ownership {telemetry._exception_label(e)}")
         return False
     items = response.get('Items', [])
     return bool(items) and items[0].get('userId') == user_id
@@ -1746,11 +1760,19 @@ def get_chat_history(session_id: str, limit: int = 10) -> list:
         return messages
 
     except ClientError as e:
-        print(f"Error getting chat history: {e}")
+        print(f"[rag] stage=chat_history {telemetry._exception_label(e)}")
         return []
 
 
 def lambda_handler(event, context):
+    """1 リクエスト 1 行の構造化ログを出す外側。本体は handle_rag_request。"""
+    started_at = time.perf_counter()
+    response = handle_rag_request(event, context, started_at)
+    telemetry.log_request(event, response, started_at)
+    return response
+
+
+def handle_rag_request(event, context, started_at):
     """
     Handle RAG query
     
@@ -1852,6 +1874,8 @@ def lambda_handler(event, context):
 
         # Get chat history for context
         chat_history = get_chat_history(session_id, limit=5)
+        # 直前の回答が「候補あり」で評価が無く 10 分以内なら、言い換えの印を付ける（暗黙の失敗信号）
+        telemetry.stamp_reformulation(chatlogs_table, chat_history)
 
         # --- Phase1: 聞き返しゲート（検索前） ---
         # WHY: 曖昧症状のまま検索すると見当違い資料→作文になる。番号は聞かない。
@@ -2058,25 +2082,8 @@ def lambda_handler(event, context):
         }
         
     except ClientError as e:
-        error_code = e.response['Error']['Code']
-        error_message = e.response['Error']['Message']
-        
-        return {
-            'statusCode': 500,
-            'headers': headers,
-            'body': json.dumps({
-                'error': error_code,
-                'message': error_message
-            })
-        }
-    
-    except Exception as e:
-        print(f"Unexpected error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': headers,
-            'body': json.dumps({
-                'error': 'InternalServerError',
-                'message': 'An unexpected error occurred'
-            })
-        }
+        # 段階（retrieve / generate / save）とエラーコードを構造化行に残し、利用者には一般化した本文だけを返す
+        return telemetry.error_response(headers, e, started_at, event)
+
+    except Exception as e:  # noqa: BLE001
+        return telemetry.error_response(headers, e, started_at, event)
