@@ -15,7 +15,7 @@ related-code: lambda/rag/, frontend/src/app/chat/
 
 ## POST /rag/query
 
-> 最終検証: 2026-09-25 — 検索設定の上書きと既定値を実装設定と照合
+> 最終検証: 2026-10-04 — sessionTitle の生成モデル設定説明を app.py と照合。検索設定の上書きと既定値は 2026-09-25 に実装設定と照合
 
 RAGクエリ実行
 

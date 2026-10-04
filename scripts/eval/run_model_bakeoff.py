@@ -88,6 +88,24 @@ def price_for(model_id: str, input_tokens=None):
     return None, None
 
 
+def total_input_tokens(usage: dict) -> int | None:
+    """通常入力・cache read・cache write を合算した入力 token 数。"""
+    keys = ("inputTokens", "cacheReadInputTokens", "cacheWriteInputTokens")
+    if not any(usage.get(key) is not None for key in keys):
+        return None
+    return sum(usage.get(key) or 0 for key in (
+        "inputTokens", "cacheReadInputTokens", "cacheWriteInputTokens",
+    ))
+
+
+def cache_cost_status(model_id: str) -> str:
+    if "sonnet-5" in model_id:
+        return "未確認"
+    if "gpt-6-luna" in model_id:
+        return "AWS公式モデルカードの単価を適用"
+    return "単価未設定"
+
+
 def estimate_cost_usd(model_id: str, usage: dict) -> float | None:
     input_tokens = usage.get("inputTokens")
     output_tokens = usage.get("outputTokens")
@@ -97,7 +115,7 @@ def estimate_cost_usd(model_id: str, usage: dict) -> float | None:
     cache_read = usage.get("cacheReadInputTokens") or 0
     cache_write = usage.get("cacheWriteInputTokens") or 0
     if "gpt-6-luna" in model_id:
-        total_input = input_tokens + cache_read + cache_write
+        total_input = total_input_tokens(usage)
         if total_input > 272000:
             input_rate, cache_write_rate, cache_read_rate, output_rate = (0.20, 0.25, 0.02, 0.75)
         else:
@@ -108,19 +126,20 @@ def estimate_cost_usd(model_id: str, usage: dict) -> float | None:
             + cache_read * cache_read_rate
             + output_tokens * output_rate
         ) / 1e6
-        return round(cost, 5)
+        return cost
 
     input_rate, output_rate = price_for(model_id, input_tokens=input_tokens)
     if input_rate is None:
         return None
-    return round(
-        (input_tokens * input_rate + output_tokens * output_rate) / 1e6, 5
-    )
+    # Bedrock の Sonnet 5 cache 単価は未確認のため、cache 分を含めない。
+    return (input_tokens * input_rate + output_tokens * output_rate) / 1e6
 
 
 def price_note(model_id: str) -> str:
     if "sonnet-5" in model_id:
-        return "Anthropic 公式 $2/$10、Bedrock 単価は請求で確認"
+        return ("Anthropic公式では input/output $2/$10、5分 cache write $2.50、"
+                "1時間 cache write $4、cache read $0.20 / MTok。Bedrock の cache 単価は未確認のため、"
+                "cache料金は金額に含めない（Bedrock 請求額とは未照合）。")
     if "gpt-6-luna" in model_id:
         return "Global: 入力 $0.10/$0.50、cache write/read $0.125/$0.01 per 1M tokens。272K超は入力/出力 $0.20/$0.75、cache write/read $0.25/$0.02。"
     return "Anthropic 公式単価の概算。請求額は AWS 料金表が正"
@@ -245,12 +264,14 @@ def run_question(mod, helpers, item: dict, models: list, retrieval_cache=None) -
                 text = f"[生成エラー] {type(e).__name__}: {e}"
                 stats = {"modelId": model_id, "error": str(e)}
         est_cost = estimate_cost_usd(model_id, stats)
+        stats["totalInputTokens"] = total_input_tokens(stats)
+        for key in (
+            "inputTokens", "cacheReadInputTokens", "cacheWriteInputTokens", "outputTokens",
+        ):
+            stats.setdefault(key, None)
+        stats["cacheCostStatus"] = cache_cost_status(model_id)
         if est_cost is not None:
             stats["estCostUsd"] = est_cost
-            stats["totalInputTokens"] = sum(
-                stats.get(key) or 0
-                for key in ("inputTokens", "cacheReadInputTokens", "cacheWriteInputTokens")
-            )
         row["answers"][label] = {"text": text, **stats}
     return row
 
@@ -258,25 +279,47 @@ def run_question(mod, helpers, item: dict, models: list, retrieval_cache=None) -
 def summarize(rows: list, models: list) -> dict:
     summary = {}
     for label, model_id in models:
-        lat, tin, tout, cost, n = [], [], [], [], 0
+        lat, input_tokens, cache_read, cache_write, total_input, tout, cost, n = (
+            [], [], [], [], [], [], [], 0
+        )
+        usage_count = 0
         for r in rows:
             a = (r.get("answers") or {}).get(label)
             if not a or "error" in a:
                 continue
             n += 1
             lat.append(a.get("latencySec") or 0)
-            tin.append(a.get("totalInputTokens", a.get("inputTokens")) or 0)
-            tout.append(a.get("outputTokens") or 0)
-            cost.append(a.get("estCostUsd") or 0)
+            answer_total_input = a.get("totalInputTokens")
+            if answer_total_input is None and "totalInputTokens" not in a:
+                answer_total_input = total_input_tokens(a)
+            if answer_total_input is not None:
+                usage_count += 1
+                input_tokens.append(a.get("inputTokens"))
+                cache_read.append(a.get("cacheReadInputTokens"))
+                cache_write.append(a.get("cacheWriteInputTokens"))
+                total_input.append(answer_total_input)
+                tout.append(a.get("outputTokens"))
+            if answer_total_input is not None and a.get("estCostUsd") is not None:
+                cost.append(a["estCostUsd"])
+
+        def average(values):
+            available = [value for value in values if value is not None]
+            return sum(available) / len(available) if available else None
+
         summary[label] = {
             "modelId": model_id,
             "answered": n,
+            "usageCount": usage_count,
             "avgLatencySec": round(sum(lat) / n, 2) if n else None,
             "maxLatencySec": max(lat) if lat else None,
-            "avgInputTokens": round(sum(tin) / n) if n else None,
-            "avgOutputTokens": round(sum(tout) / n) if n else None,
-            "totalEstCostUsd": round(sum(cost), 4),
-            "avgEstCostUsd": round(sum(cost) / n, 5) if n else None,
+            "avgInputTokens": average(input_tokens),
+            "avgCacheReadInputTokens": average(cache_read),
+            "avgCacheWriteInputTokens": average(cache_write),
+            "avgTotalInputTokens": average(total_input),
+            "avgOutputTokens": average(tout),
+            "totalEstCostUsd": sum(cost),
+            "avgEstCostUsd": sum(cost) / len(cost) if cost else None,
+            "cacheCostStatus": cache_cost_status(model_id),
         }
     return summary
 
@@ -291,15 +334,17 @@ def render_markdown(rows: list, models: list, summary: dict, meta: dict) -> str:
     L.append(f"\nKB: `{meta['kbId']}` / 質問数: {len(rows)} / 生成対象（pages ゲート通過）: {sum(1 for r in rows if r.get('gate') == 'pages')}\n")
 
     L.append("## サマリ\n")
-    L.append("| ラベル | 回答数 | 平均レイテンシ(秒) | 最大(秒) | 平均入力トークン(cache含む) | 平均出力トークン | 1問あたり概算コスト(USD) | 合計概算(USD) |")
-    L.append("|---|---|---|---|---|---|---|---|")
+    L.append("| ラベル | 回答数 | usage対象 | 平均レイテンシ(秒) | 最大(秒) | 平均通常入力 | 平均 cache read | 平均 cache write | 平均総入力 | 平均出力 | 1問あたり参考概算(USD) | 合計参考概算(USD) |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
     for label, _ in models:
         s = summary[label]
-        L.append(f"| {label} | {s['answered']} | {s['avgLatencySec']} | {s['maxLatencySec']} | {s['avgInputTokens']} | {s['avgOutputTokens']} | {s['avgEstCostUsd']} | {s['totalEstCostUsd']} |")
-    L.append("\n※ 単価の根拠・注記:")
+        avg_tokens = lambda key: "-" if s[key] is None else str(round(s[key]))
+        avg_cost = "-" if s["avgEstCostUsd"] is None else f"{s['avgEstCostUsd']:.8f}"
+        L.append(f"| {label} | {s['answered']} | {s['usageCount']}/{len(rows)} | {s['avgLatencySec']} | {s['maxLatencySec']} | {avg_tokens('avgInputTokens')} | {avg_tokens('avgCacheReadInputTokens')} | {avg_tokens('avgCacheWriteInputTokens')} | {avg_tokens('avgTotalInputTokens')} | {avg_tokens('avgOutputTokens')} | {avg_cost} | {s['totalEstCostUsd']:.8f} |")
+    L.append("\n※ 金額は参考概算（実請求とは未照合）。単価の根拠・注記:")
     for label, model_id in models:
         L.append(f"- {label}: {price_note(model_id)}")
-    L.append("請求額は AWS 料金表が正です。\n")
+    L.append("総入力トークンは通常入力 + cache read + cache write。料金は表示時に丸め、集計は丸め前の値で計算。請求額は AWS 料金表が正です。\n")
 
     L.append("## 目視比較の観点\n")
     L.append("- 参照資料に書かれていることだけを述べているか（作文していないか）")
@@ -328,7 +373,19 @@ def render_markdown(rows: list, models: list, summary: dict, meta: dict) -> str:
                 L.append(f"  - {c.get('documentName')} p.{c.get('pageNumber')} (score {round(float(c.get('relevance') or 0), 3)})")
         for label, _ in models:
             a = r["answers"].get(label, {})
-            L.append(f"\n#### {label}  —  {a.get('latencySec', '-')} 秒 / 入力 {a.get('inputTokens', '-')} / 出力 {a.get('outputTokens', '-')} / 停止理由 {a.get('stopReason', '-')} / 概算 {a.get('estCostUsd', '-')} USD\n")
+            tokens = [a.get(key) for key in (
+                "inputTokens", "cacheReadInputTokens", "cacheWriteInputTokens",
+            )]
+            total_input = a.get("totalInputTokens")
+            if total_input is None and "totalInputTokens" not in a:
+                total_input = total_input_tokens(a)
+            token_text = lambda value: "-" if value is None else str(value)
+            cost = a.get("estCostUsd")
+            cost_text = "未算出" if cost is None else f"{cost:.8f} USD"
+            cache_note = ""
+            if a.get("cacheCostStatus") == "未確認":
+                cache_note = "（cache料金未確認・金額に含めず）"
+            L.append(f"\n#### {label} — {a.get('latencySec', '-')} 秒 / 通常入力 {token_text(tokens[0])} / cache read {token_text(tokens[1])} / cache write {token_text(tokens[2])} / 総入力 {token_text(total_input)} / 出力 {token_text(a.get('outputTokens'))} / 停止理由 {a.get('stopReason', '-')} / 参考概算 {cost_text}{cache_note}\n")
             L.append("```text")
             L.append(a.get("text", ""))
             L.append("```")

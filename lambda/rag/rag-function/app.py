@@ -1416,6 +1416,8 @@ def invoke_generation(client, model_id: str, system_prompt: str, messages: list,
     return extract_response_text(response_body), {
         'inputTokens': usage.get('input_tokens'),
         'outputTokens': usage.get('output_tokens'),
+        'cacheReadInputTokens': usage.get('cache_read_input_tokens', 0),
+        'cacheWriteInputTokens': usage.get('cache_creation_input_tokens', 0),
     }, stop_reason
 
 

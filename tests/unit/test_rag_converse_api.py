@@ -89,11 +89,46 @@ def test_invoke_generation_preserves_anthropic_body_exactly(rag_app):
         client, "global.anthropic.claude-sonnet-5", "sys", messages, 42,
     )
     assert text == "ok"
-    assert usage == {"inputTokens": 2, "outputTokens": 3}
+    assert usage == {
+        "inputTokens": 2,
+        "outputTokens": 3,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+    }
     assert stop_reason == "end_turn"
     assert json.loads(client.kwargs["body"]) == rag_app.build_generation_request(
         "sys", messages, "global.anthropic.claude-sonnet-5", max_tokens=42,
     )
+
+
+def test_invoke_generation_returns_anthropic_cache_usage_without_logging(rag_app, capsys):
+    class Client:
+        def invoke_model(self, **kwargs):
+            return {"body": _Body({
+                "content": [{"type": "text", "text": "ok"}],
+                "usage": {
+                    "input_tokens": 20,
+                    "output_tokens": 7,
+                    "cache_read_input_tokens": 120,
+                    "cache_creation_input_tokens": 30,
+                },
+                "stop_reason": "end_turn",
+            })}
+
+    text, usage, stop_reason = rag_app.invoke_generation(
+        Client(), "global.anthropic.claude-sonnet-5", "sys",
+        [{"role": "user", "content": "sensitive question"}], 42,
+    )
+
+    assert text == "ok"
+    assert usage == {
+        "inputTokens": 20,
+        "outputTokens": 7,
+        "cacheReadInputTokens": 120,
+        "cacheWriteInputTokens": 30,
+    }
+    assert stop_reason == "end_turn"
+    assert capsys.readouterr().out == ""
 
 
 def test_max_tokens_is_logged_for_converse_without_changing_text(rag_app, capsys):
@@ -137,7 +172,12 @@ def test_max_tokens_is_logged_for_invoke_without_changing_text(rag_app, capsys):
         [{"role": "user", "content": "秘密の質問"}], 80,
     )
     assert text == "途中までの回答"
-    assert usage == {"inputTokens": 12, "outputTokens": 80}
+    assert usage == {
+        "inputTokens": 12,
+        "outputTokens": 80,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+    }
     assert stop_reason == "max_tokens"
     event = json.loads(capsys.readouterr().out.strip())
     assert event == {
