@@ -64,9 +64,11 @@ AWS WAF は、100 万 WAF リクエスト当たり 500 MB の WAF ログ配信�
 
 ### 2026-09-18 の再監査結果
 
+> 最終検証: 2026-10-04 — Next.js 16.3.8、production audit、CI 例外撤去、Amplify Node.js 要件を確認
+
 - `npm audit --omit=dev` の更新前は critical 2 件、high 8 件だった。
 - 非破壊更新後は critical 0 件、high 1 件、moderate 1 件まで減少した。build は成功した。
-- 残る high は Next.js が内包する `postcss` で、修正には Next.js 16 系へのメジャー更新が必要である。これは **2026-10-16 まで**の Issue #120 の期限付き例外として追跡し、現行の CI はこの 1 件だけを明示的に例外にして、それ以外の critical/high を失敗させる。Issue #21 は今回の非破壊更新がマージされたら完了として閉じる。
+- Next.js 16 系への移行で `postcss` の high を解消し、Issue #120 で追跡していた **2026-10-16 まで**の期限付き例外を CI から削除する。production dependency に critical/high があれば例外なく CI を失敗させる。Issue #21 は非破壊更新を含む PR #118 のマージにより完了した。
 
 ### B. Issue #86 — WAF logging と Block アラーム
 
