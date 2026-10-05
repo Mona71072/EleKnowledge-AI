@@ -23,9 +23,11 @@ related-code: frontend/package.json, frontend/package-lock.json, infrastructure/
 
 ## バックエンド・AWS
 
+> 最終検証: 2026-10-05 — develop の SAM runtime 定義を照合（主要 stack と旧式 troubleshooting template の差を確認）
+
 | 技術 | 用途 |
 |---|---|
-| AWS SAM / Lambda Python 3.13 | 認証・RAG・チャット・管理 API の handler |
+| AWS SAM / Lambda Python 3.13（主要 stack） | 認証・RAG・チャット・管理 API の handler |
 | API Gateway REST API | Cognito 認証と Lambda API の公開 |
 | Amazon Cognito User Pool | ユーザー認証・JWT 発行 |
 | Amazon DynamoDB | ユーザー、チャット履歴、管理・集計データ |
@@ -33,6 +35,8 @@ related-code: frontend/package.json, frontend/package-lock.json, infrastructure/
 | Amazon CloudWatch / SNS | ログ、メトリクス、アラーム、通知 |
 | AWS WAF | Regional Web ACL による API の IP / rate 制御 |
 | AWS Amplify Hosting | Next.js フロントエンド配信 |
+
+例外として、旧式の `infrastructure/sam/phase3-troubleshooting-small.yaml` は Python 3.8 を指定している。開発環境の利用者向け提供状態は未確認であり、このテンプレートを主要 stack の runtime と混同しない。
 
 ## AI / ML
 

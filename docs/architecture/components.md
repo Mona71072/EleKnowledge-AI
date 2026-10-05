@@ -18,9 +18,11 @@ related-code: frontend/src/, lambda/, infrastructure/sam/
 
 ## API・バックエンド
 
+> 最終検証: 2026-10-05 — develop の SAM runtime 定義を照合（主要 stack と旧式 troubleshooting template の差を確認）
+
 - API Gateway REST API が認証、RAG、チャット、トラブルシューティング、お知らせ・KPI API を受け付ける。
 - 認証は Cognito User Pool と JWT を使う。API 側で JWT の subject を用いて利用者データを分離する。
-- SAM 管理 Lambda の runtime は Python 3.13。各 stack / handler の詳細は `infrastructure/sam/` と `lambda/` を参照する。
+- 主要な SAM stack の Lambda runtime は Python 3.13。旧式の `infrastructure/sam/phase3-troubleshooting-small.yaml` は Python 3.8 を指定している。各 stack / handler の詳細は `infrastructure/sam/` と `lambda/` を参照する。
 - トラブルシューティングの API・Lambda・データテーブルは開発環境に存在した。利用者向け提供状態は未確認として扱う。
 
 ## AI・データ

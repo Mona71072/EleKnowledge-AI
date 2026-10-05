@@ -98,11 +98,13 @@ These observations do not include delivery tests for SNS/Budget notifications or
 
 ## Additional Stacks (added 2026-07-21 to 2026-09-09)
 
+> 最終検証: 2026-10-05 — develop の SAM 定義と 2026-09-30 AWS 読み取り専用観測記録を照合（WAF 関連付け数は実環境未確認）
+
 | Stack | Template | Key resources |
 |---|---|---|
 | `announcements-monitoring-dev` | `infrastructure/sam/announcements-monitoring-template.yaml` | DynamoDB `announcements-dev`, `metrics-dev` (TTL disabled in the 2026-09-30 observation); Lambda `announcements-read/write/publisher-dev`, `metrics-read-dev`, `metrics-aggregator-dev`; API `announcements-monitoring-api-dev` (`GET /admin/metrics`, announcements routes); AWS had daily and hourly metrics rules enabled plus `announcements-promote-dev` (5 min). Current `develop` template defines only the daily metrics rule. |
 | `eleknowledge-chat-archive-dev` | `infrastructure/sam/chat-archive-template.yaml` | Lambda `eleknowledge-chat-archive-dev` (chatlogs stream -> S3); S3 `eleknowledge-chat-archive-dev-<account>` (versioned; OnFailure invocation records), `eleknowledge-athena-results-dev-<account>`; EventBridge→SNS failure notification; Athena workgroup `eleknowledge-analytics-dev`; Glue `eleknowledge_analytics.chatlogs_archive` |
-| `eleknowledge-security-waf-dev` | `infrastructure/sam/security-waf-template.yaml` | WAFv2 regional `EleKnowledge-dev-RegionalWebAcl` + IPSet, associated with the 4 REST API stages |
+| `eleknowledge-security-waf-dev` | `infrastructure/sam/security-waf-template.yaml` | WAFv2 regional `EleKnowledge-dev-RegionalWebAcl` + IPSet. IaC defines associations with 5 REST API stages; the 2026-09-30 AWS observation confirmed API associations but did not establish their count. |
 | `eleknowledge-monitoring-dev` | `infrastructure/sam/monitoring-template.yaml` | AWS observation: SNS `eleknowledge-alerts-dev` (2 confirmed email subscriptions), 27 CloudWatch alarms, 6 saved Logs Insights queries. Current `develop` template: 26 alarms, 2 metric filters, 3 query definitions. See the dated observation above and [runbook](ops-runbook.md); notification delivery was not tested. |
 
 Not in IaC: the AWS budget notification and the Bedrock application inference profile referenced by the operational records. The 2026-09-30 read-only observation found the development RAG Lambda configured for `global.anthropic.claude-sonnet-5`; do not infer the state of other environments from this. Log group retention is set by `scripts/ops/set_log_retention.py` (Lambda 365 d / API Gateway 90 d).
