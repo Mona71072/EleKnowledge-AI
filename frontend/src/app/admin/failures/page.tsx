@@ -575,7 +575,7 @@ export default function AdminFailuresPage() {
               {item.sessionId && (
                 <p className="mt-1 text-xs text-gray-500">
                   <Link
-                    href={`/chat?session=${encodeURIComponent(item.sessionId)}`}
+                    href={`/chat?session=${encodeURIComponent(item.sessionId)}${item.ragMode === 'law' ? '&mode=law' : ''}`}
                     className="text-blue-700 underline underline-offset-2"
                   >
                     チャットで開く

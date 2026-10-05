@@ -512,6 +512,7 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
             'messageId': item.get('messageId'),
             'timestamp': ts,
             'signals': signal,
+            'ragMode': item.get('ragMode') or 'normal',
             'responseType': item.get('responseType'),
             'feedback': item.get('feedback'),
             'feedbackReason': item.get('feedbackReason'),

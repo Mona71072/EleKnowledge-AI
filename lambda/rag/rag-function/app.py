@@ -406,6 +406,8 @@ def extract_response_text(response_body: dict) -> str:
 
 
 SESSION_TITLE_MAX_LENGTH = 30
+RAG_QUERY_MAX_LENGTH = 2000
+RAG_SESSION_ID_MAX_LENGTH = 128
 # 見出し生成は Claude（既定はチャットと同じ Haiku 4.5 の推論プロファイル）で行う。
 # 失敗・無効時は質問文の切り詰めにフォールバックするため、可用性は落とさない。
 SESSION_TITLE_MODEL_ID = os.environ.get('SESSION_TITLE_MODEL_ID') or BEDROCK_MODEL_ID
@@ -2148,18 +2150,36 @@ def lambda_handler(event, context):
         if http_method == 'GET':
             return handle_document_request(event, headers)
 
-        # Parse request
-        if isinstance(event.get('body'), str):
-            body = json.loads(event['body'])
-        else:
-            body = event.get('body', {})
+        # Parse and validate request shape before reading fields.
+        raw_body = event.get('body', {})
+        try:
+            body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
+        except json.JSONDecodeError:
+            body = None
+
+        def validation_error(message):
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'ValidationError',
+                    'message': message,
+                }, ensure_ascii=False),
+            }
+
+        if not isinstance(body, dict):
+            return validation_error('Request body must be a JSON object')
         
         session_id = body.get('sessionId')
         # userId はボディではなく検証済みクレームから取る（body の userId は無視する）
         user_id = get_caller_id(event)
         query = body.get('query')
-        requested_mode = body.get('mode', 'normal') or 'normal'
-        filters = body.get('filters', {}) or {}
+        requested_mode = body.get('mode', 'normal')
+        if requested_mode is None or requested_mode == '':
+            requested_mode = 'normal'
+        filters = body.get('filters', {})
+        if filters is None:
+            filters = {}
         if requested_mode == 'spec':
             print('[rag] mode=spec is deprecated; normalizing to normal with priority categories')
 
@@ -2173,7 +2193,10 @@ def lambda_handler(event, context):
                 })
             }
 
-        if requested_mode not in ('normal', 'spec', 'law'):
+        if (
+            not isinstance(requested_mode, str)
+            or requested_mode not in ('normal', 'spec', 'law')
+        ):
             return {
                 'statusCode': 400,
                 'headers': headers,
@@ -2194,18 +2217,39 @@ def lambda_handler(event, context):
                 }, ensure_ascii=False),
             }
 
-        mode, filters = normalize_mode_and_filters(requested_mode, filters)
+        if not isinstance(query, str):
+            return validation_error('Query must be a string')
+        if not query.strip():
+            return validation_error('Query is required')
+        if len(query) > RAG_QUERY_MAX_LENGTH:
+            return validation_error(
+                f'Query must be at most {RAG_QUERY_MAX_LENGTH} characters'
+            )
+        if session_id is not None and (
+            not isinstance(session_id, str)
+            or not session_id
+            or len(session_id) > RAG_SESSION_ID_MAX_LENGTH
+        ):
+            return validation_error(
+                f'sessionId must be a non-empty string of at most '
+                f'{RAG_SESSION_ID_MAX_LENGTH} characters'
+            )
+        if not isinstance(filters, dict):
+            return validation_error('filters must be an object')
+        category_filter = filters.get('category')
+        if category_filter is not None and not (
+            isinstance(category_filter, str)
+            or (
+                isinstance(category_filter, list)
+                and all(isinstance(value, str) for value in category_filter)
+            )
+        ):
+            return validation_error('filters.category must be a string or array of strings')
+        model_type_filter = filters.get('modelType')
+        if model_type_filter is not None and not isinstance(model_type_filter, str):
+            return validation_error('filters.modelType must be a string')
 
-        # Validate input
-        if not query:
-            return {
-                'statusCode': 400,
-                'headers': headers,
-                'body': json.dumps({
-                    'error': 'ValidationError',
-                    'message': 'Query is required'
-                })
-            }
+        mode, filters = normalize_mode_and_filters(requested_mode, filters)
 
         # Generate new session ID if not provided
         if not session_id:
@@ -2478,15 +2522,15 @@ def lambda_handler(event, context):
         
     except ClientError as e:
         error_code = e.response['Error']['Code']
-        error_message = e.response['Error']['Message']
+        print(f"RAG request failed: {error_code}")
         
         return {
             'statusCode': 500,
             'headers': headers,
             'body': json.dumps({
-                'error': error_code,
-                'message': error_message
-            })
+                'error': 'InternalServerError',
+                'message': 'Unable to process request',
+            }),
         }
     
     except Exception as e:

@@ -40,6 +40,10 @@ Resources:
                 Condition:
                   StringEquals:
                     aws:ResourceAccount: !Ref AWS::AccountId
+                  StringLike:
+                    s3:prefix:
+                      - kb/egov/
+                      - kb/egov/*
               - Sid: ReadLawSearchDocuments
                 Effect: Allow
                 Action: s3:GetObject

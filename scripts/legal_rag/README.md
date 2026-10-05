@@ -2,6 +2,8 @@
 
 本ツールは対象カタログの現行版53法令だけを処理します。原文XMLは`raw/egov/<law-id>/<version-folder>.xml`へ保存し、検索本文は`kb/egov/<law-id>/<version-folder>/<provision_type>/<unit-number>.txt`へ生成します。本文には章節、項・号構造を保持し、各ファイルの`.metadata.json`に`source_url`と`provision_reference`を記録します。このスクリプトはKB Syncを実行しません。
 
+既定カタログ`docs/features/development/legal-rag-target-laws.md`はPR #155で追加予定です。#155がマージされるまでは既定カタログを使った実行はできず、このPRもマージしません。#155の業務スコープ共同確認が成立するまでは、dev Knowledge BaseのSyncや実利用へ進みません。
+
 `retrieved_at`はXMLの取得日（ISO日付）で、アップロード時刻ではありません。`uploaded_at`は実行時にUTCで記録します。取得日が分からない場合、アップロード日を代用せず、取得記録を確認してから実行してください。
 
 ## Dry-run

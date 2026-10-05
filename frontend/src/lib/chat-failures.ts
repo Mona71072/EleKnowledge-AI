@@ -16,6 +16,7 @@ export interface FailureItem {
   messageId: string;
   timestamp: string;
   signals: Array<'bad' | 'not_found'>;
+  ragMode?: 'normal' | 'spec' | 'law';
   responseType?: string;
   feedback?: string;
   feedbackReason?: FeedbackReason;
