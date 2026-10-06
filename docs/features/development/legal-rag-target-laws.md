@@ -2,7 +2,7 @@
 status: development
 phase: 3
 last-verified: 2026-10-01
-related-code: infrastructure/sam/phase2-template.yaml
+related-code: infrastructure/sam/phase2-template.yaml, scripts/legal_rag/upload_egov_laws.py
 ---
 
 # 法令RAG 対象法令フォルダ一覧
