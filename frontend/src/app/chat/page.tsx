@@ -1121,6 +1121,21 @@ const normalizeTableMarkdown = (text: string): string => {
                         )}
                       </div>
 
+                      {isLawMode && message.role === 'assistant' && (
+                        <p className="mt-2 text-xs leading-relaxed text-gray-500">
+                          法令情報の出典は{' '}
+                          <a
+                            href="https://laws.e-gov.go.jp/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            e-Gov法令検索
+                          </a>
+                          です。e-Gov XMLをもとにEle-Knowledgeが検索・回答用に加工しています。法的判断の前にリンク先の原文をご確認ください。
+                        </p>
+                      )}
+
                       {/* Citations */}
                       {message.role === 'assistant' && message.sourceDocuments && message.sourceDocuments.length > 0 && 
                        (!streamingMessageId || streamingMessageId !== message.id || (streamingMessages[message.id] || '').length >= message.content.length) && (() => {
