@@ -2,7 +2,7 @@
 status: development
 phase: 3
 last-verified: 2026-10-01
-related-code: infrastructure/sam/phase2-template.yaml, lambda/rag/rag-function/app.py, scripts/legal_rag/upload_egov_laws.py
+related-code: infrastructure/sam/phase2-template.yaml, lambda/rag/rag-function/app.py, scripts/legal_rag/upload_egov_laws.py, frontend/src/app/chat/page.tsx
 ---
 
 # 法令RAG データ基盤・検索設計
