@@ -213,17 +213,24 @@ def test_archive_and_metrics_roles_match_their_data_paths():
     reader_actions = _policy_actions(_policies(metrics_template, reader_role))
 
     assert aggregator_actions == {
-        "dynamodb:Scan", "dynamodb:PutItem",
-        "cloudwatch:GetMetricStatistics", "cloudwatch:GetMetricData",
+        "dynamodb:Scan", "dynamodb:Query", "dynamodb:PutItem",
+        "cloudwatch:GetMetricStatistics", "cloudwatch:DescribeAlarmHistory",
+        "ce:GetCostAndUsage", "ssm:GetParameter",
     }
-    assert reader_actions == {"dynamodb:Query"}
-    aggregator_resources = [
-        statement.get("Resource")
-        for statement in _policy_statements(_policies(metrics_template, aggregator_role))
-    ]
-    reader_resources = [
-        statement.get("Resource")
-        for statement in _policy_statements(_policies(metrics_template, reader_role))
-    ]
-    assert all("/index/" not in str(resource) for resource in aggregator_resources)
-    assert reader_resources == [["${MetricsTable.Arn}/index/scope-metricDate-index"]]
+    assert reader_actions == {
+        "dynamodb:Query", "cloudwatch:DescribeAlarms",
+        "cloudwatch:DescribeAlarmHistory", "cloudwatch:GetMetricData",
+    }
+    aggregator_statements = _policy_statements(_policies(metrics_template, aggregator_role))
+    aggregator_scan = next(statement for statement in aggregator_statements if statement.get("Action") == ["dynamodb:Scan"])
+    assert "/index/" not in str(aggregator_scan["Resource"])
+    aggregator_query = next(statement for statement in aggregator_statements if statement.get("Action") == ["dynamodb:Query"])
+    assert "index/userId-timestamp-index" in str(aggregator_query["Resource"])
+    assert "index/*" not in str(aggregator_query["Resource"])
+    assert "GetMetricData" not in aggregator_actions
+    reader_statements = _policy_statements(_policies(metrics_template, reader_role))
+    reader_queries = [statement for statement in reader_statements if statement.get("Action") == ["dynamodb:Query"]]
+    assert len(reader_queries) == 2
+    assert any(statement["Resource"] == ["${MetricsTable.Arn}/index/scope-metricDate-index"] for statement in reader_queries)
+    assert any("index/status-publishAt-index" in str(statement["Resource"]) for statement in reader_queries)
+    assert all("index/*" not in str(statement["Resource"]) for statement in reader_queries)

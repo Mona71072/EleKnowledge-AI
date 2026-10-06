@@ -1,7 +1,7 @@
 ---
 status: draft
 last-verified: 2026-09-10
-related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/chat-archive-template.yaml, scripts/ops/set_log_retention.py, lambda/rag/rag-function/app.py, lambda/metrics/aggregator/app.py
+related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/chat-archive-template.yaml, infrastructure/sam/phase2-template.yaml, scripts/ops/set_log_retention.py, lambda/rag/rag-function/app.py, lambda/rag/rag-function/model_profile.py, lambda/metrics/aggregator/app.py
 ---
 
 # 運用ランブック（試行運用 2026-09-10〜）
@@ -114,9 +114,11 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 ## 7. 生成モデルと推論プロファイル
 
 ### 7.1 現在の構成
+> 最終検証: 2026-09-29 — Phase 2 SAM の既定値と生成モデル設定を照合
+
 - 生成モデル: **Sonnet 5**（`global.anthropic.claude-sonnet-5`、2026-09-09 23:02 JST 切替）。環境変数 `BEDROCK_MODEL_ID` で指定。採用条件・見直し条件の正本は PR #119
-- Sonnet 5 / Opus 4.7 以降は `temperature` 指定を 400 で拒否し、既定で適応思考が動くため、`app.py` がモデル世代に応じて本文を組み立てる（`thinking: disabled` 明示）。`BEDROCK_REQUEST_STYLE=auto|new|legacy`
-- Fable 系は対象外（adaptive のみ対応）
+- `model_profile.py` の能力表に基づき、`temperature` / thinking / effort をモデル別に組み立てる。見出し生成・検索語書き換えでは thinking を無効化できない effort 対応モデルに `effort=low` を送る。能力表にも `MODEL_PROFILE_JSON` にもないモデルは、既定で最小リクエストを送りモデル既定に任せる。
+- 本番の既定モデルは Sonnet 5 のまま。モデルを切り替える場合は次の手順で評価する。
 
 ### 7.2 推論プロファイルの仕組み（切替・費用分離のために知っておくこと）
 - Bedrock のモデル呼び出し課金はモデルとトークン数で計上され、Lambda のようにリソース単位でタグを付けられない
@@ -126,9 +128,12 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 - したがって当面は global を直接指定し、**推論コストはトークン数 × 単価で算出**する（P1 の検索トレースで実装）
 
 ### 7.3 モデルを切り替える手順
-1. 候補: 速さ優先なら **Sonnet 4.6（`jp.anthropic.claude-sonnet-4-6`）**（比較記録 `docs/eval-2026-09-09-model-bakeoff-jp.md`）
-2. `sam deploy`（phase2）で `BedrockModelId=<プロファイル ID>` を渡す。Sonnet 4.6 以前なら `BedrockRequestStyle=auto` のままで temperature が付く
-3. 切替日時・モデル・環境変数を issue #86 に記録し、いいね率・not_found 率・レイテンシを前後比較
+> 最終検証: 2026-09-29 — `model_profile.py`・Phase 2 SAM 設定と切替手順を照合
+
+1. 新モデルが出たら `lambda/rag/rag-function/model_profile.py` の既知能力表に追加するか、SAM の `ModelProfileJson`（環境変数 `MODEL_PROFILE_JSON`）で能力を指定する。JSON の形式は `{"sonnet-5-5":{"sampling":false,"thinking_disable":false,"adaptive":true,"effort":true}}`。値はモデル名部分と能力ごとの boolean。モデル名を含まない application inference profile ARN の場合は、JSON キーに ARN 全体を指定する。
+2. 互換用の SAM パラメータ `BedrockRequestStyle`（環境変数 `BEDROCK_REQUEST_STYLE`）は非推奨。既定 `auto` は能力表の判定どおりにし、判定できないモデルでは最小リクエストを送る。`new` は判定できないモデルを新世代扱い（sampling なし、thinking を disabled にできるとは仮定せず最小リクエスト）、`legacy` は判定できないモデルに `temperature` を送る。既知能力表または `MODEL_PROFILE_JSON` で判定できるモデルはこの設定より優先される。新モデルの能力指定には `MODEL_PROFILE_JSON` を推奨する。
+3. `sam deploy`（phase2）で `BedrockModelId=<推論プロファイル ID>` を指定する。推論プロファイルと関連モデルの IAM 許可範囲は Phase 2 テンプレートで管理する（Global Cross-Region は Global foundation model ARN も認可対象）。詳細は [AWS の Global Cross-Region IAM 要件](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html) を参照。
+4. 本番の既定モデルはこの手順では変更しない。評価環境で評価セットを実行し、回答品質・引用・レイテンシ・Bedrock 費用を比較して記録する。採用判断後にだけ運用モデルの切替を別途行う。
 
 ## 8. デプロイとロールバック
 

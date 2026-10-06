@@ -1,8 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveAnnouncementPublishFields } from '../src/lib/announcement-publish.mjs';
+import { canEndAnnouncementNow, resolveAnnouncementPublishFields } from '../src/lib/announcement-publish.mjs';
 
 const NOW_MS = Date.parse('2026-08-26T00:00:00.000Z');
+
+test('開始前のメンテナンスは表示終了できず、開始後と他の種別はできる', () => {
+  assert.equal(canEndAnnouncementNow({ type: 'maintenance', startAt: '2026-08-27T00:00:00.000Z' }, NOW_MS), false);
+  assert.equal(canEndAnnouncementNow({ type: 'maintenance', startAt: '2026-08-26T00:00:00.000Z' }, NOW_MS), false);
+  assert.equal(canEndAnnouncementNow({ type: 'maintenance', startAt: '2026-08-25T23:00:00.000Z' }, NOW_MS), true);
+  assert.equal(canEndAnnouncementNow({ type: 'notice' }, NOW_MS), true);
+  assert.equal(canEndAnnouncementNow({ type: 'update', startAt: '2026-08-27T00:00:00.000Z' }, NOW_MS), true);
+});
 
 test('公開済み編集では既存 publishAt を保持する', () => {
   const existingPublishAt = '2026-08-20T03:00:00.000Z';
