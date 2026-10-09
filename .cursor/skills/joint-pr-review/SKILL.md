@@ -1,7 +1,7 @@
 ---
 name: joint-pr-review
 description: >-
-  mona と itai（@yukiworkspace）が根本仕様・ルール・安全関連の変更を
+  mona と itai（@yuki-mebs）が根本仕様・ルール・安全関連の変更を
   Pull Request 経由で相互に共有し、双方確認してから進める。
   Use when creating or reviewing PRs for product intent, answer schema,
   safety gates, auth, cursor rules, deploy policy, or other foundational
@@ -62,7 +62,7 @@ description: >-
 | 役割 | 担当 | メンション |
 |---|---|---|
 | mona（この PJ の主作業者） | 変更提案・レビュー | PR レビュー依頼先 |
-| itai（デプロイ・共同確認） | 共同確認・デプロイ | `@yukiworkspace` |
+| itai（デプロイ・共同確認） | 共同確認・デプロイ | `@yuki-mebs` |
 
 ## mona → itai（mona 側エージェント）
 
@@ -71,7 +71,7 @@ description: >-
 3. コミット → 明示された依頼範囲と各自の未追跡ローカル設定に従って push
 4. 同種の共同確認が未マージなら **そこに載せる／統合**（新規 PR を安易に増やさない）。無ければ base `develop` 向けに共同確認専用 PR を作成（デプロイ PR には載せない）
 5. PR 本文はテンプレに加え **`.cursor/rules/pr-clarity.mdc` の合格線**を満たす（目的一文・Yes/No・読む順）
-6. `@yukiworkspace` をメンションし、何を確認してほしいかを具体的に書く
+6. `@yuki-mebs` をメンションし、何を確認してほしいかを具体的に書く
 7. itai の Approve / コメント待ち。合意前に勝手にマージ方針を断定しない
 
 ## itai → mona（itai 側エージェント）
@@ -89,7 +89,7 @@ itai の作業でも、根本変更は **必ず PR で mona に飛ばす**。
 ### mona → itai（意図・運用ルール専用 PR）
 
 ```markdown
-@yukiworkspace cc: 共同確認依頼（意図・運用ルール）
+@yuki-mebs cc: 共同確認依頼（意図・運用ルール）
 
 ## この PR の目的
 （例: 製品意図のドラフト共有 + AI 共同開発ルールの合意。アプリ実装は含まない）
@@ -185,7 +185,7 @@ cc: mona 共同確認依頼（根本変更）
 - 共同確認とデプロイでファイルが重ならなければ **マージ順は問わない**。「先に共同確認必須」など偽の順番を PR 本文に書かない
 - **合意後は mona と itai のどちらが `develop` を押してもよい。** 本文にマージ可の条件を書く。「内容OK」と「マージ可」を混ぜない（正本: `docs/ops-ai-driven-dev.md` §6）
 - **マージ可の条件に「相手の Approve」だけを書かない。** Yes/No への回答（または修正指示の反映）を書く
-- **相手を呼ぶ。** itai が出す PR に `@yukiworkspace` は不要。mona がレビューできる書き方にする
+- **相手を呼ぶ。** itai が出す PR に `@yuki-mebs` は不要。mona がレビューできる書き方にする
 - ユーザーが「PR にして itai に共有して」と言ったら、このスキルのテンプレで **共同確認 PR** を作成する
 - itai 側から飛んできた PR をレビューするときは、意図メモ（`docs/PRODUCT_INTENT.md`）とのずれを優先して指摘する
 - 再現できる技術ブロッカーはレビュー投稿してよい。**マージ可・製品判断・業務スコープは、出す前にレビューを依頼した人へ確認する**
