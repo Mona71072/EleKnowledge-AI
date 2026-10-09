@@ -7,6 +7,7 @@ frontend:
   phases:
     preBuild:
       commands:
+        - nvm use 22
         - echo "Installing dependencies..."
         - cd frontend && npm install
         - echo "Setting up environment variables..."
