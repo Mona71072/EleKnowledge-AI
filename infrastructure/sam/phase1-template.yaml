@@ -383,54 +383,72 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
       Policies:
-        - PolicyName: DynamoDBAccess
+        - PolicyName: SignupUserWrite
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - dynamodb:GetItem
                   - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:Query
-                  - dynamodb:Scan
                 Resource:
                   - !GetAtt UsersTable.Arn
-                  - !Sub ${UsersTable.Arn}/index/*
-                  - !GetAtt ChatLogsTable.Arn
-                  - !Sub ${ChatLogsTable.Arn}/index/*
-        - PolicyName: CognitoAccess
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "1"
+
+  LoginExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub auth-login-lambda-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LoginUserUpdate
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - cognito-idp:AdminCreateUser
-                  - cognito-idp:AdminGetUser
-                  - cognito-idp:AdminSetUserPassword
-                  - cognito-idp:AdminUpdateUserAttributes
-                  - cognito-idp:AdminDeleteUser
-                  - cognito-idp:ListUsers
+                  - dynamodb:UpdateItem
                 Resource:
-                  - !GetAtt CognitoUserPool.Arn
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
-                  - s3:ListBucket
-                Resource:
-                  - !GetAtt DocumentsBucket.Arn
-                  - !Sub ${DocumentsBucket.Arn}/*
-                  - !GetAtt UploadsBucket.Arn
-                  - !Sub ${UploadsBucket.Arn}/*
+                  - !GetAtt UsersTable.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "1"
+
+  VerifyExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub auth-verify-lambda-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -472,7 +490,7 @@ Resources:
       CodeUri: ../../lambda/auth/login/
       Handler: app.lambda_handler
       Description: User login function
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !GetAtt LoginExecutionRole.Arn
       Environment:
         Variables:
           COGNITO_USER_POOL_ID: !Ref CognitoUserPool
@@ -493,7 +511,7 @@ Resources:
       CodeUri: ../../lambda/auth/verify/
       Handler: app.lambda_handler
       Description: Email verification function
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !GetAtt VerifyExecutionRole.Arn
       Environment:
         Variables:
           COGNITO_USER_POOL_ID: !Ref CognitoUserPool

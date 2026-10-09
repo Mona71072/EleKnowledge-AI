@@ -258,11 +258,11 @@ Resources:
               - Effect: Allow
                 Action: [dynamodb:Query]
                 Resource:
-                  - !GetAtt MetricsTable.Arn
-                  - !Sub ${MetricsTable.Arn}/index/*
-                  # 表示中の告知（ダッシュボードの「いま」）
-                  - !GetAtt AnnouncementsTable.Arn
-                  - !Sub ${AnnouncementsTable.Arn}/index/*
+                  - !Sub ${MetricsTable.Arn}/index/scope-metricDate-index
+              # ダッシュボードの「いま」に表示する告知は status-publishAt GSI のみ読む
+              - Effect: Allow
+                Action: [dynamodb:Query]
+                Resource: !Sub ${AnnouncementsTable.Arn}/index/status-publishAt-index
               # 「いま」の値は表示のたびに CloudWatch を直接読む（設計 §2.2）
               - Effect: Allow
                 Action: [cloudwatch:DescribeAlarms, cloudwatch:DescribeAlarmHistory, cloudwatch:GetMetricData]
@@ -287,21 +287,26 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [dynamodb:Scan, dynamodb:Query]
+                Action: [dynamodb:Scan]
                 Resource:
                   - !Sub
                     - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}
                     - TableName:
                         Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+              - Effect: Allow
+                # 新規利用者集計は userId-timestamp-index の最古レコードだけを参照
+                Action: [dynamodb:Query]
+                Resource:
                   - !Sub
-                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/*
+                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/userId-timestamp-index
                     - TableName:
                         Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
               - Effect: Allow
                 Action: [dynamodb:PutItem]
                 Resource: !GetAtt MetricsTable.Arn
               - Effect: Allow
-                Action: [cloudwatch:GetMetricStatistics, cloudwatch:GetMetricData, cloudwatch:DescribeAlarmHistory]
+                # aggregator は履歴アラームを集計するが、GetMetricData は呼び出さない
+                Action: [cloudwatch:GetMetricStatistics, cloudwatch:DescribeAlarmHistory]
                 Resource: '*'
               # 実額（Cost Explorer）。SCP で拒否される場合は CostExplorerEnabled=false にする（設計 §8.1）
               - Effect: Allow
