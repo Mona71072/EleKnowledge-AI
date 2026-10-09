@@ -176,6 +176,8 @@ def create(body: dict, actor: str) -> dict:
         'status': status,
         'publishAt': publish_at,
         'pinned': bool(body.get('pinned', False)),
+        # チャット画面の帯にも出す（既定: critical なら真。設計 2026-09-10 dashboard v2 §10.4）
+        'showInChat': bool(body.get('showInChat', body.get('severity') == 'critical')),
         'createdBy': actor,
         'createdAt': now,
         'updatedAt': now,
@@ -211,6 +213,8 @@ def update(announcement_id: str, body: dict, actor: str) -> dict:
             merged['body'] = sanitize_markdown(body['body'])
         if 'pinned' in body:
             merged['pinned'] = bool(body['pinned'])
+        if 'showInChat' in body:
+            merged['showInChat'] = bool(body['showInChat'])
         if 'publishAt' in body:
             merged['publishAt'] = _norm_ts(body['publishAt']) or merged.get('publishAt')
         # 空文字は「属性を消す」扱い（None を書くと DynamoDB に NULL 属性が残る。issue #94 R7）

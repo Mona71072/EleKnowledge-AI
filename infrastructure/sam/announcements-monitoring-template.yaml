@@ -23,10 +23,36 @@ Parameters:
     Default: admin
     Description: Cognito group name that grants admin privileges (server-side enforced)
 
-  MetricTtlDays:
+  AmplifyAppId:
+    Type: String
+    Default: d9ngenggxas1k
+    Description: Amplify Hosting app id (AWS/AmplifyHosting metrics). Empty to skip.
+
+  BedrockModelId:
+    Type: String
+    Default: global.anthropic.claude-sonnet-5
+    Description: Model id used by rag Lambda (AWS/Bedrock ModelId dimension). Keep in sync with phase2 BedrockModelId.
+
+  BedrockCostServiceName:
+    Type: String
+    Default: Claude Sonnet 5 (Amazon Bedrock Edition)
+    Description: Cost Explorer SERVICE name of the Bedrock model line (one line per model). Verify in Cost Explorer.
+
+  BedrockUnitPriceJson:
+    Type: String
+    Default: '{"global.anthropic.claude-sonnet-5": {"inputPerMTok": 2.0, "outputPerMTok": 10.0}, "jp.anthropic.claude-haiku-4-5-20251001-v1:0": {"inputPerMTok": 1.1, "outputPerMTok": 5.5}}'
+    Description: USD per million tokens by model id (JSON). Stored in SSM; the daily estimate is reconciled against Cost Explorer.
+
+  BedrockBudgetUsd:
     Type: Number
-    Default: 400
-    Description: Retention (days) for metric snapshots (~13 months for YoY comparison)
+    Default: 100
+    Description: Monthly budget (USD) for the Bedrock model line, shown on the cost page. Keep equal to the AWS Budgets amount.
+
+  CostExplorerEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Fetch actual cost from Cost Explorer daily (2 requests/day, 0.01 USD each). Set false if ce:GetCostAndUsage is denied by SCP.
 
   AllowedIPList:
     Type: CommaDelimitedList
@@ -124,6 +150,20 @@ Resources:
         - { Key: ManagedBy, Value: SAM }
         - { Key: Feature, Value: announcements-monitoring }
 
+  # Bedrock の単価表（USD / 100 万トークン）。推定 Bedrock 費の算出に使う。
+  # 改定時はこのパラメータを変えて再デプロイする（コンソールで直接書き換えると次回デプロイで戻る）
+  BedrockUnitPriceParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /eleknowledge/${Environment}/bedrock-unit-price
+      Type: String
+      Value: !Ref BedrockUnitPriceJson
+      Description: USD per million tokens by Bedrock model id (JSON)
+      Tags:
+        Project: !Ref ProjectName
+        Env: !Ref Environment
+        ManagedBy: SAM
+
   # ==========================================================================
   # IAM Roles (least privilege, one per function)
   # ==========================================================================
@@ -220,6 +260,13 @@ Resources:
                 Resource:
                   - !GetAtt MetricsTable.Arn
                   - !Sub ${MetricsTable.Arn}/index/*
+                  # 表示中の告知（ダッシュボードの「いま」）
+                  - !GetAtt AnnouncementsTable.Arn
+                  - !Sub ${AnnouncementsTable.Arn}/index/*
+              # 「いま」の値は表示のたびに CloudWatch を直接読む（設計 §2.2）
+              - Effect: Allow
+                Action: [cloudwatch:DescribeAlarms, cloudwatch:DescribeAlarmHistory, cloudwatch:GetMetricData]
+                Resource: '*'
 
   MetricsAggregatorRole:
     Type: AWS::IAM::Role
@@ -254,8 +301,15 @@ Resources:
                 Action: [dynamodb:PutItem]
                 Resource: !GetAtt MetricsTable.Arn
               - Effect: Allow
-                Action: [cloudwatch:GetMetricStatistics, cloudwatch:GetMetricData]
+                Action: [cloudwatch:GetMetricStatistics, cloudwatch:GetMetricData, cloudwatch:DescribeAlarmHistory]
                 Resource: '*'
+              # 実額（Cost Explorer）。SCP で拒否される場合は CostExplorerEnabled=false にする（設計 §8.1）
+              - Effect: Allow
+                Action: [ce:GetCostAndUsage]
+                Resource: '*'
+              - Effect: Allow
+                Action: [ssm:GetParameter]
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/eleknowledge/${Environment}/bedrock-unit-price
 
   # ==========================================================================
   # Lambda Functions
@@ -345,12 +399,30 @@ Resources:
       Environment:
         Variables:
           METRICS_TABLE: !Ref MetricsTable
+          ANNOUNCEMENTS_TABLE: !Ref AnnouncementsTable
+          API_NAMES: !Sub rag-api-${Environment},chat-api-${Environment},auth-api-${Environment},announcements-monitoring-api-${Environment}
+          ALARM_PREFIX: !Sub ${ProjectName}-${Environment}-
+          BEDROCK_COST_SERVICE_NAME: !Ref BedrockCostServiceName
+          BEDROCK_BUDGET_USD: !Ref BedrockBudgetUsd
       Events:
+        # 旧形式（現行 UI）。UI 切替後に削除する
         Get:
           Type: Api
           Properties:
             RestApiId: !Ref AppApi
             Path: /admin/metrics
+            Method: GET
+        GetDashboard:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/metrics/dashboard
+            Method: GET
+        GetCost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/metrics/cost
             Method: GET
 
   MetricsAggregatorFunction:
@@ -360,25 +432,48 @@ Resources:
       CodeUri: ../../lambda/metrics/aggregator/
       Handler: app.lambda_handler
       Role: !GetAtt MetricsAggregatorRole.Arn
-      Timeout: 120
+      # 3 日分の再集計 × CloudWatch 呼び出し（API 4 本・Amplify・Cognito・Bedrock・アラーム履歴）+ Cost Explorer
+      Timeout: 300
       MemorySize: 512
       Environment:
         Variables:
           METRICS_TABLE: !Ref MetricsTable
-          METRIC_TTL_DAYS: !Ref MetricTtlDays
+          # 日次確定時に D-1〜D-3 を再集計する（後付けの 👍👎・資料クリックを回答日の行へ反映）
+          REAGGREGATE_DAYS: "3"
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
           RAG_FUNCTION_NAME: !Sub rag-${Environment}
           CHAT_FUNCTION_NAME: !Sub chat-${Environment}
           RAG_API_NAME: !Sub rag-api-${Environment}
+          # 監視対象 API（順番: rag, chat, auth, app）
+          API_NAMES: !Sub rag-api-${Environment},chat-api-${Environment},auth-api-${Environment},announcements-monitoring-api-${Environment}
+          ALARM_PREFIX: !Sub ${ProjectName}-${Environment}-
+          AMPLIFY_APP_ID: !Ref AmplifyAppId
+          COGNITO_USER_POOL_ID:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-CognitoUserPoolId
+          COGNITO_CLIENT_ID:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-CognitoClientId
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_COST_SERVICE_NAME: !Ref BedrockCostServiceName
+          UNIT_PRICE_PARAM: !Ref BedrockUnitPriceParameter
+          COST_EXPLORER_ENABLED: !Ref CostExplorerEnabled
       Events:
         DailySchedule:
           Type: Schedule
           Properties:
-            # 02:00 JST == 17:00 UTC, aggregates the previous UTC day
+            # 02:00 JST == 17:00 UTC. 前日（JST）を確定し、D-2・D-3 も再集計する
             Schedule: cron(0 17 * * ? *)
             Name: !Sub metrics-daily-agg-${Environment}
             Description: Daily metrics aggregation for EleKnowledge dashboard
+            Input: '{"mode": "daily"}'
+        HourlySchedule:
+          Type: Schedule
+          Properties:
+            # 当日（JST）を partial=true で毎時上書きし、時間帯別の行も更新する
+            Schedule: rate(1 hour)
+            Name: !Sub metrics-hourly-agg-${Environment}
+            Description: Hourly (partial) metrics aggregation for today
+            Input: '{"mode": "hourly"}'
 
   # ==========================================================================
   # API Gateway (Cognito authorizer + office IP whitelist, mirrors phase2)
@@ -428,6 +523,11 @@ Resources:
               Access-Control-Allow-Origin: "'*'"
               Access-Control-Allow-Headers: "'Content-Type,Authorization'"
               Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      # アクセスログ（JSON 1 行/リクエスト）。requestId・時刻・resourcePath・status・latency・errorType 等を記録する。
+      # IP / userAgent / sub / 実リクエスト path / errorMessage / 本文は記録しない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
+      AccessLogSetting:
+        DestinationArn: !GetAtt AppApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
@@ -439,6 +539,13 @@ Resources:
         Project: !Ref ProjectName
         Env: !Ref Environment
         Feature: announcements-monitoring
+
+  # API Gateway アクセスログの受け皿（rag / chat / auth と同じ命名）
+  AppApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/announcements-monitoring-api-${Environment}
+      RetentionInDays: 90
 
 Outputs:
   AppApiUrl:
