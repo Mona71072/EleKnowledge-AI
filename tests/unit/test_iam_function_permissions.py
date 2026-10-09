@@ -128,8 +128,17 @@ def test_rag_and_chat_roles_are_separate_and_restrict_api_actions():
     assert rag_actions == {
         "bedrock:Retrieve", "bedrock:InvokeModel", "bedrock:Rerank",
         "lambda:InvokeFunction", "dynamodb:PutItem", "dynamodb:UpdateItem",
-        "dynamodb:Query", "s3:GetObject",
+        "dynamodb:Query", "s3:GetObject", "kms:Decrypt",
     }
+    kms_statements = [
+        statement
+        for statement in _policy_statements(_policies(template, rag_role))
+        if statement.get("Action") == "kms:Decrypt"
+    ]
+    assert len(kms_statements) == 1
+    assert kms_statements[0]["Resource"] == "LawDataBucketKmsKeyArn"
+    assert kms_statements[0]["Condition"]["StringEquals"]["kms:ViaService"] == "s3.${AWS::Region}.amazonaws.com"
+    assert "LawFullTextDevEnabled" in str(_policies(template, rag_role))
     rerank_policy = _find_policy(_policies(template, rag_role), "RerankAccess")
     assert rerank_policy is not None
     rerank_policy = rerank_policy["PolicyDocument"]["Statement"][0]

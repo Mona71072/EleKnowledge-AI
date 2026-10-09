@@ -49,6 +49,32 @@ Parameters:
       only together with the app-side image-attachment rework).
       See docs/decisions-2026-08-26-kb-selection.md.
 
+  LawKnowledgeBaseId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[A-Z0-9]{10}$'
+    Description: Optional dev-only Managed Knowledge Base for current e-Gov laws
+
+  LawRagEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable law mode only when Environment is dev and a LawKnowledgeBaseId is configured
+
+  LawDataBucketName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: Optional existing dev law bucket for read-only full-text enrichment
+
+  LawDataBucketKmsKeyArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$'
+    Description: KMS key of the dev law bucket for read-only enrichment
+
   KnowledgeBaseDataSourceBucket:
     Type: String
     Default: ragknowledgebasestackinst-datasourcebucket9fa93e04-ybbhm1efhyzb
@@ -258,6 +284,14 @@ Parameters:
 
 Conditions:
   HasRerankModelArn: !Not [!Equals [!Ref RerankModelArn, '']]
+  LawRagDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref LawRagEnabled, 'true']
+    - !Not [!Equals [!Ref LawKnowledgeBaseId, '']]
+  LawFullTextDevEnabled: !And
+    - !Condition LawRagDevEnabled
+    - !Not [!Equals [!Ref LawDataBucketName, '']]
+    - !Not [!Equals [!Ref LawDataBucketKmsKeyArn, '']]
 
 Globals:
   Function:
@@ -325,6 +359,10 @@ Resources:
                   - bedrock:Retrieve
                 Resource:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
+                  - !If
+                    - LawRagDevEnabled
+                    - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${LawKnowledgeBaseId}
+                    - !Ref AWS::NoValue
               # jp.*  ARN
               # foundation-model ARN  AccessDeniedException
               - Effect: Allow
@@ -389,6 +427,24 @@ Resources:
                   - s3:GetObject
                 Resource:
                   - !Sub arn:aws:s3:::${KnowledgeBaseDataSourceBucket}/${KnowledgeBaseSourcePrefix}*
+              - !If
+                - LawFullTextDevEnabled
+                - Effect: Allow
+                  Action: s3:GetObject
+                  Resource: !Sub arn:aws:s3:::${LawDataBucketName}/kb/egov/*
+                  Condition:
+                    StringEquals:
+                      aws:ResourceAccount: !Ref AWS::AccountId
+                - !Ref AWS::NoValue
+              - !If
+                - LawFullTextDevEnabled
+                - Effect: Allow
+                  Action: kms:Decrypt
+                  Resource: !Ref LawDataBucketKmsKeyArn
+                  Condition:
+                    StringEquals:
+                      kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+                - !Ref AWS::NoValue
 
   ChatLambdaRole:
     Type: AWS::IAM::Role
@@ -450,6 +506,10 @@ Resources:
       Environment:
         Variables:
           KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+          LAW_KNOWLEDGE_BASE_ID: !Ref LawKnowledgeBaseId
+          LAW_RAG_ENABLED: !Ref LawRagEnabled
+          LAW_DATA_BUCKET_NAME: !If [LawFullTextDevEnabled, !Ref LawDataBucketName, '']
+          LAW_DATA_BUCKET_OWNER: !If [LawFullTextDevEnabled, !Ref AWS::AccountId, '']
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           BEDROCK_REQUEST_STYLE: !Ref BedrockRequestStyle
           # 履歴一覧の見出し生成。既定は BEDROCK_MODEL_ID と同じモデル（追加の IAM 不要）

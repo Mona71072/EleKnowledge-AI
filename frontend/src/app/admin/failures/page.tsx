@@ -612,7 +612,7 @@ export default function AdminFailuresPage() {
                   </div>
                   <div className="flex gap-2">
                     {item.sessionId && (
-                      <Link href={`/chat?session=${encodeURIComponent(item.sessionId)}`} className="text-xs px-2.5 py-1 rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
+                      <Link href={`/chat?session=${encodeURIComponent(item.sessionId)}${item.ragMode === 'law' ? '&mode=law' : ''}`} className="text-xs px-2.5 py-1 rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
                         チャットで開く
                       </Link>
                     )}
