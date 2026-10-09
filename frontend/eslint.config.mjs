@@ -10,5 +10,6 @@ export default defineConfig([
       "react-hooks/set-state-in-effect": "off",
     },
   },
-  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
+  // .d.mts は型宣言のみ（tsc で検査済み）。ESLint の既定パーサーでは解析できない
+  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts", "**/*.d.mts"]),
 ]);

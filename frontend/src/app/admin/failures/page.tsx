@@ -32,6 +32,7 @@ import {
   isUnresolved,
 } from '@/lib/improvement-proposals';
 import { isThisWeekJst, periodRange } from '@/lib/failures-period.mjs';
+import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
 import { failureTruncationNotices, isReformulatedFailure } from '@/lib/failures-selection.mjs';
 
 type PeriodKey = '1' | '7' | '30' | 'custom' | 'all';
@@ -612,7 +613,7 @@ export default function AdminFailuresPage() {
                   </div>
                   <div className="flex gap-2">
                     {item.sessionId && (
-                      <Link href={`/chat?session=${encodeURIComponent(item.sessionId)}${item.ragMode === 'law' ? '&mode=law' : ''}`} className="text-xs px-2.5 py-1 rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
+                      <Link href={buildChatSessionHref(item.sessionId, item.ragMode)} className="text-xs px-2.5 py-1 rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
                         チャットで開く
                       </Link>
                     )}
@@ -756,7 +757,7 @@ export default function AdminFailuresPage() {
                   <p className="text-[11px] text-gray-500 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span>{formatTs(w.timestamp)}</span>
                     {w.contextSessionId && (
-                      <Link href={`/chat?session=${encodeURIComponent(w.contextSessionId)}`} className="text-blue-700 underline">
+                      <Link href={buildChatSessionHref(w.contextSessionId, w.ragMode)} className="text-blue-700 underline">
                         関連セッション
                       </Link>
                     )}

@@ -199,6 +199,8 @@ export interface ProductWish {
   text: string;
   timestamp: string;
   contextSessionId?: string;
+  /** 関連セッションのモード（API が返す場合のみ。law ならリンクに mode=law を付ける） */
+  ragMode?: 'normal' | 'spec' | 'law';
   triage?: Triage;
 }
 

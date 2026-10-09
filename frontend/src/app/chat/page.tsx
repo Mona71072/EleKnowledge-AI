@@ -16,6 +16,7 @@ import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { documentHref, documentHrefWithPage } from '@/lib/documents';
 import { getAnnouncements, Announcement } from '@/lib/announcements';
 import { NoticeBanner } from '@/components/announcements/NoticeBanner';
+import { resolveInitialChatMode } from '@/lib/chat-session-link.mjs';
 import {
   BadFeedbackReasonId,
   FEEDBACK_COMMENT_MAX,
@@ -298,8 +299,7 @@ const normalizeTableMarkdown = (text: string): string => {
   // 初期化：ユーザー情報取得とセッション読み込み
   useEffect(() => {
     const initializeChat = async () => {
-      const requestedMode = new URLSearchParams(window.location.search).get('mode');
-      const initialMode: ChatMode = requestedMode === 'law' ? 'law' : 'normal';
+      const initialMode: ChatMode = resolveInitialChatMode(window.location.search);
       setRagMode(initialMode);
 
       // 開発モード: 認証をスキップする場合
@@ -340,7 +340,7 @@ const normalizeTableMarkdown = (text: string): string => {
   useEffect(() => {
     if (!userId) return;
     const params = new URLSearchParams(window.location.search);
-    const initialMode: ChatMode = params.get('mode') === 'law' ? 'law' : 'normal';
+    const initialMode: ChatMode = resolveInitialChatMode(window.location.search);
     setRagMode(initialMode);
     const q = params.get('q');
     const sessionId = params.get('session');
@@ -352,7 +352,8 @@ const normalizeTableMarkdown = (text: string): string => {
     }
     if (sessionId) {
       dirty = true;
-      fetchSessionMessages(sessionId).catch((err) => {
+      // setRagMode は次の描画まで反映されないため、取得モードは明示的に渡す（既定の ragMode は古い）
+      fetchSessionMessages(sessionId, initialMode).catch((err) => {
         console.error('Failed to open session from URL:', err);
         setError('指定されたセッションを開けませんでした');
       });
