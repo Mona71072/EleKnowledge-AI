@@ -67,6 +67,29 @@ def test_profile_strips_inference_prefix_and_version_suffix(load_rag_module, mon
     assert profiles.get_model_profile(
         "global.anthropic.claude-sonnet-5-5-20260901-v1:0"
     ).thinking_disable is False
+    luna = profiles.get_model_profile("global.openai.gpt-6-luna")
+    assert luna.api == "converse"
+    assert luna.image_input is True
+    assert profiles._normalize_model_name("global.openai.gpt-6-luna") == "gpt-6-luna"
+
+
+def test_json_override_sets_api_and_unknown_api_falls_back_to_invoke(
+    load_rag_module, monkeypatch, capsys
+):
+    profiles = _load_profile(
+        load_rag_module,
+        monkeypatch,
+        model_profile_json=json.dumps({
+            "openai.gpt-6-luna": {"api": "invoke"},
+            "future-model": {"api": "converse"},
+        }),
+    )
+    assert profiles.get_model_profile("global.openai.gpt-6-luna").api == "invoke"
+    assert profiles.get_model_profile("future-model").api == "converse"
+    monkeypatch.setenv("MODEL_PROFILE_JSON", '{"bad":{"api":"unknown"}}')
+    invalid = _load_profile(load_rag_module, monkeypatch, model_profile_json='{"bad":{"api":"unknown"}}')
+    assert invalid.get_model_profile("bad").api == "invoke"
+    assert '"event":"invalid_model_profile_api"' in capsys.readouterr().out
 
 
 def test_unknown_model_uses_minimal_capabilities_and_logs_only_model_id(

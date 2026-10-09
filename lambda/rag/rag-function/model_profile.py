@@ -1,4 +1,4 @@
-"""Generation capabilities for Anthropic models called through Bedrock."""
+"""Bedrock 対応モデルの生成 API と能力プロファイル。"""
 
 from dataclasses import dataclass, fields
 import json
@@ -8,12 +8,14 @@ import re
 
 @dataclass(frozen=True)
 class ModelProfile:
-    """Request fields accepted by a model family."""
+    """モデルが受け付ける生成 API とリクエスト設定。"""
 
     sampling: bool
     thinking_disable: bool
     adaptive: bool
     effort: bool
+    api: str = "invoke"
+    image_input: bool = False
 
 
 _PROFILE_FIELDS = frozenset(field.name for field in fields(ModelProfile))
@@ -27,6 +29,7 @@ if _REQUEST_STYLE not in {"auto", "new", "legacy"}:
 # Keys are normalized model names. Prefix matches ending in '-' cover a model
 # family such as Sonnet 4.x. Matching always checks longer keys first.
 MODEL_PROFILES = {
+    "gpt-6-luna": ModelProfile(False, False, False, False, "converse", True),
     "sonnet-5-5": ModelProfile(False, False, True, True),
     "opus-5-5": ModelProfile(False, False, True, True),
     "fable-5-1": ModelProfile(False, False, True, True),
@@ -64,7 +67,7 @@ def _normalize_model_name(model_id: str) -> str:
     parts = value.split(".")
     if parts and parts[0] in {"global", "jp", "us", "apac", "eu", "au", "ca", "in"}:
         parts = parts[1:]
-    if parts and parts[0] == "anthropic":
+    if parts and parts[0] in {"anthropic", "openai"}:
         parts = parts[1:]
     name = ".".join(parts)
     if name.startswith("claude-"):
@@ -88,8 +91,21 @@ def _load_overrides() -> dict[str, ModelProfile]:
             if not normalized_name or not isinstance(values, dict):
                 raise TypeError("each model profile must be an object")
             unknown = set(values) - _PROFILE_FIELDS
-            if unknown or any(type(value) is not bool for value in values.values()):
-                raise TypeError("profile capabilities must be boolean fields")
+            if unknown:
+                raise TypeError("profile capabilities have invalid values")
+            api = values.get("api", "invoke")
+            if type(api) is not str or api not in ("invoke", "converse"):
+                print(json.dumps(
+                    {"event": "invalid_model_profile_api"},
+                    separators=(",", ":"),
+                ))
+                values = {**values, "api": "invoke"}
+            invalid_capability = any(
+                key != "api" and type(value) is not bool
+                for key, value in values.items()
+            )
+            if invalid_capability:
+                raise TypeError("profile capabilities have invalid values")
             base = _profile_for_normalized_name(normalized_name) or _SAFE_MINIMAL_PROFILE
             overrides[normalized_name] = ModelProfile(
                 **{**base.__dict__, **values}

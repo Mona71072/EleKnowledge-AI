@@ -1,7 +1,4 @@
-"""
-EleKnowledge RAG Lambda Function
-Knowledge Base + Claude 4 Integration
-"""
+"""EleKnowledge RAG Lambda: Knowledge Base 検索と Bedrock 生成。"""
 import json
 import os
 import importlib.util
@@ -469,7 +466,7 @@ def generate_session_title(query: str, deadline=None) -> str:
     """最初の質問から、履歴一覧で見分けられる短い見出しを作る。
 
     質問文をそのまま切り詰めると「※機種未指定のため…」や長い文がそのまま並び、
-    一覧で会話を判別できない。Claude に短い体言止めの見出しを作らせ、
+    一覧で会話を判別できない。生成モデルに短い体言止めの見出しを作らせ、
     失敗時は従来どおり質問文の先頭50文字にフォールバックする。
 
     deadline（time.monotonic() 基準）を渡すと、残り予算が読取期限 + 保存・返却の
@@ -492,15 +489,12 @@ def generate_session_title(query: str, deadline=None) -> str:
             "content": "次の質問に見出しを付けてください。\n"
                        f"<question>\n{text[:500]}\n</question>",
         }]
-        request_body = build_generation_request(
-            SESSION_TITLE_SYSTEM_PROMPT, messages, SESSION_TITLE_MODEL_ID,
-            max_tokens=64, temperature=0, apply_generation_settings=False,
+        title_text, _, _ = invoke_generation(
+            bedrock_runtime_title, SESSION_TITLE_MODEL_ID,
+            SESSION_TITLE_SYSTEM_PROMPT, messages, max_tokens=64,
+            temperature=0, apply_generation_settings=False, call_name='title',
         )
-        response = bedrock_runtime_title.invoke_model(
-            modelId=SESSION_TITLE_MODEL_ID, body=json.dumps(request_body),
-        )
-        response_body = json.loads(response['body'].read())
-        title = _normalize_session_title(extract_response_text(response_body))
+        title = _normalize_session_title(title_text)
         return title or _fallback_session_title(text)
     except Exception as e:  # noqa: BLE001 - 見出し生成の失敗で回答を落とさない
         print(f"[rag] stage=session_title_generation {telemetry._exception_label(e)}")
@@ -1091,19 +1085,14 @@ def maybe_rewrite_search_query(query: str, chat_history: list = None,
     )
 
     try:
-        request_body = build_generation_request(
-            QUERY_REWRITE_SYSTEM_PROMPT,
-            [{'role': 'user', 'content': prompt}],
-            QUERY_REWRITE_MODEL_ID,
-            max_tokens=200,
-            apply_generation_settings=False,
+        rewrite_messages = [{'role': 'user', 'content': prompt}]
+        rewritten, _, _ = invoke_generation(
+            _get_query_rewrite_client(), QUERY_REWRITE_MODEL_ID,
+            QUERY_REWRITE_SYSTEM_PROMPT, rewrite_messages,
+            max_tokens=200, apply_generation_settings=False,
+            ensure_ascii=False, call_name='rewrite',
         )
-        response = _get_query_rewrite_client().invoke_model(
-            modelId=QUERY_REWRITE_MODEL_ID,
-            body=json.dumps(request_body, ensure_ascii=False),
-        )
-        response_body = json.loads(response['body'].read())
-        rewritten = (extract_response_text(response_body) or '').strip()
+        rewritten = (rewritten or '').strip()
         if not rewritten or '\n' in rewritten or '\r' in rewritten or len(rewritten) > 200:
             log('invalid_output')
             return query
@@ -1548,6 +1537,111 @@ def build_generation_request(system_prompt: str, messages: list, model_id: str,
     return body
 
 
+def build_converse_messages(messages: list, system_prompt: str = None,
+                            supports_images: bool = False) -> tuple:
+    """Anthropic Messages の text/image ブロックを Converse 形式へ変換する。"""
+    import base64
+    converse_messages = []
+    omitted_images = 0
+    for message in messages or []:
+        role = message.get('role') if message.get('role') in ('user', 'assistant') else 'user'
+        content = message.get('content')
+        blocks = content if isinstance(content, list) else [{'type': 'text', 'text': content}]
+        converted = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            if block.get('type') == 'text' and block.get('text'):
+                converted.append({'text': str(block['text'])})
+            elif block.get('type') == 'image':
+                if not supports_images:
+                    omitted_images += 1
+                    continue
+                source = block.get('source') or {}
+                image_format = source.get('media_type', '').removeprefix('image/').lower()
+                image_format = {'jpg': 'jpeg'}.get(image_format, image_format)
+                if source.get('type') != 'base64' or image_format not in {
+                    'png', 'jpeg', 'gif', 'webp'
+                }:
+                    raise ValueError('unsupported Anthropic image block')
+                converted.append({
+                    'image': {
+                        'format': image_format,
+                        'source': {'bytes': base64.b64decode(source.get('data') or '')},
+                    }
+                })
+        if converted:
+            converse_messages.append({'role': role, 'content': converted})
+    if omitted_images:
+        print(json.dumps({
+            'event': 'model_image_input_omitted', 'count': omitted_images,
+        }, separators=(',', ':')))
+    system = [{'text': system_prompt}] if system_prompt else []
+    return converse_messages, system
+
+
+def invoke_generation(client, model_id: str, system_prompt: str, messages: list,
+                      max_tokens: int = None, temperature: float = None,
+                      apply_generation_settings: bool = True,
+                      ensure_ascii: bool = True,
+                      call_name: str = 'answer') -> tuple:
+    """モデル能力に応じて生成し、本文・usage・停止理由を返す。"""
+    profile = get_model_profile(model_id)
+    request_body = build_generation_request(
+        system_prompt, messages, model_id, max_tokens=max_tokens,
+        temperature=temperature,
+        apply_generation_settings=apply_generation_settings,
+    )
+    if profile.api == 'converse':
+        converse_messages, system = build_converse_messages(
+            messages, system_prompt, supports_images=profile.image_input,
+        )
+        inference_config = {'maxTokens': request_body['max_tokens']}
+        if profile.sampling and 'temperature' in request_body:
+            inference_config['temperature'] = request_body['temperature']
+        response = client.converse(
+            modelId=model_id,
+            messages=converse_messages,
+            system=system,
+            inferenceConfig=inference_config,
+        )
+        content = ((response.get('output') or {}).get('message') or {}).get('content') or []
+        text = ''.join(
+            block.get('text', '') for block in content
+            if isinstance(block, dict) and isinstance(block.get('text'), str)
+        )
+        usage = response.get('usage') or {}
+        stop_reason = response.get('stopReason')
+        if stop_reason == 'max_tokens':
+            print(json.dumps({
+                'event': 'generation_truncated', 'api': 'converse', 'call': call_name,
+            }, separators=(',', ':')))
+        return text, {
+            'inputTokens': usage.get('inputTokens'),
+            'outputTokens': usage.get('outputTokens'),
+            'cacheReadInputTokens': usage.get('cacheReadInputTokens', 0),
+            'cacheWriteInputTokens': usage.get('cacheWriteInputTokens', 0),
+        }, stop_reason
+
+    response = client.invoke_model(
+        modelId=model_id,
+        body=json.dumps(request_body, ensure_ascii=ensure_ascii),
+    )
+    response_body = json.loads(response['body'].read())
+    usage = response_body.get('usage') or {}
+    stop_reason = response_body.get('stop_reason')
+    if stop_reason == 'max_tokens':
+        print(json.dumps({
+            'event': 'generation_truncated', 'api': 'invoke', 'call': call_name,
+        }, separators=(',', ':')))
+    return extract_response_text(response_body), {
+        'inputTokens': usage.get('input_tokens'),
+        'outputTokens': usage.get('output_tokens'),
+        'cacheReadInputTokens': usage.get('cache_read_input_tokens', 0),
+        'cacheWriteInputTokens': usage.get('cache_creation_input_tokens', 0),
+    }, stop_reason
+
+
 def extract_response_text(response_body: dict) -> str:
     """content から最初の text ブロックを返す（thinking ブロックが先頭に来る場合に備える）。"""
     for block in response_body.get("content") or []:
@@ -1560,7 +1654,7 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
                                   mode: str = "normal", search_query: str = None,
                                   rank_key: str = None) -> str:
     """
-    Generate response using Claude 4 with Knowledge Base results
+    設定された Bedrock モデルと Knowledge Base の検索結果から回答を生成する。
 
     Args:
         query: Raw user turn (saved to history as-is)
@@ -1622,15 +1716,10 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
             query, selected_results, chat_history, search_query=search_query
         )
 
-        request_body = build_generation_request(system_prompt, messages, BEDROCK_MODEL_ID)
-
-        response = bedrock_runtime.invoke_model(
-            modelId=BEDROCK_MODEL_ID,
-            body=json.dumps(request_body)
+        assistant_message, _, _ = invoke_generation(
+            bedrock_runtime, BEDROCK_MODEL_ID, system_prompt, messages,
+            call_name='answer',
         )
-        
-        response_body = json.loads(response['body'].read())
-        assistant_message = extract_response_text(response_body)
         
         return assistant_message
         
@@ -2509,3 +2598,4 @@ def handle_rag_request(event, context, started_at):
 
     except Exception as e:  # noqa: BLE001
         return telemetry.error_response(headers, e, started_at, event)
+
