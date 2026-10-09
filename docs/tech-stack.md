@@ -10,14 +10,18 @@ related-code: frontend/package.json, frontend/package-lock.json, infrastructure/
 
 ## フロントエンド
 
+> 最終検証: 2026-10-09 — develop の package.json / lockfile、Amplify の Node.js 設定、PR #167 の CI を確認。デプロイ済み環境は未確認。
+
 | 技術 | リポジトリ上の指定 | 用途 |
 |---|---|---|
-| Next.js | `^15.5.24` | App Router |
-| React / React DOM | `19.1.0` | UI |
+| Next.js | `^16.3.8` | App Router、静的 export |
+| React / React DOM | `^19.2.8` | UI |
+| AWS Amplify UI | `^6.13.0` | 認証 UI |
 | AWS Amplify | `^6.15.7` | Cognito 認証統合 |
 | Axios | `^1.13.2` | API 通信 |
 | Tailwind CSS | `^4` | スタイリング |
 | TypeScript | `^5` | 型検査 |
+| Node.js | `22` | Amplify Hosting のビルド |
 
 バージョンは `frontend/package.json` の指定範囲であり、環境ごとのデプロイ済み成果物を示すものではない。
 
