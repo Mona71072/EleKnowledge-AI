@@ -35,6 +35,8 @@ These observations do not include delivery tests for SNS/Budget notifications or
 
 ## Phase 1 - Auth and Base Data
 
+> 最終検証: 2026-10-04 — SAMテンプレートとLambdaのAWS API呼出しを照合（実環境未確認）
+
 | Resource name | Component type | Purpose | Managed by |
 | --- | --- | --- | --- |
 | `users-dev` | Cognito User Pool | User authentication and account lifecycle | `phase1-template.yaml` |
@@ -43,7 +45,9 @@ These observations do not include delivery tests for SNS/Budget notifications or
 | `chatlogs-dev` | DynamoDB table | Chat sessions/messages with user timestamp GSI | `phase1-template.yaml` |
 | `documents-dev-${AWS::AccountId}` | S3 bucket | Source documents for RAG and citations | `phase1-template.yaml` |
 | `uploads-dev-${AWS::AccountId}` | S3 bucket | Temporary upload area | `phase1-template.yaml` |
-| `auth-lambda-dev` | IAM role | Shared execution role for auth Lambda functions | `phase1-template.yaml` |
+| `auth-lambda-dev` | IAM role | signup: usersテーブルへの`PutItem` | `phase1-template.yaml` |
+| `auth-login-lambda-dev` | IAM role | login: usersテーブルへの`UpdateItem` | `phase1-template.yaml` |
+| `auth-verify-lambda-dev` | IAM role | verify: CloudWatch Logsのみ | `phase1-template.yaml` |
 | `signup-dev` | Lambda function | User signup endpoint handler | `phase1-template.yaml` |
 | `login-dev` | Lambda function | User login endpoint handler | `phase1-template.yaml` |
 | `verify-dev` | Lambda function | Email verification endpoint handler | `phase1-template.yaml` |
@@ -52,6 +56,8 @@ These observations do not include delivery tests for SNS/Budget notifications or
 
 ## Phase 2 - RAG and Chat
 
+> 最終検証: 2026-10-04 — SAMテンプレートとLambdaのAWS API呼出しを照合（実環境未確認）
+
 | Resource name | Component type | Purpose | Managed by |
 | --- | --- | --- | --- |
 | `kb-dev` | OpenSearch Serverless collection | Vector storage backing Bedrock Knowledge Base | `phase2-template.yaml` |
@@ -59,7 +65,8 @@ These observations do not include delivery tests for SNS/Budget notifications or
 | `kb-dev-net` | OpenSearch Serverless network policy | Network policy for `kb-dev` and dashboards | `phase2-template.yaml` |
 | `kb-dev` | IAM role | Bedrock Knowledge Base access to S3/OpenSearch | `phase2-template.yaml` |
 | `/eleknowledge/dev/knowledge-base-id` | SSM Parameter | Bedrock Knowledge Base ID placeholder/value | `phase2-template.yaml` |
-| `rag-lambda-dev` | IAM role | Shared execution role for RAG and chat Lambda functions | `phase2-template.yaml` |
+| `rag-lambda-dev` | IAM role | RAG: Bedrock Retrieve/InvokeModel/Rerank、chatlogsの検索・書込み、対象S3のGetObject、非同期自己呼出し | `phase2-template.yaml` |
+| `chat-lambda-dev` | IAM role | chat: chatlogsのQuery/Scan/書込み。GSIは`userId-timestamp-index`のみ | `phase2-template.yaml` |
 | `rag-dev` | Lambda function | RAG query processing with Bedrock | `phase2-template.yaml` |
 | `chat-dev` | Lambda function | Chat session/message management | `phase2-template.yaml` |
 | `rag-api-dev` | API Gateway REST API | Authenticated RAG query API | `phase2-template.yaml` |
@@ -106,6 +113,16 @@ These observations do not include delivery tests for SNS/Budget notifications or
 | `eleknowledge-chat-archive-dev` | `infrastructure/sam/chat-archive-template.yaml` | Lambda `eleknowledge-chat-archive-dev` (chatlogs stream -> S3); S3 `eleknowledge-chat-archive-dev-<account>` (versioned; OnFailure invocation records), `eleknowledge-athena-results-dev-<account>`; EventBridge→SNS failure notification; Athena workgroup `eleknowledge-analytics-dev`; Glue `eleknowledge_analytics.chatlogs_archive` |
 | `eleknowledge-security-waf-dev` | `infrastructure/sam/security-waf-template.yaml` | WAFv2 regional `EleKnowledge-dev-RegionalWebAcl` + IPSet. IaC defines associations with 5 REST API stages; the 2026-09-30 AWS observation confirmed API associations but did not establish their count. |
 | `eleknowledge-monitoring-dev` | `infrastructure/sam/monitoring-template.yaml` | AWS observation: SNS `eleknowledge-alerts-dev` (2 confirmed email subscriptions), 27 CloudWatch alarms, 6 saved Logs Insights queries. Current `develop` template: 26 alarms, 2 metric filters, 3 query definitions. See the dated observation above and [runbook](ops-runbook.md); notification delivery was not tested. |
+
+### Lambda execution roles
+
+> 最終検証: 2026-10-09 — #166のSAM定義とLambda呼出し権限を照合（AWS変更セットの適用前、実環境未確認）
+
+| Lambda execution role | 権限範囲 |
+| --- | --- |
+| `eleknowledge-chat-archive-dev-role` | DynamoDB Streams読取り（chatlogs stream ARN）、S3 `PutObject`（`chatlogs/*` と `aws/lambda/*`）と `ListBucket`（OnFailure送信先に必要） |
+| `metrics-aggregator-dev` | chatlogs `Scan`、metricsテーブル`PutItem`、CloudWatch `GetMetricStatistics` |
+| `metrics-read-dev` | metricsテーブルの`scope-metricDate-index`に対する`Query` |
 
 Not in IaC: the AWS budget notification and the Bedrock application inference profile referenced by the operational records. The 2026-09-30 read-only observation found the development RAG Lambda configured for `global.anthropic.claude-sonnet-5`; do not infer the state of other environments from this. Log group retention is set by `scripts/ops/set_log_retention.py` (Lambda 365 d / API Gateway 90 d).
 
