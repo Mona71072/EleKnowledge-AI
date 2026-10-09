@@ -51,6 +51,7 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 |------|------|---------|
 | トラブルシューティング | [docs/features/development/phase3-troubleshooting-spec.md](docs/features/development/phase3-troubleshooting-spec.md) | AWS リソースは存在するが利用者向け E2E 未確認。既存の[処理シーケンス](docs/features/production/troubleshooting-sequence.md)は現行との照合が必要。PoC 設計: [docs/agent-spec.md](docs/agent-spec.md) ／ [実装ガイド](docs/features/development/phase3-troubleshooting-implementation-guide.md) |
 | 品質書類チェック（Claude 4 Vision） | [docs/features/development/phase3-quality-check-spec.md](docs/features/development/phase3-quality-check-spec.md) | 開発仕様のみ。実装・E2E は未確認。 |
+| 法令RAG（e-Gov法令検索） | [docs/features/development/legal-rag-design.md](docs/features/development/legal-rag-design.md) | [対象法令フォルダ一覧](docs/features/development/legal-rag-target-laws.md) ／ 専用S3・専用Knowledge Base・法令モードの設計 |
 | RAG の 2 モード化（通常モード＋じっくりモード。設計段階） | [設計（合意済み・未実装）](docs/design-2026-09-24-rag-two-modes.md) | 決定: [docs/decisions-2026-09-24-rag-two-modes.md](docs/decisions-2026-09-24-rag-two-modes.md) ／ 調査: [docs/survey-2026-09-24-agentic-rag.md](docs/survey-2026-09-24-agentic-rag.md) ／ [KB 修正依頼台帳](docs/kb-change-requests.md) |
 | Know-how Knowledge Layer（設計段階・未確定） | [docs/design-2026-10-01-knowhow-flywheel.md](docs/design-2026-10-01-knowhow-flywheel.md) | 調査: [docs/survey-2026-10-01-knowhow-flywheel.md](docs/survey-2026-10-01-knowhow-flywheel.md) |
 
