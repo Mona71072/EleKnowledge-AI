@@ -1,0 +1,980 @@
+<title>EleKnowledge 運用ダッシュボード</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;600&display=swap">
+<style>
+  /* 単一テーマ（ライト）に固定。実アプリ（Tailwind gray 系）の見た目に寄せる */
+  :root {
+    color-scheme: light;
+    --ground: #f6f6f3;
+    --card: #ffffff;
+    --line: #e3e3dd;
+    --line-strong: #c6c6bf;
+    --ink: #161715;
+    --ink-2: #4a4b47;
+    --ink-3: #7b7c76;
+    --accent: #1d4ed8;
+    --accent-bg: #eaf0fc;
+    --accent-line: #bfd3f6;
+    --violet: #6d4fb8;
+    --violet-bg: #f1edfa;
+    --s1: #2a78d6;         /* 系列青（charts.tsx PALETTE.series1） */
+    --s1-light: #cde2fb;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --good: #0ca30c;       --good-text: #166534;  --good-bg: #f0fbf0;  --good-line: #b9e4b9;
+    --warn: #fab219;       --warn-text: #7c4a00;  --warn-bg: #fff7e3;  --warn-line: #f1d48c;
+    --serious: #ec835a;    --serious-text: #93361a; --serious-bg: #fff1ea; --serious-line: #f4c0a6;
+    --critical: #d03b3b;   --critical-text: #961b1b; --critical-bg: #fdeaea; --critical-line: #efadad;
+    --mock: #fff4cc;
+    --mock-line: #e6ca62;
+    --font: "IBM Plex Sans JP", "Hiragino Sans", "Yu Gothic UI", "Meiryo", "Noto Sans JP", system-ui, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+  a { color: var(--accent); }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .num { font-variant-numeric: tabular-nums; }
+  code { font-family: var(--mono); font-size: 12px; }
+  h1, h2, h3 { margin: 0; text-wrap: balance; }
+
+  /* ---- shell ---- */
+  .hdr { position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,.92); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
+  .hdr-in { max-width: 1160px; margin: 0 auto; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .brand .mark { width: 34px; height: 34px; border-radius: 8px; background: linear-gradient(135deg, #3b4252, #161715); color: #fff; display: grid; place-items: center; font-weight: 600; font-size: 13px; }
+  .brand .t { font-weight: 600; font-size: 16px; line-height: 1.2; }
+  .brand .s { font-size: 11px; color: var(--ink-3); }
+  .user { font-size: 12px; color: var(--ink-3); }
+  .subnav { border-bottom: 1px solid var(--line); background: var(--card); }
+  .subnav-in { max-width: 1160px; margin: 0 auto; padding: 0 20px; display: flex; gap: 4px; overflow-x: auto; }
+  .tab { border: 0; background: none; padding: 10px 12px; color: var(--ink-2); border-bottom: 2px solid transparent; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+  .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab .cnt { font-size: 11px; background: var(--ground); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; color: var(--ink-2); }
+  .tab .cnt.hot { background: var(--critical-bg); border-color: var(--critical-line); color: var(--critical-text); }
+
+  .mockbar { background: var(--mock); border-bottom: 1px solid var(--mock-line); }
+  .mockbar-in { max-width: 1160px; margin: 0 auto; padding: 8px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; font-size: 12px; color: #4a3b00; }
+  .mockbar .lbl { font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 11px; }
+  .seg { display: inline-flex; background: rgba(255,255,255,.7); border: 1px solid var(--mock-line); border-radius: 6px; padding: 2px; }
+  .seg button { border: 0; background: none; padding: 3px 10px; border-radius: 4px; color: #4a3b00; }
+  .seg button[aria-pressed="true"] { background: #161715; color: #fff; }
+  .mockbar label { display: inline-flex; align-items: center; gap: 6px; }
+
+  main { max-width: 1160px; margin: 0 auto; padding: 20px 20px 56px; }
+  .view { display: none; }
+  .view.on { display: block; }
+  .pg-h { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; margin-bottom: 16px; }
+  .pg-h h1 { font-size: 20px; font-weight: 600; }
+  .pg-h .sub { color: var(--ink-3); font-size: 13px; }
+  .pg-h .acts { display: flex; gap: 8px; align-items: center; }
+
+  .sec { margin-top: 22px; }
+  .sec-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin-bottom: 8px; }
+  .sec-h h2 { font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+  .sec-h .sub { font-size: 12px; color: var(--ink-3); }
+  .sec-h .grow { flex: 1; }
+  .note { display: none; align-items: center; gap: 4px; font-size: 10.5px; color: #4a3b00; background: var(--mock); border: 1px solid var(--mock-line); border-radius: 3px; padding: 1px 6px; white-space: nowrap; }
+  body.notes .note { display: inline-flex; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; }
+  .btn { font-size: 12px; border: 1px solid var(--line-strong); background: var(--card); color: var(--ink-2); border-radius: 5px; padding: 4px 10px; white-space: nowrap; }
+  .btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.sm { padding: 2px 8px; font-size: 11.5px; }
+  .btn.danger { color: var(--critical-text); border-color: var(--critical-line); }
+  .lnk { border: 0; background: none; color: var(--accent); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; padding: 0; white-space: nowrap; }
+
+  /* ---- status ---- */
+  .st { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; border-radius: 4px; padding: 1px 8px; border: 1px solid; }
+  .st .i { font-size: 11px; }
+  .st-good { color: var(--good-text); background: var(--good-bg); border-color: var(--good-line); }     .st-good .i { color: var(--good); }
+  .st-warning { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-line); }   .st-warning .i { color: var(--warn); }
+  .st-serious { color: var(--serious-text); background: var(--serious-bg); border-color: var(--serious-line); } .st-serious .i { color: var(--serious); }
+  .st-critical { color: var(--critical-text); background: var(--critical-bg); border-color: var(--critical-line); } .st-critical .i { color: var(--critical); }
+
+  /* ---- now strip ---- */
+  .now { display: grid; grid-template-columns: minmax(220px, 1.4fr) minmax(220px, 1fr) minmax(220px, 1fr) minmax(180px, .9fr); gap: 0; border-left-width: 5px; padding: 0; overflow: hidden; }
+  .now.good { border-left-color: var(--good); }
+  .now.warning { border-left-color: var(--warn); }
+  .now.critical { border-left-color: var(--critical); }
+  .now > div { padding: 12px 16px; border-right: 1px solid var(--line); min-width: 0; }
+  .now > div:last-child { border-right: 0; }
+  .now .k { font-size: 11px; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 4px; }
+  .hero { display: flex; align-items: center; gap: 10px; }
+  .hero .i { font-size: 22px; line-height: 1; }
+  .hero .v { font-size: 26px; font-weight: 600; line-height: 1.1; }
+  .now.good .hero .i { color: var(--good); }
+  .now.warning .hero .i { color: var(--warn); }
+  .now.critical .hero .i { color: var(--critical); }
+  .alarms { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .alarm { font-size: 11px; font-family: var(--mono); border: 1px solid var(--critical-line); background: var(--critical-bg); color: var(--critical-text); border-radius: 3px; padding: 1px 6px; }
+  .alarm.p2 { border-color: var(--warn-line); background: var(--warn-bg); color: var(--warn-text); }
+  .notice-line { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+  .mini { display: flex; gap: 12px; }
+  .mini > div .l, .mini > div .v { white-space: nowrap; }
+  .mini > div .l { font-size: 11px; color: var(--ink-3); }
+  .mini > div .v { font-size: 18px; font-weight: 600; }
+  .canary .v { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+  .canary .d { font-size: 11px; color: var(--ink-3); }
+  .fresh { font-size: 12px; color: var(--ink-2); }
+  .fresh div + div { margin-top: 2px; }
+
+  /* ---- tiles ---- */
+  .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .tile { position: relative; border-left-width: 4px; border-left-color: var(--line-strong); }
+  .tile.good { border-left-color: var(--good); }
+  .tile.warning { border-left-color: var(--warn); }
+  .tile.serious { border-left-color: var(--serious); }
+  .tile.critical { border-left-color: var(--critical); }
+  .tile.plain { border-left-color: var(--line); }
+  .tile .k { font-size: 11px; color: var(--ink-3); display: flex; justify-content: space-between; align-items: center; gap: 6px; min-height: 20px; }
+  .tile .v { font-size: 26px; font-weight: 600; line-height: 1.15; margin-top: 4px; }
+  .tile .v small { font-size: 12px; font-weight: 400; color: var(--ink-3); }
+  .tile .d { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+  .tile .d div + div { margin-top: 1px; }
+  .tile .d .m { color: var(--ink-3); }
+  .tile a { text-decoration: none; }
+  .tile a:hover { text-decoration: underline; }
+  .today { margin-top: 8px; font-size: 12.5px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .today b { font-weight: 600; color: var(--ink); }
+
+  /* ---- funnel ---- */
+  .funnel-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .frow .rh { font-size: 12px; color: var(--ink-3); margin-bottom: 8px; display: flex; justify-content: space-between; }
+  .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .step .l { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+  .step .v { font-size: 20px; font-weight: 600; line-height: 1.2; }
+  .step .b { height: 6px; background: var(--s1-light); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .step .b i { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
+  .unreach { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .unreach b { color: var(--ink); }
+
+  /* ---- charts ---- */
+  .charts2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .charts3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .ch-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .ch-h h3 { font-size: 13px; font-weight: 600; }
+  .ch-h .sub { font-size: 11.5px; color: var(--ink-3); }
+  .legend { display: flex; gap: 12px; font-size: 11.5px; color: var(--ink-2); margin: 2px 0 4px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .legend i.ln { height: 2px; width: 14px; border-radius: 1px; vertical-align: 3px; }
+  svg.chart { width: 100%; height: auto; display: block; }
+  .tbl { max-height: 220px; overflow: auto; }
+  .tbl table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .tbl th, .tbl td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--line); }
+  .tbl th { color: var(--ink-3); font-weight: 500; position: sticky; top: 0; background: var(--card); }
+  .tbl td.n, .tbl th.n { text-align: right; }
+  .range { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; padding: 2px; background: var(--ground); }
+  .range button { border: 0; background: none; padding: 2px 9px; border-radius: 3px; font-size: 12px; color: var(--ink-2); }
+  .range button[aria-pressed="true"] { background: var(--card); color: var(--accent); font-weight: 600; box-shadow: 0 1px 1px rgba(0,0,0,.06); }
+  #tip { position: fixed; z-index: 50; pointer-events: none; background: var(--ink); color: #fff; font-size: 12px; padding: 5px 8px; border-radius: 4px; display: none; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+  #tip b { font-weight: 600; }
+
+  /* ---- events ---- */
+  .events { padding: 4px 0; }
+  .ev { display: grid; grid-template-columns: 96px 78px 1fr auto auto auto; gap: 10px; align-items: center; padding: 7px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .ev:last-child { border-bottom: 0; }
+  .ev .t { color: var(--ink-2); font-size: 12px; }
+  .ev .kind { font-size: 11px; font-weight: 600; border-radius: 3px; padding: 1px 6px; text-align: center; border: 1px solid; }
+  .kind.alarm { color: var(--critical-text); background: var(--critical-bg); border-color: var(--critical-line); }
+  .kind.alarm.p2 { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-line); }
+  .kind.ok { color: var(--good-text); background: var(--good-bg); border-color: var(--good-line); }
+  .kind.deploy { color: var(--ink-2); background: var(--ground); border-color: var(--line-strong); }
+  .kind.canary { color: var(--serious-text); background: var(--serious-bg); border-color: var(--serious-line); }
+  .ev .ttl .m { color: var(--ink-3); font-size: 12px; }
+  .ev .dur { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+  .ev a, .ev .lnk { font-size: 12px; white-space: nowrap; }
+  .ev.open { background: var(--critical-bg); }
+  .evx { padding: 8px 16px 12px 200px; border-bottom: 1px solid var(--line); background: var(--card); font-size: 12px; color: var(--ink-2); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .evx h4 { margin: 0 0 4px; font-size: 11px; color: var(--ink-3); font-weight: 600; letter-spacing: .03em; }
+  .evx table { border-collapse: collapse; width: 100%; }
+  .evx td { padding: 1px 6px 1px 0; }
+  .evx td.n { text-align: right; }
+  .evx .foot { grid-column: 1 / -1; color: var(--ink-3); font-size: 11.5px; }
+
+  details.ref { margin-top: 22px; }
+  details.ref summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .ref-in { margin-top: 10px; display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; }
+  .rank { padding: 0; margin: 0; }
+  .rank li { list-style: none; font-size: 12.5px; margin-bottom: 6px; }
+  .rank .r { display: flex; justify-content: space-between; gap: 8px; }
+  .rank .r span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rank .b { height: 6px; background: var(--ground); border-radius: 3px; margin-top: 2px; }
+  .rank .b i { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
+  .eval dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12.5px; }
+  .eval dt { color: var(--ink-3); }
+  .eval dd { margin: 0; }
+
+  /* ---- cost ---- */
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .03em; border-radius: 3px; padding: 1px 7px; white-space: nowrap; }
+  .b-actual { background: var(--ink); color: #fff; }
+  .b-unattr { border: 1.5px dashed var(--ink-2); color: var(--ink-2); }
+  .b-shared { border: 1.5px dotted var(--ink-3); color: var(--ink-3); background: var(--ground); }
+  .b-est { border: 1px solid var(--line-strong); color: var(--ink-2); background: repeating-linear-gradient(135deg, #fff 0 3px, #f0f0eb 3px 6px); }
+  .b-est::before { content: "≈"; font-weight: 600; }
+  .blegend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink-2); align-items: center; }
+  .cost-boxes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .cbox .k { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .cbox .k .n { font-size: 12px; color: var(--ink-3); }
+  .cbox .v { font-size: 26px; font-weight: 600; line-height: 1.1; }
+  .cbox.hero-box .v { font-size: 34px; }
+  .cbox .v small { font-size: 12px; color: var(--ink-3); font-weight: 400; }
+  .cbox .rows { margin-top: 8px; font-size: 12.5px; }
+  .cbox .rows div { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; border-top: 1px solid var(--line); }
+  .cbox .rows div span:first-child { color: var(--ink-2); }
+  .cbox .fn { margin-top: 8px; font-size: 11.5px; color: var(--ink-3); }
+  .meter { height: 8px; background: var(--s1-light); border-radius: 4px; position: relative; margin-top: 10px; }
+  .meter i { display: block; height: 100%; background: var(--s1); border-radius: 4px; }
+  .meter b { position: absolute; top: -3px; width: 1px; height: 14px; background: var(--ink-3); }
+  .meter-l { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-3); margin-top: 4px; }
+  .checks { padding: 6px 0; }
+  .chk { display: grid; grid-template-columns: 20px 200px 1fr; gap: 10px; align-items: baseline; padding: 7px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .chk:last-child { border-bottom: 0; }
+  .chk .i { font-size: 11px; }
+  .chk .i.good { color: var(--good); } .chk .i.warning { color: var(--warn); } .chk .i.critical { color: var(--critical); }
+  .chk .n { font-weight: 600; }
+  .chk .d { color: var(--ink-2); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  table.plain { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.plain th, table.plain td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.plain th { color: var(--ink-3); font-weight: 500; font-size: 12px; }
+  table.plain td.n, table.plain th.n { text-align: right; white-space: nowrap; }
+  table.plain tr:last-child td { border-bottom: 0; }
+  table.plain tr.editing td { background: var(--accent-bg); }
+  .fn { font-size: 11.5px; color: var(--ink-3); margin-top: 8px; }
+  .budget dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 13px; }
+  .budget dt { color: var(--ink-3); }
+  .budget dd { margin: 0; }
+
+  /* ---- failures ---- */
+  .filters { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 12px; }
+  .filters label { font-size: 12px; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; }
+  .filters select, .filters input { font: inherit; font-size: 12.5px; border: 1px solid var(--line-strong); border-radius: 5px; padding: 3px 8px; background: var(--card); color: var(--ink); }
+  .work { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; padding: 0; overflow: hidden; }
+  .work > div { padding: 10px 16px; border-right: 1px solid var(--line); }
+  .work > div:last-child { border-right: 0; }
+  .work > div.focus { background: var(--accent-bg); }
+  .work .l { font-size: 11px; color: var(--ink-3); }
+  .work .v { font-size: 22px; font-weight: 600; }
+  .work .v small { font-size: 11px; font-weight: 400; color: var(--ink-3); }
+  .props { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .prop { border-left: 3px solid var(--accent); }
+  .prop .t { font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+  .prop .t span:last-child { color: var(--ink-3); font-weight: 400; font-size: 12px; }
+  .prop .b { font-size: 12.5px; color: var(--ink-2); margin-top: 4px; }
+  .prop ul { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: var(--ink-2); }
+  .prop .o { font-size: 11px; color: var(--ink-3); margin-top: 8px; display: flex; justify-content: space-between; align-items: center; }
+  .near { font-size: 12px; color: var(--ink-3); margin-top: 8px; }
+  .fitem { margin-bottom: 10px; }
+  .fitem .top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .fitem .top .sp { flex: 1; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); background: var(--ground); color: var(--ink-2); white-space: nowrap; }
+  .chip.bad { color: var(--critical-text); background: var(--critical-bg); border-color: var(--critical-line); }
+  .chip.nf { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-line); }
+  .chip.rf { color: var(--ink-2); background: var(--card); border-style: dashed; }
+  .chip.reason { font-weight: 500; }
+  .fitem .tm { font-size: 11px; color: var(--ink-3); }
+  .fitem .q { font-weight: 600; font-size: 14px; }
+  .fitem .a { font-size: 12px; color: var(--ink-2); background: var(--ground); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; margin-top: 4px; }
+  .fitem .meta { font-size: 12px; color: var(--ink-3); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .hints { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+  .hints .l { font-size: 11px; color: var(--ink-3); }
+  .hint { font-size: 11.5px; border: 1px solid var(--accent-line); color: var(--accent); background: var(--accent-bg); border-radius: 4px; padding: 1px 7px; }
+  .hint::before { content: "◇ "; }
+  .trace { font-size: 11.5px; color: var(--ink-2); margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .trace .l { color: var(--ink-3); }
+  .trace b { font-weight: 600; font-family: var(--mono); }
+  .triage { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); display: grid; grid-template-columns: auto auto minmax(160px, 1fr) auto auto; gap: 8px; align-items: center; }
+  .triage select, .triage input { font: inherit; font-size: 12px; border: 1px solid var(--line-strong); border-radius: 5px; padding: 3px 8px; background: var(--card); color: var(--ink); min-width: 0; }
+  .triage input.ref { width: 150px; }
+  .tri { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; border-radius: 4px; padding: 1px 8px; border: 1px solid; white-space: nowrap; }
+  .tri.open { color: var(--ink); background: var(--card); border-color: var(--ink-2); }
+  .tri.prog { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-line); }
+  .tri.done { color: var(--ink-3); background: var(--ground); border-color: var(--line-strong); }
+  .drawer { margin-top: 10px; border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; background: var(--ground); }
+  .drawer h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; }
+  .drawer h4 span:last-child { font-weight: 400; color: var(--ink-3); }
+  .drawer table { width: 100%; border-collapse: collapse; font-size: 11.5px; background: var(--card); }
+  .drawer th, .drawer td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+  .drawer th { color: var(--ink-3); font-weight: 500; }
+  .drawer td.n, .drawer th.n { text-align: right; }
+  .drawer tr.sel td { background: var(--accent-bg); }
+  .drawer tr.exc td { color: var(--ink-3); }
+  .wish { border-left: 3px solid var(--violet); margin-bottom: 8px; }
+  .wish .tx { font-size: 13px; }
+  .wish .m { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+
+  /* ---- announcements ---- */
+  .active { padding: 0; }
+  .an { display: grid; grid-template-columns: 84px 1fr auto auto; gap: 10px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .an:last-child { border-bottom: 0; }
+  .an .m { font-size: 11.5px; color: var(--ink-3); }
+  .sev { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; border-radius: 4px; padding: 1px 7px; border: 1px solid; white-space: nowrap; }
+  .sev.info { color: #1e40af; background: var(--accent-bg); border-color: var(--accent-line); }
+  .sev.warning { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-line); }
+  .sev.critical { color: var(--critical-text); background: var(--critical-bg); border-color: var(--critical-line); }
+  .where { font-size: 11px; color: var(--ink-2); border: 1px solid var(--line-strong); border-radius: 3px; padding: 0 6px; white-space: nowrap; }
+  .where.chat { border-color: var(--ink-2); font-weight: 600; }
+  .tpls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .tpl { display: flex; flex-direction: column; gap: 6px; }
+  .tpl.hot { border-color: var(--critical-line); background: #fffafa; }
+  .tpl .t { font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+  .tpl .p { font-size: 11.5px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+  .tpl .w { font-size: 12px; color: var(--ink-2); }
+  .tpl .act { margin-top: auto; display: flex; justify-content: flex-end; }
+  .form { display: grid; gap: 10px; }
+  .form .row { display: grid; grid-template-columns: 1fr 1fr 1fr 1.6fr; gap: 10px; }
+  .form .opts { display: flex; flex-wrap: wrap; gap: 6px 14px; padding-top: 8px; }
+  .form .row.half { grid-template-columns: 1fr 1fr; }
+  .form label { font-size: 12px; color: var(--ink-3); display: grid; gap: 4px; }
+  .form input, .form select, .form textarea { font: inherit; font-size: 13px; border: 1px solid var(--line-strong); border-radius: 5px; padding: 6px 8px; background: var(--card); color: var(--ink); }
+  .form textarea { min-height: 190px; font-family: var(--mono); font-size: 12px; resize: vertical; }
+  .preview { border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; font-size: 13px; background: var(--ground); min-height: 190px; }
+  .preview h3 { font-size: 14px; margin: 0 0 6px; }
+  .preview p { margin: 0 0 6px; }
+  .preview ul { margin: 0 0 6px; padding-left: 18px; }
+  .form .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .chk-line { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+  .empty { text-align: center; color: var(--ink-3); font-size: 13px; padding: 18px; border: 1px dashed var(--line-strong); border-radius: 6px; }
+
+  @media (max-width: 980px) {
+    .now { grid-template-columns: 1fr 1fr; }
+    .now > div:nth-child(2) { border-right: 0; }
+    .now > div:nth-child(1), .now > div:nth-child(2) { border-bottom: 1px solid var(--line); }
+    .tiles { grid-template-columns: repeat(3, 1fr); }
+    .charts3, .tpls { grid-template-columns: 1fr 1fr; }
+    .cost-boxes { grid-template-columns: 1fr 1fr; }
+    .evx { padding-left: 16px; }
+    .form .row { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 720px) {
+    .tiles, .funnel-wrap, .charts2, .two, .ref-in, .cost-boxes, .props, .tpls, .work, .charts3 { grid-template-columns: 1fr; }
+    .now { grid-template-columns: 1fr; }
+    .now > div { border-right: 0; border-bottom: 1px solid var(--line); }
+    .ev, .an, .triage, .evx { grid-template-columns: 1fr; gap: 3px; }
+    .form .row, .form .row.half { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .tab, .seg button, .range button { transition: color .12s, background-color .12s; }
+  }
+</style>
+
+<header class="hdr">
+  <div class="hdr-in">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">EK</div>
+      <div><div class="t">EleKnowledge</div><div class="s">管理コンソール</div></div>
+    </div>
+    <div class="user">itai · admin · 2026-09-24（木）08:41</div>
+  </div>
+</header>
+<nav class="subnav" aria-label="管理コンソール">
+  <div class="subnav-in" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-view="dashboard">ダッシュボード</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="failures">失敗・改善提案 <span class="cnt" id="tab-fail-cnt">未振り分け 7</span></button>
+    <button class="tab" role="tab" aria-selected="false" data-view="cost">コスト</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="announcements">お知らせ管理 <span class="cnt" id="tab-ann-cnt">表示中 1</span></button>
+  </div>
+</nav>
+<div class="mockbar">
+  <div class="mockbar-in">
+    <span class="lbl">設計モック</span>
+    <span>数字は表示例。想定日 2026-09-24（試行 3 週目）。章番号と推奨度 ◎○△ は <code>design-2026-09-10-dashboard-v2.md</code></span>
+    <span class="seg" role="group" aria-label="シナリオ">
+      <button type="button" data-sc="calm" aria-pressed="true">平穏な朝</button>
+      <button type="button" data-sc="incident" aria-pressed="false">異常がある朝</button>
+    </span>
+    <label><input type="checkbox" id="notes" checked> 設計注記を表示</label>
+  </div>
+</div>
+
+<main>
+  <!-- ================= ダッシュボード ================= -->
+  <section class="view on" id="view-dashboard" aria-labelledby="h-dash">
+    <div class="pg-h">
+      <div><h1 id="h-dash">運用ダッシュボード</h1><div class="sub">昨日うまくいったか、今日直すものは何か。枠は「昨日」「7 日」「14 日」に固定</div></div>
+      <div class="sub num" id="dash-updated"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>いま</h2><span class="sub">ページを開いた瞬間に CloudWatch を直接読む</span><span class="grow"></span><span class="note">§2.2 DescribeAlarms + GetMetricData を表示時に 1 回ずつ</span><span class="note">§2.2 ◎ 告知導線</span><span class="note">別立て B3 合成監視</span></div>
+      <div class="card now" id="now"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2 id="y-title">昨日</h2><span class="sub">02:00 JST 確定。色はシステム信号にだけ付く</span><span class="grow"></span><span class="note">§2.3 タイル 5 枚</span><span class="note">§2.7 件数が先、率は分母 30 以上</span><span class="note">§2.8 閾値はアラームと同じ（SLO 20 s）</span></div>
+      <div class="tiles" id="tiles"></div>
+      <div class="today" id="today"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>到達ファネル</h2><span class="sub">製品の成功定義「資料に到達し、疑問が解ける」を数える場所。比率の線は引かない</span><span class="grow"></span><span class="note">§2.4</span><span class="note">I3 DocumentOpen EMF</span><span class="note">別立て B2 言い換え</span></div>
+      <div class="funnel-wrap" id="funnel"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>推移</h2><span class="sub">1 軸ずつ。二軸は使わない</span><span class="grow"></span>
+        <span class="range" role="group" aria-label="日数"><button type="button" data-r="14" aria-pressed="true">14 日</button><button type="button" data-r="30" aria-pressed="false">30 日</button><button type="button" data-r="90" aria-pressed="false">90 日</button></span>
+        <span class="note">§2.5</span></div>
+      <div class="charts2">
+        <div class="card">
+          <div class="ch-h"><div><h3>質問数（到達できず を積み上げ）</h3><div class="sub">日別・JST</div></div><button type="button" class="lnk" data-toggle="c-q">表で見る</button></div>
+          <div class="legend"><span><i style="background:var(--s1)"></i>到達した・その他</span><span><i style="background:var(--warn)"></i>到達できず（not_found + 👎）</span></div>
+          <div id="c-q"></div>
+        </div>
+        <div class="card">
+          <div class="ch-h"><div><h3>rag 応答時間</h3><div class="sub">API Gateway Latency・日別。基準線 20 s（SLO / P2）・25 s（P1）</div></div><button type="button" class="lnk" data-toggle="c-l">表で見る</button></div>
+          <div class="legend"><span><i class="ln" style="background:var(--s1)"></i>p90</span><span><i class="ln" style="background:#eb6834"></i>最大</span></div>
+          <div id="c-l"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>出来事（直近 7 日）</h2><span class="sub">アラーム遷移・デプロイ・合成監視の失敗を 1 列に。各行から Logs Insights へ時間範囲つきで飛ぶ</span><span class="grow"></span><span class="note">§2.6 / §4.4</span><span class="note">§4.4 ○ 行内の内訳（Logs Insights の集計だけ）</span><span class="note">I7 デプロイマーカー</span></div>
+      <div class="card events" id="events" style="padding:0"></div>
+    </div>
+
+    <details class="ref">
+      <summary>参考（朝の判断には使わない）</summary>
+      <div class="ref-in">
+        <div class="card">
+          <div class="ch-h"><div><h3>参照文書 TOP10</h3><div class="sub">直近 30 日・回答での引用回数</div></div><span class="note">R1</span></div>
+          <ol class="rank" id="rank"></ol>
+        </div>
+        <div class="card eval">
+          <div class="ch-h"><div><h3>最終ゴールデン評価</h3><div class="sub">週次・第 1 層（機械採点）</div></div><span class="note">R2 / 別立て B5</span></div>
+          <dl>
+            <dt>実行日</dt><dd class="num">2026-09-22（月）</dd>
+            <dt>hit_in_candidates</dt><dd class="num">11 / 14（ラベル済み 14。N &lt; 10 では率を見ない）</dd>
+            <dt>難問枠</dt><dd class="num">drawing 2/3 · incident 1/2 · qsheet 2/2</dd>
+            <dt>前回比</dt><dd>悪化なし（9/15: 10 / 13）</dd>
+            <dt>logicVersion</dt><dd><code>e4f5a6b</code></dd>
+          </dl>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================= 失敗・改善提案 ================= -->
+  <section class="view" id="view-failures" aria-labelledby="h-fail">
+    <div class="pg-h">
+      <div><h1 id="h-fail">失敗・改善提案</h1><div class="sub">到達できなかった 1 件ずつをどう扱い、何を直したか。週次レビューのゴールは「未振り分けを 0 にする」</div></div>
+      <div class="acts"><button type="button" class="btn">再読込</button><button type="button" class="btn">表示中を候補コピー</button></div>
+    </div>
+
+    <div class="filters">
+      <label>期間 <span class="range" role="group"><button type="button" data-fp="1" aria-pressed="false">昨日</button><button type="button" data-fp="7" aria-pressed="true">7 日</button><button type="button" data-fp="30" aria-pressed="false">30 日</button><button type="button" data-fp="c" aria-pressed="false">指定</button></span></label>
+      <label>状態 <select id="f-tri"><option value="open">未振り分け</option><option value="in_progress">対応中</option><option value="done">対応済み</option><option value="all" selected>すべて</option></select></label>
+      <label>種類 <select><option>すべて</option><option>👎</option><option>not_found</option><option>言い換え</option></select></label>
+      <label>理由 <select><option>すべて</option><option>資料が違う</option><option>疑問が解けない</option><option>回答がおかしい</option><option>その他</option><option>理由なし 👎</option></select></label>
+      <span class="note">§9.2 ◎ 期間・状態・種類（言い換え）</span>
+    </div>
+    <div class="card work" id="f-work"></div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>改善提案</h2><span class="sub">期間内・未対応の信号だけを集計。3 件以上でカード（ルール v0 のまま）</span><span class="grow"></span><span class="note">§9.2 ○ 対応済みを除いて集計</span></div>
+      <div class="props" id="f-props"></div>
+      <div class="near" id="f-near"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>一覧</h2><span class="sub" id="f-count"></span><span class="grow"></span><span class="note">§9.3 ○ ヒント</span><span class="note">§9.4 ◎ 振り分け（triage）</span><span class="note">トレース要約はトレース実装後</span><span class="note">§9.2 △ トレース全文ドロワー</span></div>
+      <div id="f-list"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>こうなってほしい（利用者の文字）</h2><span class="sub">未読 2 · 対応済み 1</span><span class="grow"></span><span class="note">§9.2 △ 既読／対応済み</span></div>
+      <div id="f-wishes"></div>
+    </div>
+  </section>
+
+  <!-- ================= コスト ================= -->
+  <section class="view" id="view-cost" aria-labelledby="h-cost">
+    <div class="pg-h">
+      <div><h1 id="h-cost">コスト</h1><div class="sub">2026 年 9 月・UTC 日基準・確定は 9/22 まで（D-2）。Cost Explorer を 1 日 2 回読む</div></div>
+      <div class="blegend"><span>バッジ:</span><span class="badge b-actual">実額・確定</span><span class="badge b-unattr">実額・帰属未確認</span><span class="badge b-shared">共有・按分不能</span><span class="badge b-est">推定</span><span class="note">§5.2 出所で機械的に決まる</span></div>
+    </div>
+
+    <div class="sec" style="margin-top:8px">
+      <div class="sec-h"><h2>今月</h2><span class="sub">4 つの箱を混ぜない。費用対効果の分母は「実額・確定」だけ</span><span class="grow"></span><span class="note">§5.3 C1〜C4</span><span class="note">Q2 Amplify は専用 → 確定、WAF は構成 × 料金表の推定</span></div>
+      <div class="cost-boxes" id="costboxes"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>前提チェック</h2><span class="sub">実額を「EleKnowledge 分」と言い切れる条件を毎日自動で確かめる</span><span class="grow"></span><span class="note">§5.5 C5 / C6</span><span class="note">§5.9 OpenSearch の OCU と検索リクエスト（要実測）</span></div>
+      <div class="card checks" id="checks" style="padding:0"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>日次推移（30 日）</h2><span class="sub">日付基準が違うものは別チャートに分ける</span><span class="grow"></span><span class="note">§5.3 C7</span></div>
+      <div class="charts3">
+        <div class="card">
+          <div class="ch-h"><div><h3>Bedrock Sonnet 5 実額</h3><div class="sub">USD・UTC 日。9/9 のモデル切替前は 0</div></div><button type="button" class="lnk" data-toggle="c-cost">表で見る</button></div>
+          <div id="c-cost"></div>
+        </div>
+        <div class="card">
+          <div class="ch-h"><div><h3>質問数</h3><div class="sub">件・JST 日（ダッシュボードと同じ値）</div></div><button type="button" class="lnk" data-toggle="c-q2">表で見る</button></div>
+          <div id="c-q2"></div>
+        </div>
+        <div class="card">
+          <div class="ch-h"><div><h3>OpenSearch 検索 OCU（最大）</h3><div class="sub">アカウント合計。増えていなければ EleKnowledge の増分は 0</div></div><button type="button" class="lnk" data-toggle="c-ocu">表で見る</button></div>
+          <div id="c-ocu"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec two">
+      <div>
+        <div class="sec-h"><h2>1 質問あたり</h2><span class="grow"></span><span class="note">§5.3 C8</span></div>
+        <div class="card">
+          <table class="plain" id="perq"></table>
+          <div class="fn">生成（Bedrock 呼び出し）は「候補あり」の回答でだけ走る。聞き返し・not_found はトークンを使わない</div>
+        </div>
+      </div>
+      <div>
+        <div class="sec-h"><h2>見込み（いまの単価で）</h2><span class="grow"></span><span class="note">§5.6 C9</span></div>
+        <div class="card">
+          <table class="plain" id="proj"></table>
+          <div class="fn">利用が伸びて効くのは Bedrock だけ。Lambda / DynamoDB / API Gateway は 1,000 質問/日でも月 1 USD 未満。CloudWatch Logs は月 2 USD 程度</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>予算アラート</h2><span class="grow"></span><span class="note">§5.7 Budgets 1 本、通知は既存 SNS</span></div>
+      <div class="card budget">
+        <dl>
+          <dt>予算</dt><dd><code>EleKnowledge-dev-P2-budget-bedrock-sonnet5</code> · 月次 100 USD · フィルタ Service = Claude Sonnet 5 (Amazon Bedrock Edition)</dd>
+          <dt>通知</dt><dd>実績 50 % / 実績 100 % / 予測 100 % → SNS <code>eleknowledge-alerts-dev</code>（2 名）</dd>
+          <dt>今月</dt><dd id="budget-now" class="num"></dd>
+          <dt>次回見直し</dt><dd>10/1 に「前月実績 × 2 と 100 USD の大きい方」へ。コスト配分タグ有効化後に <code>Project=EleKnowledge</code> の 2 本目を追加</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= お知らせ管理 ================= -->
+  <section class="view" id="view-announcements" aria-labelledby="h-ann">
+    <div class="pg-h">
+      <div><h1 id="h-ann">お知らせ管理</h1><div class="sub">障害中・受付停止を利用者に伝える。文面は型から。表示終了は削除ではなく終了日時で</div></div>
+      <div class="acts"><button type="button" class="btn pri" data-tpl="blank">＋ 新規作成</button></div>
+    </div>
+
+    <div class="sec" style="margin-top:8px">
+      <div class="sec-h"><h2>いま表示中</h2><span class="sub">公開中かつ未終了。戻し忘れをここで見る</span><span class="grow"></span><span class="note">§10.2 ◎ 表示中の帯</span><span class="note">§10.4 ◎ チャット画面にも表示</span></div>
+      <div class="card active" id="a-active"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>テンプレート</h2><span class="sub">種別・重要度・固定・表示先のプリセット付き。{{ }} の穴だけ埋める</span><span class="grow"></span><span class="note">§10.3 ◎ 6 種</span></div>
+      <div class="tpls" id="a-tpls"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2 id="a-form-h">編集</h2><span class="sub" id="a-form-sub"></span><span class="grow"></span><span class="note">§10.2 ◎ 表示終了（全種別）</span></div>
+      <div class="card" id="a-form"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>一覧</h2><span class="sub" id="a-list-sub"></span><span class="grow"></span><span class="note">§10.2 ○ 作成者・表示終了列</span></div>
+      <div class="card" style="padding:0;overflow-x:auto"><table class="plain" id="a-list"></table></div>
+    </div>
+  </section>
+</main>
+<div id="tip" role="tooltip"></div>
+
+<script>
+(function () {
+  'use strict';
+  // ------------------------------------------------------------------ data
+  function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const rnd = mulberry32(20260924);
+  const YESTERDAY = new Date(2026, 8, 23);
+  const TRIAL_START = new Date(2026, 8, 10);
+  const SONNET5_FROM = new Date(2026, 8, 9);
+  const N = 90;
+  const WD = ['日', '月', '火', '水', '木', '金', '土'];
+  const days = [];
+  for (let i = 0; i < N; i++) {
+    const dt = new Date(YESTERDAY); dt.setDate(YESTERDAY.getDate() - (N - 1 - i));
+    const dow = dt.getDay(); const wk = dow === 0 || dow === 6;
+    const td = Math.round((dt - TRIAL_START) / 864e5);
+    let q;
+    if (td < 0) q = wk ? Math.round(rnd() * 2) : Math.round(1 + rnd() * 3);
+    else q = Math.round((8 + Math.min(td, 14) * 1.6) * (wk ? 0.15 : 1) * (0.8 + rnd() * 0.4));
+    const unreached = Math.round(q * (0.07 + rnd() * 0.08));
+    const sonnet = dt >= SONNET5_FROM;
+    let p90 = q ? (sonnet ? 9.5 + rnd() * 3.5 : 4 + rnd() * 2) : null;
+    let max = q ? p90 + 3 + rnd() * 5 : null;
+    let cost = 0;
+    if (dt.getTime() === SONNET5_FROM.getTime()) cost = 1.2;
+    else if (sonnet) cost = q * 0.013 * (0.85 + rnd() * 0.3);
+    const m = dt.getMonth() + 1, d = dt.getDate();
+    days.push({ dt, iso: `2026-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`, label: `${m}/${d}`, wd: WD[dow], q, unreached, p90, max, cost, ocu: 2 });
+  }
+  const last = days[N - 1];
+
+  const SC = {
+    calm: {
+      status: 'good', alarms: [],
+      last60: { req: 2, x5: 0, lat: '最大 10.4 s', latN: 2 },
+      canary: { ok: true, at: '08:00', text: 'OK 10.9 s', detail: 'retrieve 0.8 s · generate 10.1 s · 2 時間おき・Lambda 直接 invoke' },
+      fresh: { daily: '02:03', partial: '08:40' },
+      notice: { active: [{ id: 'anc_1', title: '生成モデルを切り替えました（9/9）', sev: 'info', since: '9/9 23:10', chat: false }] },
+      y: { p1: 0, x5: 0, x5by: 'rag 0 · chat 0 · auth 0 · app 0 · Amplify 0', p90: 11.2, max: 17.8, n: 28, unreached: 2, nf: 1, bad: 1, ref: 2, open: 2, q: 28, users: 16, newu: 2, lastwk: 24, est: 0.38, med7: 0.36 },
+      today: { asOf: '08:40', q: 4, un: 0, x5: 0 },
+      fy: { signIns: 21, queries: 28, pages: 22, opened: 13, good: 4 },
+      f7: { signIns: 118, queries: 176, pages: 141, opened: 79, good: 22, unreached: 19, nf: 11, bad: 9, ref: 14 },
+      events: [
+        { t: '9/22 02:03', kind: 'deploy', title: '集計 <code>metrics-aggregator-dev</code> D-1〜D-3 再集計', meta: '👎 の後付け 2 件を 9/20 行に反映', dur: '', lt: 'CloudWatch Logs: /aws/lambda/metrics-aggregator-dev · 9/22 02:00–02:10' },
+        { t: '9/20 14:16', kind: 'ok', title: '<code>P2-rag-api-4xx-spike</code>', meta: '', dur: '5 分', lt: 'Logs Insights: EleKnowledge/dev/api-4xx-breakdown · /aws/apigateway/rag-api-dev · 9/20 13:56–14:31' },
+        { t: '9/20 14:11', kind: 'alarm p2', title: '<code>P2-rag-api-4xx-spike</code>', meta: '内訳: EXPIRED_TOKEN 31 件（同一 sub 1 名）→ 利用者側のトークン失効', dur: '', lt: 'Logs Insights: EleKnowledge/dev/api-4xx-breakdown · 9/20 13:56–14:31', x: { title: '9/20 13:56–14:31 · rag-api-dev アクセスログ', a: [['EXPIRED_TOKEN / 401', 31], ['ACCESS_DENIED / 403', 0], ['WAF_FILTERED / 403', 0], ['200', 12]], b: [['影響 sub', '1 名'], ['UA', 'Chrome / Windows'], ['再ログイン後', '14:17 に 200']], c: ['3f9a…c1', 'b71e…08', '0d4c…9e', '77a2…41', 'e2b0…63'] } },
+        { t: '9/19 21:30', kind: 'deploy', title: 'デプロイ monitoring スタック', meta: 'AlarmDescription にランブック節を追加（I5）', dur: '', lt: 'issue #86 デプロイ記録' },
+        { t: '9/18 06:00', kind: 'canary', title: '合成監視 失敗 → 08:00 に回復', meta: 'generate 26.3 s（Bedrock 遅延）。利用者影響なし（時間帯に質問 0）', dur: '1 回', lt: 'CloudWatch Logs: /aws/lambda/rag-canary-dev · 9/18 05:55–06:05' },
+      ],
+    },
+    incident: {
+      status: 'critical',
+      alarms: [{ n: 'P1-rag-api-5xx', p: 'p1', since: '07:52' }, { n: 'P1-rag-error-lines', p: 'p1', since: '07:52' }],
+      last60: { req: 14, x5: 3, lat: '最大 12.1 s', latN: 6 },
+      canary: { ok: false, at: '08:00', text: '失敗 ThrottlingException', detail: 'retrieve 0.8 s OK → generate 失敗（Bedrock）。次回 10:00' },
+      fresh: { daily: '02:03', partial: '08:40' },
+      notice: { active: [{ id: 'anc_9', title: '回答が返らない事象が発生しています（対応中）', sev: 'critical', since: '08:05', chat: true }, { id: 'anc_1', title: '生成モデルを切り替えました（9/9）', sev: 'info', since: '9/9 23:10', chat: false }] },
+      y: { p1: 1, x5: 4, x5by: 'rag 4 · chat 0 · auth 0 · app 0 · Amplify 0', p90: 23.4, max: 28.7, n: 31, unreached: 5, nf: 3, bad: 2, ref: 4, open: 4, q: 31, users: 17, newu: 3, lastwk: 24, est: 0.62, med7: 0.38 },
+      today: { asOf: '08:40', q: 6, un: 2, x5: 3 },
+      fy: { signIns: 24, queries: 31, pages: 21, opened: 11, good: 3 },
+      f7: { signIns: 121, queries: 179, pages: 140, opened: 77, good: 21, unreached: 22, nf: 13, bad: 10, ref: 16 },
+      events: [
+        { t: '9/24 08:00', kind: 'canary', title: '合成監視 失敗', meta: 'generate で ThrottlingException（retrieve は OK）', dur: '継続中', lt: 'CloudWatch Logs: /aws/lambda/rag-canary-dev · 9/24 07:55–08:05', open: true },
+        { t: '9/24 07:52', kind: 'alarm', title: '<code>P1-rag-api-5xx</code> / <code>P1-rag-error-lines</code>', meta: 'stage=generate · ThrottlingException × 3', dur: '継続中 49 分', lt: 'Logs Insights: EleKnowledge/dev/rag-error-lines · /aws/lambda/rag-dev · 9/24 07:37–08:41', open: true, expanded: true, x: { title: '9/24 07:37–08:41 · rag-dev 構造化行 + rag-api-dev アクセスログ', a: [['stage=generate / ThrottlingException', 3], ['stage=retrieve', 0], ['stage=save', 0], ['200', 11]], b: [['影響 sub', '2 名'], ['モデル', 'global.anthropic.claude-sonnet-5'], ['直前の変更', '9/23 23:02 phase2 デプロイ'], ['入力トークン中央値', '5,900（前週 3,700）']], c: ['4f1c…a2', '9a2e…7d', 'c07d…31'] } },
+        { t: '9/23 23:25', kind: 'ok', title: '<code>P1-rag-duration-max</code>', meta: '', dur: '15 分', lt: 'Logs Insights: EleKnowledge/dev/slow-requests · 9/23 22:55–23:40' },
+        { t: '9/23 23:10', kind: 'alarm', title: '<code>P1-rag-duration-max</code>', meta: '最大 28.7 s（504 の可能性 2 件）', dur: '', lt: 'Logs Insights: EleKnowledge/dev/slow-requests · 9/23 22:55–23:40', x: { title: '9/23 22:55–23:40 · rag-dev 構造化行', a: [['latencyMs.total > 25,000', 2], ['latencyMs.generate > 20,000', 2], ['200', 6]], b: [['影響 sub', '2 名'], ['logicVersion', 'e4f5a6b（23:02 から）']], c: ['1be3…55', '8c0a…e9'] } },
+        { t: '9/23 23:02', kind: 'deploy', title: 'デプロイ phase2（<code>rag-dev</code>）', meta: 'RagLogicVersion a1b2c3d → e4f5a6b · BedrockModelId 変更なし', dur: '', lt: 'issue #86 デプロイ記録 · CloudTrail UpdateFunctionConfiguration' },
+        { t: '9/20 14:11', kind: 'alarm p2', title: '<code>P2-rag-api-4xx-spike</code>', meta: 'EXPIRED_TOKEN 31 件（同一 sub 1 名）', dur: '5 分', lt: 'Logs Insights: EleKnowledge/dev/api-4xx-breakdown · 9/20 13:56–14:31', x: { title: '9/20 13:56–14:31 · rag-api-dev アクセスログ', a: [['EXPIRED_TOKEN / 401', 31], ['200', 12]], b: [['影響 sub', '1 名']], c: ['3f9a…c1', 'b71e…08'] } },
+      ],
+    },
+  };
+  const ST = { good: ['●', '正常'], warning: ['▲', '注意'], serious: ['◆', '悪化'], critical: ['■', '重大'] };
+  const st = (k, extra) => `<span class="st st-${k}"><span class="i">${ST[k][0]}</span>${ST[k][1]}${extra ? ' ' + extra : ''}</span>`;
+  const fmt = (n) => n.toLocaleString('ja-JP');
+  const usd = (n, d = 1) => n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) + ' USD';
+
+  // thresholds (§2.8, SLO p90 20 s) ------------------------------------
+  const order = ['good', 'warning', 'serious', 'critical'];
+  const worse = (a, b) => order[Math.max(order.indexOf(a), order.indexOf(b))];
+  const st5xx = (n) => n === 0 ? 'good' : n <= 5 ? 'warning' : n <= 20 ? 'serious' : 'critical';
+  const stLat = (p90, max) => { let a = p90 <= 20 ? 'good' : p90 <= 25 ? 'warning' : p90 <= 29 ? 'serious' : 'critical'; if (max > 29) a = worse(a, 'serious'); else if (max > 25) a = worse(a, 'warning'); return a; };
+  const stCost = (est, med) => (est > med * 3 && est > 1) ? 'warning' : 'good';
+
+  // ------------------------------------------------------------------ dashboard
+  function renderNow(s) {
+    const el = document.getElementById('now');
+    el.className = 'card now ' + s.status;
+    const heroLabel = s.status === 'good' ? '正常' : s.status === 'warning' ? '注意' : '重大';
+    const alarms = s.alarms.length ? s.alarms.map(a => `<span class="alarm ${a.p}" title="${a.since} から ALARM">${a.n}</span>`).join('') : '<span style="font-size:12px;color:var(--ink-3)">ALARM なし（28 本）</span>';
+    const crit = s.notice.active.find(n => n.sev === 'critical');
+    let notice = '';
+    if (s.status === 'critical' && !crit) notice = `<a href="#" data-goto="announcements" data-tpl="incident">利用者へ告知 →</a>`;
+    else if (crit) notice = `<span>告知中: <b>${crit.title}</b>（${crit.since} から・チャット表示）</span><a href="#" data-goto="announcements">表示終了 / 更新 →</a>`;
+    else notice = `<span style="color:var(--ink-3)">告知中 ${s.notice.active.length} 件（情報）</span><a href="#" data-goto="announcements" style="color:var(--ink-3)">お知らせ管理 →</a>`;
+    const x5st = s.last60.x5 > 0 ? ' ' + st('warning') : '';
+    el.innerHTML = `
+      <div><div class="k">現在</div><div class="hero"><span class="i">${ST[s.status][0]}</span><span class="v">${heroLabel}</span></div><div class="alarms">${alarms}</div><div class="notice-line">${notice}</div></div>
+      <div><div class="k">直近 60 分</div><div class="mini">
+        <div><div class="l">リクエスト</div><div class="v num">${s.last60.req}</div></div>
+        <div><div class="l">5xx</div><div class="v num">${s.last60.x5}${x5st}</div></div>
+        <div><div class="l">rag 応答（${s.last60.latN} 件）</div><div class="v num" style="font-size:14px;padding-top:4px">${s.last60.lat}</div></div>
+      </div></div>
+      <div class="canary"><div class="k">合成監視 ${s.canary.at}</div><div class="v">${st(s.canary.ok ? 'good' : 'critical')} <span class="num">${s.canary.text}</span></div><div class="d">${s.canary.detail}</div></div>
+      <div class="fresh"><div class="k">鮮度</div><div>前日確定 <span class="num">${s.fresh.daily}</span> ${st('good')}</div><div>今日ここまで <span class="num">${s.fresh.partial}</span> 更新（毎時）</div></div>`;
+  }
+
+  function renderYesterday(s) {
+    const y = s.y;
+    document.getElementById('y-title').textContent = `昨日（${last.label} ${last.wd}）`;
+    const sInc = worse(st5xx(y.x5), y.p1 >= 1 ? 'serious' : 'good');
+    const sLat = stLat(y.p90, y.max);
+    const sCost = stCost(y.est, y.med7);
+    const latMain = y.n >= 10 ? `p90 ${y.p90.toFixed(1)}<small>s</small>` : `中央値 ${y.p90.toFixed(1)}<small>s</small>`;
+    const tiles = [
+      { cls: sInc, k: '障害', stt: st(sInc), v: `${y.p1} <small>/</small> ${y.x5}`, d: `<div>P1 遷移 / 5xx 件数</div><div class="m">${y.x5by}</div>` },
+      { cls: sLat, k: '応答時間', stt: st(sLat), v: latMain, d: `<div>最大 <span class="num">${y.max.toFixed(1)} s</span> · <span class="num">${y.n}</span> 件</div><div class="m">${y.n >= 10 ? 'p90 は件数 10 以上のときだけ' : '件数 10 未満のため中央値と最大'}</div>` },
+      { cls: 'plain', k: '到達できず', stt: '', v: `${y.unreached} <small>件</small>`, d: `<div>not_found <span class="num">${y.nf}</span> · 👎 <span class="num">${y.bad}</span> · 言い換え <span class="num">${y.ref}</span></div><div>未振り分け <b class="num">${y.open}</b> · <a href="#" data-goto="failures" data-fp="1">失敗一覧で見る →</a></div>` },
+      { cls: 'plain', k: '利用', stt: '', v: `${y.q} <small>質問</small>`, d: `<div>利用者 <span class="num">${y.users}</span> · 初めて <span class="num">${y.newu}</span></div><div class="m">先週同曜日: <span class="num">${y.lastwk}</span> 質問</div>` },
+      { cls: sCost, k: 'Bedrock 費', stt: st(sCost), v: `<span class="badge b-est" style="vertical-align:middle;margin-right:4px"></span>${y.est.toFixed(2)} <small>USD</small>`, d: `<div>今月 <span class="badge b-actual">実額・確定</span> <span class="num">${usd(COST.mtd)}</span></div><div class="m">D-2 まで · <a href="#" data-goto="cost">コストへ →</a></div>` },
+    ];
+    document.getElementById('tiles').innerHTML = tiles.map(t => `<div class="card tile ${t.cls}"><div class="k"><span>${t.k}</span>${t.stt}</div><div class="v num">${t.v}</div><div class="d">${t.d}</div></div>`).join('');
+    const td = s.today;
+    document.getElementById('today').innerHTML = `<span>今日ここまで（<span class="num">${td.asOf}</span> 時点）</span><span>質問 <b class="num">${td.q}</b></span><span>到達できず <b class="num">${td.un}</b></span><span>5xx <b class="num">${td.x5}</b>${td.x5 > 0 ? ' ' + st('warning') : ''}</span>`;
+    document.getElementById('dash-updated').textContent = `最終更新 08:41 · 前日確定 ${s.fresh.daily}`;
+  }
+
+  function funnelRow(title, r, withRates) {
+    const steps = [['ログイン', r.signIns, 'Cognito SignInSuccesses'], ['質問', r.queries, 'chatlogs role=user'], ['候補あり', r.pages, 'responseType=pages'], ['資料を開いた', r.opened, 'DocumentOpen（回答数）'], ['👍', r.good, 'feedback=good']];
+    const mx = Math.max(...steps.map(x => x[1]));
+    const html = steps.map(x => `<div class="step" title="${x[2]}"><div class="l">${x[0]}</div><div class="v num">${x[1]}</div><div class="b"><i style="width:${Math.round(x[1] / mx * 100)}%"></i></div></div>`).join('');
+    let un = '';
+    if (withRates) un = `<div class="unreach"><span>到達できず <b class="num">${r.unreached}</b> / ${r.queries}（<span class="num">${Math.round(r.unreached / r.queries * 100)} %</span>。分母 30 以上なので率も出す）</span><span>not_found <b class="num">${r.nf}</b></span><span>👎 <b class="num">${r.bad}</b></span><span>言い換え <b class="num">${r.ref}</b></span></div>`;
+    else un = `<div class="unreach"><span>到達できず <b class="num">${r.unreached}</b> 件（分母 30 未満のため率は出さない）</span><span>資料を開いた ÷ 候補あり <b class="num">${r.opened}/${r.pages}</b></span></div>`;
+    return `<div class="card frow"><div class="rh"><span>${title}</span></div><div class="steps">${html}</div>${un}</div>`;
+  }
+  function renderFunnel(s) {
+    const fy = Object.assign({}, s.fy, { unreached: s.y.unreached, nf: s.y.nf, bad: s.y.bad, ref: s.y.ref });
+    document.getElementById('funnel').innerHTML = funnelRow(`昨日（${last.label}）`, fy, false) + funnelRow('直近 7 日（9/17〜9/23）', s.f7, true);
+  }
+
+  function renderEvents(s) {
+    const box = document.getElementById('events');
+    box.innerHTML = s.events.map((e, i) => {
+      const kindLabel = e.kind.startsWith('alarm') ? 'ALARM' : e.kind === 'ok' ? 'OK' : e.kind === 'deploy' ? 'デプロイ' : '合成監視';
+      const detail = e.x ? `<button type="button" class="lnk" data-evx="${i}" aria-expanded="${e.expanded ? 'true' : 'false'}">${e.expanded ? '内訳を閉じる' : '内訳'}</button>` : '<span></span>';
+      const row = `<div class="ev${e.open ? ' open' : ''}"><span class="t num">${e.t}</span><span class="kind ${e.kind}">${kindLabel}</span><span class="ttl">${e.title}${e.meta ? ` <span class="m">· ${e.meta}</span>` : ''}</span><span class="dur num">${e.dur}</span>${detail}<a href="#" title="${e.lt}" onclick="return false">→ ${e.kind === 'deploy' ? '記録' : 'ログ'}</a></div>`;
+      const x = e.x && e.expanded ? `<div class="evx"><div><h4>${e.x.title}</h4><table>${e.x.a.map(r => `<tr><td>${r[0]}</td><td class="n num">${r[1]}</td></tr>`).join('')}</table></div><div><h4>影響・文脈</h4><table>${e.x.b.map(r => `<tr><td>${r[0]}</td><td class="n num">${r[1]}</td></tr>`).join('')}</table></div><div><h4>apiRequestId（上位）</h4><div style="font-family:var(--mono);font-size:11.5px;line-height:1.7">${e.x.c.join('<br>')}</div></div><div class="foot">Logs Insights の集計だけを表示（ログ本文は出さない）。同じ条件で <a href="#" onclick="return false">Logs Insights を開く →</a> · <a href="#" onclick="return false">request-by-id に貼る</a></div></div>` : '';
+      return row + x;
+    }).join('');
+    box.querySelectorAll('[data-evx]').forEach(b => b.addEventListener('click', () => { const e = s.events[+b.dataset.evx]; e.expanded = !e.expanded; renderEvents(s); }));
+  }
+
+  function renderRank() {
+    const docs = [['C-591124 据付基準（AXIEZ）', 41], ['TI-2024-018 巻上機 交換手順', 33], ['C-602311 据付場用図 標準', 29], ['災害事例集 2023 年度版', 21], ['Q シート 昇降路寸法', 18], ['C-588902 制御盤 配線', 15], ['据付ノート 第 7 版', 12], ['TI-2025-003 かご枠 調整', 10], ['現場代理人業務マニュアル', 8], ['W-1102 品質記録様式', 6]];
+    const mx = docs[0][1];
+    document.getElementById('rank').innerHTML = docs.map((d, i) => `<li><div class="r"><span title="${d[0]}">${i + 1}. ${d[0]}</span><span class="num" style="color:var(--ink-3)">${d[1]}</span></div><div class="b"><i style="width:${Math.round(d[1] / mx * 100)}%"></i></div></li>`).join('');
+  }
+
+  // ------------------------------------------------------------------ charts
+  const SVG = 'http://www.w3.org/2000/svg';
+  const el = (t, a) => { const e = document.createElementNS(SVG, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const txt = (x, y, s, a) => { const t = el('text', Object.assign({ x, y, 'font-size': 10, fill: 'var(--ink-3)', 'font-family': 'inherit' }, a || {})); t.textContent = s; return t; };
+  function niceMax(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const m = v / p; const n = m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 4 ? 4 : m <= 5 ? 5 : 10; return n * p; }
+  const tip = document.getElementById('tip');
+  function showTip(e, html) { tip.innerHTML = html; tip.style.display = 'block'; const w = tip.offsetWidth, h = tip.offsetHeight; let x = e.clientX + 12, y = e.clientY + 12; if (x + w > window.innerWidth - 8) x = e.clientX - w - 12; if (y + h > window.innerHeight - 8) y = e.clientY - h - 12; tip.style.left = x + 'px'; tip.style.top = y + 'px'; }
+  function hideTip() { tip.style.display = 'none'; }
+  function roundedTop(x, y, w, h, r) { if (h < r * 1.5) return el('rect', { x, y, width: w, height: h }); return el('path', { d: `M${x},${y + r} a${r},${r} 0 0 1 ${r},-${r} h${w - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${h - r} h-${w} z` }); }
+  function frame(W, H, pad, ymax, fmtTick, aria) {
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria || '' }); svg.classList.add('chart');
+    const ih = H - pad.t - pad.b;
+    [0, 0.25, 0.5, 0.75, 1].forEach(t => { const y = pad.t + ih * (1 - t); svg.append(el('line', { x1: pad.l, y1: y, x2: W - pad.r, y2: y, stroke: 'var(--grid)', 'stroke-width': 1 })); if (t === 0 || t === 0.5 || t === 1) svg.append(txt(pad.l - 6, y + 3.5, fmtTick(ymax * t), { 'text-anchor': 'end' })); });
+    return svg;
+  }
+  function columns(container, rows, series, o) {
+    o = o || {}; const W = o.W || 640, H = o.H || 190, pad = { l: 42, r: 10, t: 10, b: 24 }; const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+    const totals = rows.map(r => series.reduce((a, s) => a + (r[s.key] || 0), 0));
+    const ymax = niceMax(Math.max(o.ymin || 1, ...totals));
+    const svg = frame(W, H, pad, ymax, o.fmt || (v => fmt(Math.round(v))), o.aria);
+    const band = iw / rows.length, bw = Math.min(24, band * 0.64);
+    rows.forEach((r, i) => {
+      const g = el('g', {}); let y0 = pad.t + ih; const x = pad.l + i * band + (band - bw) / 2;
+      const present = series.filter(s => (r[s.key] || 0) > 0);
+      present.forEach((s, si) => { const v = r[s.key]; const h = v / ymax * ih; const y = y0 - h; const top = si === present.length - 1; const shape = top ? roundedTop(x, y, bw, h, 4) : el('rect', { x, y: y + 2, width: bw, height: Math.max(0, h - 2) }); shape.setAttribute('fill', s.color); g.append(shape); y0 = y; });
+      const hit = el('rect', { x: pad.l + i * band, y: pad.t, width: band, height: ih, fill: 'transparent' }); g.append(hit);
+      g.addEventListener('mousemove', e => showTip(e, o.tip ? o.tip(r) : `<b>${r.label}</b> ${totals[i]}`)); g.addEventListener('mouseleave', hideTip);
+      const every = rows.length <= 16 ? 1 : Math.ceil(rows.length / 10);
+      if (i % every === 0 || i === rows.length - 1) svg.append(txt(pad.l + i * band + band / 2, H - 7, r.label, { 'text-anchor': 'middle', 'font-size': 9 }));
+      svg.append(g);
+    });
+    if (o.marker) { const i = rows.findIndex(r => r.iso === o.marker.iso); if (i >= 0) { const x = pad.l + i * band + band / 2; svg.append(el('line', { x1: x, y1: pad.t, x2: x, y2: pad.t + ih, stroke: 'var(--ink-3)', 'stroke-width': 1, 'stroke-dasharray': '3 3' })); svg.append(txt(x + 4, pad.t + 9, o.marker.label, { 'font-size': 9 })); } }
+    container.replaceChildren(svg);
+  }
+  function lines(container, rows, series, o) {
+    o = o || {}; const W = o.W || 640, H = o.H || 190, pad = { l: 42, r: 10, t: 10, b: 24 }; const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+    const vals = []; rows.forEach(r => series.forEach(s => { if (r[s.key] != null) vals.push(r[s.key]); })); (o.ref || []).forEach(x => vals.push(x.v));
+    const ymax = niceMax(Math.max(o.ymin || 1, ...vals));
+    const svg = frame(W, H, pad, ymax, o.fmt || (v => fmt(Math.round(v))), o.aria);
+    const X = i => pad.l + (rows.length === 1 ? iw / 2 : iw * i / (rows.length - 1)); const Y = v => pad.t + ih * (1 - v / ymax);
+    (o.ref || []).forEach(rf => { const y = Y(rf.v); svg.append(el('line', { x1: pad.l, y1: y, x2: W - pad.r, y2: y, stroke: 'var(--ink-3)', 'stroke-width': 1, 'stroke-dasharray': '4 3' })); svg.append(txt(pad.l + 4, y - 3, rf.label, { 'font-size': 9 })); });
+    series.forEach(s => {
+      let d = '', pen = false; rows.forEach((r, i) => { const v = r[s.key]; if (v == null) { pen = false; return; } d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1) + ' '; pen = true; });
+      svg.append(el('path', { d, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+      for (let i = rows.length - 1; i >= 0; i--) { const v = rows[i][s.key]; if (v != null) { svg.append(el('circle', { cx: X(i), cy: Y(v), r: 4, fill: s.color, stroke: 'var(--card)', 'stroke-width': 2 })); break; } }
+    });
+    const cross = el('line', { x1: 0, y1: pad.t, x2: 0, y2: pad.t + ih, stroke: 'var(--axis)', 'stroke-width': 1, opacity: 0 }); svg.append(cross);
+    const band = iw / Math.max(1, rows.length - 1);
+    rows.forEach((r, i) => { const hit = el('rect', { x: X(i) - band / 2, y: pad.t, width: band, height: ih, fill: 'transparent' }); hit.addEventListener('mousemove', e => { cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('opacity', 1); showTip(e, o.tip ? o.tip(r) : r.label); }); hit.addEventListener('mouseleave', () => { cross.setAttribute('opacity', 0); hideTip(); }); svg.append(hit);
+      const every = rows.length <= 16 ? 1 : Math.ceil(rows.length / 10); if (i % every === 0 || i === rows.length - 1) svg.append(txt(X(i), H - 7, r.label, { 'text-anchor': 'middle', 'font-size': 9 })); });
+    container.replaceChildren(svg);
+  }
+  function table(cols, rows) { return `<div class="tbl"><table><thead><tr>${cols.map(c => `<th class="${c.n ? 'n' : ''}">${c.h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${cols.map(c => `<td class="${c.n ? 'n num' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`; }
+
+  let range = 14; let scenario = 'calm';
+  const charts = {};
+  function trendRows() { const rows = days.slice(N - range).map(d => Object.assign({}, d)); const y = rows[rows.length - 1]; const s = SC[scenario].y; y.q = s.q; y.unreached = s.unreached; y.p90 = s.p90; y.max = s.max; y.cost = s.est; rows.forEach(r => { r.reached = r.q - r.unreached; }); return rows; }
+  charts['c-q'] = { render(c) { const rows = trendRows(); columns(c, rows, [{ key: 'reached', color: 'var(--s1)' }, { key: 'unreached', color: 'var(--warn)' }], { aria: '質問数の推移', tip: r => `<b>${r.label}（${r.wd}）</b> 質問 ${r.q} · 到達できず ${r.unreached}`, marker: range > 14 ? { iso: '2026-09-10', label: '試行開始' } : null }); }, table() { return table([{ h: '日付', f: r => `${r.label}（${r.wd}）` }, { h: '質問', n: 1, f: r => r.q }, { h: '到達できず', n: 1, f: r => r.unreached }], trendRows().slice().reverse()); } };
+  charts['c-l'] = { render(c) { const rows = trendRows(); lines(c, rows, [{ key: 'p90', color: 'var(--s1)' }, { key: 'max', color: '#eb6834' }], { aria: 'rag 応答時間の推移', ymin: 30, fmt: v => v + ' s', ref: [{ v: 20, label: '20 s SLO / P2' }, { v: 25, label: '25 s P1' }], tip: r => r.p90 == null ? `<b>${r.label}</b> 質問なし` : `<b>${r.label}（${r.wd}）</b> p90 ${r.p90.toFixed(1)} s · 最大 ${r.max.toFixed(1)} s · ${r.q} 件` }); }, table() { return table([{ h: '日付', f: r => `${r.label}（${r.wd}）` }, { h: 'p90 (s)', n: 1, f: r => r.p90 == null ? '—' : r.p90.toFixed(1) }, { h: '最大 (s)', n: 1, f: r => r.max == null ? '—' : r.max.toFixed(1) }, { h: '件数', n: 1, f: r => r.q }], trendRows().slice().reverse()); } };
+
+  // ------------------------------------------------------------------ cost
+  const COST = {};
+  (function () {
+    const mtdRows = days.filter(d => d.iso >= '2026-09-01' && d.iso <= '2026-09-22');
+    COST.mtd = mtdRows.reduce((a, d) => a + d.cost, 0);
+    COST.in = COST.mtd * 0.6; COST.out = COST.mtd * 0.38; COST.cache = COST.mtd * 0.02;
+    COST.queries = mtdRows.reduce((a, d) => a + d.q, 0);
+    COST.answers = Math.round(COST.queries * 0.79);
+    COST.est = COST.mtd * 0.93;
+    COST.perQ = COST.mtd / COST.queries; COST.perA = COST.mtd / COST.answers;
+    COST.amplify = 10.2; COST.unattr = { CloudWatch: 3.4, S3: 0.3, Lambda: 0.01, DynamoDB: 0.01, 'API Gateway': 0.0 };
+    COST.unattrTotal = Object.values(COST.unattr).reduce((a, b) => a + b, 0);
+    COST.aoss = 438.0; COST.embed = 0.4;
+    COST.waf = 4.7; COST.aossShare = 0.16;
+  })();
+  function renderCost() {
+    const boxes = [
+      { cls: 'hero-box', badge: '<span class="badge b-actual">実額・確定</span>', k: '帰属が確定', v: usd(COST.mtd + COST.amplify), rows: [['Bedrock Sonnet 5', usd(COST.mtd)], ['　入力トークン', usd(COST.in)], ['　出力トークン', usd(COST.out)], ['　キャッシュ', usd(COST.cache)], ['Amplify（専用）', usd(COST.amplify)]], fn: `予算 100 USD の <span class="num">${Math.round(COST.mtd)} %</span>（Bedrock）`, meter: COST.mtd / 100 },
+      { badge: '<span class="badge b-unattr">実額・帰属未確認</span>', k: 'タグ待ち', v: usd(COST.unattrTotal), rows: Object.entries(COST.unattr).map(([k, v]) => [k, usd(v, 2)]), fn: 'コスト配分タグ有効化後に <code>Project=EleKnowledge</code> で「実額・確定」へ移る。有効化前には遡及しない' },
+      { badge: '<span class="badge b-shared">共有・按分不能</span>', k: '切り出せない', v: usd(COST.aoss + COST.embed, 0), rows: [['OpenSearch Serverless（OCU）', usd(COST.aoss, 0)], ['埋め込みモデル（KB 検索時）', usd(COST.embed)]], fn: '費用対効果の分母に入れない。OCU が増えない限り EleKnowledge の増分は 0（下の前提チェック）' },
+      { badge: '<span class="badge b-est">推定</span>', k: '計測 × 単価 / 按分', v: usd(COST.waf + COST.aoss * COST.aossShare, 0), rows: [['WAF EleKnowledge 分（構成 × 料金表）', usd(COST.waf)], [`OpenSearch リクエスト按分（${Math.round(COST.aossShare * 100)} %）`, usd(COST.aoss * COST.aossShare, 0)], ['Bedrock（トークン × 単価）', usd(COST.est)]], fn: 'WAF は Web ACL 1 + ルール 1 + リクエスト数。OpenSearch は EleKnowledge の retrieve 回数 ÷ コレクションの検索リクエスト数' },
+    ];
+    document.getElementById('costboxes').innerHTML = boxes.map(b => `<div class="card cbox ${b.cls || ''}"><div class="k">${b.badge}<span class="n">${b.k}</span></div><div class="v num">${b.v}</div>${b.meter != null ? `<div class="meter"><i style="width:${Math.min(100, b.meter * 100).toFixed(1)}%"></i><b style="left:50%"></b></div><div class="meter-l"><span>0</span><span>50 %</span><span>予算 100 USD</span></div>` : ''}<div class="rows">${b.rows.map(r => `<div><span>${r[0]}</span><span class="num">${r[1]}</span></div>`).join('')}</div><div class="fn">${b.fn}</div></div>`).join('');
+    const checks = [
+      ['good', 'Sonnet 5 の唯一の利用者', `成立。9/9〜9/22 の Bedrock <code>Invocations</code> <span class="num">${COST.answers}</span> = 「候補あり」回答 <span class="num">${COST.answers}</span>（1 回答 1 呼び出し）。崩れた日があれば上の実額を「帰属未確認」に降格`],
+      ['good', '実額 vs 推定', `<span class="num">${usd(COST.mtd)}</span> / <span class="num">${usd(COST.est)}</span>（<span class="num">+${Math.round((COST.mtd / COST.est - 1) * 100)} %</span>）。±20 % 超で注意。SSM 単価の妥当性もここで検証`],
+      ['good', 'モデル ID', `<code>global.anthropic.claude-sonnet-5</code>、9/9 23:02 以降変更なし。変わった月は Cost Explorer から切り出せない旨を表示`],
+      ['good', 'OpenSearch 検索 OCU', `平均 <span class="num">2.0</span> / 最大 <span class="num">2.0</span>（30 日、増加なし）。EleKnowledge の retrieve <span class="num">1,240</span> 回 ÷ コレクション検索 <span class="num">7,600</span> 回 = <span class="num">16 %</span>（AWS/AOSS。要実測）`],
+      ['warning', 'コスト配分タグ', '未有効（管理アカウント側の作業、依頼済み）。有効化日を SSM に置き、以降の月だけ帰属できる'],
+    ];
+    document.getElementById('checks').innerHTML = checks.map(c => `<div class="chk"><span class="i ${c[0]}">${ST[c[0]][0]}</span><span class="n">${c[1]}</span><span class="d">${c[2]}</span></div>`).join('');
+    document.getElementById('perq').innerHTML = `<tr><th>基準</th><th class="n">USD</th><th>出所</th></tr>
+      <tr><td>実額 ÷ 質問（今月）</td><td class="n num">${COST.perQ.toFixed(3)}</td><td><span class="badge b-est">推定</span> ${usd(COST.mtd)} ÷ ${fmt(COST.queries)} 質問</td></tr>
+      <tr><td>実額 ÷ 回答（今月）</td><td class="n num">${COST.perA.toFixed(3)}</td><td><span class="badge b-est">推定</span> ÷ ${fmt(COST.answers)} 回答（候補あり）</td></tr>
+      <tr><td>トレース 1 回答 中央値</td><td class="n num">0.012</td><td><span class="badge b-est">推定</span> retrievalTrace.generation × SSM 単価</td></tr>
+      <tr><td>トレース 1 回答 p90</td><td class="n num">0.021</td><td><span class="badge b-est">推定</span> 同上。長い履歴・多候補で伸びる</td></tr>`;
+    const perDay = [100, 300, 1000].map(n => [n, n * COST.perQ * 30]);
+    document.getElementById('proj').innerHTML = `<tr><th class="n">質問/日</th><th class="n">Bedrock 月額</th><th>備考</th></tr>` + perDay.map(p => `<tr><td class="n num">${fmt(p[0])}</td><td class="n num"><span class="badge b-est">推定</span> ${usd(p[1], 0)}</td><td>${p[0] === 300 ? '予算 100 USD を超える水準' : p[0] === 1000 ? '設計上限。Lambda / DynamoDB / API GW は合計 1 USD 未満' : '現在の 4〜5 倍'}</td></tr>`).join('');
+    document.getElementById('budget-now').innerHTML = `実績 <span class="badge b-actual">実額・確定</span> ${usd(COST.mtd)}（${Math.round(COST.mtd)} %）· 月末予測 <span class="badge b-est">推定</span> ${usd(COST.mtd / 22 * 30)} · 通知なし`;
+    const rows30 = days.slice(N - 30);
+    charts['c-cost'] = { render(c) { columns(c, rows30, [{ key: 'cost', color: 'var(--s1)' }], { W: 420, H: 170, aria: 'Bedrock Sonnet 5 実額の推移', fmt: v => v.toFixed(1), ymin: 1.5, tip: r => `<b>${r.label}</b> ${r.cost.toFixed(2)} USD${r.iso >= '2026-09-23' ? '（暫定）' : ''}`, marker: { iso: '2026-09-09', label: 'Sonnet 5 切替' } }); }, table() { return table([{ h: '日付（UTC）', f: r => r.label }, { h: 'USD', n: 1, f: r => r.cost.toFixed(2) }, { h: '確定', f: r => r.iso <= '2026-09-22' ? '確定' : '暫定' }], rows30.slice().reverse()); } };
+    charts['c-q2'] = { render(c) { columns(c, rows30, [{ key: 'q', color: 'var(--s1)' }], { W: 420, H: 170, aria: '質問数の推移', tip: r => `<b>${r.label}（${r.wd}）</b> ${r.q} 質問`, marker: { iso: '2026-09-10', label: '試行開始' } }); }, table() { return table([{ h: '日付（JST）', f: r => `${r.label}（${r.wd}）` }, { h: '質問', n: 1, f: r => r.q }], rows30.slice().reverse()); } };
+    charts['c-ocu'] = { render(c) { lines(c, rows30, [{ key: 'ocu', color: 'var(--s1)' }], { W: 420, H: 170, aria: '検索 OCU の推移', ymin: 4, fmt: v => v + ' OCU', tip: r => `<b>${r.label}</b> 検索 OCU 最大 ${r.ocu}` }); }, table() { return table([{ h: '日付', f: r => r.label }, { h: '検索 OCU 最大', n: 1, f: r => r.ocu }], rows30.slice().reverse()); } };
+    ['c-cost', 'c-q2', 'c-ocu'].forEach(id => charts[id].render(document.getElementById(id)));
+  }
+
+  // ------------------------------------------------------------------ failures
+  const TRI = { open: ['open', '未振り分け'], in_progress: ['prog', '対応中'], done: ['done', '対応済み'] };
+  const CAUSES = [['', '原因を選ぶ'], ['search', '検索ミス'], ['snippet', 'snippet が弱い'], ['writing', '作文'], ['clarify', '聞き返し不足'], ['kb_missing', 'KB 欠落'], ['scope', '機種スコープ'], ['user', '利用者側'], ['other', 'その他']];
+  const FAILS = [
+    { t: '9/23 14:02', sig: ['nf'], q: 'AXIEZ の巻上機ブレーキ ギャップ調整値', a: '該当する資料が見つかりませんでした。機種と資料カテゴリを見直すか、質問を言い換えてください。低信頼の手がかり: C-591124（p.48）', filt: '機種:AXIEZ / カテゴリ:C資料, TI', hints: ['上位スコア 0.41（弱い）', '機種スコープで 6 件除外'], tr: { m: 26, s: 0, x: 6, top: 0.41, ms: 820, opened: null }, tri: { st: 'open' }, drawer: true },
+    { t: '9/23 10:47', sig: ['bad'], reason: '資料が違う', q: 'かご枠の水平調整の許容値を教えて', a: '据付基準 C-591124 の §4.2 では、かご枠の水平は ±1.0 mm 以内としています。TI-2025-003 では調整手順を…', filt: '機種:未指定 / カテゴリ:据付基準', hints: ['資料は開かれた（2 件）', '言い換えあり（3 分後）'], tr: { m: 26, s: 8, x: 0, top: 0.62, ms: 910, opened: 2 }, tri: { st: 'open' } },
+    { t: '9/22 16:30', sig: ['bad'], reason: '疑問が解けない', comment: '表が読めない', q: '制御盤 配線 端子台の対応表', a: 'C-588902 の p.12〜14 に端子台の対応表があります。表の内容は…', filt: '機種:MAXIEZ / カテゴリ:C資料', hints: ['資料は開かれた（1 件）→ 検索は当たり、snippet か作文'], tr: { m: 24, s: 6, x: 0, top: 0.71, ms: 780, opened: 1 }, tri: { st: 'in_progress', cause: 'snippet', note: 'FMP 解析で表が崩れている。KB 側で確認中', ref: '#112' } },
+    { t: '9/22 09:15', sig: ['rf'], q: '据付基準 昇降路寸法 許容差 → 3 分後「昇降路 寸法 公差」', a: '（1 回目）据付基準 C-591124 §3.1 に昇降路寸法の許容差が…（2 回目）Q シート「昇降路寸法」に…', filt: '機種:未指定 / カテゴリ:すべて', hints: ['言い換え後に 👍 なし', '2 回目は資料を開いた'], tr: { m: 28, s: 7, x: 0, top: 0.58, ms: 860, opened: 1 }, tri: { st: 'open' } },
+    { t: '9/21 11:08', sig: ['nf'], q: '災害事例 感電 2019 年', a: '該当する資料が見つかりませんでした。', filt: '機種:未指定 / カテゴリ:災害事例集', hints: ['カテゴリ過絞り（候補 3 件）'], tr: { m: 3, s: 0, x: 0, top: 0.39, ms: 640, opened: null }, tri: { st: 'done', cause: 'search', note: '年度で絞ると落ちる。ゴールデンに追加、略語展開に「感電」系を検討', ref: 'G017' } },
+    { t: '9/20 15:40', sig: ['bad'], reason: '回答がおかしい', q: 'TI-2024-018 の適用機種はどれですか', a: 'TI-2024-018 は AXIEZ と MAXIEZ の両方に適用されます。…（実際は AXIEZ のみ）', filt: '機種:未指定 / カテゴリ:TI', hints: ['資料は開かれた（1 件）'], tr: { m: 26, s: 6, x: 0, top: 0.74, ms: 900, opened: 1 }, tri: { st: 'done', cause: 'writing', note: '断定を抑えるプロンプト修正', ref: '#108 · e4f5a6b' } },
+  ];
+  const CANDS = [[1, 'C-591124 据付基準（AXIEZ）', 48, 0.41, 'AXIEZ', 'sel'], [2, 'TI-2024-018 巻上機 交換手順', 7, 0.39, 'AXIEZ', 'sel'], [3, 'C-602311 据付場用図 標準', 3, 0.36, '*', ''], [4, 'C-577020 巻上機 ブレーキ（MAXIEZ）', 22, 0.35, 'MAXIEZ', 'exc'], [5, 'C-577020 巻上機 ブレーキ（MAXIEZ）', 23, 0.34, 'MAXIEZ', 'exc'], [6, '据付ノート 第 7 版', 61, 0.31, '*', ''], [7, 'TI-2023-041 ブレーキ 点検', 2, 0.30, 'MAXIEZ', 'exc'], [8, 'Q シート ブレーキ隙間', 1, 0.29, 'MAXIEZ', 'exc']];
+  function sigChip(s, f) { if (s === 'bad') return `<span class="chip bad">👎 bad</span>`; if (s === 'nf') return `<span class="chip nf">not_found</span>`; return `<span class="chip rf">↻ 言い換え</span>`; }
+  function renderFailures() {
+    document.getElementById('f-work').innerHTML = `
+      <div class="focus"><div class="l">未振り分け</div><div class="v num">7 <small>件 → 0 にするのが週次のゴール</small></div></div>
+      <div><div class="l">対応中</div><div class="v num">2</div></div>
+      <div><div class="l">今週 対応済み</div><div class="v num">5 <small>原因: 検索 3 · 作文 1 · KB 1</small></div></div>
+      <div><div class="l">要望（未読）</div><div class="v num">2</div></div>`;
+    document.getElementById('f-props').innerHTML = [
+      { t: '資料候補の精度', c: 4, b: '候補資料が別物になっています（未対応 4 件・7 日）。うち 2 件は機種スコープ除外あり。', acts: ['failures から golden 候補を 3 件追加し run_retrieve_eval.py で確認', 'ABBREV_MAP・カテゴリ過絞り・model_type 空欄を確認', '改善時のみ phase2 sam deploy（itai）'], o: 'mona → 必要なら SAM（itai）' },
+      { t: 'ヒット不足', c: 5, b: '弱い検索で not_found が多いです（未対応 5 件・7 日）。3 件は上位スコア 0.45 未満。', acts: ['カテゴリ未指定・機種フィルタの有無を failures で確認', 'golden に not_found タグ付きで追加'], o: 'mona' },
+    ].map(p => `<div class="card prop"><div class="t"><span>${p.t}</span><span>${p.c} 件</span></div><div class="b">${p.b}</div><ul>${p.acts.map(a => `<li>${a}</li>`).join('')}</ul><div class="o"><span>担当目安: ${p.o}</span><button type="button" class="btn sm">該当を見る</button></div></div>`).join('');
+    document.getElementById('f-near').innerHTML = 'しきい値未満（注目）: 疑問が解けない 2 件 · 回答がおかしい 1 件 · 理由なし 👎 1 件 · 言い換え 6 件（暗黙の失敗。カードのルールは v1 で追加）';
+    document.getElementById('f-count').textContent = `表示 6 / 取得 9（7 日・すべて）· Scan 打ち切りなし`;
+    document.getElementById('f-list').innerHTML = FAILS.map((f, i) => {
+      const tri = TRI[f.tri.st];
+      const triage = `<div class="triage">
+          <span class="tri ${tri[0]}">${tri[1]}</span>
+          <select aria-label="原因">${CAUSES.map(c => `<option value="${c[0]}" ${f.tri.cause === c[0] ? 'selected' : ''}>${c[1]}</option>`).join('')}</select>
+          <input type="text" placeholder="メモ（200 字まで）" value="${f.tri.note || ''}" aria-label="メモ">
+          <input type="text" class="ref" placeholder="参照 #issue / G0xx / commit" value="${f.tri.ref || ''}" aria-label="参照">
+          <span style="display:flex;gap:6px"><button type="button" class="btn sm">保存</button>${f.tri.st !== 'done' ? '<button type="button" class="btn sm">対応済みにする</button>' : ''}</span>
+        </div>`;
+      const trace = `<div class="trace"><span class="l">検索の要約</span><span>候補 <b>${f.tr.m}</b></span><span>選択 <b>${f.tr.s}</b></span><span>機種除外 <b>${f.tr.x}</b></span><span>上位スコア <b>${f.tr.top.toFixed(2)}</b></span><span>retrieve <b>${f.tr.ms} ms</b></span><span>資料を開いた <b>${f.tr.opened == null ? '—' : f.tr.opened + ' 件'}</b></span><button type="button" class="lnk" data-drawer="${i}">${f.drawer ? 'トレース全文を閉じる' : 'トレース全文'}</button></div>`;
+      const drawer = f.drawer ? `<div class="drawer"><h4><span>候補 26 件（上位 8）· HYBRID · kb VQV81CNYU4 · logicVersion e4f5a6b</span><span>選択 = 生成に渡した · 除外 = 機種スコープ</span></h4><table><tr><th class="n">#</th><th>文書</th><th class="n">頁</th><th class="n">score</th><th>機種</th><th>扱い</th></tr>${CANDS.map(c => `<tr class="${c[5]}"><td class="n num">${c[0]}</td><td>${c[1]}</td><td class="n num">${c[2]}</td><td class="n num">${c[3].toFixed(2)}</td><td>${c[4]}</td><td>${c[5] === 'sel' ? '選択' : c[5] === 'exc' ? '除外（機種）' : '—'}</td></tr>`).join('')}</table><div class="fn">not_found のため生成は走っていない（generation = null）。全 26 件と本文は Athena か <code>GET …/trace</code> で</div></div>` : '';
+      return `<div class="card fitem"><div class="top">${f.sig.map(sigChip).join('')}${f.reason ? `<span class="chip reason">${f.reason}</span>` : ''}<span class="tm num">${f.t}</span><span class="sp"></span><button type="button" class="btn sm">チャットで開く</button><button type="button" class="btn sm">ゴールデン候補をコピー</button></div>
+        <div class="q">${f.q}</div><div class="a">回答: ${f.a}</div><div class="meta"><span>${f.filt}</span>${f.comment ? `<span>コメント: ${f.comment}</span>` : ''}</div>
+        <div class="hints"><span class="l">ヒント</span>${f.hints.map(h => `<span class="hint">${h}</span>`).join('')}</div>${trace}${drawer}${triage}</div>`;
+    }).join('');
+    document.getElementById('f-list').querySelectorAll('[data-drawer]').forEach(b => b.addEventListener('click', () => { const f = FAILS[+b.dataset.drawer]; f.drawer = !f.drawer; renderFailures(); }));
+    document.getElementById('f-wishes').innerHTML = [
+      { tx: '機種を選ばなくても「この機種の話です」と質問文から拾ってほしい', t: '9/23 11:20', st: 'open', ses: true },
+      { tx: '資料が開いたあと、どのページか分かるようにしてほしい（PDF が長い）', t: '9/22 17:05', st: 'open', ses: true },
+      { tx: '前に聞いた質問をもう一度探しやすくしてほしい', t: '9/18 09:40', st: 'done', ref: '#104 履歴検索', ses: false },
+    ].map(w => `<div class="card wish"><div class="tx">${w.tx}</div><div class="m"><span class="num">${w.t}</span>${w.ses ? '<a href="#" onclick="return false">関連セッション</a>' : ''}<span class="tri ${w.st === 'done' ? 'done' : 'open'}">${w.st === 'done' ? '対応済み' : '未読'}</span>${w.ref ? `<span>${w.ref}</span>` : ''}${w.st !== 'done' ? '<button type="button" class="btn sm">既読にする</button>' : ''}</div></div>`).join('');
+  }
+
+  // ------------------------------------------------------------------ announcements
+  const TPLS = {
+    incident: { name: '障害中（回答が返らない）', type: 'notice', sev: 'critical', pin: true, chat: true, when: 'ダッシュボード「いま」が P1 のとき', title: '回答が返らない事象が発生しています（対応中）', body: '{{時刻}} ごろから、質問への回答が返らない・エラーになる事象が発生しています。\n\n- 現在、原因の切り分けと復旧作業を行っています\n- 復旧見込み: {{復旧見込み}}\n- 復旧しましたら本お知らせを更新します\n\nお急ぎの場合は、資料は従来の共有フォルダから直接ご参照ください。' },
+    recovered: { name: '復旧', type: 'notice', sev: 'info', pin: false, chat: true, when: 'OK メールを見たら。障害告知を同時に表示終了', title: '回答が返らない事象は復旧しました', body: '{{時刻}} に復旧を確認しました。ご迷惑をおかけしました。\n\n- 発生: {{発生時刻}} 〜 {{復旧時刻}}\n- 影響: 質問への回答がエラーになる\n- 原因と再発防止は改めてお知らせします' },
+    signup_stop: { name: '新規登録の受付を一時停止', type: 'notice', sev: 'warning', pin: true, chat: false, when: 'P2-cognito-signups-40 が鳴ったら', title: '本日の新規登録の受付を一時停止しています', body: '確認メールの 1 日あたりの送信数が上限に近づいたため、本日の新規登録の受付を一時停止しています。\n\n- 明日 9 時以降に再開します\n- すでに登録済みの方はそのままご利用いただけます' },
+    mail_limit: { name: 'メール上限に達した方へ', type: 'notice', sev: 'warning', pin: false, chat: false, when: 'P1-cognito-email-errors が鳴ったら', title: '確認メールが届かなかった方へ', body: '本日のメール送信数が上限に達したため、確認コードのメールが届かない場合があります。\n\n- 明日 9 時以降に、確認画面の「確認コードを再送信」からお試しください\n- 「登録が完了していません」と表示された方だけ、新規登録をやり直してください' },
+    maint: { name: 'メンテナンス予告', type: 'maintenance', sev: 'warning', pin: true, chat: true, when: '定時後デプロイの前日', title: '{{日付}} {{開始}}〜{{終了}} にメンテナンスを行います', body: 'システム更新のため、下記の時間帯はご利用いただけません。\n\n- 日時: {{日付}} {{開始}}〜{{終了}}\n- 影響: ログイン・質問ができません\n- 終了後、改めてお知らせします' },
+    model: { name: '生成モデルの切替', type: 'update', sev: 'info', pin: false, chat: false, when: 'ランブック §7.3 の切替後', title: '回答を生成するモデルを切り替えました', body: '{{日付}} に、回答を生成する AI モデルを切り替えました。\n\n- 回答の表現や所要時間が変わることがあります\n- 気になる点は 👎 の理由か「こうなってほしい」からお知らせください' },
+  };
+  const ANN_ROWS = [
+    { id: 'anc_9', st: 'published', type: 'notice', sev: 'critical', title: '回答が返らない事象が発生しています（対応中）', pub: '9/24 08:05', end: '', by: 'itai', chat: true, incidentOnly: true },
+    { id: 'anc_8', st: 'scheduled', type: 'maintenance', sev: 'warning', title: '9/27（土）22:00〜24:00 にメンテナンスを行います', pub: '9/25 09:00', end: '9/28 00:00', by: 'morimoto', chat: true },
+    { id: 'anc_7', st: 'draft', type: 'notice', sev: 'warning', title: '本日の新規登録の受付を一時停止しています', pub: '—', end: '', by: 'itai', chat: false },
+    { id: 'anc_6', st: 'draft', type: 'notice', sev: 'info', title: '回答が返らない事象は復旧しました', pub: '—', end: '', by: 'itai', chat: true },
+    { id: 'anc_1', st: 'published', type: 'update', sev: 'info', title: '生成モデルを切り替えました（9/9）', pub: '9/9 23:10', end: '', by: 'itai', chat: false },
+    { id: 'anc_0', st: 'ended', type: 'notice', sev: 'info', title: '試行運用を開始しました', pub: '9/10 09:00', end: '9/17 09:00', by: 'itai', chat: false },
+  ];
+  const SEVL = { info: 'ℹ 情報', warning: '⚠ 注意', critical: '⛔ 重要' };
+  const TYPEL = { notice: 'お知らせ', update: 'アップデート', maintenance: 'メンテナンス' };
+  let annTpl = null;
+  function renderAnnouncements(s) {
+    const active = s.notice.active;
+    document.getElementById('a-active').innerHTML = active.length ? active.map(n => `<div class="an"><span class="sev ${n.sev}">${SEVL[n.sev]}</span><span>${n.title} <span class="m">· ${n.since} から</span></span><span class="where ${n.chat ? 'chat' : ''}">${n.chat ? 'ホーム + チャット' : 'ホーム'}</span><span style="display:flex;gap:6px"><button type="button" class="btn sm">編集</button><button type="button" class="btn sm danger">表示終了</button></span></div>`).join('') : '<div class="an"><span></span><span style="color:var(--ink-3)">表示中の告知はありません</span></div>';
+    document.getElementById('tab-ann-cnt').textContent = `表示中 ${active.length}`;
+    document.getElementById('tab-ann-cnt').className = 'cnt' + (active.some(n => n.sev === 'critical') ? ' hot' : '');
+    document.getElementById('a-tpls').innerHTML = Object.entries(TPLS).map(([k, t]) => `<div class="card tpl ${k === 'incident' && s.status === 'critical' ? 'hot' : ''}"><div class="t"><span>${t.name}</span><span class="sev ${t.sev}">${SEVL[t.sev]}</span></div><div class="p"><span>${TYPEL[t.type]}</span><span>·</span><span>${t.pin ? '固定' : '固定なし'}</span><span>·</span><span class="where ${t.chat ? 'chat' : ''}">${t.chat ? 'ホーム + チャット' : 'ホーム'}</span></div><div class="w">開く契機: ${t.when}</div><div class="act"><button type="button" class="btn sm ${k === 'incident' && s.status === 'critical' ? 'pri' : ''}" data-tpl="${k}">この型で作る</button></div></div>`).join('');
+    renderAnnForm(s);
+    const rows = ANN_ROWS.filter(r => !r.incidentOnly || s.status === 'critical');
+    const stl = { published: '公開', scheduled: '予約', draft: '下書き', ended: '終了' };
+    document.getElementById('a-list').innerHTML = `<tr><th>状態</th><th>種別</th><th>重要度</th><th>タイトル</th><th>表示先</th><th>公開</th><th>表示終了</th><th>作成者</th><th></th></tr>` + rows.map(r => `<tr class="${annTpl && annTpl.editId === r.id ? 'editing' : ''}"><td><span class="tri ${r.st === 'published' ? 'prog' : r.st === 'scheduled' ? 'open' : 'done'}">${stl[r.st]}</span></td><td>${TYPEL[r.type]}</td><td><span class="sev ${r.sev}">${SEVL[r.sev]}</span></td><td>${r.title}</td><td><span class="where ${r.chat ? 'chat' : ''}">${r.chat ? 'ホーム + チャット' : 'ホーム'}</span></td><td class="n num">${r.pub}</td><td class="n num">${r.end || '—'}</td><td>${r.by}</td><td class="n"><button type="button" class="btn sm">編集</button></td></tr>`).join('');
+    document.getElementById('a-list-sub').textContent = `全 ${rows.length} 件`;
+  }
+  function renderAnnForm(s) {
+    const box = document.getElementById('a-form');
+    const t = annTpl ? TPLS[annTpl.key] : null;
+    if (!t) {
+      document.getElementById('a-form-h').textContent = '編集';
+      document.getElementById('a-form-sub').textContent = 'テンプレートを選ぶか「新規作成」で開始';
+      box.innerHTML = `<div class="empty">編集中の告知はありません。上のテンプレートから型を選ぶと、ここに流し込まれます</div>`;
+      return;
+    }
+    const isInc = annTpl.key === 'incident';
+    const body = isInc && s.status === 'critical' ? t.body.replace('{{時刻}}', '本日 07:50') : t.body;
+    document.getElementById('a-form-h').textContent = `新規作成 · 型: ${t.name}`;
+    document.getElementById('a-form-sub').textContent = '{{ }} を埋めて公開。表示終了は後から「表示終了」ボタンでも設定できる';
+    const prev = body.split('\n').filter(Boolean).map(l => l.startsWith('- ') ? `<li>${l.slice(2)}</li>` : `<p>${l}</p>`).join('').replace(/(<li>.*?<\/li>)+/g, m => `<ul>${m}</ul>`);
+    box.innerHTML = `<div class="form">
+      <div class="row">
+        <label>種別<select><option ${t.type === 'notice' ? 'selected' : ''}>お知らせ</option><option ${t.type === 'update' ? 'selected' : ''}>アップデート</option><option ${t.type === 'maintenance' ? 'selected' : ''}>メンテナンス</option></select></label>
+        <label>重要度<select><option ${t.sev === 'info' ? 'selected' : ''}>情報 (info)</option><option ${t.sev === 'warning' ? 'selected' : ''}>注意 (warning)</option><option ${t.sev === 'critical' ? 'selected' : ''}>重要 (critical)</option></select></label>
+        <label>表示終了（全種別）<input type="datetime-local" value="" placeholder="未設定"></label>
+        <label>表示先<span class="opts"><span class="chk-line"><input type="checkbox" checked disabled> ホーム</span><span class="chk-line"><input type="checkbox" ${t.chat ? 'checked' : ''}> チャット画面にも表示</span><span class="chk-line"><input type="checkbox" ${t.pin ? 'checked' : ''}> 上部に固定</span></span></label>
+      </div>
+      <label>タイトル<input type="text" value="${t.title}"></label>
+      <div class="row half">
+        <label>本文（Markdown）<textarea>${body}</textarea></label>
+        <label>プレビュー（チャット画面の帯 + ホームの一覧）<div class="preview"><div class="sev ${t.sev}" style="margin-bottom:8px">${SEVL[t.sev]}</div><h3>${t.title}</h3>${prev}</div></label>
+      </div>
+      <div class="actions"><button type="button" class="btn pri">いま公開</button><button type="button" class="btn">予約公開…</button><button type="button" class="btn">下書き保存</button><span style="flex:1"></span><button type="button" class="btn" data-tpl="none">閉じる</button></div>
+    </div>`;
+  }
+
+  // ------------------------------------------------------------------ wiring
+  function renderDash() { const s = SC[scenario]; renderNow(s); renderYesterday(s); renderFunnel(s); renderEvents(s); ['c-q', 'c-l'].forEach(id => { const c = document.getElementById(id); if (!c.dataset.table) charts[id].render(c); else c.innerHTML = charts[id].table(); }); }
+  function renderAll() { renderDash(); renderAnnouncements(SC[scenario]); }
+  document.querySelectorAll('.seg [data-sc]').forEach(b => b.addEventListener('click', () => { scenario = b.dataset.sc; document.querySelectorAll('.seg [data-sc]').forEach(x => x.setAttribute('aria-pressed', x === b)); annTpl = scenario === 'incident' ? { key: 'incident' } : null; renderAll(); }));
+  document.querySelectorAll('.range [data-r]').forEach(b => b.addEventListener('click', () => { range = +b.dataset.r; document.querySelectorAll('.range [data-r]').forEach(x => x.setAttribute('aria-pressed', x === b)); renderDash(); }));
+  document.querySelectorAll('.range [data-fp]').forEach(b => b.addEventListener('click', () => { document.querySelectorAll('.range [data-fp]').forEach(x => x.setAttribute('aria-pressed', x === b)); }));
+  document.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', () => { const id = b.dataset.toggle; const c = document.getElementById(id); if (c.dataset.table) { delete c.dataset.table; charts[id].render(c); b.textContent = '表で見る'; } else { c.dataset.table = '1'; c.innerHTML = charts[id].table(); b.textContent = 'グラフで見る'; } }));
+  function showView(v) { document.querySelectorAll('.view').forEach(x => x.classList.toggle('on', x.id === 'view-' + v)); document.querySelectorAll('.tab[data-view]').forEach(t => t.setAttribute('aria-selected', t.dataset.view === v)); window.scrollTo({ top: 0 }); }
+  document.querySelectorAll('.tab[data-view]').forEach(t => t.addEventListener('click', () => showView(t.dataset.view)));
+  document.addEventListener('click', e => {
+    const g = e.target.closest('[data-goto]');
+    if (g) { e.preventDefault(); if (g.dataset.tpl) { annTpl = { key: g.dataset.tpl }; renderAnnouncements(SC[scenario]); } if (g.dataset.fp) { document.querySelectorAll('.range [data-fp]').forEach(x => x.setAttribute('aria-pressed', x.dataset.fp === g.dataset.fp)); } showView(g.dataset.goto); return; }
+    const tb = e.target.closest('[data-tpl]');
+    if (tb && !tb.dataset.goto) { e.preventDefault(); annTpl = tb.dataset.tpl === 'none' ? null : { key: tb.dataset.tpl === 'blank' ? 'incident' : tb.dataset.tpl }; if (tb.dataset.tpl === 'blank') annTpl = { key: 'model' }; renderAnnouncements(SC[scenario]); document.getElementById('a-form').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  });
+  const notes = document.getElementById('notes'); const applyNotes = () => document.body.classList.toggle('notes', notes.checked); notes.addEventListener('change', applyNotes); applyNotes();
+
+  renderCost(); renderRank(); renderFailures(); renderAll();
+})();
+</script>
