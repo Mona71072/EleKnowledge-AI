@@ -15,7 +15,7 @@ related-code: lambda/rag/, frontend/src/app/chat/
 
 ## POST /rag/query
 
-> 最終検証: 2026-10-04 — sessionTitle の生成モデル設定説明を app.py と照合。検索設定の上書きと既定値は 2026-09-25 に実装設定と照合
+> 最終検証: 2026-10-09 — `mode` の受理値・省略/null/空文字の正規化・403・409・セッション読取失敗の 500 を app.py と照合（null・空文字の受理はハンドラのモック実行でも確認）。sessionTitle の生成モデル設定説明は 2026-10-04、検索設定の上書きと既定値は 2026-09-25 に実装設定と照合
 
 RAGクエリ実行
 
@@ -30,7 +30,11 @@ RAGクエリ実行
 }
 ```
 
-- `mode`: `normal`（標準 RAG）| `spec`（仕様確認モード）。実装 [app.py](../../lambda/rag/rag-function/app.py) 参照。
+- `mode`: `normal`（標準 RAG）| `spec`（仕様確認モード。非推奨）| `law`（法令モード）。省略・`null`・空文字（`""`）の場合は `normal` として扱う。実装 [app.py](../../lambda/rag/rag-function/app.py) 参照。
+  - 上記の受理値・正規化対象以外の値（数値・真偽値・配列・オブジェクト等を含む）は **400** `ValidationError`（`Unsupported RAG mode`）。
+  - `law` は開発環境で機能フラグと法令 KB が設定されているときだけ使える。無効のときは **403** `FeatureUnavailable`（`法令モードは利用できません`）。
+  - 既存セッション（`sessionId` 指定）のモードと `mode` が異なるときは **409** `SessionModeMismatch`。セッションはモードをまたいで再利用できない（`ragMode` を持たない旧メッセージは `normal` 扱い）。
+  - 既存セッションの確認で、セッションが存在しない・他人のものの場合は **404** `NotFound`（存在有無を漏らさないため区別しない）。DynamoDB の読取に失敗して確認できなかった場合は 404 にせず、下記「500 応答」の一般化した **500** を返す。
 - `filters.category`: フロント側の**安定キー**（`drawing` / `spec` / `tech_info` / `incident` / `qsheet` / `std` / `note` 等）。サーバー側 `CATEGORY_MAP` が実 KB の `category` メタデータ値へ変換する。安定キー・KB実値・UI表示ラベルの対応は下表参照。
 - **カテゴリ未指定時**: `category` の**許可リスト**（実カテゴリ全10種 = `CATEGORY_MAP` の値 = `ALLOWED_CATEGORY_VALUES`）を**常時適用**する。ユーザー視点では従来どおり「未指定＝全検索」だが、web-crawler（GenU ドキュメント）・quick-start（引用 presign 不能バケット）データソース由来のノイズ文書と `TEST` 文書は category が許可リスト外のため遮断される。カテゴリ指定時も許可リスト外の値は通らない。根拠: [verification-2026-08-26-kb-vqv-metadata.md](../verification-2026-08-26-kb-vqv-metadata.md)（PR #55）。
 - `filters.modelType`: UI 機種絞り込み項目（6項目）。サーバー側 `UI_MODEL_FILTERS` が対象機種へ展開し（例 `AXIEZ` → `AXIEZ` / `AXIEZ(KE-WF・KE-HF)` / `駅舎エレ`）、`model_type` に対する **`listContains`（リスト要素の完全一致）** の `orAll` で検索前に絞り込む。KB の `model_type` は list 型 / string 型が混在するが、string 型はスカラー＝単要素リスト扱いで `listContains` に一致する（2026-08-26 実機確認）。旧実装の `stringContains`（部分一致。`AXIEZ` が `AXIEZ-LINKs` にも一致していた）は廃止。機種を指定した場合でも、全機種共通文書（`model_type` が `*` / `general`）は常に検索対象に含める（**展開機種 OR `*` OR `general`**）。空文字・空配列・キー欠落は実データ 0 件のため空文字句は持たない。加えて取得後に要素完全一致の post-filter と取扱機種スコープ（`HANDLED_MODEL_TYPES`）を安全弁として適用する。根拠: [verification-2026-08-26-kb-vqv-metadata.md](../verification-2026-08-26-kb-vqv-metadata.md) §4/§5.4（PR #55）、[rag-model-filter-mapping-2026-08-26.md](../rag-model-filter-mapping-2026-08-26.md) §1/§4（PR #54）。
@@ -114,7 +118,7 @@ Anthropic モデルでは能力表に従い、対応しない sampling / thinkin
 - カテゴリ未指定時の**本命優先 2 段階 retrieve は 2026-08-26 に一時停止**（少数カテゴリが全検索でヒットしない副作用のため。mona 了承済み）。現在は未指定時も常に単一の retrieve（対象は実カテゴリ10種の許可リスト内）。後継方式の検討は [issue #61](https://github.com/yukiworkspace/EleKnowledge-AI/issues/61)。ユーザーが category を選んでいる場合はそれを尊重（従来どおり）。
 - 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。
 - `priorityExpanded`: 本命→全資料へ拡大したとき `true` だった診断用フィールド（チャット UI では未表示）。優先 retrieve 停止中は**常に `false`**（API 互換のためフィールドは残置）。
-- `mode`: API 上は `normal` \| `spec` を受け付ける。現行チャット UI は常に `normal`。`spec` は **非推奨**で、サーバ側で `normal` に正規化し、カテゴリ未指定時は本命（`spec`/`tech_info`/`std`）を強制する。
+- `mode`: API 上は `normal` \| `spec` \| `law` を受け付ける（詳細は上記 Request の `mode`）。現行チャット UI は常に `normal`。`spec` は **非推奨**で、サーバ側で `normal` に正規化し、カテゴリ未指定時は本命（`spec`/`tech_info`/`std`）を強制する。`law` は `filters` を無視する。
 - `sourceUri` の形式は環境変数 `CITATION_URI_MODE`（SAM パラメータ `CitationUriMode`）で切り替える（デプロイ順を壊さないための段階移行スイッチ）。
   - `s3`（移行完了後の姿。上の例）: **`s3://` URI**。プリサイン HTTPS URL は応答にも DynamoDB にも含めない。フロントは `documentHref()` で中継ページ `/doc?uri=...` へのリンクに変換し、クリック時に `GET /rag/document` で実 URL を都度発行する。
   - `presigned`（既定・移行互換）: 従来どおり**プリサイン HTTPS URL**（TTL は `PresignedUrlExpiresIn`、既定 300 秒）。受付（`GET /rag/document` と `/doc`）だけを先に本番反映しても、デプロイ済みフロントを壊さないためのモード。受付の実機確認とフロント反映（Amplify）の完了後に `s3` へ切り替える。
@@ -171,9 +175,11 @@ Authorization: Bearer <IdToken>
 
 ## 500 応答の形と構造化ログ（2026-09-11）
 
-> 最終検証: 2026-09-25 — #111 / #134 のログ項目、#133 の契約、#139 の最新アクセスログ形式を照合（未デプロイ。#111 / #139 のマージ・SAM デプロイ後に有効）
+> 最終検証: 2026-10-09 — セッション読取失敗の 500 化と、内部の見出しタスクで `rag_request` を出さない挙動を app.py と照合（未デプロイ。マージ・SAM デプロイ後に有効）。ログ項目・アクセスログ形式は 2026-09-25 に #111 / #134 / #133 / #139 と照合
 
 `POST /rag/query` の 500 は AWS のエラーメッセージを返さず、一般化した本文と API Gateway のリクエスト ID だけを返す。
+
+既存セッションの所有者確認・モード確認・履歴取得で DynamoDB の読取に失敗した場合も、この 500 になる（`rag_error` の `stage` は `history`）。以前は「確認できなかった」ことを 404（`NotFound`）として返したり、履歴取得の失敗を空履歴として回答生成を続けたりしていたが、いずれも行わない。404 は、セッションが存在しない・他人のものと確認できたときだけ返す。
 
 ```json
 { "error": "InternalServerError", "message": "処理に失敗しました。時間をおいて再度お試しください。", "requestId": "<apiRequestId>" }
@@ -183,7 +189,7 @@ CloudWatch Logs には 1 リクエスト 1 行の構造化行が出る（本文�
 
 | event | 主な項目 | 用途 |
 |---|---|---|
-| `rag_request` | `apiRequestId`, `statusCode`, `responseType`, `pageCandidates`, `sourceDocuments`, `priorityExpanded`, `latencyMs`。`pageCandidates` / `sourceDocuments` は件数 | アクセスログの `requestId` と結合（保存クエリ `request-by-id`） |
+| `rag_request` | `apiRequestId`, `statusCode`, `responseType`, `pageCandidates`, `sourceDocuments`, `priorityExpanded`, `latencyMs`。`pageCandidates` / `sourceDocuments` は件数。非同期の見出し生成（内部タスク）は HTTP リクエストではないため出さない | アクセスログの `requestId` と結合（保存クエリ `request-by-id`） |
 | `rag_error` | `apiRequestId`, `stage`（retrieve / generate / save / history / `unknown`）, `errorCode`, `exceptionClass`, `latencyMs` | 500 の段階と原因 |
 | `document_open` | `apiRequestId`, `documentName` | 資料到達の追跡 |
 | `reformulation` | なし（イベント名のみ） | 直前の回答に言い換えの印（`reformulatedAt`）を付けた |

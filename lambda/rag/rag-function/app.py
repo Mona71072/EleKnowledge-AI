@@ -2102,30 +2102,29 @@ def owns_session(session_id: str, user_id: str) -> bool:
     """
     if not session_id or not user_id:
         return False
-    try:
-        response = chatlogs_table.query(
-            KeyConditionExpression='sessionId = :sid',
-            ExpressionAttributeValues={':sid': session_id},
-            Limit=1
-        )
-    except ClientError as e:
-        print(f"[rag] stage=session_ownership {telemetry._exception_label(e)}")
-        return False
+    # 読取に失敗した場合（ClientError）は握りつぶさず呼び出し元へ伝える。
+    # 「存在しない／他人のもの」(False → 404) と「確認できなかった」(例外 → 一般化した 500) を
+    # 区別するため。構造化ログ（rag_error）は lambda_handler 側の error_response が出す。
+    response = chatlogs_table.query(
+        KeyConditionExpression='sessionId = :sid',
+        ExpressionAttributeValues={':sid': session_id},
+        Limit=1
+    )
     items = response.get('Items', [])
     return bool(items) and items[0].get('userId') == user_id
 
 
 def get_session_rag_mode(session_id: str) -> str | None:
-    """Return a session's mode; legacy messages without ragMode are normal."""
-    try:
-        response = chatlogs_table.query(
-            KeyConditionExpression='sessionId = :sid',
-            ExpressionAttributeValues={':sid': session_id},
-            Limit=10,
-        )
-    except ClientError as exc:
-        print(f"Error checking session mode: {exc}")
-        return None
+    """Return a session's mode; legacy messages without ragMode are normal.
+
+    セッションに行が無ければ None（404 の根拠）。DynamoDB の読取失敗は
+    ClientError のまま送出し、呼び出し元で一般化した 500 にする。
+    """
+    response = chatlogs_table.query(
+        KeyConditionExpression='sessionId = :sid',
+        ExpressionAttributeValues={':sid': session_id},
+        Limit=10,
+    )
     for item in response.get('Items', []):
         if item.get('role') in ('user', 'assistant'):
             return item.get('ragMode') or 'normal'
@@ -2133,40 +2132,45 @@ def get_session_rag_mode(session_id: str) -> str | None:
 
 
 def get_chat_history(session_id: str, limit: int = 10, mode: str = 'normal') -> list:
-    """Get recent chat history for this mode (legacy messages are normal)."""
-    try:
-        collected = []
-        exclusive_start = None
-        while len(collected) < limit:
-            kwargs = {
-                'KeyConditionExpression': 'sessionId = :sid',
-                'FilterExpression': 'attribute_not_exists(#del) OR #del = :false',
-                'ExpressionAttributeNames': {'#del': 'deleted'},
-                'ExpressionAttributeValues': {':sid': session_id, ':false': False},
-                'ScanIndexForward': False,
-                'Limit': max(limit * 2, 20),
-            }
-            if exclusive_start:
-                kwargs['ExclusiveStartKey'] = exclusive_start
-            response = chatlogs_table.query(**kwargs)
-            collected.extend(response.get('Items') or [])
-            exclusive_start = response.get('LastEvaluatedKey')
-            if not exclusive_start:
-                break
-        messages = collected[:limit]
-        messages.reverse()  # Oldest first
-        return [
-            message for message in messages
-            if (message.get('ragMode') or 'normal') == mode
-        ]
+    """Get recent chat history for this mode (legacy messages are normal).
 
-    except ClientError as e:
-        print(f"[rag] stage=chat_history {telemetry._exception_label(e)}")
-        return []
+    読取失敗（ClientError）を空履歴として扱うと、文脈なしで回答を生成してしまう。
+    送出して一般化した 500 にする。
+    """
+    collected = []
+    exclusive_start = None
+    while len(collected) < limit:
+        kwargs = {
+            'KeyConditionExpression': 'sessionId = :sid',
+            'FilterExpression': 'attribute_not_exists(#del) OR #del = :false',
+            'ExpressionAttributeNames': {'#del': 'deleted'},
+            'ExpressionAttributeValues': {':sid': session_id, ':false': False},
+            'ScanIndexForward': False,
+            'Limit': max(limit * 2, 20),
+        }
+        if exclusive_start:
+            kwargs['ExclusiveStartKey'] = exclusive_start
+        response = chatlogs_table.query(**kwargs)
+        collected.extend(response.get('Items') or [])
+        exclusive_start = response.get('LastEvaluatedKey')
+        if not exclusive_start:
+            break
+    messages = collected[:limit]
+    messages.reverse()  # Oldest first
+    return [
+        message for message in messages
+        if (message.get('ragMode') or 'normal') == mode
+    ]
+
+
 
 
 def lambda_handler(event, context):
     """1 リクエスト 1 行の構造化ログを出す外側。本体は handle_rag_request。"""
+    # 非同期の見出し生成は HTTP リクエストではない。statusCode=0・apiRequestId 空の
+    # rag_request 行を作らないよう、ログ契約の対象外としてここで分岐する。
+    if isinstance(event, dict) and event.get('_internalTask') == 'session-title':
+        return handle_session_title_task(event)
     started_at = time.perf_counter()
     response = handle_rag_request(event, context, started_at)
     telemetry.log_request(event, response, started_at)

@@ -133,7 +133,7 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 
 実装メモ: chatlogs に失敗専用 GSI は無いため Scan + Filter。試用初期向け。`queryFilters` は RAG Lambda が assistant 行に保存する（2026-07-29〜）。
 
-**改善提案パネル（v0）:** `/admin/failures` 上部で failures レスポンスをクライアント集計し定型提案を表示。`GET /chat/admin/improvement-summary` は**未実装**（後続）。設計: [design-2026-07-29-improvement-proposals.md](./design-2026-07-29-improvement-proposals.md)
+**改善提案パネル（v0）:** `/admin/failures` 上部で failures レスポンスをクライアント集計し定型提案を表示。`GET /chat/admin/improvement-summary` は**未実装**（後続）。設計: [design-2026-07-29-improvement-proposals.md](../design-2026-07-29-improvement-proposals.md)
 
 ## PUT /chat/admin/messages/{sessionId}/{messageId}/triage
 

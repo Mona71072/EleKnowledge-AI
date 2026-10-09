@@ -7,7 +7,7 @@ related-code: lambda/metrics/aggregator/app.py, lambda/metrics/read/app.py, fron
 # 設計: 運用ダッシュボード v2 — 毎朝の判断・健全性・切り分け・コスト
 
 > **状態:** 実装は #106 / #110 / #111 / #112 / #114。API の正は `docs/api/`。この骨子と違う箇所は API 文書と実装の型を正とする。
-> **前提:** データ源は [telemetry-inventory-2026-09-10.md](./telemetry-inventory-2026-09-10.md) に列挙したものが上限。棚卸しに無いものは「足す提案」として作業量つきで書く。
+> **前提:** データ源は telemetry-inventory-2026-09-10.md（このリポジトリには存在しない） に列挙したものが上限。棚卸しに無いものは「足す提案」として作業量つきで書く。
 > **上書き対象:** [design-2026-09-10-metrics-v2.md](./design-2026-09-10-metrics-v2.md) の §6（read API）・§7（UI）・§11（PR 分割）は本書で置き換える。§3〜§5（JST 境界・毎時集計・日次行）は本書の §6 の差分を足したうえで **そのまま生かす**。[design-2026-09-10-retrieval-trace.md](./design-2026-09-10-retrieval-trace.md) は変更しない（§5.1 でコスト算出の役割だけ変える）。
 > **記法:** 外部仕様への言及は ◎ = 公式仕様・実測で確度が高い、△ = 記憶に頼っており実装時に一次情報で確認、の 2 段で書き分ける。
 > **モック:** [design-2026-09-10-dashboard-v2-mock.html](./design-2026-09-10-dashboard-v2-mock.html)（「平穏な朝」「異常がある朝」の切替つき。数字は表示例。§8 の回答と別立て B2 / B3 / B5 を反映済み）
