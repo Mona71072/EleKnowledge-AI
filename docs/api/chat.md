@@ -160,6 +160,8 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 - 設計: [design-2026-09-10-dashboard-v2.md](../design-2026-09-10-dashboard-v2.md) §9.4
 
 ## POST /chat/suggestions
+> 最終検証: 2026-10-09 — product wish の ragMode を追加
+
 利用者の「こうなってほしい」自由記述（認証必須）。👎 とは別系統。
 
 **Request:**
@@ -176,9 +178,12 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 | `sessionId` | no | 関連チャットセッション（所有する場合のみ保存） |
 
 - chatlogs に `role=product_wish` として保存（`sessionId=wish-{sub}`）
+- `sessionId` が所有セッションのときは、そのセッションのモードを `contextRagMode`（`normal` / `law`）として併せて保存する。他人のセッションや取得できない場合は保存しない（一覧では `normal` 扱い）
 - チャット履歴一覧には出さない
 
 ## GET /chat/admin/suggestions
+> 最終検証: 2026-10-09 — product wish の ragMode を追加
+
 改善要望一覧（**admin のみ**）
 
 **Query:** `limit` = 1〜100（既定 50）
@@ -194,6 +199,7 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
       "text": "機種なしでも検索してほしい",
       "timestamp": "2026-07-29T12:00:00",
       "contextSessionId": "session_xxxxx",
+      "ragMode": "law",
       "triage": { "status": "open" }
     }
   ],
@@ -201,4 +207,5 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 }
 ```
 
+- `ragMode` は関連セッションのモード（`law` のみ `law`、それ以外・記録なしは `normal`）。法令モードのセッションを開くリンクに `mode=law` を付けるために使う
 - `sessionId` と `triage` は 2026-09-11 に追加（PR #114）。要望の既読 / 対応済みは上記 PUT triage で保存する（`in_progress` = 既読）

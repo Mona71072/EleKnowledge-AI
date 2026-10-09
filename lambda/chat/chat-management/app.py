@@ -224,6 +224,32 @@ def owns_session(session_id: str, user_id: str) -> bool:
     return bool(items) and items[0].get('userId') == user_id
 
 
+def get_session_owner_and_mode(session_id: str, user_id: str) -> tuple:
+    """owns_session と同じ判定を 1 回の Query で行い、セッションの ragMode も返す。
+
+    戻り値は (所有者か, モード)。所有者でない・存在しない場合は (False, None)。
+    モードは先頭の user/assistant メッセージの ragMode（旧データは normal）。
+    取れなければ None。rag-function の get_session_rag_mode と同じ読み方。
+    """
+    if not session_id or not user_id:
+        return False, None
+    try:
+        response = chatlogs_table.query(
+            KeyConditionExpression='sessionId = :sid',
+            ExpressionAttributeValues={':sid': session_id},
+            Limit=10,
+        )
+    except ClientError:
+        return False, None
+    items = response.get('Items', [])
+    if not items or items[0].get('userId') != user_id:
+        return False, None
+    for item in items:
+        if item.get('role') in ('user', 'assistant'):
+            return True, item.get('ragMode') or 'normal'
+    return True, None
+
+
 # Custom JSON encoder for Decimal
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -718,8 +744,12 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
     }
 
 
-def save_product_wish(user_id: str, text: str, context_session_id: str = None) -> dict:
-    """利用者の「こうなってほしい」自由記述を chatlogs に保存（role=product_wish）。"""
+def save_product_wish(user_id: str, text: str, context_session_id: str = None,
+                      context_rag_mode: str = None) -> dict:
+    """利用者の「こうなってほしい」自由記述を chatlogs に保存（role=product_wish）。
+
+    context_rag_mode は関連セッションのモード（normal / law）。不明なら記録しない。
+    """
     text = (text or '').strip()
     if not text:
         raise ValueError('text is required')
@@ -742,6 +772,8 @@ def save_product_wish(user_id: str, text: str, context_session_id: str = None) -
     }
     if context_session_id:
         item['contextSessionId'] = context_session_id
+        if context_rag_mode in ('normal', 'law'):
+            item['contextRagMode'] = context_rag_mode
 
     chatlogs_table.put_item(Item=item)
     return {'messageId': message_id, 'timestamp': now}
@@ -789,6 +821,8 @@ def list_product_wishes(limit: int = FAILURES_DEFAULT_LIMIT) -> dict:
             'text': item.get('content') or '',
             'timestamp': item.get('timestamp'),
             'contextSessionId': item.get('contextSessionId'),
+            # 旧データ（contextRagMode 未記録）は normal 扱い
+            'ragMode': 'law' if item.get('contextRagMode') == 'law' else 'normal',
             'triage': normalize_triage(item),
         })
 
@@ -1177,10 +1211,15 @@ def lambda_handler(event, context):
         elif http_method == 'POST' and path.rstrip('/').endswith('/chat/suggestions'):
             text = (body.get('text') or body.get('content') or '').strip()
             context_session_id = body.get('sessionId') or body.get('contextSessionId')
-            if context_session_id and not owns_session(context_session_id, caller_id):
-                context_session_id = None
+            context_rag_mode = None
+            if context_session_id:
+                # 他人のセッションのモードは読まない（所有者判定と同じ Query で取得）
+                owned, context_rag_mode = get_session_owner_and_mode(context_session_id, caller_id)
+                if not owned:
+                    context_session_id = None
+                    context_rag_mode = None
             try:
-                saved = save_product_wish(caller_id, text, context_session_id)
+                saved = save_product_wish(caller_id, text, context_session_id, context_rag_mode)
             except ValueError as ve:
                 return {
                     'statusCode': 400,
