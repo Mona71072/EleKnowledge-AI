@@ -1,4 +1,5 @@
-import type { FailureItem, FeedbackReason } from './chat-failures';
+import type { FailureItem, FeedbackReason, FailureKind } from './chat-failures';
+import { isReformulatedFailure } from './failures-selection.mjs';
 
 /** しきい値以上で改善提案カードを出す（試用初期） */
 export const IMPROVEMENT_PROPOSAL_THRESHOLD = 3;
@@ -12,6 +13,7 @@ export interface FailureSignalSummary {
   total: number;
   badCount: number;
   notFoundCount: number;
+  reformulatedCount: number;
   reasonCounts: Record<string, number>;
   badWithoutReason: number;
 }
@@ -101,15 +103,28 @@ const PROPOSAL_TEMPLATES: Record<
   },
 };
 
-export function aggregateFailureSignals(items: FailureItem[]): FailureSignalSummary {
+/** 対応済み・対応しない は集計から除く（設計 §9.2: 期間内・未対応の信号だけ） */
+export function isUnresolved(item: FailureItem): boolean {
+  const status = item.triage?.status ?? 'open';
+  return status !== 'done' && status !== 'wontfix';
+}
+
+export function aggregateFailureSignals(items: FailureItem[], onlyUnresolved = true): FailureSignalSummary {
   const reasonCounts: Record<string, number> = {};
   let badCount = 0;
   let notFoundCount = 0;
+  let reformulatedCount = 0;
   let badWithoutReason = 0;
+  let total = 0;
 
   for (const item of items) {
+    if (onlyUnresolved && !isUnresolved(item)) continue;
+    total += 1;
     if (item.signals.includes('not_found') || item.responseType === 'not_found') {
       notFoundCount += 1;
+    }
+    if (isReformulatedFailure(item)) {
+      reformulatedCount += 1;
     }
     if (item.feedback === 'bad' || item.signals.includes('bad')) {
       badCount += 1;
@@ -123,9 +138,10 @@ export function aggregateFailureSignals(items: FailureItem[]): FailureSignalSumm
   }
 
   return {
-    total: items.length,
+    total,
     badCount,
     notFoundCount,
+    reformulatedCount,
     reasonCounts,
     badWithoutReason,
   };
@@ -163,7 +179,7 @@ export function buildImprovementProposals(
 
 export function filterFailureItems(
   items: FailureItem[],
-  kind: 'all' | 'bad' | 'not_found',
+  kind: FailureKind,
   reasonFilter: ReasonFilterKey,
 ): FailureItem[] {
   let filtered = items;
@@ -176,6 +192,8 @@ export function filterFailureItems(
     filtered = filtered.filter(
       (i) => i.responseType === 'not_found' || i.signals.includes('not_found'),
     );
+  } else if (kind === 'reformulated') {
+    filtered = filtered.filter(isReformulatedFailure);
   }
 
   if (reasonFilter === 'all') return filtered;
