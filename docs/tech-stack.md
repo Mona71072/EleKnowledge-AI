@@ -10,16 +10,19 @@ related-code: frontend/package.json, lambda/, infrastructure/
 
 ## フロントエンド
 
+> 最終検証: 2026-10-06 — PR #167の依存更新・Node.js 22設定・CI検証記録を照合
+
 | カテゴリ | 技術 | バージョン | 用途 |
 |---------|------|-----------|------|
-| Framework | Next.js | 14.x | App Router、SSR/SSG |
-| UI Library | React | 18.x | コンポーネント開発 |
+| Framework | Next.js | 16.3.x | App Router、静的 export |
+| UI Library | React | 19.2.x | コンポーネント開発 |
 | スタイリング | Tailwind CSS | 3.x | ユーティリティファースト |
 | UI Components | shadcn/ui | latest | 再利用可能コンポーネント |
 | 状態管理 | Zustand | 4.x | 軽量状態管理 |
 | フォーム | React Hook Form | 7.x | フォーム検証 |
 | HTTP Client | Axios | 1.x | API通信 |
 | 認証 | AWS Amplify | 6.x | Cognito統合 |
+| ビルドランタイム | Node.js | 22.x | Amplify Hostingのフロントエンドビルド |
 
 ## バックエンド
 

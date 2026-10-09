@@ -22,6 +22,9 @@ function DocContent() {
 
   useEffect(() => {
     const uri = searchParams.get('uri');
+    // どの回答の引用から開いたか（到達ファネルの計測用。無くても開ける）
+    const ctx = { sessionId: searchParams.get('s'), messageId: searchParams.get('m') };
+    const ctxQuery = ctx.sessionId && ctx.messageId ? `&s=${encodeURIComponent(ctx.sessionId)}&m=${encodeURIComponent(ctx.messageId)}` : '';
     if (!uri) {
       setError('文書が指定されていません。');
       return;
@@ -31,7 +34,7 @@ function DocContent() {
 
     (async () => {
       try {
-        const url = await resolveDocumentUrl(uri);
+        const url = await resolveDocumentUrl(uri, ctx);
         if (cancelled) return;
         // PDF のページ指定は署名対象外のフラグメントなので、そのまま引き継ぐ
         const fragment = window.location.hash;
@@ -40,7 +43,7 @@ function DocContent() {
         if (cancelled) return;
         if (err instanceof DocumentAuthRequiredError) {
           setNeedsLogin(true);
-          const back = `/doc?uri=${encodeURIComponent(uri)}${window.location.hash}`;
+          const back = `/doc?uri=${encodeURIComponent(uri)}${ctxQuery}${window.location.hash}`;
           router.replace(`/login?next=${encodeURIComponent(back)}`);
           return;
         }

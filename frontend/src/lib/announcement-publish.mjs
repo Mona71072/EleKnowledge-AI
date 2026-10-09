@@ -45,3 +45,16 @@ export function resolveAnnouncementPublishFields({
 
   return { status: 'published', publishAt: new Date(nowMs).toISOString() };
 }
+
+/**
+ * 「表示終了」（endAt = 今）を出せるか。
+ * 開始前のメンテナンスは endAt が startAt より前になり write Lambda が 400 を返すため、削除で取り消す。
+ *
+ * @param {{ type: string, startAt?: string }} announcement
+ * @param {number} [nowMs]
+ * @returns {boolean}
+ */
+export function canEndAnnouncementNow(announcement, nowMs = Date.now()) {
+  if (announcement.type !== 'maintenance' || !announcement.startAt) return true;
+  return Date.parse(announcement.startAt) < nowMs;
+}

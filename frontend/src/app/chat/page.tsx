@@ -14,6 +14,8 @@ import { ChatMessageFeedback } from '@/components/chat/ChatMessageFeedback';
 import { ProductWishModal } from '@/components/chat/ProductWishModal';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { documentHref, documentHrefWithPage } from '@/lib/documents';
+import { getAnnouncements, Announcement } from '@/lib/announcements';
+import { NoticeBanner } from '@/components/announcements/NoticeBanner';
 import {
   BadFeedbackReasonId,
   FEEDBACK_COMMENT_MAX,
@@ -105,6 +107,22 @@ export default function ChatPage() {
   const [wishSubmitting, setWishSubmitting] = useState(false);
   const [wishSent, setWishSent] = useState(false);
   const [wishError, setWishError] = useState<string | null>(null);
+  // 表示中の告知（障害中・復旧・メンテナンスなど、チャット画面の帯に出すもの）
+  const [notices, setNotices] = useState<Announcement[]>([]);
+
+  useEffect(() => {
+    getAnnouncements(10)
+      .then((res) => {
+        const seen = new Set<string>();
+        const merged = [...(res.activeMaintenance ?? []), ...res.announcements].filter((a) => {
+          if (seen.has(a.announcementId)) return false;
+          seen.add(a.announcementId);
+          return true;
+        });
+        setNotices(merged);
+      })
+      .catch(() => setNotices([]));
+  }, []);
 
   // value は Knowledge Base の実 category 値に対応する安定キー
   // 並び: 本命（C / TI / 据付基準）を先に、その他は後。
@@ -718,6 +736,8 @@ const normalizeTableMarkdown = (text: string): string => {
 
   return (
     <div className="h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col overflow-hidden">
+      {/* 障害中・メンテナンスなどの帯（critical は閉じられない） */}
+      <NoticeBanner announcements={notices} />
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-2 flex justify-between items-center flex-shrink-0 shadow-sm backdrop-blur-sm bg-white/95">
         <div className="flex items-center gap-2.5">
@@ -991,7 +1011,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                   {message.pageCandidates.map((c, idx) => (
                                     <li key={`${c.sourceUri}-${idx}`} className="text-sm">
                                       <a
-                                        href={documentHrefWithPage(c.sourceUri, c.pageNumber)}
+                                        href={documentHrefWithPage(c.sourceUri, c.pageNumber, { sessionId: currentSession, messageId: message.id })}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="font-medium text-blue-700 hover:underline"
@@ -1095,7 +1115,7 @@ const normalizeTableMarkdown = (text: string): string => {
                               {primaryDocs.map((doc, idx) => (
                                 <a
                                   key={`${doc.sourceUri || doc.documentName}-${idx}`}
-                                  href={documentHref(doc.sourceUri)}
+                                  href={documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id })}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"
@@ -1127,7 +1147,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                       {extraDocs.map((doc, idx) => (
                                         <a
                                           key={`${doc.sourceUri || doc.documentName}-extra-${idx}`}
-                                          href={documentHref(doc.sourceUri)}
+                                          href={documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id })}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"
