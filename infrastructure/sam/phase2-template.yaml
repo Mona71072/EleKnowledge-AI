@@ -73,7 +73,7 @@ Parameters:
     Type: String
     Default: ''
     AllowedPattern: '^$|^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$'
-    Description: KMS key of the dev law bucket for read-only enrichment
+    Description: 顧客管理キーを使うときだけ指定。AWS 管理キー（aws/s3）なら空でよい
 
   KnowledgeBaseDataSourceBucket:
     Type: String
@@ -291,6 +291,8 @@ Conditions:
   LawFullTextDevEnabled: !And
     - !Condition LawRagDevEnabled
     - !Not [!Equals [!Ref LawDataBucketName, '']]
+  HasLawDataBucketKmsKey: !And
+    - !Condition LawFullTextDevEnabled
     - !Not [!Equals [!Ref LawDataBucketKmsKeyArn, '']]
 
 Globals:
@@ -437,7 +439,7 @@ Resources:
                       aws:ResourceAccount: !Ref AWS::AccountId
                 - !Ref AWS::NoValue
               - !If
-                - LawFullTextDevEnabled
+                - HasLawDataBucketKmsKey
                 - Effect: Allow
                   Action: kms:Decrypt
                   Resource: !Ref LawDataBucketKmsKeyArn

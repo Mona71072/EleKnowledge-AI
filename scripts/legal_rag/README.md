@@ -107,7 +107,7 @@ python .\scripts\legal_rag\upload_egov_laws.py `
 既知の参照不足・原因・影響・A/B/C比較の正本は`docs/features/development/legal-rag-design.md`の「既知の不具合: 収録済み条文の参照不足」。KB取込失敗ではなく、関連チャンク検索と同一本文2チャンク制限により後半がモデルへ渡らない事象だった。
 
 - 案Bは検索で採用した法令本文だけをS3から全文補完し、生成と引用に同じ参照集合を使う。全文6本文、単体8,000文字/32KB、合計20,000文字。補完時間枠は2秒、生成時間を確保できない場合は部分参照へ戻す。
-- `LawDataBucketName` / `LawDataBucketKmsKeyArn`はdev法令有効時だけGetObject/Decryptを許可し、構成bucket・owner・版指定の派生TXTキーだけを読める。raw XML読取り・書込みは追加しない。通常RAGは変更しない。
+- `LawDataBucketName`はdev法令有効時だけGetObjectを許可し、`LawDataBucketKmsKeyArn`は顧客管理キーを使うときだけ指定してkms:Decryptを許可する（AWS管理キー`aws/s3`なら空でよい）。構成bucket・owner・版指定の派生TXTキーだけを読める。raw XML読取り・書込みは追加しない。通常RAGは変更しない。
 - 上限/読取り失敗は部分参照としてプロンプトと出典へ状態/理由を渡す。`law_reference_coverage`ログはrequest IDと件数/理由/文字数のみ。質問・引用全文・個人情報は出さない。
 - dev change set `law-full-text-20261002`は`UPDATE_COMPLETE`。実変更はRagFunctionのCode/EnvironmentとRagLambdaRoleのPolicies、置換なし。SDK同梱を維持し、本番変更・KB再同期・S3再uploadは行っていない。
 - 481テスト成功、実S3/KBの6条文で最終項の参照保持、認証済みAPIの5送信で対象6条文の全文状態と後半の要件回答を確認。実ログのサーバー処理9.57〜25.95秒、参照本文3,455〜10,495文字/送信。これは速度目標達成や法的正確性の認定ではない。

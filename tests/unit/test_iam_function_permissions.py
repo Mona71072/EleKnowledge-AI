@@ -139,6 +139,12 @@ def test_rag_and_chat_roles_are_separate_and_restrict_api_actions():
     assert kms_statements[0]["Resource"] == "LawDataBucketKmsKeyArn"
     assert kms_statements[0]["Condition"]["StringEquals"]["kms:ViaService"] == "s3.${AWS::Region}.amazonaws.com"
     assert "LawFullTextDevEnabled" in str(_policies(template, rag_role))
+    # kms:Decrypt は顧客管理キー指定時だけ。AWS 管理キー（空指定）では GetObject のみ
+    kms_condition = template["Conditions"]["HasLawDataBucketKmsKey"]
+    assert kms_condition[0] == "LawFullTextDevEnabled"
+    assert "LawDataBucketKmsKeyArn" in str(kms_condition)
+    assert "LawDataBucketKmsKeyArn" not in str(template["Conditions"]["LawFullTextDevEnabled"])
+    assert "HasLawDataBucketKmsKey" in str(_policies(template, rag_role))
     rerank_policy = _find_policy(_policies(template, rag_role), "RerankAccess")
     assert rerank_policy is not None
     rerank_policy = rerank_policy["PolicyDocument"]["Statement"][0]
