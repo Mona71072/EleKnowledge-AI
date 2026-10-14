@@ -10,6 +10,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
 )
@@ -45,22 +46,52 @@ for line in CATALOG.read_text(encoding='utf-8').splitlines():
 assert [len(groups[k]) for k in range(3, 8)] == [10, 12, 7, 16, 8]
 assert len({x[1] for group in groups.values() for x in group}) == 53
 
-pdfmetrics.registerFont(TTFont('JP', 'C:/Windows/Fonts/YuGothR.ttc', subfontIndex=0))
-pdfmetrics.registerFont(TTFont('JPBold', 'C:/Windows/Fonts/YuGothB.ttc', subfontIndex=0))
-NAVY = colors.HexColor('#163347')
-TEAL = colors.HexColor('#147d88')
-MUTED = colors.HexColor('#526673')
+# Match the distributed manual's CSS; preserve this catalog's four-page structure.
+pdfmetrics.registerFont(TTFont('JP', 'C:/Windows/Fonts/BIZ-UDGothicR.ttc', subfontIndex=1))
+pdfmetrics.registerFont(TTFont('JPBold', 'C:/Windows/Fonts/BIZ-UDGothicB.ttc', subfontIndex=1))
+TEXT = colors.HexColor('#1a1a1a')
+BLUE = colors.HexColor('#1d4ed8')
+LIGHT_BLUE = colors.HexColor('#eff6ff')
+RULE = colors.HexColor('#93c5fd')
+GRID = colors.HexColor('#cbd5e1')
+MUTED = colors.HexColor('#475569')
 styles = {
-    'title': ParagraphStyle('title', fontName='JPBold', fontSize=23, leading=32, textColor=NAVY, spaceAfter=9),
-    'sub': ParagraphStyle('sub', fontName='JP', fontSize=10, leading=17, textColor=MUTED, spaceAfter=9),
-    'body': ParagraphStyle('body', fontName='JP', fontSize=9, leading=15, textColor=NAVY, wordWrap='CJK', spaceAfter=7),
-    'small': ParagraphStyle('small', fontName='JP', fontSize=7.7, leading=12, textColor=MUTED, wordWrap='CJK', spaceAfter=5),
-    'heading': ParagraphStyle('heading', fontName='JPBold', fontSize=13, leading=20, textColor=TEAL, spaceBefore=12, spaceAfter=7),
-    'cell': ParagraphStyle('cell', fontName='JP', fontSize=8.6, leading=13, textColor=NAVY, wordWrap='CJK'),
-    'headcell': ParagraphStyle('headcell', fontName='JPBold', fontSize=8, leading=12, textColor=colors.white),
+    'title': ParagraphStyle('title', fontName='JPBold', fontSize=18, leading=26, textColor=TEXT, wordWrap='CJK'),
+    'sub': ParagraphStyle('sub', fontName='JP', fontSize=10.5, leading=17.85, textColor=MUTED, spaceAfter=9),
+    'body': ParagraphStyle('body', fontName='JP', fontSize=10.5, leading=17.85, textColor=TEXT, wordWrap='CJK', spaceAfter=7),
+    'small': ParagraphStyle('small', fontName='JP', fontSize=9, leading=15.3, textColor=MUTED, wordWrap='CJK', spaceAfter=5),
+    'heading': ParagraphStyle('heading', fontName='JPBold', fontSize=13.5, leading=23, textColor=TEXT, spaceBefore=16, spaceAfter=8, keepWithNext=True),
+    'noteheading': ParagraphStyle('noteheading', fontName='JPBold', fontSize=11.5, leading=19.55, textColor=colors.HexColor('#1e3a8a'), spaceBefore=14, spaceAfter=6, keepWithNext=True),
+    'cell': ParagraphStyle('cell', fontName='JP', fontSize=9.8, leading=16.66, textColor=TEXT, wordWrap='CJK'),
+    'headcell': ParagraphStyle('headcell', fontName='JPBold', fontSize=9.8, leading=16.66, textColor=TEXT),
 }
 
+
+class SectionHeading(Paragraph):
+    """Draw the manual's light-blue rule underneath a subsection heading."""
+
+    def draw(self):
+        super().draw()
+        self.canv.setStrokeColor(RULE)
+        self.canv.setLineWidth(1.5)
+        self.canv.line(0, -2, self.width, -2)
+
+
 def p(text, style='body'):
+    if style == 'title':
+        title = Table([[Paragraph(text, styles[style])]], colWidths=[178 * mm])
+        title.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), LIGHT_BLUE),
+            ('LINEBEFORE', (0, 0), (0, -1), 4.5, BLUE),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4 * mm),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 2 * mm),
+            ('TOPPADDING', (0, 0), (-1, -1), 2 * mm),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2 * mm),
+        ]))
+        title.spaceAfter = 6 * mm
+        return title
+    if style == 'heading':
+        return SectionHeading(text, styles[style])
     return Paragraph(text, styles[style])
 
 story = []
@@ -73,17 +104,16 @@ def law_table(title, entries):
         number += 1
         stamp = folder.split('_')[1]
         date = f'{stamp[:4]}-{stamp[4:6]}-{stamp[6:]}'
-        data.append([p(str(number), 'cell'), p(f'<link href="{escape(source["本文URL"])}" color="#163347">{escape(name)}</link>', 'cell'), p(date, 'cell')])
-    table = Table(data, colWidths=[12 * mm, 130 * mm, 32 * mm], repeatRows=1, hAlign='LEFT')
+        data.append([p(str(number), 'cell'), p(f'<link href="{escape(source["本文URL"])}" color="#1a1a1a">{escape(name)}</link>', 'cell'), p(date, 'cell')])
+    table = Table(data, colWidths=[12 * mm, 132 * mm, 34 * mm], repeatRows=1, hAlign='LEFT')
     table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), NAVY),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#f0f5f7'), colors.white]),
+        ('BACKGROUND', (0, 0), (-1, 0), LIGHT_BLUE),
+        ('GRID', (0, 0), (-1, -1), 0.75, GRID),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 7),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 7),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('LINEBELOW', (0, 0), (-1, 0), 0.7, TEAL),
+        ('LEFTPADDING', (0, 0), (-1, -1), 2.5 * mm),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 2.5 * mm),
+        ('TOPPADDING', (0, 0), (-1, -1), 1.5 * mm),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 1.5 * mm),
     ]))
     story.extend([p(title + f'　／ {len(entries)}件', 'heading'), table])
 
@@ -106,29 +136,48 @@ story.append(PageBreak())
 story += [p('搬入・条件付き対象と利用案内', 'title')]
 law_table('05　道路・搬入', groups[7][:6])
 law_table('06　条件付き対象', groups[7][6:])
-story += [p('条件付き対象の見方', 'heading'),
-          p('高圧ガス保安法はボンベ等の高圧ガスを扱う場合、作業環境測定法は法令上の作業環境測定が必要となる場合の参照候補です。各法令の適用条件を原文で確認してください。'),
-          p('この一覧に含まれない資料', 'heading'),
-          p('自治体条例、告示・通知・通達、JIS、業界標準、メーカー資料は、この53件に含みません。未施行版・過去版も本一覧の対象外です。すべての関連法令・資料を網羅する一覧ではありません。'),
-          p('利用時の確認', 'heading'),
-          p('法令名をクリックすると、参照元カタログに対応するe-Gov原文を開けます。「収録版の施行日」は一覧に掲載した版の日付であり、資料作成日時点の最新改正を保証する日付ではありません。業務判断の前に原文・施行日・作業条件を確認してください。'),
-          p('作成根拠・版情報', 'heading'),
+story += [p('条件付き対象の見方', 'noteheading'),
+          p('高圧ガス保安法はボンベ等の高圧ガスを扱う場合、作業環境測定法は法令上の作業環境測定が必要となる場合の参照候補です。各法令の適用条件を原文で確認してください。', 'small'),
+          p('この一覧に含まれない資料', 'noteheading'),
+          p('自治体条例、告示・通知・通達、JIS、業界標準、メーカー資料は、この53件に含みません。未施行版・過去版も本一覧の対象外です。すべての関連法令・資料を網羅する一覧ではありません。', 'small'),
+          p('利用時の確認', 'noteheading'),
+          p('法令名をクリックすると、参照元カタログに対応するe-Gov原文を開けます。「収録版の施行日」は一覧に掲載した版の日付であり、資料作成日時点の最新改正を保証する日付ではありません。業務判断の前に原文・施行日・作業条件を確認してください。', 'small'),
+          p('作成根拠・版情報', 'noteheading'),
           p('参照：プロジェクトの「法令RAG 対象法令フォルダ一覧」（一覧基準日2026-10-01、選定説明の検証日2026-10-09）、e-Gov一括ダウンロード付属の法令一覧CSV。53件の法令名・版識別子・未施行欄を照合して作成しました。稼働中の検索基盤と最新改正の照合は実施していません。', 'small'),
-          p('<link href="https://laws.e-gov.go.jp/" color="#147d88">公式原文：e-Gov法令検索</link>　｜　文書版：2026-10-15 / 1.0', 'small')]
+          p('<link href="https://laws.e-gov.go.jp/" color="#1d4ed8">公式原文：e-Gov法令検索</link>　｜　文書版：2026-10-15 / 1.0', 'small')]
 
 def footer(canvas, doc):
-    canvas.setStrokeColor(TEAL)
-    canvas.setLineWidth(0.6)
-    canvas.line(18 * mm, 18 * mm, 192 * mm, 18 * mm)
-    canvas.setFont('JP', 7)
-    canvas.setFillColor(MUTED)
-    canvas.drawString(18 * mm, 13 * mm, 'Ele-Knowledge  |  法令RAG 取扱法令一覧  |  基準日 2026-10-01')
-    canvas.drawRightString(192 * mm, 13 * mm, str(doc.page))
+    canvas.setFont('JP', 6)
+    canvas.setFillColor(colors.HexColor('#64748b'))
+    canvas.drawString(16 * mm, 290 * mm, 'EleKnowledge 法令RAG 取扱法令一覧')
+    canvas.drawRightString(194 * mm, 290 * mm, '第1版 2026-10-15')
+
+
+class NumberedCanvas(pdfcanvas.Canvas):
+    """Use the manual's centered page / total-pages footer."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.page_states = []
+
+    def showPage(self):
+        self.page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        count = len(self.page_states)
+        for state in self.page_states:
+            self.__dict__.update(state)
+            self.setFont('JP', 6)
+            self.setFillColor(colors.HexColor('#64748b'))
+            self.drawCentredString(105 * mm, 5 * mm, f'{self._pageNumber} / {count}')
+            super().showPage()
+        super().save()
 
 target = OUT / '法令RAG_取扱法令一覧_2026-10-15.pdf'
-doc = SimpleDocTemplate(str(target), pagesize=(210 * mm, 297 * mm), rightMargin=18 * mm,
-                        leftMargin=18 * mm, topMargin=17 * mm, bottomMargin=23 * mm,
+doc = SimpleDocTemplate(str(target), pagesize=(210 * mm, 297 * mm), rightMargin=16 * mm,
+                        leftMargin=16 * mm, topMargin=16 * mm, bottomMargin=18 * mm,
                         title='Ele-Knowledge 法令RAG 取扱法令一覧', author='Ele-Knowledge',
                         subject='dev環境向け・53法令・一覧基準日2026-10-01')
-doc.build(story, onFirstPage=footer, onLaterPages=footer)
+doc.build(story, onFirstPage=footer, onLaterPages=footer, canvasmaker=NumberedCanvas)
 print(f'Created {target.name}; verified {number} laws against CSV ({len(rows)} rows).')
