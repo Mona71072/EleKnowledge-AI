@@ -180,7 +180,23 @@ EleKnowledge の WAF ログ配信・WAF アラーム・専用通知 SNS は確�
 - Bedrock 費: 検索トレースのトークン数 × 単価（SSM パラメータ）を日次集計し、管理画面に「今月の推定 Bedrock 費」（P1 で実装）。CloudWatch の ModelId 別トークンは他システム混在のため参考値
 - 共有 KB（OpenSearch Serverless）は他システムと共有のため按分しない
 
-## 10. 変更履歴
+## 10. 開発用依存のhigh脆弱性（#173）
+
+> 最終検証: 2026-10-14 — npm auditとNext ESLintプラグインの依存・呼出し箇所を照合。後続PRでの変更であり、#179のcritical修正とは分離する。
+
+`@next/eslint-plugin-next`がルートディレクトリ探索に使う`fast-glob`は、`micromatch`経由で未修正版の`braces`を取り込む（[GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)）。この依存経路だけをnpmのscoped overrideで`glob@13.0.6`へ置き換える。Nextプラグインが使う`globSync`の絶対パス・配列・braceパターン・Windowsパスと、内部リンクのlint検出が維持されることを合成ディレクトリと実ESLintで検証する。lint規則は削除・無効化しない。
+
+これはfast-glob全APIの互換置換ではない。`glob`は`onlyDirectories`を解釈せず一致ファイルも返すが、Nextの呼出し側は存在するpages/appディレクトリだけを利用する。ファイルが混在するrootDirパターンでも内部リンク違反を検出できることをテストする。Nextプラグイン更新時は`get-root-dirs`の呼出しAPIと利用側を再確認する。他の依存へこのoverrideを広げない。
+
+受入条件は、`npm ci`後の全依存auditでhigh・criticalが0件、production audit成功、互換性テスト・lint・typecheck・既存テスト・build成功。修正版のない脆弱性を例外登録したり、audit対象から除外したりして解消扱いにしない。
+
+> 最終検証: 2026-10-15 — 全依存監査の期限付き例外スキーマ・推移依存への適用・期限切れの拒否をテストで照合。台帳は空で、実際の例外は追加していない。
+
+全依存の監査は`npm run audit:all`で行う。`scripts/dependency-audit-exceptions.json`にはアドバイザリID・理由・期限（JSTの日末）・追跡Issue・人の明示承認へのリンクを必須とする。未登録・期限切れ・形式不正・分類できないhigh/criticalは失敗させる。推移依存も根本のアドバイザリ単位で判定し、別のアドバイザリまで一括免除しない。npm取得失敗やJSON不正を脆弱性0件として扱わない。
+
+今回の台帳は空。仕組みの追加自体は脆弱性の使用許可ではなく、将来の実例外の登録にはAGENTS.mdとの整合と人の明示承認を別途確認する。例外中は修正済みと表示せず、修正版採用後に台帳から削除する。本番依存の監査は別途従来どおり実行する。
+
+## 11. 変更履歴
 
 - 2026-09-10 初版（issue #86 の P0 反映後）
 

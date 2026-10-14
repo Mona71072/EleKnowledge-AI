@@ -50,6 +50,12 @@ jobs:
       - name: Lint frontend
         working-directory: frontend
         run: npm run lint
+      - name: Verify Next lint dependency compatibility
+        working-directory: frontend
+        run: npm run test:lint-dependencies
+      - name: Audit all dependencies for high and critical vulnerabilities
+        working-directory: frontend
+        run: npm run audit:all
       - name: Type check frontend
         working-directory: frontend
         run: npm run typecheck
