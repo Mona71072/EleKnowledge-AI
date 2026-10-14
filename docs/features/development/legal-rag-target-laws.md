@@ -210,6 +210,9 @@ related-code: infrastructure/sam/phase2-template.yaml, scripts/legal_rag/upload_
 
 ## 10. 関連設計
 
+> 最終検証: 2026-10-15 — 利用者共有用PDF・生成手順への参照を追加し、配置先を確認。
+
+- [利用者共有用PDF・更新手順](../../user-manual/legal-rag/README.md)
 - [法令RAG データ基盤・検索設計](legal-rag-design.md)
 - [e-Gov法令検索](https://laws.e-gov.go.jp/)
 - [e-Gov XML一括ダウンロード](https://laws.e-gov.go.jp/bulkdownload/)
