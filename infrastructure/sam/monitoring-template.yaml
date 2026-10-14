@@ -799,7 +799,8 @@ Resources:
         - !Sub '/aws/apigateway/auth-api-${Environment}'
         - !Sub '/aws/lambda/${RagFunctionName}'
       QueryString: |
-        # REPLACE_ME をアクセスログの requestId（= RAG Lambda の構造化行の apiRequestId）に置き換える
+        # REPLACE_ME をアクセスログの requestId（= RAG Lambda の構造化行の requestId）に置き換える。
+        # 移行期間: デプロイ前の Lambda 行は apiRequestId のみ。RAG Lambda のロググループ保持（365 日、scripts/ops/set_log_retention.py）を過ぎたら apiRequestId を外せる。
         fields @timestamp, @log, requestId, apiRequestId, status, statusCode, resourcePath, errorType, responseLatency, integrationLatency, latencyMs, event, stage, errorCode, exceptionClass
         | filter requestId = "REPLACE_ME" or apiRequestId = "REPLACE_ME"
         | sort @timestamp asc

@@ -1132,7 +1132,7 @@ def law_rag_is_enabled(environment: str, feature_flag: str, knowledge_base_id: s
 
 
 def prepare_law_references(selected_results: list, request_deadline=None,
-                           request_id: str = '') -> list:
+                           request_id: str = '', route: str = '', started_at=None) -> list:
     """Enrich selected law units within a bounded, read-only S3 budget."""
     global law_full_text_s3
     groups = {}
@@ -1235,12 +1235,13 @@ def prepare_law_references(selected_results: list, request_deadline=None,
         prepared.append(result)
         reasons[reason] = reasons.get(reason, 0) + 1
     print(json.dumps({
-        'event': 'law_reference_coverage', 'apiRequestId': request_id,
+        **telemetry.common_fields('law_reference_coverage', request_id=request_id, route=route,
+                                  started_at=started_at),
         'selectedDocuments': len(groups), 'referenceDocuments': len(prepared),
         'fullDocuments': full_count, 'partialDocuments': len(prepared) - full_count,
         'omittedDocuments': len(groups) - len(prepared),
         'referenceCharacters': used_chars, 'reasons': reasons,
-    }))
+    }, ensure_ascii=False))
     return prepared
 
 
@@ -1963,7 +1964,7 @@ def is_allowed_document_uri(doc_uri: str) -> bool:
     return False
 
 
-def handle_document_request(event, headers):
+def handle_document_request(event, headers, started_at=None):
     """
     GET /rag/document?uri=s3://bucket/key
 
@@ -2006,6 +2007,7 @@ def handle_document_request(event, headers):
 
     telemetry.record_document_open(
         chatlogs_table, open_session_id, open_message_id, get_caller_id(event), owns_session, doc_uri, event,
+        started_at=started_at,
     )
     return {
         'statusCode': 200,
@@ -2167,7 +2169,7 @@ def get_chat_history(session_id: str, limit: int = 10, mode: str = 'normal') -> 
 
 def lambda_handler(event, context):
     """1 リクエスト 1 行の構造化ログを出す外側。本体は handle_rag_request。"""
-    # 非同期の見出し生成は HTTP リクエストではない。statusCode=0・apiRequestId 空の
+    # 非同期の見出し生成は HTTP リクエストではない。statusCode=0・requestId 空の
     # rag_request 行を作らないよう、ログ契約の対象外としてここで分岐する。
     if isinstance(event, dict) and event.get('_internalTask') == 'session-title':
         return handle_session_title_task(event)
@@ -2222,7 +2224,7 @@ def handle_rag_request(event, context, started_at):
         # 引用文書の解決 (GET /rag/document?uri=s3://...)
         # 認証済みユーザーにだけ短命の署名付き URL を発行する。
         if http_method == 'GET':
-            return handle_document_request(event, headers)
+            return handle_document_request(event, headers, started_at)
 
         # Parse and validate request shape before reading fields.
         raw_body = event.get('body', {})
@@ -2363,7 +2365,7 @@ def handle_rag_request(event, context, started_at):
         # Get chat history for context
         chat_history = get_chat_history(session_id, limit=5, mode=mode)
         # 直前の回答が「候補あり」で評価が無く 10 分以内なら、言い換えの印を付ける（暗黙の失敗信号）
-        telemetry.stamp_reformulation(chatlogs_table, chat_history)
+        telemetry.stamp_reformulation(chatlogs_table, chat_history, event=event, started_at=started_at)
 
         # --- Phase1: 聞き返しゲート（検索前） ---
         # 法令modeは設備症状用の聞き返しルールと通常KBの機種filterを使わない。
@@ -2530,7 +2532,9 @@ def handle_rag_request(event, context, started_at):
             kb_results['_lawSelectedResults'] = prepare_law_references(
                 select_retrieval_results(retrieval_results, mode='law', rank_key=RERANK_RANK_KEY),
                 request_deadline=request_deadline,
-                request_id=(event.get('requestContext') or {}).get('requestId', ''),
+                request_id=telemetry.request_id_of(event),
+                route=telemetry.route_of(event),
+                started_at=started_at,
             )
         ai_response = generate_response_with_claude(
             query, kb_results, chat_history, mode,

@@ -111,6 +111,8 @@ Required outputs for later steps:
 
 ## 3. Deploy Phase 2
 
+> 最終検証: 2026-10-14 — phase2 のデプロイ例に RagLogicVersion を追加
+
 Creates the RAG/chat Lambda functions, `rag-api-dev`, `chat-api-dev`, and `/eleknowledge/dev/knowledge-base-id`.
 
 This stack **no longer creates an OpenSearch Serverless collection or a Knowledge Base service role** — Phase 2 reuses the existing Knowledge Base (see section 4). `KnowledgeBaseId` has a default value in `phase2-template.yaml` and is constrained by `AllowedPattern`; the old `KnowledgeBaseId=pending` two-pass flow is gone, because deploying with `pending` silently produced a `rag-dev` that returned zero results for every query. The template default is **not** authoritative for the running environment — always confirm the deployed value as described below.
@@ -144,7 +146,8 @@ sam deploy `
   --profile $Profile `
   --s3-bucket $ArtifactsBucket `
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM `
-  --parameter-overrides "Environment=$Env" "ProjectName=$Project" "KnowledgeBaseId=$KbId"
+  --parameter-overrides "Environment=$Env" "ProjectName=$Project" "KnowledgeBaseId=$KbId" `
+  "RagLogicVersion=$(git rev-parse --short HEAD)"
 ```
 
 > **If `$Project-$Env-phase2` is already deployed with the old template**, split the change into two

@@ -168,6 +168,10 @@ EleKnowledge の WAF ログ配信・WAF アラーム・専用通知 SNS は確�
 
 ## 8. デプロイとロールバック
 
+> 最終検証: 2026-10-14 — #181のRAGログ版のSAM配線・必須指定をコードとテストで照合。AWS反映は未実施。
+
+phase2を反映するときは`RagLogicVersion=<検証済みソースのGit SHA>`（7〜40桁の小文字16進）を必ず渡し、コード更新のたびに同じソースの版へ更新する。設定値は`RAG_LOGIC_VERSION`としてログへ出る。`--parameter-overrides`を使う場合は、現在のモデル・KB・法令ゲートなど維持する値も全て渡す。反映後にCloudWatchの`ragLogicVersion`が指定値であり、`unknown`でないことを確認する。
+
 - **ルール**: develop へのマージ（＝Amplify が自動配信）と本番スタックの deploy は **定時後** に行う（AGENTS.md）
 - 手順: 統合ブランチを作る → `sam build` → `sam deploy --no-execute-changeset` で changeset を作る → 内容（Add / Modify / Replace）を確認 → `execute-change-set`。Replace が出たら止まって確認
 - **announcements-monitoring は必ず TTL 無効化を含むテンプレートから**（develop 単体から作ると TTL が再有効化される事故があった）

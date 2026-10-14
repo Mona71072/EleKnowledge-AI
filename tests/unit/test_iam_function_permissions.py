@@ -116,6 +116,19 @@ def test_auth_functions_have_only_their_users_table_operations():
     assert signup_resources == login_resources == ["UsersTable.Arn"]
 
 
+def test_rag_deployments_require_a_reviewed_source_version():
+    import re
+
+    template = _template("phase2-template.yaml")
+    version = template["Parameters"]["RagLogicVersion"]
+    assert "Default" not in version
+    assert re.fullmatch(version["AllowedPattern"], "b9188925")
+    assert not re.fullmatch(version["AllowedPattern"], "unknown")
+    assert not re.fullmatch(version["AllowedPattern"], "main")
+    env = template["Resources"]["RagFunction"]["Properties"]["Environment"]["Variables"]
+    assert env["RAG_LOGIC_VERSION"] == "RagLogicVersion"
+
+
 def test_rag_and_chat_roles_are_separate_and_restrict_api_actions():
     template = _template("phase2-template.yaml")
     rag_role = _role_for_function(template, "RagFunction")

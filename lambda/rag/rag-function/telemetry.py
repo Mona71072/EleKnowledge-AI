@@ -4,10 +4,13 @@
 - 500 経路の構造化エラー行と、利用者へ返す本文の一般化（AWS のエラーメッセージをそのまま返さない）
 - 引用文書を開いた回数を assistant 行に加算（documentOpens / lastOpenedAt）→ 到達ファネル「資料を開いた」
 - 言い換えの印（reformulatedAt）を直前の assistant 行に付ける → 暗黙の失敗信号
+- 全イベント行の共通項目と errorFingerprint（契約: docs/features/development/rag-observability-contract.md）
 
 どの関数も例外を外に出さない（テレメトリで本処理を止めない）。
 """
+import hashlib
 import json
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +18,12 @@ from botocore.exceptions import ClientError
 
 # 回答から次の質問までがこの秒数以内なら「言い換え」とみなす
 REFORMULATION_WINDOW_SEC = 600
+
+# ログ行の版。共通項目の意味や型を変えたら上げる（契約 §イベント契約）
+SCHEMA_VERSION = 1
+
+# errorFingerprint として記録する SHA-256 の先頭文字数（契約 §エラー指紋）
+FINGERPRINT_LENGTH = 16
 
 # botocore の operation_name → 失敗した段階
 _STAGE_BY_OPERATION = {
@@ -49,13 +58,37 @@ def _parse_ts(value):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def api_request_id(event) -> str:
+def request_id_of(event) -> str:
     """API Gateway のリクエスト ID（アクセスログの requestId と同じ値）。"""
     return ((event or {}).get('requestContext') or {}).get('requestId') or ''
 
 
+def route_of(event) -> str:
+    """API Gateway のリソースパス（/rag/query など）。パスパラメータや実 URL は含まれない。"""
+    context = (event or {}).get('requestContext') or {}
+    return context.get('resourcePath') or (event or {}).get('resource') or ''
+
+
 def elapsed_ms(started_at: float) -> int:
     return int((time.perf_counter() - started_at) * 1000)
+
+
+def rag_logic_version() -> str:
+    return os.environ.get('RAG_LOGIC_VERSION') or 'unknown'
+
+
+def common_fields(event_name: str, *, request_id: str = '', route: str = '',
+                  status_code: int | None = None, started_at: float | None = None) -> dict:
+    """全イベント行に付く共通項目。HTTP 応答が決まる前の行は statusCode を null にする。"""
+    return {
+        'schemaVersion': SCHEMA_VERSION,
+        'event': event_name,
+        'requestId': request_id or '',
+        'route': route or '',
+        'statusCode': status_code,
+        'latencyMs': elapsed_ms(started_at) if started_at is not None else None,
+        'ragLogicVersion': rag_logic_version(),
+    }
 
 
 def stage_of(error: Exception) -> str:
@@ -71,6 +104,16 @@ def _exception_label(error: Exception) -> str:
         if code:
             return f'{label} code={code}'
     return label
+
+
+def error_fingerprint(stage: str, exception_class: str, error_code: str) -> str:
+    """同一原因を集約するための指紋。段階・例外の型・エラーコードの SHA-256 の先頭 16 文字。
+
+    入力は運用上の固定値だけで、利用者のデータ・例外の文面・ID は含まない（鍵も使わない）。
+    よって同じ原因なら文面が違っても同じ値になる。
+    """
+    message = '|'.join(str(part or '').strip() for part in (stage, exception_class, error_code))
+    return hashlib.sha256(message.encode('utf-8')).hexdigest()[:FINGERPRINT_LENGTH]
 
 
 def _emit(payload: dict) -> None:
@@ -94,14 +137,12 @@ def log_request(event, response: dict, started_at: float) -> None:
         if method == 'GET':
             return  # 文書解決は document_open で別に出す
         _emit({
-            'event': 'rag_request',
-            'apiRequestId': api_request_id(event),
-            'statusCode': status,
+            **common_fields('rag_request', request_id=request_id_of(event), route=route_of(event),
+                            status_code=status, started_at=started_at),
             'responseType': body.get('responseType'),
             'pageCandidates': len(body.get('pageCandidates') or []),
             'sourceDocuments': len(body.get('sourceDocuments') or []),
             'priorityExpanded': body.get('priorityExpanded'),
-            'latencyMs': elapsed_ms(started_at),
         })
     except Exception as e:  # noqa: BLE001
         print(f"[telemetry] log_request failed: {_exception_label(e)}")
@@ -109,21 +150,22 @@ def log_request(event, response: dict, started_at: float) -> None:
 
 def error_response(headers: dict, error: Exception, started_at: float, event) -> dict:
     """500 の構造化エラー行を出し、利用者には一般化した本文と requestId だけを返す。"""
-    request_id = api_request_id(event)
+    request_id = request_id_of(event)
+    exception_class = type(error).__name__
     if isinstance(error, ClientError):
         err = error.response.get('Error', {}) if hasattr(error, 'response') else {}
         code = err.get('Code') or 'ClientError'
         stage = stage_of(error)
     else:
-        code = type(error).__name__ or 'InternalServerError'
+        code = exception_class or 'InternalServerError'
         stage = 'unknown'
     _emit({
-        'event': 'rag_error',
-        'apiRequestId': request_id,
+        **common_fields('rag_error', request_id=request_id, route=route_of(event),
+                        status_code=500, started_at=started_at),
         'stage': stage,
         'errorCode': code,
-        'exceptionClass': type(error).__name__,
-        'latencyMs': elapsed_ms(started_at),
+        'exceptionClass': exception_class,
+        'errorFingerprint': error_fingerprint(stage, exception_class, code),
     })
     return {
         'statusCode': 500,
@@ -136,7 +178,8 @@ def error_response(headers: dict, error: Exception, started_at: float, event) ->
     }
 
 
-def record_document_open(table, session_id: str, message_id: str, user_id: str, owns_session, doc_uri: str, event=None) -> bool:
+def record_document_open(table, session_id: str, message_id: str, user_id: str, owns_session, doc_uri: str,
+                         event=None, started_at: float | None = None) -> bool:
     """引用文書を開いた回答（assistant 行）に documentOpens を加算する。
 
     /doc?uri=…&s=<sessionId>&m=<messageId> から GET /rag/document?uri=&s=&m= で渡される。
@@ -162,14 +205,15 @@ def record_document_open(table, session_id: str, message_id: str, user_id: str, 
         print(f"[telemetry] document_open failed: {_exception_label(e)}")
         return False
     _emit({
-        'event': 'document_open',
-        'apiRequestId': api_request_id(event) if event else '',
+        **common_fields('document_open', request_id=request_id_of(event), route=route_of(event),
+                        status_code=200, started_at=started_at),
         'documentName': (doc_uri or '').rsplit('/', 1)[-1],
     })
     return True
 
 
-def stamp_reformulation(table, chat_history: list, now: datetime | None = None) -> bool:
+def stamp_reformulation(table, chat_history: list, now: datetime | None = None,
+                        event=None, started_at: float | None = None) -> bool:
     """新しい質問が来たとき、直前の回答が「候補あり」で、評価が無く、回答から 10 分以内なら reformulatedAt を付ける。
 
     chat_history は古い順（get_chat_history の戻り値）。集計側は reformulatedAt があり、👍 も資料クリックも無い行を
@@ -200,5 +244,6 @@ def stamp_reformulation(table, chat_history: list, now: datetime | None = None) 
     except Exception as e:  # noqa: BLE001
         print(f"[telemetry] reformulation failed: {_exception_label(e)}")
         return False
-    _emit({'event': 'reformulation'})
+    _emit(common_fields('reformulation', request_id=request_id_of(event), route=route_of(event),
+                        status_code=None, started_at=started_at))
     return True

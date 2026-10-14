@@ -5,6 +5,11 @@ Description: >
   Knowledge Base, RAG Lambda, Chat Management, OpenSearch Serverless
 
 Parameters:
+  RagLogicVersion:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{7,40}$'
+    Description: Reviewed source Git SHA; set explicitly for each RAG deployment
+
   Environment:
     Type: String
     Default: dev
@@ -508,6 +513,7 @@ Resources:
       Environment:
         Variables:
           KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+          RAG_LOGIC_VERSION: !Ref RagLogicVersion
           LAW_KNOWLEDGE_BASE_ID: !Ref LawKnowledgeBaseId
           LAW_RAG_ENABLED: !Ref LawRagEnabled
           LAW_DATA_BUCKET_NAME: !If [LawFullTextDevEnabled, !Ref LawDataBucketName, '']

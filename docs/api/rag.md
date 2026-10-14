@@ -181,21 +181,28 @@ Authorization: Bearer <IdToken>
 
 ## 500 応答の形と構造化ログ（2026-09-11）
 
-> 最終検証: 2026-10-09 — セッション読取失敗の 500 化と、内部の見出しタスクで `rag_request` を出さない挙動を app.py と照合（未デプロイ。マージ・SAM デプロイ後に有効）。ログ項目・アクセスログ形式は 2026-09-25 に #111 / #134 / #133 / #139 と照合
+> 最終検証: 2026-10-10 — 全 RAG ログ行の共通項目（schemaVersion・requestId・route・statusCode・latencyMs・ragLogicVersion）と errorFingerprint を telemetry.py・app.py・単体テストと照合（未デプロイ。マージ・SAM デプロイ後に有効）。500 経路の挙動は 2026-10-09 に app.py と照合。アクセスログ形式は 2026-09-25 に #111 / #134 / #133 / #139 と照合
 
 `POST /rag/query` の 500 は AWS のエラーメッセージを返さず、一般化した本文と API Gateway のリクエスト ID だけを返す。
 
 既存セッションの所有者確認・モード確認・履歴取得で DynamoDB の読取に失敗した場合も、この 500 になる（`rag_error` の `stage` は `history`）。以前は「確認できなかった」ことを 404（`NotFound`）として返したり、履歴取得の失敗を空履歴として回答生成を続けたりしていたが、いずれも行わない。404 は、セッションが存在しない・他人のものと確認できたときだけ返す。
 
 ```json
-{ "error": "InternalServerError", "message": "処理に失敗しました。時間をおいて再度お試しください。", "requestId": "<apiRequestId>" }
+{ "error": "InternalServerError", "message": "処理に失敗しました。時間をおいて再度お試しください。", "requestId": "<requestId>" }
 ```
 
 CloudWatch Logs には 1 リクエスト 1 行の構造化行が出る（本文・質問文は含まない）。API Gateway のアクセスログも本契約の対象とし、`path` は含めず `resourcePath` を記録する。送信元 IP・User-Agent・利用者 ID（sub）は記録しない。
 
-| event | 主な項目 | 用途 |
+全行の共通項目: `schemaVersion`（現在 `1`）, `event`, `requestId`（API Gateway のリクエスト ID。アクセスログの `requestId` と同じ値）, `route`（API Gateway の `resourcePath`。パス値は含まない）, `statusCode`（HTTP 応答が決まる前の行は `null`）, `latencyMs`（リクエスト開始からその行を出すまでの経過ミリ秒）, `ragLogicVersion`（SAMの必須パラメータ`RagLogicVersion`から環境変数`RAG_LOGIC_VERSION`へ渡す、検証済みソースのGit SHA）。旧配信や環境変数未設定時の互換フォールバックだけを`unknown`とする。
+
+> 最終検証: 2026-10-14 — `RagLogicVersion`のSAM配線・必須指定・Git SHA形式をテンプレートと単体テストで照合。AWS未反映。
+
+`errorFingerprint` は `rag_error` に付く。段階（`stage`）・例外の型（`exceptionClass`）・エラーコードを `|` で連結した文字列の SHA-256 の先頭 16 文字。鍵は使わず、例外の文面・ID・本文は入力に含めないため、同一原因なら文面が違っても同じ値になる。
+
+| event | 主な項目（共通項目に加えて） | 用途 |
 |---|---|---|
-| `rag_request` | `apiRequestId`, `statusCode`, `responseType`, `pageCandidates`, `sourceDocuments`, `priorityExpanded`, `latencyMs`。`pageCandidates` / `sourceDocuments` は件数。非同期の見出し生成（内部タスク）は HTTP リクエストではないため出さない | アクセスログの `requestId` と結合（保存クエリ `request-by-id`） |
-| `rag_error` | `apiRequestId`, `stage`（retrieve / generate / save / history / `unknown`）, `errorCode`, `exceptionClass`, `latencyMs` | 500 の段階と原因 |
-| `document_open` | `apiRequestId`, `documentName` | 資料到達の追跡 |
-| `reformulation` | なし（イベント名のみ） | 直前の回答に言い換えの印（`reformulatedAt`）を付けた |
+| `rag_request` | `statusCode`, `responseType`, `pageCandidates`, `sourceDocuments`, `priorityExpanded`。`pageCandidates` / `sourceDocuments` は件数。非同期の見出し生成（内部タスク）は HTTP リクエストではないため出さない | アクセスログの `requestId` と結合（保存クエリ `request-by-id`） |
+| `rag_error` | `statusCode`（500）, `stage`（retrieve / generate / save / history / `unknown`）, `errorCode`, `exceptionClass`, `errorFingerprint` | 500 の段階と原因。同一原因の集約は `errorFingerprint` で行う |
+| `document_open` | `statusCode`（200）, `documentName` | 資料到達の追跡 |
+| `reformulation` | `statusCode` は `null`（共通項目のみ） | 直前の回答に言い換えの印（`reformulatedAt`）を付けた |
+| `law_reference_coverage` | `statusCode` は `null`。件数（選択・参照・全文・部分・省略）、参照文字数、理由別件数 | 法令の参照本文の取得範囲。本文は出さない |

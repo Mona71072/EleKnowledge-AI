@@ -20,6 +20,7 @@ s3_prefix = "eleknowledge-ai"
 region = "ap-northeast-1"
 image_repositories = []
 disable_rollback = false
+# RagLogicVersion (phase2) is required: pass the deployed commit SHA via --parameter-overrides, not here (see docs/ops-runbook.md)
 parameter_overrides = [
     "Environment=dev",
     "ProjectName=EleKnowledge"
@@ -50,6 +51,7 @@ s3_prefix = "eleknowledge-ai"
 region = "ap-northeast-1"
 image_repositories = []
 disable_rollback = false
+# RagLogicVersion (phase2) is required: pass the deployed commit SHA via --parameter-overrides, not here (see docs/ops-runbook.md)
 parameter_overrides = [
     "Environment=prd",
     "ProjectName=EleKnowledge"
