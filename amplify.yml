@@ -9,7 +9,7 @@ frontend:
       commands:
         - nvm use 22
         - echo "Installing dependencies..."
-        - cd frontend && npm install
+        - cd frontend && npm ci --include=dev
         - echo "Setting up environment variables..."
     build:
       commands:
