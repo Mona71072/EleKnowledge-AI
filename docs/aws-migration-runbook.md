@@ -49,7 +49,7 @@ sam build --template-file infrastructure/sam/phase3-template.yaml --build-dir .a
 
 `--resolve-s3` cannot work in this account. It creates the `aws-sam-cli-managed-default` stack, whose
 `SamCliSourceBucket` sets a public-access block, and the organization SCP
-(`arn:aws:organizations::841162687537:policy/o-jjrd939pt4/service...`) **explicitly denies
+(`arn:aws:organizations::<ORG_MANAGEMENT_ACCOUNT_ID>:policy/o-jjrd939pt4/service...`。`<ORG_MANAGEMENT_ACCOUNT_ID>` は実際の値を各自のローカル設定・AWS コンソールで確認する) **explicitly denies
 `s3:PutBucketPublicAccessBlock` for every principal**, including this SSO role. The stack fails with:
 
 ```
@@ -66,7 +66,8 @@ call `PutBucketPublicAccessBlock`, and since April 2023 S3 blocks public access 
 default anyway, so the bucket is still private.
 
 ```powershell
-$ArtifactsBucket = "eleknowledge-sam-artifacts-$Env-730972069979-$Region"
+# <DEV_ACCOUNT_ID> は実際の値を各自のローカル設定・AWS コンソールで確認して置き換える
+$ArtifactsBucket = "eleknowledge-sam-artifacts-$Env-<DEV_ACCOUNT_ID>-$Region"
 aws s3 mb "s3://$ArtifactsBucket" --region $Region --profile $Profile
 
 # If aws-sam-cli-managed-default is stuck in ROLLBACK_COMPLETE, delete it so SAM stops retrying it:
