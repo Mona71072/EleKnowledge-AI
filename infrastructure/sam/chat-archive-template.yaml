@@ -14,6 +14,15 @@ Description: >
 # ---------------------------------------------------------------------------
 
 Parameters:
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+    AllowedValues: [ele-knowledge]
+  CostUsage:
+    Type: String
+    Default: shared
+    AllowedValues: [development, user, shared]
+
   Environment:
     Type: String
     Default: dev
@@ -62,6 +71,12 @@ Resources:
         EventBridgeConfiguration:
           EventBridgeEnabled: true
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env
@@ -72,6 +87,13 @@ Resources:
   ArchiveFunctionRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub eleknowledge-chat-archive-${Environment}-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -119,6 +141,9 @@ Resources:
       MemorySize: 256
       Role: !GetAtt ArchiveFunctionRole.Arn
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         ManagedBy: SAM
@@ -146,6 +171,13 @@ Resources:
   ArchiveFailureEventRule:
     Type: AWS::Events::Rule
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       Name: !Sub eleknowledge-chat-archive-${Environment}-failure-notification
       Description: Notify when Lambda writes a failed DynamoDB Streams invocation to the archive bucket.
       EventPattern:
@@ -179,6 +211,12 @@ Resources:
             Status: Enabled
             ExpirationInDays: 30
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env
@@ -193,6 +231,12 @@ Resources:
       Description: EleKnowledge chat analytics workgroup
       State: ENABLED
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env

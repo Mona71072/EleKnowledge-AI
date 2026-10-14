@@ -19,6 +19,14 @@ Parameters:
     Type: String
     AllowedPattern: '^[0-9a-f]{7,40}$'
     Description: Reviewed source Git SHA; set explicitly for each RAG deployment
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+    AllowedValues: [ele-knowledge]
+  CostUsage:
+    Type: String
+    Default: shared
+    AllowedValues: [development, user, shared]
 
   Environment:
     Type: String
@@ -354,6 +362,9 @@ Globals:
         ENVIRONMENT: !Ref Environment
         PROJECT_NAME: !Ref ProjectName
     Tags:
+      gyoumu012Project: !Ref CostProjectName
+      gyoumu012Component: shared
+      gyoumu012Usage: !Ref CostUsage
       Project: !Ref ProjectName
       Env: !Ref Environment
       ManagedBy: SAM
@@ -376,6 +387,9 @@ Resources:
       Value: !Ref KnowledgeBaseId
       Description: Bedrock Knowledge Base ID for EleKnowledge RAG
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         ManagedBy: SAM
@@ -387,6 +401,13 @@ Resources:
   RagLambdaRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub rag-lambda-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -611,6 +632,10 @@ Resources:
   RagFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub rag-${Environment}
       CodeUri: ../../lambda/rag/rag-function/
       Handler: app.lambda_handler
@@ -668,6 +693,10 @@ Resources:
   ChatManagementFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub chat-${Environment}
       CodeUri: ../../lambda/chat/chat-management/
       Handler: app.lambda_handler
@@ -747,6 +776,7 @@ Resources:
   RagApi:
     Type: AWS::Serverless::Api
     Properties:
+      PropagateTags: true
       Name: !Sub rag-api-${Environment}
       StageName: !Ref Environment
       Cors:
@@ -788,6 +818,9 @@ Resources:
           DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         Phase: "2"
@@ -795,6 +828,7 @@ Resources:
   ChatApi:
     Type: AWS::Serverless::Api
     Properties:
+      PropagateTags: true
       Name: !Sub chat-api-${Environment}
       StageName: !Ref Environment
       Cors:
@@ -836,6 +870,9 @@ Resources:
           DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         Phase: "2"
@@ -846,12 +883,26 @@ Resources:
   RagApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       LogGroupName: !Sub /aws/apigateway/rag-api-${Environment}
       RetentionInDays: !Ref LogRetentionInDays
   
   ChatApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       LogGroupName: !Sub /aws/apigateway/chat-api-${Environment}
       RetentionInDays: !Ref LogRetentionInDays
 
