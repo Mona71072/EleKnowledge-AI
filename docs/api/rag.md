@@ -9,6 +9,12 @@ related-code: lambda/rag/, frontend/src/app/chat/
 
 # RAG処理API
 
+## develop 法令チャットの追加仕様
+
+> 最終検証: 2026-10-09 — #155 / #156を含むdevelop `b8070f56`のコードとPRコメントを照合。AWS反映・利用者向けE2Eは未確認。
+
+法令モード（`mode=law`）、法令出典、モード別履歴の追加契約は[法令チャットAPI補足](legal-chat.md)を参照する。この追加は既存devのプレリリース向けであり、本番提供を意味しない。通常モードの既存契約は以下を参照する。
+
 > spec.md §7.2 から切り出し。Phase 2 の RAG クエリエンドポイントを記載する。
 
 **Base URL:** Phase 2 `RagApiUrl` output, e.g. `https://{api-id}.execute-api.{region}.amazonaws.com/{env}`
@@ -118,7 +124,7 @@ Anthropic モデルでは能力表に従い、対応しない sampling / thinkin
 - カテゴリ未指定時の**本命優先 2 段階 retrieve は 2026-08-26 に一時停止**（少数カテゴリが全検索でヒットしない副作用のため。mona 了承済み）。現在は未指定時も常に単一の retrieve（対象は実カテゴリ10種の許可リスト内）。後継方式の検討は [issue #61](https://github.com/yukiworkspace/EleKnowledge-AI/issues/61)。ユーザーが category を選んでいる場合はそれを尊重（従来どおり）。
 - 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。
 - `priorityExpanded`: 本命→全資料へ拡大したとき `true` だった診断用フィールド（チャット UI では未表示）。優先 retrieve 停止中は**常に `false`**（API 互換のためフィールドは残置）。
-- `mode`: API 上は `normal` \| `spec` \| `law` を受け付ける（詳細は上記 Request の `mode`）。現行チャット UI は常に `normal`。`spec` は **非推奨**で、サーバ側で `normal` に正規化し、カテゴリ未指定時は本命（`spec`/`tech_info`/`std`）を強制する。`law` は `filters` を無視する。
+- `mode`: API 上は `normal` \| `spec` \| `law` を受け付ける（詳細は上記 Request の `mode`）。通常チャット UI は `normal`、法令チャット UI は `law` を送る。`spec` は **非推奨**で、サーバ側で `normal` に正規化し、カテゴリ未指定時は本命（`spec`/`tech_info`/`std`）を強制する。`law` は `filters` を無視する。
 - `sourceUri` の形式は環境変数 `CITATION_URI_MODE`（SAM パラメータ `CitationUriMode`）で切り替える（デプロイ順を壊さないための段階移行スイッチ）。
   - `s3`（移行完了後の姿。上の例）: **`s3://` URI**。プリサイン HTTPS URL は応答にも DynamoDB にも含めない。フロントは `documentHref()` で中継ページ `/doc?uri=...` へのリンクに変換し、クリック時に `GET /rag/document` で実 URL を都度発行する。
   - `presigned`（既定・移行互換）: 従来どおり**プリサイン HTTPS URL**（TTL は `PresignedUrlExpiresIn`、既定 300 秒）。受付（`GET /rag/document` と `/doc`）だけを先に本番反映しても、デプロイ済みフロントを壊さないためのモード。受付の実機確認とフロント反映（Amplify）の完了後に `s3` へ切り替える。

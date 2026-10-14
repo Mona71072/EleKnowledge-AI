@@ -38,6 +38,7 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/, lambda/metrics/, lambd
   userId: string;           // ユーザーID（GSI）
   role: 'user' | 'assistant' | 'product_wish';
   content: string;          // メッセージ内容
+  ragMode?: 'normal' | 'law'; // develop法令プレリリース。旧データの未設定値はnormal扱い
   timestamp: string;        // タイムスタンプ
   citations?: string[];     // 引用（AIのみ・レガシー）
   sourceDocuments?: object[]; // ソース文書（AI）
@@ -146,3 +147,9 @@ PK `metricDate` / SK `scope`。GSI `scope-metricDate-index`（PK=scope, SK=metri
 # lambda/rag/rag-function/app.py
 ttl_timestamp = int(time.time()) + (60 * 24 * 60 * 60)  # 60 days
 ```
+
+## develop 法令チャットの追加データ
+
+> 最終検証: 2026-10-09 — develop `b8070f56`の保存・取得コードを照合。AWS反映・既存データの再読取りは未確認。
+
+user / assistantメッセージに`ragMode`を保存し、法令出典は既存の`sourceDocuments`内の`lawCitation`に保存する。APIの法令`sourceUri`はe-Gov URLで、内部S3 URIを利用者向け出典にしない。旧データは変更せずnormal扱いとする。履歴分離・所有権・TTLは[法令API補足](api/legal-chat.md)を参照する。法令原文・派生本文・manifestの保存構造は[法令RAG設計](features/development/legal-rag-design.md)を正とする。

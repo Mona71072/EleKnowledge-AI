@@ -9,6 +9,12 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 
 # チャット管理API
 
+## develop 法令チャットの追加仕様
+
+> 最終検証: 2026-10-09 — #155 / #156を含むdevelop `b8070f56`のコードとPRコメントを照合。AWS反映・利用者向けE2Eは未確認。
+
+法令モード（`mode=law`）、法令出典、モード別履歴の追加契約は[法令チャットAPI補足](legal-chat.md)を参照する。この追加は既存devのプレリリース向けであり、本番提供を意味しない。通常モードの既存契約は以下を参照する。
+
 > Phase 2 のチャットセッション管理エンドポイント。
 
 **Base URL:** Phase 2 `ChatApiUrl` output, e.g. `https://{api-id}.execute-api.{region}.amazonaws.com/{env}`

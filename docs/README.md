@@ -39,3 +39,9 @@ docs/ops-ai-driven-dev.md    AIを用いた開発の共同運用
 | [製品ロードマップ](./product-roadmap.md) | 発展候補、部門別予定、依存事項。未確定案を含む |
 | [システム仕様索引](../spec.md) | 機能、API、アーキテクチャ、セキュリティ等 |
 | [AI駆動開発の共同運用](./ops-ai-driven-dev.md) | 共同開発、レビュー、PRとマージの運用 |
+
+## 法令チャットのdevelopプレリリース
+
+> 最終検証: 2026-10-09 — #155 / #156のマージと文書の参照関係を確認。develop公開・実画面の確認結果は専用確認記録を参照。
+
+[公開・受入手順](legal-chat-prerelease.md) → [利用者マニュアル](user-manual/eleknowledge-user-manual.html) → [管理者確認表](user-manual/admin-verification-sheet.md)の順に読む。APIは[法令チャット補足](api/legal-chat.md)、PR根拠・未確認の実測項目は[確認記録](verification-2026-10-09-legal-chat-prerelease.md)。正式対象部門の決定や本番提供とは区別する。

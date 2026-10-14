@@ -136,3 +136,11 @@ Not in IaC: the AWS budget notification and the Bedrock application inference pr
 | `troubleshooting-small*` | Lambda/CloudFormation | Old troubleshooting POC | Excluded legacy candidate |
 | `rag-*` old APIs | API Gateway | Earlier RAG POC APIs | Excluded legacy candidate |
 | Control Tower/Config/CloudTrail/VPC baseline | AWS governance/networking | Account baseline services | Out of EleKnowledge migration scope |
+
+## Law chat: develop pre-release addition
+
+> 最終検証: 2026-10-09 — develop `b8070f56`の法令SAM定義とPR #155 / #156を照合。今回のAWS実リソース読取りは未実施。
+
+法令専用KBは`infrastructure/sam/legal-rag-kb-template.yaml`、データ保存の定義は`legal-rag-data-template.yaml` / `legal-rag-data-import-template.yaml`、RAGへの接続は`phase2-template.yaml`にある。過去のdev記録では独立KB stackが保持済みbucketを参照する。定義の存在をbucket import済み・現在のAWS反映済みと扱わない。
+
+通常KBとは別の`LAW_KNOWLEDGE_BASE_ID`を使い、`ENVIRONMENT=dev`・`LAW_RAG_ENABLED=true`・KB IDありで許可する。データ・IAM・KMS・コードの現況は[プレリリース手順](legal-chat-prerelease.md)に沿って読み戻し、[確認記録](verification-2026-10-09-legal-chat-prerelease.md)に残す。過去のリソースIDやgate状態を現在値として転記しない。

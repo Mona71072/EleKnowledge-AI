@@ -371,3 +371,9 @@ Do not recreate these unless a later dependency review explicitly requires them:
 - `troubleshooting-small*`
 - individual POC Lambda functions
 - Control Tower, Config, CloudTrail, and VPC baseline resources
+
+## 10. Existing dev: law-chat pre-release
+
+> 最終検証: 2026-10-09 — PR #155 / #156、developコード、Amplify job 64、RAG有効化設定と実配信画面を照合。develop公開反映・カードからの法令画面遷移を確認。
+
+既存devへ法令チャットを反映する場合、空環境の再構築を行わず[法令プレリリース手順](legal-chat-prerelease.md)を使用する。`NEXT_PUBLIC_LAW_RAG_ENABLED`はdevelopブランチのカード表示条件、`LawRagEnabled` / `LawKnowledgeBaseId`はPhase 2のサーバー設定であり、それぞれ読み戻して確認する。Lambda / SAMはitaiが既存パラメータと他テーマの反映を保持した変更セットで実施する。文書更新やPRマージだけでAWS反映完了とは扱わず、追加Syncや旧stack / bucketの削除・importをこの手順に含めない。
