@@ -287,16 +287,14 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [dynamodb:Scan]
-                Resource:
-                  - !Sub
-                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}
-                    - TableName:
-                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
-              - Effect: Allow
+                # 日別集計は日別 GSI の全シャードだけを Query する（Scan は廃止。issue #130）。
                 # 新規利用者集計は userId-timestamp-index の最古レコードだけを参照
                 Action: [dynamodb:Query]
                 Resource:
+                  - !Sub
+                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/metricDayShard-timestamp-index
+                    - TableName:
+                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
                   - !Sub
                     - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/userId-timestamp-index
                     - TableName:
@@ -447,6 +445,8 @@ Resources:
           REAGGREGATE_DAYS: "3"
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          # 日別 GSI のシャード数（書き込み側 phase2-template の CHATLOGS_METRIC_SHARDS と一致させる）
+          CHATLOGS_METRIC_SHARDS: "10"
           RAG_FUNCTION_NAME: !Sub rag-${Environment}
           CHAT_FUNCTION_NAME: !Sub chat-${Environment}
           RAG_API_NAME: !Sub rag-api-${Environment}

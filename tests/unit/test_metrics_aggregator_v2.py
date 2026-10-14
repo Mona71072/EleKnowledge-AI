@@ -48,17 +48,43 @@ def test_jst_date_of_splits_at_utc_15h():
     assert agg.jst_date_of(None) is None
 
 
-def test_scan_bounds_cover_the_jst_day_in_utc_strings():
-    lo, hi = agg.scan_bounds_for_jst_day(date(2026, 9, 10))
-    assert lo == "2026-09-09T15:00:00"
-    assert hi == "2026-09-10T15:00:00"
-    # 文字列比較で境界の内外が正しく分かれる（chatlogs の timestamp は 'Z' 終端）
-    assert lo <= "2026-09-09T15:00:00.000001Z" <= hi
-    assert lo <= "2026-09-10T14:59:59Z" <= hi
-    assert lo <= "2026-09-10T14:59:59.999999Z" <= hi
-    assert not (lo <= "2026-09-09T14:59:59.999999Z" <= hi)
-    assert not (lo <= "2026-09-10T15:00:00Z" <= hi)
-    assert not (lo <= "2026-09-10T15:00:00.000000Z" <= hi)
+def test_query_day_reads_every_shard_of_the_gsi_without_scan(monkeypatch):
+    """日別 GSI の全シャードを Query する。Scan は呼ばない（issue #130）。"""
+    class NoScan:
+        def scan(self, **kw):
+            raise AssertionError("aggregator must not Scan chatlogs")
+
+    class ShardedQuery(NoScan):
+        def __init__(self):
+            self.calls = []
+
+        def query(self, **kw):
+            self.calls.append(kw)
+            shard_key = kw["KeyConditionExpression"]._values[1]
+            if kw.get("ExclusiveStartKey"):
+                return {"Items": [{"deleted": False}]}
+            # シャード #0 だけ 2 ページ目がある
+            if shard_key.endswith("#0"):
+                return {"Items": [{"role": "user"}], "LastEvaluatedKey": {"k": "1"}}
+            return {"Items": [{"role": "user", "deleted": True}] if shard_key.endswith("#1") else []}
+
+    fake = ShardedQuery()
+    monkeypatch.setattr(agg, "chatlogs_table", fake)
+    monkeypatch.setattr(agg, "METRIC_DAY_SHARD_COUNT", 3)
+    items = agg.query_day(date(2026, 9, 10))
+
+    assert [c["IndexName"] for c in fake.calls][0] == "metricDayShard-timestamp-index"
+    assert len({c["IndexName"] for c in fake.calls}) == 1
+    assert len(fake.calls) == 4                     # shard 0 は 2 ページ、shard 1 と 2 は 1 回
+    assert fake.calls[0]["KeyConditionExpression"]._values[1] == "2026-09-10#0"
+    assert [c["KeyConditionExpression"]._values[1] for c in fake.calls][-2:] == ["2026-09-10#1", "2026-09-10#2"]
+    # ページング分も含めて全件返る（deleted の除外は FilterExpression の側で行う）
+    assert len(items) == 3
+    assert "FilterExpression" in fake.calls[0] and fake.calls[0]["ExpressionAttributeNames"] == {"#del": "deleted"}
+
+
+def test_shard_key_helpers_match_writer_format():
+    assert agg.METRIC_DAY_INDEX_NAME == "metricDayShard-timestamp-index"
 
 
 # ------------------------------------------------------------------ plan (modes)
@@ -133,7 +159,7 @@ def test_aggregate_hourly_buckets_by_jst_hour():
 def test_write_day_writes_daily_and_hourly_rows_without_ttl(monkeypatch):
     fake = FakeTable()
     monkeypatch.setattr(agg, "metrics_table", fake)
-    monkeypatch.setattr(agg, "scan_day", lambda day: _items())
+    monkeypatch.setattr(agg, "query_day", lambda day: _items())
     monkeypatch.setattr(agg, "aggregate_platform", lambda day, chat: {"errorRate": 0.0, "latencyP90": 1.0, "http5xx": 0, "incidents": 0})
     monkeypatch.setattr(agg, "count_new_users", lambda ids, day: 0)
 
@@ -154,7 +180,7 @@ def test_write_day_writes_daily_and_hourly_rows_without_ttl(monkeypatch):
 def test_write_day_final_writes_24_hourly_rows(monkeypatch):
     fake = FakeTable()
     monkeypatch.setattr(agg, "metrics_table", fake)
-    monkeypatch.setattr(agg, "scan_day", lambda day: [])
+    monkeypatch.setattr(agg, "query_day", lambda day: [])
     monkeypatch.setattr(agg, "aggregate_platform", lambda day, chat: {"errorRate": 0.0, "latencyP90": 0.0, "http5xx": 0, "incidents": 0})
     monkeypatch.setattr(agg, "count_new_users", lambda ids, day: 0)
     agg.write_day(date(2026, 9, 10), partial=False)

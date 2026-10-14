@@ -12,6 +12,13 @@ from urllib.parse import unquote
 from botocore.exceptions import ClientError
 from decimal import Decimal
 
+# 日別集計用キー（metricDay / metricDayShard）。rag-function と同じ実装（同ディレクトリの chatlog_metric_keys.py）
+import sys as _sys  # noqa: E402
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in _sys.path:
+    _sys.path.insert(0, _HERE)
+import chatlog_metric_keys  # noqa: E402
+
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'ap-northeast-1'))
 
@@ -756,7 +763,8 @@ def save_product_wish(user_id: str, text: str, context_session_id: str = None,
     if len(text) > WISH_TEXT_MAX:
         raise ValueError(f'text must be at most {WISH_TEXT_MAX} characters')
 
-    now = datetime.utcnow().isoformat() + 'Z'
+    now_utc = datetime.now(timezone.utc)
+    now = now_utc.isoformat().replace('+00:00', 'Z')
     ttl = int(time.time()) + (60 * 24 * 60 * 60)
     message_id = f'wish-{int(time.time() * 1000)}'
     session_id = f'wish-{user_id}'
@@ -770,6 +778,8 @@ def save_product_wish(user_id: str, text: str, context_session_id: str = None,
         'timestamp': now,
         'ttl': ttl,
     }
+    # 日別集計用（GSI metricDayShard-timestamp-index）。timestamp と同じ時刻から導く
+    item.update(chatlog_metric_keys.metric_day_keys(now_utc, message_id))
     if context_session_id:
         item['contextSessionId'] = context_session_id
         if context_rag_mode in ('normal', 'law'):

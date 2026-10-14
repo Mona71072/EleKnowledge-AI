@@ -272,6 +272,8 @@ Resources:
           AttributeType: S
         - AttributeName: timestamp
           AttributeType: S
+        - AttributeName: metricDayShard
+          AttributeType: S
       KeySchema:
         - AttributeName: sessionId
           KeyType: HASH
@@ -281,6 +283,16 @@ Resources:
         - IndexName: userId-timestamp-index
           KeySchema:
             - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # 日別集計（issue #130）。metricDayShard = "<JST日付>#<shard>"。集計は全シャードを Query する。
+        # 1 回のスタック更新で追加する GSI は 1 つだけ（CloudFormation の制約）。
+        - IndexName: metricDayShard-timestamp-index
+          KeySchema:
+            - AttributeName: metricDayShard
               KeyType: HASH
             - AttributeName: timestamp
               KeyType: RANGE

@@ -60,6 +60,12 @@ Cost Explorer は日次バッチが 1 日 2 回だけ呼ぶ（0.02 USD/日）。
 
 `?period=today|week|month|custom`。`period=custom` の場合は `from=YYYY-MM-DD&to=YYYY-MM-DD` を指定します。未指定時は `week` にフォールバックします。旧ダッシュボードの形（`kpi` / `series` / `topDocuments` / `health`）。UI 切替後に削除する。
 
+## 集計の入力（chatlogs）
+
+> 最終検証: 2026-10-10 — 集計 Lambda の入力を実装（日別 GSI の全シャード Query）と照合（AWS 未実査。未デプロイ。移行手順は [ops-runbook.md](../ops-runbook.md) §8.1）
+
+日次・毎時の集計（`metrics-aggregator`）は chatlogs を Scan せず、GSI `metricDayShard-timestamp-index` を日付のシャードごとに Query する（issue #130）。この API の応答形は変わらない。
+
 ## エラー
 
 > 最終検証: 2026-09-25 — CloudWatch / 告知取得失敗時の応答を実装と照合（draft。未デプロイ）

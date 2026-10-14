@@ -22,6 +22,8 @@ EleKnowledge Metrics - Aggregator (EventBridge-triggered)
 
 冪等: 同じ metricDate + scope は PutItem で上書きされるため、再実行しても二重計上しない。
 TTL: 日次 KPI は無期限保持（issue #86 決定）。ttl 属性は書かない。
+chatlogs は Scan せず、GSI metricDayShard-timestamp-index を日付のシャードごとに Query する（issue #130）。
+GSI の値（metricDay / metricDayShard）は書き込み側が付ける。付いていない既存行はバックフィルが必要。
 """
 import json
 import os
@@ -38,6 +40,9 @@ cloudwatch = boto3.client('cloudwatch', region_name=REGION)
 
 CHATLOGS_TABLE = os.environ.get('CHATLOGS_TABLE')
 METRICS_TABLE = os.environ.get('METRICS_TABLE')
+# chatlogs の日別 GSI（issue #130）。シャード数は書き込み側（CHATLOGS_METRIC_SHARDS）と必ず一致させる
+METRIC_DAY_INDEX_NAME = 'metricDayShard-timestamp-index'
+METRIC_DAY_SHARD_COUNT = int(os.environ.get('CHATLOGS_METRIC_SHARDS', '10'))
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
 # Optional: names used for CloudWatch lookups (best-effort; defaults derived from env)
 RAG_FUNCTION_NAME = os.environ.get('RAG_FUNCTION_NAME', f'rag-{ENVIRONMENT}')
@@ -120,39 +125,34 @@ def utc_window_for_jst_day(day: date) -> tuple[datetime, datetime]:
     return start, start + timedelta(days=1)
 
 
-def scan_bounds_for_jst_day(day: date) -> tuple[str, str]:
-    """Scan の FilterExpression 用の文字列境界（chatlogs の timestamp は UTC ISO、終端は Z）。
-
-    hi は翌日 00:00 の秒までの文字列。Z や小数秒はこれより後ろに並ぶので、当日の最終時刻は入り、
-    翌日 00:00:00Z は入らない。マイクロ秒を引いた終端だと、Z 付きの最終 1 マイクロ秒が外れる。
-    """
-    start, end = utc_window_for_jst_day(day)
-    lo = start.strftime('%Y-%m-%dT%H:%M:%S')
-    hi = end.strftime('%Y-%m-%dT%H:%M:%S')
-    return lo, hi
-
-
 def parse_day(value: str) -> date:
     return date.fromisoformat(value)
 
 
 # ----------------------------------------------------------------------------- chatlogs
-def scan_day(day: date) -> list:
-    """Paginated scan of chatlogs for a single JST day (UTC timestamp window)."""
-    lo, hi = scan_bounds_for_jst_day(day)
+def query_day(day: date) -> list:
+    """その JST 日の chatlogs 行を、日別 GSI の全シャードから Query する（Scan は使わない）。
+
+    シャードは metricDayShard = "<YYYY-MM-DD>#<n>"（n = 0 .. METRIC_DAY_SHARD_COUNT-1）。
+    同じ日の行は必ずいずれかのシャードに入るため、全シャードを読めば欠けない。
+    """
     items = []
-    kwargs = {
-        'FilterExpression': '#ts BETWEEN :lo AND :hi AND (attribute_not_exists(#del) OR #del = :false)',
-        'ExpressionAttributeNames': {'#ts': 'timestamp', '#del': 'deleted'},
-        'ExpressionAttributeValues': {':lo': lo, ':hi': hi, ':false': False},
-    }
-    while True:
-        resp = chatlogs_table.scan(**kwargs)
-        items.extend(resp.get('Items', []))
-        lek = resp.get('LastEvaluatedKey')
-        if not lek:
-            break
-        kwargs['ExclusiveStartKey'] = lek
+    day_key = day.isoformat()
+    for shard in range(METRIC_DAY_SHARD_COUNT):
+        kwargs = {
+            'IndexName': METRIC_DAY_INDEX_NAME,
+            'KeyConditionExpression': Key('metricDayShard').eq(f'{day_key}#{shard}'),
+            'FilterExpression': 'attribute_not_exists(#del) OR #del = :false',
+            'ExpressionAttributeNames': {'#del': 'deleted'},
+            'ExpressionAttributeValues': {':false': False},
+        }
+        while True:
+            resp = chatlogs_table.query(**kwargs)
+            items.extend(resp.get('Items', []))
+            lek = resp.get('LastEvaluatedKey')
+            if not lek:
+                break
+            kwargs['ExclusiveStartKey'] = lek
     return items
 
 
@@ -662,7 +662,7 @@ def build_hourly_rows(day: date, hourly: dict, upto_hour: int, aggregated_at: st
 def write_day(day: date, partial: bool, upto_hour: int = 23) -> dict:
     """1 日分を集計して日次行と時間帯別の行を書く。"""
     aggregated_at = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-    items = scan_day(day)
+    items = query_day(day)
     chat = aggregate_chat(items)
     chat['newUsers'] = count_new_users(chat.get('userIds') or [], day)
     platform = aggregate_platform(day, chat)

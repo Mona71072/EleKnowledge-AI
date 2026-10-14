@@ -81,6 +81,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in _sys.path:
     _sys.path.insert(0, _HERE)
 import telemetry  # noqa: E402
+import chatlog_metric_keys  # noqa: E402
 
 # 引用 sourceUri の保存・返却形式（段階移行用スイッチ）:
 #   'presigned' … 従来どおり署名付き HTTPS URL（既定）。受付
@@ -555,6 +556,7 @@ def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: 
     """
     message_id = generate_message_id()
     ttl_timestamp = int(time.time()) + (60 * 24 * 60 * 60)  # 60 days (hot window; full history archived to S3 via stream)
+    now_utc = datetime.now(timezone.utc)
     
     item = {
         'sessionId': session_id,
@@ -563,9 +565,11 @@ def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: 
         'role': role,
         'ragMode': rag_mode,
         'content': content,
-        'timestamp': _utc_now_iso(),
+        'timestamp': now_utc.isoformat().replace('+00:00', 'Z'),
         'ttl': ttl_timestamp
     }
+    # 日別集計用（metricDay / metricDayShard。GSI metricDayShard-timestamp-index）。timestamp と同じ時刻から導く
+    item.update(chatlog_metric_keys.metric_day_keys(now_utc, message_id))
     
     if citations:
         item['citations'] = citations

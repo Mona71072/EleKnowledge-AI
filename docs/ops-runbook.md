@@ -180,6 +180,31 @@ phase2を反映するときは`RagLogicVersion=<検証済みソースのGit SHA>
 - 配信構成の記録は issue #86 のデプロイ記録に残す（Lambda の CodeSha256、環境変数、KB ID、モデル ID、フロントの commit）
 - ロールバック: 旧コードだけでなく **モデル ID と環境変数の組合せ** を指定して phase2 を再デプロイする（例: `BedrockModelId=jp.anthropic.claude-haiku-4-5-20251001-v1:0` + 当時の commit）
 
+### 8.1 chatlogs 日別 GSI への移行（issue #130）
+
+> 最終検証: 2026-10-14 — 手順・コードとdevのテーブル定義・本文を取得しない件数/容量を照合。GSI未作成・未デプロイ。書込み・集計の統合検証は合成データ専用テーブルで行い、実データの移行は別途実施する。期限2026-10-23。
+
+目的: 集計の全件 Scan を廃止する。順序を守らないと、キーの無い行が集計から漏れる（欠損）。
+
+1. **GSI 追加（phase1 / `chatlogs-<env>`）**: `sam deploy --no-execute-changeset` で changeset を作り、`ChatLogsTable` が **Modify のみ**（Replace なし）で、追加される GSI が `metricDayShard-timestamp-index` の 1 つだけであることを確認してから execute する。CloudFormation は 1 回の更新で GSI を 1 つしか追加できない（AWS の仕様）。
+   - 確認: `aws dynamodb describe-table --table-name chatlogs-<env>` で該当 GSI の `IndexStatus` が `ACTIVE` になるまで待つ（作成は非同期で、ACTIVE までは Query 結果が不完全）。
+2. **書込み側（phase2 / rag-function・chat-management）**: 新規行に `metricDay` / `metricDayShard` を付けるようになる。この時点で旧集計（Scan）は従来どおり動く。
+   - 確認: 送信後に chatlogs の新しい行に `metricDayShard` が付いていること（本文は見ない）。
+3. **バックフィル（ローカル実行。Lambda には入れない）**:
+   - `python scripts/ops/backfill_chatlogs_metric_day.py --table chatlogs-<env>`（dry-run。件数だけ出る）
+   - 件数を確認してから `--apply --rps 20`。既にキーのある行は条件付き更新で上書きしない。再実行しても二重付与にならない。
+   - 完了後に dry-run を再実行し、`would_update`・`skipped_bad_timestamp`・`errors`がすべて0であることを確認する。不正timestampを黙って移行完了扱いにしない。
+   - 注意: 更新は DynamoDB Stream に出る（MODIFY）。chat-archive が S3 へ追記するため、行数ぶんのアーカイブ書込みが増える（一回限り）。
+4. **照合**: `python scripts/ops/backfill_chatlogs_metric_day.py --table chatlogs-<env> --verify-days 3`。直近 3 日について、全件 Scan の数え上げと GSI 全シャードの Query 件数が一致すること（`match: true`）。不一致なら、書込み中の差かを見て再実行する。
+5. **集計の切替（announcements-monitoring）**: 集計コードと IAM（Scan 削除、Query 追加）を同じデプロイで出す。切替前に、直近 3 日の `overall` 行の値（`queries` / `feedbackGood` / `feedbackBad` / `notFound` など）を控える。切替後に `{"date": "YYYY-MM-DD"}` で 3 日を再集計し、chatlogs 由来の値が控えと一致することを確認する（CloudWatch 由来の値は時間帯で変わり得るので対象外）。
+6. **比較の記録**: 読取り容量（`chatlogs-<env>` の GSI `ConsumedReadCapacityUnits`）、`metrics-aggregator-<env>` の実行時間、スロットル（`P2-chatlogs-read-throttle`）を移行前後で比べ、issue #130 に一行残す。
+
+ロールバック: 集計コードと IAM を旧版（Scan）に戻す。GSI と書込み側のキーは残してよい（旧コードは未使用の属性を無視する）。
+
+シャード数（`CHATLOGS_METRIC_SHARDS`、既定10）は書込み側（phase2）と集計側（announcements-monitoring）で必ず一致させ、移行後は固定する。このバックフィルは未設定行だけを更新するため、`--shards`を変えて再実行しても既存キーは再配置されない。シャード数変更には旧キーの再配置と読取り切替を含む別の移行計画が必要。
+
+統合検証は`python -m pytest tests/integration/test_chatlogs_metric_day.py -q`で合成データとDynamoDB互換エミュレーターを使う。実DynamoDBでの検証は運用者の`AWS_PROFILE`・`AWS_DEFAULT_REGION`を設定し、`RUN_AWS_DYNAMODB_INTEGRATION=1`を指定して同じテストを実行する。実行ごとの専用テーブルだけを作成・削除し、既存chatlogs・metricsには書き込まない。JST境界、既存行の移行、2つの書込み側、ページング、論理削除、集計値一致、再実行の冪等性を確認する。これは移行後の実データ照合の代わりではない。直近3日が空または少数の場合は、データのある日も照合対象に含める。
+
 ### SAMのデプロイ用ローカル設定
 
 > 最終検証: 2026-10-14 — SAM設定ファイルとAWS公式CLIの`--config-file`・`--resolve-s3`・`--kms-key-id`を照合。AWSバケット設定・組織SCPの再検証は含まない。
@@ -219,6 +244,7 @@ phase2を反映するときは`RagLogicVersion=<検証済みソースのGit SHA>
 ## 11. 変更履歴
 
 - 2026-09-10 初版（issue #86 の P0 反映後）
+- 2026-10-10 §8.1 を追加（chatlogs 日別 GSI への移行。issue #130。未デプロイ）
 
 ## 11. 法令チャットのdevelopプレリリース
 

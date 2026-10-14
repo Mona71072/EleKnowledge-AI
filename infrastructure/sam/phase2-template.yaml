@@ -642,6 +642,8 @@ Resources:
           KB_SOURCE_PREFIX: !Ref KnowledgeBaseSourcePrefix
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          # 日別集計キー metricDayShard のシャード数（集計 Lambda と一致させる。変えたらバックフィルをやり直す）
+          CHATLOGS_METRIC_SHARDS: "10"
           DOCUMENTS_BUCKET:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
           PRESIGNED_URL_EXPIRES_IN: !Ref PresignedUrlExpiresIn
@@ -677,6 +679,8 @@ Resources:
         Variables:
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          # 日別集計キー metricDayShard のシャード数（集計 Lambda と一致させる。変えたらバックフィルをやり直す）
+          CHATLOGS_METRIC_SHARDS: "10"
           ENVIRONMENT: !Ref Environment
           FEEDBACK_METRIC_NAMESPACE: EleKnowledge/Feedback
           ADMIN_GROUP_NAME: admin

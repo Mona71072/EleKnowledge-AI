@@ -307,8 +307,9 @@ def test_archive_and_metrics_roles_match_their_data_paths():
     aggregator_actions = _policy_actions(_policies(metrics_template, aggregator_role))
     reader_actions = _policy_actions(_policies(metrics_template, reader_role))
 
+    # 日別集計は Scan を使わず、日別 GSI と userId の GSI を Query する（issue #130）
     assert aggregator_actions == {
-        "dynamodb:Scan", "dynamodb:Query", "dynamodb:PutItem",
+        "dynamodb:Query", "dynamodb:PutItem",
         "cloudwatch:GetMetricStatistics", "cloudwatch:DescribeAlarmHistory",
         "ce:GetCostAndUsage", "ssm:GetParameter",
     }
@@ -317,11 +318,12 @@ def test_archive_and_metrics_roles_match_their_data_paths():
         "cloudwatch:DescribeAlarmHistory", "cloudwatch:GetMetricData",
     }
     aggregator_statements = _policy_statements(_policies(metrics_template, aggregator_role))
-    aggregator_scan = next(statement for statement in aggregator_statements if statement.get("Action") == ["dynamodb:Scan"])
-    assert "/index/" not in str(aggregator_scan["Resource"])
+    assert all(statement.get("Action") != ["dynamodb:Scan"] for statement in aggregator_statements)
     aggregator_query = next(statement for statement in aggregator_statements if statement.get("Action") == ["dynamodb:Query"])
+    assert "index/metricDayShard-timestamp-index" in str(aggregator_query["Resource"])
     assert "index/userId-timestamp-index" in str(aggregator_query["Resource"])
     assert "index/*" not in str(aggregator_query["Resource"])
+    assert "table/" in str(aggregator_query["Resource"])
     assert "GetMetricData" not in aggregator_actions
     reader_statements = _policy_statements(_policies(metrics_template, reader_role))
     reader_queries = [statement for statement in reader_statements if statement.get("Action") == ["dynamodb:Query"]]
