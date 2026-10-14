@@ -4,28 +4,15 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { getCurrentUser } from 'aws-amplify/auth';
+import { announcementDate, loadReadAnnouncementIds, markAnnouncementRead } from '@/lib/announcement-display.mjs';
 import {
   Announcement,
   TYPE_META,
   SEVERITY_META,
-  relativeTime,
   absoluteTime,
   daysUntil,
 } from '@/lib/announcements';
-
-const LAST_READ_KEY = 'announcements:lastReadAt';
-
-function getLastRead(): number {
-  if (typeof window === 'undefined') return 0;
-  const v = window.localStorage.getItem(LAST_READ_KEY);
-  return v ? Number(v) : 0;
-}
-
-function markAllRead() {
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(LAST_READ_KEY, String(Date.now()));
-  }
-}
 
 interface Props {
   announcements: Announcement[];
@@ -43,17 +30,40 @@ export function AnnouncementsSection({
   showSeeAll = true,
   max = 5,
 }: Props) {
-  const [lastRead, setLastRead] = useState(0);
+  const [readKey, setReadKey] = useState<string | null>(null);
+  const [readIds, setReadIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<Announcement | null>(null);
 
   useEffect(() => {
-    setLastRead(getLastRead());
-    // Mark read shortly after the feed is seen.
-    const t = setTimeout(() => {
-      markAllRead();
-    }, 1500);
-    return () => clearTimeout(t);
-  }, [announcements.length]);
+    let cancelled = false;
+    getCurrentUser().then((user) => {
+      if (cancelled) return;
+      const key = `announcements:readIds:${user.userId}`;
+      setReadKey(key);
+      setReadIds((current) => [...new Set([...current, ...loadReadAnnouncementIds(key)])]);
+    }).catch(() => {
+      // Keep read state in memory if identity cannot be resolved.
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!readKey) return;
+    const syncRead = (event: StorageEvent) => {
+      if (event.key === readKey || event.key === null) {
+        setReadIds(loadReadAnnouncementIds(readKey));
+      }
+    };
+    window.addEventListener('storage', syncRead);
+    return () => window.removeEventListener('storage', syncRead);
+  }, [readKey]);
+
+  useEffect(() => {
+    if (!readKey || readIds.length === 0) return;
+    // Persist clicks made while the authenticated identity was still loading.
+    const mergedIds = markAnnouncementRead(readKey, readIds[0], readIds);
+    if (mergedIds.length !== readIds.length) setReadIds(mergedIds);
+  }, [readKey, readIds]);
 
   useEffect(() => {
     if (!selected) return;
@@ -65,14 +75,15 @@ export function AnnouncementsSection({
   const items = useMemo(() => announcements.slice(0, max), [announcements, max]);
   const unreadCount = useMemo(
     () =>
-      announcements.filter((a) => {
-        const t = new Date(a.publishAt).getTime();
-        return t > lastRead;
-      }).length,
-    [announcements, lastRead]
+      announcements.filter((a) => !readIds.includes(a.announcementId)).length,
+    [announcements, readIds]
   );
 
-  const isNew = (a: Announcement) => new Date(a.publishAt).getTime() > lastRead;
+  const isNew = (a: Announcement) => !readIds.includes(a.announcementId);
+  const openAnnouncement = (a: Announcement) => {
+    setSelected(a);
+    setReadIds((current) => [...new Set([...current, a.announcementId])]);
+  };
 
   return (
     <section aria-labelledby="announcements-heading" className="mb-8">
@@ -124,7 +135,7 @@ export function AnnouncementsSection({
               <button
                 key={a.announcementId}
                 type="button"
-                onClick={() => setSelected(a)}
+                onClick={() => openAnnouncement(a)}
                 className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-50 focus:outline-none focus:bg-blue-50"
               >
                 {a.pinned && <span aria-label="固定" title="固定" className="flex-shrink-0">📌</span>}
@@ -143,9 +154,9 @@ export function AnnouncementsSection({
                 )}
                 <span
                   className="flex-shrink-0 text-xs text-gray-500"
-                  title={absoluteTime(a.publishAt)}
+                  title={announcementDate(a.publishAt)}
                 >
-                  {relativeTime(a.publishAt)}
+                  {announcementDate(a.publishAt)}
                 </span>
                 {isNew(a) && (
                   <span className="flex-shrink-0 rounded bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5">
@@ -194,8 +205,8 @@ export function AnnouncementsSection({
                 </svg>
               </button>
             </div>
-            <div className="text-xs text-gray-500 mb-4" title={absoluteTime(selected.publishAt)}>
-              {absoluteTime(selected.publishAt)}
+            <div className="text-xs text-gray-500 mb-4" title={announcementDate(selected.publishAt)}>
+              {announcementDate(selected.publishAt)}
               {selected.startAt && selected.endAt && (
                 <span className="ml-2">
                   ／ 期間: {absoluteTime(selected.startAt)} 〜 {absoluteTime(selected.endAt)}
@@ -203,7 +214,7 @@ export function AnnouncementsSection({
               )}
             </div>
             {/* react-markdown does not render raw HTML by default -> safe */}
-            <div className="prose prose-sm max-w-none text-gray-800">
+            <div className="announcement-markdown text-gray-800">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.body}</ReactMarkdown>
             </div>
           </div>

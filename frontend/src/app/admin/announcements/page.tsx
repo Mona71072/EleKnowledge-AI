@@ -612,7 +612,7 @@ export default function AdminAnnouncementsPage() {
           </label>
           <div className="text-sm">
             <span className="block text-gray-600 mb-1">プレビュー</span>
-            <div className="border border-gray-200 rounded px-3 py-2 h-56 overflow-y-auto bg-gray-50 prose prose-sm max-w-none">
+            <div className="announcement-markdown border border-gray-200 rounded px-3 py-2 h-56 overflow-y-auto bg-gray-50">
               {form.body ? (
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{form.body}</ReactMarkdown>
               ) : (
