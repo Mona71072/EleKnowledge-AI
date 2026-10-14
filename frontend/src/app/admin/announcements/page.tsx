@@ -12,15 +12,16 @@ import {
   TYPE_META,
   SEVERITY_META,
   listAllAnnouncements,
+  listActiveAnnouncements,
   createAnnouncement,
   updateAnnouncement,
   deleteAnnouncement,
   endAnnouncementNow,
   absoluteTime,
-  isVisibleNow,
 } from '@/lib/announcements';
 import { ANNOUNCEMENT_TEMPLATES, getTemplate, fillTemplate, templatePlaceholders } from '@/lib/announcement-templates.mjs';
 import { canEndAnnouncementNow, resolveAnnouncementPublishFields } from '@/lib/announcement-publish.mjs';
+import { appendAnnouncementPage, sortActiveAnnouncements } from '@/lib/announcement-list.mjs';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 
@@ -71,6 +72,10 @@ function statusOf(a: Announcement, now: Date): AnnouncementStatus | 'ended' {
  */
 export default function AdminAnnouncementsPage() {
   const [list, setList] = useState<Announcement[]>([]);
+  // いま表示中は一覧のページングとは独立に全件取得する（51 件目以降の戻し忘れも警告するため）
+  const [activeList, setActiveList] = useState<Announcement[]>([]);
+  const [nextToken, setNextToken] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -95,14 +100,31 @@ export default function AdminAnnouncementsPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await listAllAnnouncements();
+      const [res, activeRes] = await Promise.all([listAllAnnouncements(), listActiveAnnouncements()]);
       setList(res.announcements);
+      setNextToken(res.nextToken);
+      setActiveList(activeRes.announcements);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (!nextToken) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const res = await listAllAnnouncements({ nextToken });
+      setList((prev) => appendAnnouncementPage(prev, res.announcements));
+      setNextToken(res.nextToken);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextToken]);
 
   useEffect(() => {
     load();
@@ -247,13 +269,7 @@ export default function AdminAnnouncementsPage() {
   };
 
   const now = useMemo(() => new Date(), [list]); // eslint-disable-line react-hooks/exhaustive-deps
-  const active = useMemo(
-    () =>
-      list
-        .filter((a) => isVisibleNow(a, now))
-        .sort((a, b) => ({ critical: 0, warning: 1, info: 2 }[a.severity] - { critical: 0, warning: 1, info: 2 }[b.severity]) || b.publishAt.localeCompare(a.publishAt)),
-    [list, now],
-  );
+  const active = useMemo(() => sortActiveAnnouncements(activeList), [activeList]);
   const filtered = list.filter((a) => statusFilter === 'all' || a.status === statusFilter);
   const holes = [...templatePlaceholders(form.title), ...templatePlaceholders(form.body)];
 
@@ -263,7 +279,7 @@ export default function AdminAnnouncementsPage() {
         <div>
           <h2 className="text-xl font-bold text-gray-900">お知らせ管理</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            障害中・受付停止を利用者に伝える。文面は型から。表示終了は削除ではなく終了日時で · 全 {list.length} 件
+            障害中・受付停止を利用者に伝える。文面は型から。表示終了は削除ではなく終了日時で · {nextToken ? '読み込み済み' : '全'} {list.length} 件
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -466,6 +482,13 @@ export default function AdminAnnouncementsPage() {
               })}
             </tbody>
           </table>
+        )}
+        {nextToken && (
+          <div className="flex justify-center border-t border-gray-100 px-4 py-3">
+            <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
+              {loadingMore ? '読み込み中...' : 'さらに読み込む'}
+            </Button>
+          </div>
         )}
       </div>
 

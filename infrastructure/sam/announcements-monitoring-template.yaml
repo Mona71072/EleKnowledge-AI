@@ -210,8 +210,12 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Scan]
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem]
                 Resource: !GetAtt AnnouncementsTable.Arn
+              # 管理一覧は status-publishAt-index を Query する（全件 Scan は使わない。issue #94 R9）
+              - Effect: Allow
+                Action: [dynamodb:Query]
+                Resource: !Sub ${AnnouncementsTable.Arn}/index/status-publishAt-index
 
   AnnouncementsPublisherRole:
     Type: AWS::IAM::Role
@@ -351,6 +355,13 @@ Resources:
           Properties:
             RestApiId: !Ref AppApi
             Path: /admin/announcements
+            Method: GET
+        # いま表示中の全件（件数で切らない。issue #94 R9 の追補）
+        ListActive:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/announcements/active
             Method: GET
         Create:
           Type: Api
