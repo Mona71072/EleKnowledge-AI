@@ -371,6 +371,7 @@ $ruleJson = @"
 }
 "@
 
+# waf-rules.json の <ACCOUNT_ID> を実アカウント ID に置換してから適用する（ファイルには実 ID を書かない）
 # WAF ACLにルールを追加
 aws wafv2 update-web-acl `
   --name eleknowledge-ai-dev-waf `

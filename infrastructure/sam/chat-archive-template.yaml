@@ -21,9 +21,10 @@ Parameters:
     Type: String
     Default: EleKnowledge
   ChatLogsStreamArn:
+    # Required, no default (the ARN contains the account ID). Phase1 does not export the
+    # stream ARN, so pass it at deploy time or rely on the previous stack value (UsePreviousValue).
     Type: String
     Description: LatestStreamArn of the chatlogs table (NEW_AND_OLD_IMAGES)
-    Default: arn:aws:dynamodb:ap-northeast-1:730972069979:table/chatlogs-dev/stream/2026-07-01T09:17:54.718
 
 Resources:
 

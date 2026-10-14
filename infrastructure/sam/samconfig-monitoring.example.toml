@@ -1,8 +1,9 @@
+# Copy to samconfig-monitoring.local.toml and set the existing artifact bucket.
 version = 0.1
 
 # Monitoring stack (SNS + alarms + metric filters + saved queries). See issue #86.
 # Alert e-mail addresses are NOT stored in the repository. Pass them at deploy time:
-#   sam deploy --config-file samconfig-monitoring.toml --profile <profile> \
+#   sam deploy --config-file samconfig-monitoring.local.toml --profile <profile> \
 #     --parameter-overrides Environment=dev ProjectName=EleKnowledge \
 #       AlertEmailPrimary=<mail1> AlertEmailSecondary=<mail2>
 # (--parameter-overrides replaces the whole parameter_overrides list below, so pass every value)
@@ -13,7 +14,7 @@ version = 0.1
 stack_name = "eleknowledge-monitoring-dev"
 template_file = "monitoring-template.yaml"
 # Org SCP denies s3:PutBucketPublicAccessBlock, so resolve_s3 cannot be used.
-s3_bucket = "eleknowledge-sam-artifacts-dev-730972069979-ap-northeast-1"
+s3_bucket = "<DEPLOYMENT_ARTIFACT_BUCKET>"
 s3_prefix = "monitoring"
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
 region = "ap-northeast-1"

@@ -174,6 +174,20 @@ EleKnowledge の WAF ログ配信・WAF アラーム・専用通知 SNS は確�
 - 配信構成の記録は issue #86 のデプロイ記録に残す（Lambda の CodeSha256、環境変数、KB ID、モデル ID、フロントの commit）
 - ロールバック: 旧コードだけでなく **モデル ID と環境変数の組合せ** を指定して phase2 を再デプロイする（例: `BedrockModelId=jp.anthropic.claude-haiku-4-5-20251001-v1:0` + 当時の commit）
 
+### SAMのデプロイ用ローカル設定
+
+> 最終検証: 2026-10-14 — SAM設定ファイルとAWS公式CLIの`--config-file`・`--resolve-s3`・`--kms-key-id`を照合。AWSバケット設定・組織SCPの再検証は含まない。
+
+`infrastructure/sam/samconfig-monitoring.example.toml`と`samconfig-announcements-monitoring.example.toml`を、それぞれ同じディレクトリの`.local.toml`へコピーし、既存のデプロイ成果物バケット名を各自のローカル設定から記入する。`.local.toml`はGit追跡対象外とし、共有する例には実アカウントID・メール・認証情報を入れない。既存設定を移すときはスタック名・リージョン・パラメータを保持し、バケットを新しく作らない。
+
+`infrastructure/sam`で、`sam deploy --config-file samconfig-monitoring.local.toml --profile <profile>`または`sam deploy --config-file samconfig-announcements-monitoring.local.toml --profile <profile>`を使う。旧ファイル名でのコマンドを使い続けない。`--parameter-overrides`は設定内の一覧全体を置き換えるため、追加値だけでなく維持する値もすべて渡す。
+
+`resolve_s3 = true`はSAMがデプロイ成果物を置くS3バケットを用意する機能であり、設定値や認証情報を保管する機能ではない。既存の移行記録では組織SCPが`PutBucketPublicAccessBlock`を拒否しているため、今回は既存バケットを維持する。将来の自動作成への移行は組織制御と権限を別途確認する。
+
+成果物の暗号化はS3の暗号化設定と、必要ならSAMの`--kms-key-id`で管理する。KMSキーは暗号化・復号の権限を制御する鍵であり設定ファイルの保管先ではない。将来AWS内に設定を集約する場合、通常の設定はSSM Parameter Store、秘匿情報はSecrets Managerを候補とし、実行ロール・CIの認証とともに別途設計する。今回KMSキー・バケット・Secrets ManagerのAWS変更は行わない。
+
+- 根拠: [SAM設定ファイル](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-config.html)、[sam deploy](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-cli-command-reference-sam-deploy.html)、[既存のSCP確認記録](aws-migration-runbook.md)。
+
 ## 9. コストの追い方
 
 - リソース費: Cost Explorer で `Project=EleKnowledge` タグ（**コスト配分タグの有効化は管理アカウント側の作業**。有効化前の利用には遡及しない）

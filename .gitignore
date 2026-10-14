@@ -8,6 +8,7 @@ spec.md
 .aws-sam/
 infrastructure/sam/.aws-sam/
 samconfig.toml.backup
+infrastructure/sam/samconfig-*.local.toml
 
 # Dependencies
 node_modules/

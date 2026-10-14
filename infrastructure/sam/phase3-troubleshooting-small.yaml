@@ -27,9 +27,10 @@ Resources:
 
 Parameters:
   BedrockAgentConfigArn:
+    # No default: the ARN contains the account ID. Pass it at deploy time, e.g.
+    #   --parameter-overrides BedrockAgentConfigArn=<secret ARN in the target account>
     Type: String
-    Description: "Secrets Manager ARN for Bedrock Agent Config"
-    Default: "arn:aws:secretsmanager:us-east-1:423623870147:secret:EleKnowledgeAI/BedrockAgentConfig-8sBN5B"
+    Description: "Secrets Manager ARN for Bedrock Agent Config (required, no default)"
 
 Outputs:
   LambdaFunctionArn:
