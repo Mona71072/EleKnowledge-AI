@@ -116,11 +116,11 @@ These observations do not include delivery tests for SNS/Budget notifications or
 
 ### Lambda execution roles
 
-> 最終検証: 2026-10-09 — #166のSAM定義とLambda呼出し権限を照合（AWS変更セットの適用前、実環境未確認）
+> 最終検証: 2026-10-09 — #166/#169のSAM定義とLambda呼出し権限を照合（#169変更セットの適用前、実環境未確認）
 
 | Lambda execution role | 権限範囲 |
 | --- | --- |
-| `eleknowledge-chat-archive-dev-role` | DynamoDB Streams読取り（chatlogs stream ARN）、S3 `PutObject`（`chatlogs/*` と `aws/lambda/*`）と `ListBucket`（OnFailure送信先に必要） |
+| `eleknowledge-chat-archive-dev-role` | DynamoDB Streams読取り（chatlogs stream ARN）、専用アーカイブバケット内のS3 `PutObject`（`s3:ResourceAccount` で自アカウントに限定）と `ListBucket`（OnFailure送信先に必要） |
 | `metrics-aggregator-dev` | chatlogs `Scan`、metricsテーブル`PutItem`、CloudWatch `GetMetricStatistics` |
 | `metrics-read-dev` | metricsテーブルの`scope-metricDate-index`に対する`Query` |
 

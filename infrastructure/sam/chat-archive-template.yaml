@@ -93,12 +93,15 @@ Resources:
                   - dynamodb:DescribeStream
                   - dynamodb:ListStreams
                 Resource: !Ref ChatLogsStreamArn
+              # Lambda の S3 OnFailure 宛先検証には、専用バケット内のオブジェクト全体への PutObject が必要。
+              # このバケットはアーカイブと失敗 invocation の保存専用で、他用途のデータは置かない。
               - Sid: S3Write
                 Effect: Allow
                 Action: s3:PutObject
-                Resource:
-                  - !Sub arn:aws:s3:::${ArchiveBucket}/chatlogs/*
-                  - !Sub arn:aws:s3:::${ArchiveBucket}/aws/lambda/*
+                Resource: !Sub arn:aws:s3:::${ArchiveBucket}/*
+                Condition:
+                  StringEquals:
+                    s3:ResourceAccount: !Ref AWS::AccountId
               - Sid: S3DestinationList
                 Effect: Allow
                 Action: s3:ListBucket

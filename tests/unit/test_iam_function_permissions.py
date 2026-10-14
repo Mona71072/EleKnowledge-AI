@@ -205,10 +205,10 @@ def test_archive_and_metrics_roles_match_their_data_paths():
         statement for statement in _policy_statements(archive_policies)
         if statement.get("Action") == "s3:PutObject"
     )
-    assert archive_s3["Resource"] == [
-        "arn:aws:s3:::${ArchiveBucket}/chatlogs/*",
-        "arn:aws:s3:::${ArchiveBucket}/aws/lambda/*",
-    ]
+    assert archive_s3["Resource"] == "arn:aws:s3:::${ArchiveBucket}/*"
+    assert archive_s3["Condition"] == {
+        "StringEquals": {"s3:ResourceAccount": "AWS::AccountId"}
+    }
     archive_list = next(
         statement for statement in _policy_statements(archive_policies)
         if statement.get("Action") == "s3:ListBucket"
