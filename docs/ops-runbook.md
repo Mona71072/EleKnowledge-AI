@@ -221,7 +221,10 @@ phase2を反映するときは`RagLogicVersion=<検証済みソースのGit SHA>
 
 ## 9. コストの追い方
 
-- リソース費: Cost Explorer で `Project=EleKnowledge` タグ（**コスト配分タグの有効化は管理アカウント側の作業**。有効化前の利用には遡及しない）
+> 最終検証: 2026-10-15 — コスト配分タグ3軸の採用とAWSタグ棚卸し。Bedrockモデル設定を読取確認。請求データでの帰属確認は未実施。
+
+- リソース費: `gyoumu012Project=ele-knowledge` で絞り、`gyoumu012Component` / `gyoumu012Usage` で分類する。**コスト配分タグの有効化は管理アカウント側の作業で、現時点では未確認**。定義・反映結果・有効化依頼文の正本は [コスト配分タグの運用](ops-cost-allocation-tags.md)。旧 `Project` / `Env` は互換性のため保持する。
+- 過去費用: 管理部門は最大12か月のバックフィルを申請できるが、当時のタグ付与が条件となる。新キー付与前の費用を新キーで復元済みとは扱わない。
 - Bedrock 費: 検索トレースのトークン数 × 単価（SSM パラメータ）を日次集計し、管理画面に「今月の推定 Bedrock 費」（P1 で実装）。CloudWatch の ModelId 別トークンは他システム混在のため参考値
 - 共有 KB（OpenSearch Serverless）は他システムと共有のため按分しない
 
