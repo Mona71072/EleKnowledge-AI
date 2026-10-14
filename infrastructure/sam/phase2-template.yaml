@@ -4,6 +4,16 @@ Description: >
   EleKnowledge Phase 2: RAG Chat System
   Knowledge Base, RAG Lambda, Chat Management, OpenSearch Serverless
 
+Metadata:
+  # BedrockModelId / QueryRewriteModelId は種別（BedrockModelIdType 等）で ARN にも ID にもなる。
+  # system-profile のとき ID を ARN 形式の検査（W1030 / W1031）にかけると誤検知になるため、
+  # この 2 件だけ抑止する。種別と値の組み合わせは各パラメータの Description で運用担保する。
+  cfn-lint:
+    config:
+      ignore_checks:
+        - W1030
+        - W1031
+
 Parameters:
   RagLogicVersion:
     Type: String
@@ -95,11 +105,28 @@ Parameters:
   BedrockModelId:
     Type: String
     Default: jp.anthropic.claude-haiku-4-5-20251001-v1:0
+    # IAM の許可範囲はこの値から組み立てる（RagLambdaRole の InvokeModel 参照）。
+    # 推論プロファイル ID は <接頭辞>.<provider>.<model> の 3 区切りに限り、
+    # 区切り文字を含まない形だけ受け付ける。形式外の値は組み立て時の誤った ARN ではなく
+    # デプロイ時の検証エラーにする。
+    AllowedPattern: '^((global|jp|apac|us|eu|au|ca|us-gov)\.[a-z0-9-]+\.[a-z0-9:-]+|arn:aws:bedrock:[a-z0-9-]+:[0-9]{12}:application-inference-profile/[A-Za-z0-9_-]+)$'
     Description: >-
       Bedrock LLM Model ID. Must be an inference profile ID (jp.* / apac.* / global.*)
       or an application inference profile ARN (arn:aws:bedrock:...:application-inference-profile/xxx),
       not a bare foundation model ID. Request capabilities are selected by model_profile.py;
       unknown models use a minimal request unless MODEL_PROFILE_JSON supplies capabilities.
+
+  BedrockModelIdType:
+    Type: String
+    Default: system-profile
+    AllowedValues:
+      - system-profile
+      - application-profile
+    Description: >-
+      BedrockModelId の種別。system-profile は jp. / global. / apac. などのシステム推論プロファイル ID、
+      application-profile は application inference profile ARN を渡すときに指定する。
+      テンプレートは ID と種別の組み合わせ（ARN なのに system-profile など）を防げない。
+      組み合わせが違うと IAM の許可が合わず AccessDenied になるため、運用で必ず合わせる。
 
   BedrockRequestStyle:
     Type: String
@@ -157,7 +184,19 @@ Parameters:
   QueryRewriteModelId:
     Type: String
     Default: ''
+    # BedrockModelId と同じ形式に限る（IAM の許可範囲をこの値から組み立てるため）
+    AllowedPattern: '^$|^((global|jp|apac|us|eu|au|ca|us-gov)\.[a-z0-9-]+\.[a-z0-9:-]+|arn:aws:bedrock:[a-z0-9-]+:[0-9]{12}:application-inference-profile/[A-Za-z0-9_-]+)$'
     Description: Optional Bedrock model ID for conversation-aware query rewriting
+
+  QueryRewriteModelIdType:
+    Type: String
+    Default: system-profile
+    AllowedValues:
+      - system-profile
+      - application-profile
+    Description: >-
+      QueryRewriteModelId の種別（BedrockModelIdType と同じ意味）。QueryRewriteModelId が空なら無視される。
+      種別と値の組み合わせはテンプレートでは検証できないため、運用で必ず合わせる。
 
   GenerationThinking:
     Type: String
@@ -299,6 +338,9 @@ Conditions:
   HasLawDataBucketKmsKey: !And
     - !Condition LawFullTextDevEnabled
     - !Not [!Equals [!Ref LawDataBucketKmsKeyArn, '']]
+  BedrockModelIdIsApplicationProfile: !Equals [!Ref BedrockModelIdType, application-profile]
+  HasQueryRewriteModelId: !Not [!Equals [!Ref QueryRewriteModelId, '']]
+  QueryRewriteModelIdIsApplicationProfile: !Equals [!Ref QueryRewriteModelIdType, application-profile]
 
 Globals:
   Function:
@@ -370,16 +412,79 @@ Resources:
                     - LawRagDevEnabled
                     - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${LawKnowledgeBaseId}
                     - !Ref AWS::NoValue
-              # jp.*  ARN
-              # foundation-model ARN  AccessDeniedException
+              # InvokeModel（Converse も同じアクションで認可される）。使うモデルだけに絞る。
+              # 対象は BedrockModelId（と QueryRewriteModelId）。SESSION_TITLE_MODEL_ID は
+              # テンプレートで設定せず BEDROCK_MODEL_ID を使うため、ここで足りる。
+              # 種別は BedrockModelIdType / QueryRewriteModelIdType で指定する。
+              # CloudFormation の Conditions では Fn::Select / Fn::Split を使えないため、
+              # 種別は Ref の比較だけで判定し、ID の分解は Resources 側の Fn::If の中に置く。
+              # system-profile の基盤モデル ID（<provider>.<model>）は、推論プロファイル ID
+              # （<接頭辞>.<provider>.<model>）から作る。選ばれない分岐も評価され得るため、
+              # 添字が範囲外にならないよう末尾に ".." を足してから分解する（分解結果は
+              # application-profile では使わない）。
+              # 基盤モデルの region は * にする。Global は region なし ARN、geographic は
+              # 振り分け先のリージョンを使い、その先が AWS 管理で変わるため。モデル名は固定し、
+              # bedrock:InferenceProfileArn の条件で、そのプロファイル経由の呼び出しに限る。
+              # application-profile では ARN 自体と、その ARN 経由の基盤モデルだけを許可する
+              # （基盤モデル ID は ARN から取れないため条件で絞る）。
+              # 基盤モデル側も許可しないと AWS の要件を満たさず AccessDenied になる。
               - Effect: Allow
                 Action:
                   - bedrock:InvokeModel
-                Resource:
-                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
-                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*
-                  # The Region wildcard also covers the regionless foundation-model ARN used by Global inference.
-                  - !Sub arn:aws:bedrock:*::foundation-model/*
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - !Ref BedrockModelId
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub
+                    - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                    - FoundationModelId: !Join
+                        - '.'
+                        - - !Select [1, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                          - !Select [2, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                Condition:
+                  StringLike:
+                    bedrock:InferenceProfileArn: !If
+                      - BedrockModelIdIsApplicationProfile
+                      - !Ref BedrockModelId
+                      - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              # QueryRewriteModelId を設定したときだけ、同じ形で許可を追加する
+              - !If
+                - HasQueryRewriteModelId
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !If
+                    - QueryRewriteModelIdIsApplicationProfile
+                    - !Ref QueryRewriteModelId
+                    - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${QueryRewriteModelId}
+                - !Ref AWS::NoValue
+              - !If
+                - HasQueryRewriteModelId
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !If
+                    - QueryRewriteModelIdIsApplicationProfile
+                    - 'arn:aws:bedrock:*::foundation-model/*'
+                    - !Sub
+                      - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                      - FoundationModelId: !Join
+                          - '.'
+                          - - !Select [1, !Split ['.', !Join ['', [!Ref QueryRewriteModelId, '..']]]]
+                            - !Select [2, !Split ['.', !Join ['', [!Ref QueryRewriteModelId, '..']]]]
+                  Condition:
+                    StringLike:
+                      bedrock:InferenceProfileArn: !If
+                        - QueryRewriteModelIdIsApplicationProfile
+                        - !Ref QueryRewriteModelId
+                        - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${QueryRewriteModelId}
+                - !Ref AWS::NoValue
         - !If
           - HasRerankModelArn
           - PolicyName: RerankAccess
@@ -418,6 +523,9 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              # documents バケットは KB データソースと違いプレフィックス規約がない
+              # （docs/deployment-guide.md はバケット直下へ sync）。引用の署名 URL も
+              # 任意キーに対して発行するため、キーでは絞らずバケット単位のままにする。
               - Effect: Allow
                 Action:
                   - s3:GetObject

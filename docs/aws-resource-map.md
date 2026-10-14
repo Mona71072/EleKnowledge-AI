@@ -56,6 +56,7 @@ These observations do not include delivery tests for SNS/Budget notifications or
 
 ## Phase 2 - RAG and Chat
 
+> 最終検証: 2026-10-10 — RAG ロールの権限を絞る
 > 最終検証: 2026-10-04 — SAMテンプレートとLambdaのAWS API呼出しを照合（実環境未確認）
 
 | Resource name | Component type | Purpose | Managed by |
@@ -65,7 +66,7 @@ These observations do not include delivery tests for SNS/Budget notifications or
 | `kb-dev-net` | OpenSearch Serverless network policy | Network policy for `kb-dev` and dashboards | `phase2-template.yaml` |
 | `kb-dev` | IAM role | Bedrock Knowledge Base access to S3/OpenSearch | `phase2-template.yaml` |
 | `/eleknowledge/dev/knowledge-base-id` | SSM Parameter | Bedrock Knowledge Base ID placeholder/value | `phase2-template.yaml` |
-| `rag-lambda-dev` | IAM role | RAG: Bedrock Retrieve/InvokeModel/Rerank、chatlogsの検索・書込み、対象S3のGetObject、非同期自己呼出し | `phase2-template.yaml` |
+| `rag-lambda-dev` | IAM role | RAG: Bedrock Retrieve/Rerank、設定モデル（`BedrockModelId` と `QueryRewriteModelId`）のInvokeModel（推論プロファイルと、そのプロファイル経由の基盤モデルだけ。モデル名は固定。application inference profile ARN を渡すときは `BedrockModelIdType=application-profile`）、chatlogsの検索・書込み、対象S3のGetObject（KBデータソースはprefix配下、documentsバケットは全体）、非同期自己呼出し | `phase2-template.yaml` |
 | `chat-lambda-dev` | IAM role | chat: chatlogsのQuery/Scan/書込み。GSIは`userId-timestamp-index`のみ | `phase2-template.yaml` |
 | `rag-dev` | Lambda function | RAG query processing with Bedrock | `phase2-template.yaml` |
 | `chat-dev` | Lambda function | Chat session/message management | `phase2-template.yaml` |

@@ -1,5 +1,6 @@
 """SAM の Lambda 実行ロールが機能ごとの権限境界を保つことを確認する。"""
 
+import re
 from pathlib import Path
 
 import yaml
@@ -171,9 +172,6 @@ def test_rag_and_chat_roles_are_separate_and_restrict_api_actions():
         for resource in [statement.get("Resource")]
     )
     assert any("knowledge-base/${KnowledgeBaseId}" in str(resource) for resource in rag_resources)
-    assert any("inference-profile/*" in str(resource) for resource in rag_resources)
-    assert any("application-inference-profile/*" in str(resource) for resource in rag_resources)
-    assert any("foundation-model/*" in str(resource) for resource in rag_resources)
     assert any("${KnowledgeBaseSourcePrefix}*" in str(resource) for resource in rag_resources)
     assert all("/index/" not in str(resource) for resource in rag_resources)
 
@@ -208,6 +206,75 @@ def test_rag_and_chat_roles_are_separate_and_restrict_api_actions():
     chat_policy_names = {policy["PolicyName"] for policy in _policies(template, chat_role) if isinstance(policy, dict)}
     assert "InvokeSelfForSessionTitle" in rag_policy_names
     assert "InvokeSelfForSessionTitle" not in chat_policy_names
+
+
+def test_rag_invoke_model_is_limited_to_configured_models():
+    template = _template("phase2-template.yaml")
+    rag_role = _role_for_function(template, "RagFunction")
+    invoke_statements = [
+        statement for statement in _policy_statements(_policies(template, rag_role))
+        if statement.get("Action") == ["bedrock:InvokeModel"]
+    ]
+    # !If は読み込み時に値の列へ展開されるため、Resource は文字列として確認する
+    resources = [str(statement.get("Resource")) for statement in invoke_statements]
+    joined = " ".join(resources)
+
+    assert "inference-profile/*" not in joined
+    assert "application-inference-profile/*" not in joined
+    assert "arn:aws:bedrock:*::foundation-model/*" in joined
+    assert "inference-profile/${BedrockModelId}" in joined
+    assert "foundation-model/${FoundationModelId}" in joined
+    assert "QueryRewriteModelId" in joined
+
+    # 基盤モデルは推論プロファイル経由に限る。条件のない foundation-model 許可を作らない
+    for statement in invoke_statements:
+        if "foundation-model/" in str(statement.get("Resource")):
+            assert "bedrock:InferenceProfileArn" in str(statement.get("Condition"))
+
+
+def test_rag_model_id_types_are_refs_and_conditions_avoid_string_functions():
+    template = _template("phase2-template.yaml")
+    text = (ROOT / "infrastructure" / "sam" / "phase2-template.yaml").read_text()
+    conditions_text = text[text.index("\nConditions:"):text.index("\nGlobals:")]
+
+    # CloudFormation の Conditions では Fn::Select / Fn::Split を使えない
+    assert "Select" not in conditions_text
+    assert "Split" not in conditions_text
+
+    parameters = template["Parameters"]
+    for name in ("BedrockModelIdType", "QueryRewriteModelIdType"):
+        assert parameters[name]["Default"] == "system-profile"
+        assert parameters[name]["AllowedValues"] == ["system-profile", "application-profile"]
+
+    conditions = template["Conditions"]
+    assert conditions["BedrockModelIdIsApplicationProfile"] == [
+        "BedrockModelIdType", "application-profile"
+    ]
+    assert conditions["QueryRewriteModelIdIsApplicationProfile"] == [
+        "QueryRewriteModelIdType", "application-profile"
+    ]
+
+
+def test_bedrock_model_id_patterns_accept_configured_models_only():
+    template = _template("phase2-template.yaml")
+    parameters = template["Parameters"]
+    model_pattern = re.compile(parameters["BedrockModelId"]["AllowedPattern"])
+    rewrite_pattern = re.compile(parameters["QueryRewriteModelId"]["AllowedPattern"])
+
+    for model_id in (
+        "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-sonnet-5",
+        "global.openai.gpt-6-luna",
+        "arn:aws:bedrock:ap-northeast-1:123456789012:application-inference-profile/abc123DEF",
+    ):
+        assert model_pattern.fullmatch(model_id), model_id
+        assert rewrite_pattern.fullmatch(model_id), model_id
+    assert rewrite_pattern.fullmatch("")
+
+    # 基盤モデル ID（接頭辞なし）や区切りが余分な ID は組み立てられないため拒否する
+    for model_id in ("anthropic.claude-haiku-4-5-20251001-v1:0", "global.anthropic.claude.sonnet", "*"):
+        assert not model_pattern.fullmatch(model_id), model_id
+        assert not rewrite_pattern.fullmatch(model_id), model_id
 
 
 def test_archive_and_metrics_roles_match_their_data_paths():
