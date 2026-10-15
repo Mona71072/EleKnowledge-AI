@@ -174,6 +174,85 @@ def read_tags(session, region: str, arn: str) -> dict[str, str]:
     return {t["Key"]: t["Value"] for t in rows[0]["Tags"]}
 
 
+def preflight_ownership(session, resources: list[dict], account: str) -> dict:
+    """Recheck every ownership dependency using live evidence before writing."""
+    by_arn = {r["arn"]: r for r in resources}
+    live_tags = {
+        r["arn"]: read_tags(session, r["region"], r["arn"])
+        for r in resources
+    }
+    for resource in resources:
+        current = live_tags[resource["arn"]]
+        # SECURITY: A missing ownership key is a change, not an empty match.
+        # Adding a valid same-project key is safe; replacing/removing is not.
+        for key in ("Project", KEYS[0]):
+            if key in resource["before"] and (
+                current.get(key) != resource["before"][key]
+            ):
+                raise ValueError("Project ownership changed since planning")
+        validate_resource({**resource, "before": current}, account)
+
+    checked, checking = set(), set()
+
+    def check(resource):
+        arn = resource["arn"]
+        if arn in checked:
+            return
+        if arn in checking:
+            raise ValueError("Cyclic ownership dependency")
+        checking.add(arn)
+        if resource.get("owner"):
+            parent = by_arn.get(resource["owner"])
+            if parent is None or parent["region"] != resource["region"]:
+                raise ValueError("Parent workload missing from apply plan")
+            check(parent)
+        if resource.get("owner_stack"):
+            client = session.client(
+                "cloudformation", region_name=resource["region"],
+            )
+            stack = client.describe_stacks(
+                StackName=resource["owner_stack"],
+            )["Stacks"][0]
+            tags = {t["Key"]: t["Value"] for t in stack.get("Tags", [])}
+            if (
+                stack["StackId"] != resource["owner_stack"]
+                or ("Project" in tags and tags["Project"] not in PROJECT_VALUES)
+                or (KEYS[0] in tags and tags[KEYS[0]] != "ele-knowledge")
+            ):
+                raise ValueError("CloudFormation ownership changed")
+            members = []
+            for page in client.get_paginator("list_stack_resources").paginate(
+                StackName=resource["owner_stack"],
+            ):
+                members.extend(page["StackResourceSummaries"])
+            # Stack ownership may come from an owned workload's stack-id.
+            # Use that workload's live tags, never its planning snapshot.
+            owned_member = any(
+                r["region"] == resource["region"]
+                and live_tags[r["arn"]].get("aws:cloudformation:stack-id")
+                == stack["StackId"]
+                and (
+                    live_tags[r["arn"]].get("Project") in PROJECT_VALUES
+                    or live_tags[r["arn"]].get(KEYS[0]) == "ele-knowledge"
+                )
+                for r in resources
+            )
+            if (
+                tags.get("Project") not in PROJECT_VALUES
+                and tags.get(KEYS[0]) != "ele-knowledge" and not owned_member
+            ) or not any(
+                m.get("PhysicalResourceId") == resource["physical_id"]
+                for m in members
+            ):
+                raise ValueError("CloudFormation ownership not established")
+        checking.remove(arn)
+        checked.add(arn)
+
+    for resource in resources:
+        check(resource)
+    return live_tags
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True)
@@ -201,47 +280,10 @@ def main() -> int:
         for resource in plan["resources"]:
             validate_resource(resource, account)
         # Preflight all resources before the first write.
-        live_tags = {}
-        for resource in plan["resources"] if args.apply else []:
-            current = read_tags(session, resource["region"], resource["arn"])
-            live_tags[resource["arn"]] = current
-            if current.get("Project") != resource["before"].get("Project"):
-                raise ValueError("Project ownership changed since planning")
-            if resource.get("owner"):
-                owner_tags = read_tags(
-                    session, resource["region"], resource["owner"],
-                )
-                if owner_tags.get("Project") not in PROJECT_VALUES:
-                    raise ValueError("Parent workload project ownership changed")
-            if resource.get("owner_stack"):
-                client = session.client(
-                    "cloudformation", region_name=resource["region"],
-                )
-                stack = client.describe_stacks(
-                    StackName=resource["owner_stack"],
-                )["Stacks"][0]
-                tags = {t["Key"]: t["Value"] for t in stack.get("Tags", [])}
-                members = client.list_stack_resources(
-                    StackName=resource["owner_stack"],
-                )["StackResourceSummaries"]
-                owned_member = any(
-                    r["before"].get("Project") in PROJECT_VALUES
-                    and r["before"].get("aws:cloudformation:stack-id")
-                    == stack["StackId"]
-                    for r in plan["resources"]
-                )
-                if (
-                    tags.get("Project") not in PROJECT_VALUES and not owned_member
-                ) or not any(
-                    m.get("PhysicalResourceId") == resource["physical_id"]
-                    for m in members
-                ):
-                    raise ValueError("CloudFormation ownership not established")
-            if args.apply and any(
-                k in current and current[k] != v
-                for k, v in resource["desired"].items()
-            ):
-                raise ValueError("Live classification conflicts with the plan")
+        live_tags = (
+            preflight_ownership(session, plan["resources"], account)
+            if args.apply else {}
+        )
         results = []
         result_path = args.plan.with_name(args.plan.stem + "-results.json")
         for resource in plan["resources"]:
