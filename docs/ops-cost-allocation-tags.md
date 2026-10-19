@@ -10,6 +10,8 @@ related-code: scripts/ops/apply_cost_allocation_tags.py, infrastructure/sam/
 
 ## 決定と適用範囲
 
+> 最終検証: 2026-10-19 — SAMテンプレート・samconfigのEnvタグ付与停止と、Environmentパラメータ維持を照合。AWS未適用。
+
 2026-10-15、ユーザーが本会話で3軸の採用、AWS反映、文書化を依頼した。monaの口頭承諾はユーザー申告として記録する（承諾日そのものは未確認）。この記録はPRマージの許可を兼ねない。
 
 共用AWSアカウント内で管理部門がタグ名を識別できるよう、キーを `gyoumu012` で始める。Ele-Knowledge専用リソースを対象とし、他プロジェクトとの共用リソースは所有者・配賦方法を確認するまで一括帰属させない。検索対象・資料・ユーザーの業務スコープは変更しない。
@@ -26,7 +28,7 @@ related-code: scripts/ops/apply_cost_allocation_tags.py, infrastructure/sam/
 
 `Component=shared` と `Usage=shared` はそれぞれ機能間共用、利用区分間共用を意味する。未設定・帰属未確認を `shared` へ自動変換しない。`dev` というリソース名だけで `Usage=development` と判断しない。
 
-本アカウントは単一環境で、本番は別AWSアカウントへリリースするため、`Env` はコスト配分の軸に含めない。既存の `Project` / `Env` は互換性のため今回削除せず、SAMの `Environment` / `ProjectName` パラメータも維持する。
+本アカウントは単一環境で、本番は別AWSアカウントへリリースするため、`Env` はコスト配分の軸に含めない。SAMテンプレートと `samconfig` から `Env` リソースタグ・スタックタグの付与をやめる。既存リソースのタグ状態は次回の通常スタック更新後に再読取して確認する。本変更ではAWSへ適用しない。SAMの `Environment` / `ProjectName` パラメータと、それらを使うリソース名・アプリ設定は維持する。
 
 ## 初期分類と変更手順
 
@@ -66,7 +68,7 @@ python scripts/ops/apply_cost_allocation_tags.py --profile $profileName --expect
 
 > Ele-Knowledgeのコスト管理用として、アカウント識別接頭辞を付けた以下3キーをコスト配分タグとして有効化してください。
 > `gyoumu012Project` / `gyoumu012Component` / `gyoumu012Usage`
-> プロジェクト値は `ele-knowledge` です。環境はAWSアカウントで分離するため `Env` の有効化は不要です。
+> プロジェクト値は `ele-knowledge` です。環境はAWSアカウントで分離するため、コスト配分タグとして有効化するのは上記3キーのみです。`Env` はSAMから付与しません。
 > 有効化日と、請求データで各キーを確認できた日をご連絡ください。
 
 反映には時間差があるため、有効化後にCost Explorer / CURで確認する。バックフィルは管理アカウントから最大12か月を申請できるが、当時リソースに付いていたタグが対象であり、新キー付与前の期間を新キーで復元できるとは扱わない。
