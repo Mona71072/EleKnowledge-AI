@@ -14,14 +14,18 @@ Resource ownership should be identified with tags, not long names:
 - `Project=EleKnowledge`
 - `ManagedBy=SAM`
 
-SAM no longer sets the legacy `Env` resource tag. Existing resources may retain it until their next stack update; deployed tags have not been rechecked here. The `Environment` parameter still selects the deployment environment.
+SAM templates no longer declare the legacy `Env` resource tag; the `Environment` parameter still selects the deployment environment. AWS read-only inspection on 2026-10-19 found `Env` still present on all 108 resources returned with `Project=EleKnowledge`, including after their stack updates. Of these, 99 had each of the three `gyoumu012` cost-allocation keys. Treat template tags and already-deployed resource tags as separate states; this inventory does not authorize bulk tag changes.
 
 Use [AWS Migration Runbook](aws-migration-runbook.md) for the end-to-end deployment and verification procedure.
 See [AWS Resource Map](aws-resource-map.md) for the resource name, component type, and purpose table.
 
 ## Migration Target
 
-Create an empty `dev` environment first. Data migration is out of scope for this phase.
+> 最終検証: 2026-10-19 — AWS CLI 読み取り専用確認（東京リージョンのCloudFormation。データ内容・機能E2Eは未確認）
+
+The Phase 1–3 `dev` stacks already exist in the inspected AWS account and were `UPDATE_COMPLETE` on 2026-10-19. The documented “create an empty dev environment” instruction is a migration target for a different/new account, not a description of the current environment. A separate live stack, `eleknowledge-law-kb-dev`, was also `UPDATE_COMPLETE`; it is not yet included in the Phase 1–3 inventory and needs migration-scope review. The `eleknowledge-legal-rag-dev` stack was `ROLLBACK_COMPLETE` and must not be treated as deployed.
+
+Data migration scope remains out of scope for this inventory. This snapshot is limited to CloudFormation status and does not verify data completeness or service health.
 
 ## IaC Managed Resources
 
