@@ -1,3 +1,4 @@
+---
 schema_version: 1
 record_id: "elv-lv5k-lv6k-clt-dimension-acceleration-case"
 record_version: 1

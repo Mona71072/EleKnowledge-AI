@@ -1,8 +1,7 @@
 ---
 schema_version: 1
 record_id: "elv-board-compatibility"
-record_version: 5
-  topic: "副番の近さだけで機種間互換を推定しない"
+record_version: 6
 title: "エレベーター基板互換性の照合上の注意"
 category: "不具合対応(ELV)"
 record_type: "knowhow"

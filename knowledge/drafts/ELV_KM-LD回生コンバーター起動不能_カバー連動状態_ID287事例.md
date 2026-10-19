@@ -1,4 +1,4 @@
-これど---
+---
 schema_version: 1
 record_id: "elv-kmld-regenerative-converter-start-failure-cover-interlock-id287"
 record_version: 1

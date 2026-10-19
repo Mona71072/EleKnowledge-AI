@@ -10,8 +10,27 @@ list_item_id	title	model	importance	reported_status	theme_bucket
 32	100Vと200Vが混線してる件	新AXIEZ	中	対応済み	other
 36	本スロー切り替え時にＤ４１未点灯	CM-LB	中	対応済み	other
 85	据付完了フラグの消し方	新AXIEZ	中	対応済み	install_dim
+87	RHQコネクタ取付忘れにより、本スロー出し後にかご上でUP運転できない	AXIEZ-LINKS	↓低	対応済み	other
+88	メンテコンがP1基板を認識しない際の確認箇所		中	対応不要	other
+89	JRE仕様時の負荷試験実施方法	VFGLB	↓低	対応不要	other
+90	WOS用短絡コネクタ取外し間違いによる、本スロー後の不具合	AXIEZ-LINKS	↑高	対応済み	other
+91	視覚障害者仕様(VHP)適用時、ランディングオープン(LO)しない件	VFGLF・VFGLB・VFGH	中	対応済み	other
+92	パニックオープンと同時に乗場呼び自動登録されてしまう件	エレコール	↓低	対応済み	group_call
+93	表示基板が手配される件	VFGLF	重要	対応不要	display
+95	SD-T12コンタクタ不具合(LBA,LBB)	VFGLF	↑高	対応済み	other
+96	SD-T21コンタクタ不具合(#5,M5,LBA)	VFGLF	↑高	対応済み	other
+97	＃ ５ (SDT21)コンタクタ動作不良によるエレ走行不能の件	VFGLF	中	対応済み	other
+98	タイマーリレー誤品によりヘルスエアーが起動しない		↑高	対応済み	other
 99	乗場インジとカゴ内インジの階床表示を変更してもカゴ内インジの行先階予約表示は変更されない件	VFGLF	中	対応済み	group_call
+100	BILNET雛形について		中	対応不要	other
+101	MELDバッテリーの誤結線により、IPU基盤内M1カードが焼けた		中	対応済み	other
+102	一次二次消防リレーの接触不良によりかごが自動運転ができない件	VFGH	中	対応済み	other
+103	ポスト式光電センサー光軸ズレにより停止待機動作に移行しない件	SVFC	中	対応済み	other
+104	かご上ステーションでのオーダー確認方法	VFGLB	中	対応済み	other
+105	釦CPU基板からDOB,DCB信号が出力されず戸開閉釦が効かない件	VFGLF	中	対応済み	door
+106	LUB-236ガイドシューベイク手配図番、東流品番について	全エレ機種	中	対応不要	other
 107	ソフト不備によりかご内インジの行先予報灯が1階床ズレて登録される件	VFGLF	中	対応済み	display
+109	トランスリアクトル箱のS0端子のボルトが弛んでいたため、引渡し前点検時の増し締め確認の際、ケーブルが端子から外れた件	VFGLB	重要	対応済み	power
 122	一般放送/非常放送の２線式・3線式の違い	全エレ機種		対応済み	safety
 123	MELDなしの場合の受電盤にあるバックアップバッテリーは何に使う？	VFGH	中	対応済み	power
 131	鋼芯入り制御ケーブルの誘導電圧対策	VFGH	中	対応済み	power
@@ -30,7 +49,6 @@ list_item_id	title	model	importance	reported_status	theme_bucket
 152	SAI2200C(即時予報付)でバンク内に非常用エレがある場合の乗場インジは通常運行時に点灯しない	VFGH	中	対応済み	group_call
 153	階床が6階以上の場合は、いたずら呼びキャンセル(FCC-A)が基本仕様となる。	全エレ機種	中	対応不要	group_call
 208	エアコンのスケジュール設定について		↓低	対応不要	other
-259	パソコン取付板が取り付けられない	KM-LD	↓低	対応不要	other
 269	乗場CR/顔認証セキュリティの制御処理不具合	全エレ機種	中	対応済み	group_call
 278	SfleX-ropeと非対称型ソケットが労働安全衛生法（エレベーター構造規格）に準拠しているかの確認が漏れていた件	MR機種	中	対応済み	safety
 315	NS一時解除時のボタン点滅設定について	AXIEZ-LINKS	中	対応不要	other
@@ -44,16 +62,19 @@ list_item_id	title	model	importance	reported_status	theme_bucket
 354	直伝通信が確立しておらず、カゴ内調整機能ほかドアSW、CPD、点検SW効かない件	VFGR	中	対応済み	door
 361	据付け中認識フラグへのリセットについて	VFGLF	中	対応済み	install_dim
 370	品目で確認した基板の副番が、図面改定により現地基板と異なっていた件	KM-LD	中	対応済み	other
+371	群管理盤への電源供給線が抜かれる	MR機種	中	対応済み	group_call
+372	タイブラケットの正規取付向きについて	MRL機種	↓低	対応済み	other
 373	エレナビの行先階登録制限により、工事使用中にカゴ呼びを登録できない。	VFGH	↓低	対応済み	group_call
 377	クーラー付き運転（ACO-E）の遠方発停の動作について	全エレ機種	↓低	対応済み	other
+378	METREP 9稲再申請に関する注意事項		中	対応不要	other
 379	ER運転の動作点について	VFGH	↓低	対応済み	other
+380	S21コネクタB2ピン抜けによる自動運転不良	VFGLF	中	対応済み	other
+384	3carで群管理運転せず、2C-2BC運転となる。	CM-MA	中	対応中	group_call
 386	図面左上のDEF欄に記載ある【REF】、【DWG】の意味とは	全エレ機種		対応不要	other
 387	防錆油除去作業箇所	全エレ機種	↓低	対応不要	other
 388	ロックダウン取付方法について	VFGH	↓低	対応済み	other
 389	昇降路全高が短く、レール頂部間隙が確保できない。	VFGLF	中	対応済み	other
-392	ブレーキスイッチ設定不良で本スロー時カゴ運転不能の件	VFGLF	↑高	対応済み	other
 393	2ndピットスイッチの有無	ME-BL	↓低	対応済み	install_dim
-394	ピットタラップの取付位置について	全エレ機種	↑高	対応済み	install_dim
 395	冠水時管制運転(PER)の有無について	VFGLB・VFGLF	↓低	対応済み	other
 396	型板設定時のピアノ線間寸法計算について	MR機種	↓低	対応済み	install_dim
 397	M1カード不良により、自動運転中にカゴ急停止する件	VFGLF	中	対応済み	other
@@ -71,10 +92,10 @@ list_item_id	title	model	importance	reported_status	theme_bucket
 413	ピット点検口から出入り不可	VFGH	重要	対応不要	install_dim
 414	ラインLEDの配線地絡によりかご上STで伝送異常を検知する件	VFGLF	中	対応済み	comm
 415	ELSGW盤にPuTTYでアクセスできない	エレナビ	↓低	対応不要	other
-416	長周期振動感知器の短絡ジャンパについて	VFGH	↑高	対応不要	other
 419	VFGLBにおける戸短検出時の解除方法の注意点	VFGLB	↓低	対応不要	door
 426	秤基板から電圧が出力されない	VFGH	中	対応済み	power
 428	短ランバイ適用物件における終端階運転制限	VFGH	中	対応不要	other
+429	M14コネクタ ピンアサイン間違い	VFGLF	中	対応済み	other
 430	弓ローラーが動かず手摺テンション調整できない	u形	↓低	対応済み	other
 431	動力電源仮設配線ミスによるELV起動不能の件	ME-CM	↓低	対応済み	power
 432	LV5K／LV6Kドア適用現場におけるCLT寸法の設定基準について	全エレ機種	中	対応不要	door

@@ -64,7 +64,8 @@ def evidence_sources_blob(text: str) -> str:
 def list_ids_from_draft(path: Path, text: str, *, include_source_id_suffix: bool) -> set[str]:
     """Match list item IDs only (not error codes in narrative body)."""
     ids: set[str] = set()
-    for m in re.finditer(r"(?<![0-9])ID(\d{1,5})(?![0-9])", path.name):
+    fm = frontmatter_text(text)
+    for m in re.finditer(r"^list_item_id:\s*[`\"']?(\d{1,5})", fm, re.M):
         ids.add(m.group(1))
     evidence = evidence_sources_blob(text)
     for m in re.finditer(r"[（(]ID(\d{1,5})[）)]", evidence):
@@ -72,7 +73,12 @@ def list_ids_from_draft(path: Path, text: str, *, include_source_id_suffix: bool
     for m in re.finditer(r"list_item_id:\s*[`\"']?(\d{1,5})", evidence, re.I):
         ids.add(m.group(1))
     if include_source_id_suffix:
-        for m in re.finditer(r'source_id:\s*"[^"]*[-_](\d{1,5})"', evidence):
+        # Lists 由来のみ: source_id に list / -id を含む場合の末尾数字（研修連番等を除外）
+        for m in re.finditer(
+            r'source_id:\s*"[^"]*(?:list|[-_]id)[^"]*[-_](\d{1,5})"',
+            evidence,
+            re.I,
+        ):
             ids.add(m.group(1))
     return ids
 
@@ -280,7 +286,7 @@ def main() -> None:
     # machine-readable exports
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     with (OUT_DIR / "reconcile-lists-matched.tsv").open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f, delimiter="\t")
+        w = csv.writer(f, delimiter="\t", lineterminator="\n")
         w.writerow(["list_item_id", "record_id", "record_ids", "title", "model", "importance"])
         for row in sorted(matched_lists, key=lambda r: int(r["list_item_id"])):
             w.writerow(
@@ -295,7 +301,7 @@ def main() -> None:
             )
 
     with (OUT_DIR / "reconcile-lists-matched-extended.tsv").open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f, delimiter="\t")
+        w = csv.writer(f, delimiter="\t", lineterminator="\n")
         w.writerow(["list_item_id", "record_id", "record_ids", "title", "model", "importance"])
         for row in sorted(matched_ext, key=lambda r: int(r["list_item_id"])):
             w.writerow(
@@ -310,7 +316,7 @@ def main() -> None:
             )
 
     with (OUT_DIR / "reconcile-lists-unmatched-extended.tsv").open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f, delimiter="\t")
+        w = csv.writer(f, delimiter="\t", lineterminator="\n")
         w.writerow(["list_item_id", "title", "model", "importance", "reported_status", "theme_bucket"])
         for row in sorted(unmatched_ext, key=lambda r: int(r["list_item_id"])):
             w.writerow(
@@ -325,7 +331,7 @@ def main() -> None:
             )
 
     with (OUT_DIR / "reconcile-lists-unmatched.tsv").open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f, delimiter="\t")
+        w = csv.writer(f, delimiter="\t", lineterminator="\n")
         w.writerow(["list_item_id", "title", "model", "importance", "reported_status", "theme_bucket"])
         for row in sorted(unmatched_lists, key=lambda r: int(r["list_item_id"])):
             w.writerow(
@@ -402,13 +408,13 @@ def render_markdown(
         "",
         "- **一致**: 同じ `list_item_id` または `onenote_id` が、既存の `knowledge/drafts/` にすでに紐づいている。新規事例カードは作らない。",
         "- **未整備**: スナップショット上の ID が、下書き側に見つからない。体系化候補として人がテーマを選ぶ。",
-        "- **本文比較はしない**: ファイル名・frontmatter・根拠題名の ID のみ。",
+        "- **本文比較はしない**: frontmatter の `list_item_id` と根拠題名の ID のみ。表示タイトルとファイル名は照合に使わない。",
         "",
         "## 件数サマリ",
         "",
         "| 対象 | 総数 | 一致 | 未整備 | 備考 |",
         "| --- | ---: | ---: | ---: | --- |",
-        f"| Lists（推奨: ファイル名 + evidence の ID） | {lp['total']} | {lp['matched_primary']} | {lp['unmatched_primary']} | 重複一致 {lp['duplicate_matches_primary']} 件 |",
+        f"| Lists（推奨: `list_item_id` + evidence の ID） | {lp['total']} | {lp['matched_primary']} | {lp['unmatched_primary']} | 重複一致 {lp['duplicate_matches_primary']} 件 |",
         f"| Lists（拡張: + source_id 末尾） | {lp['total']} | {lp['matched_extended_with_source_id_suffix']} | {lp['unmatched_extended_with_source_id_suffix']} | 重複 {lp['duplicate_matches_extended']} 件・要確認 |",
         f"| OneNote ページ | {on['total_pages']} | {on['matched']} | {on['unmatched']} | 添付中心で実質空 {on['emptyish_pages']} 件 |",
         f"| 下書き走査 | {summary['drafts_scanned']} | — | — | IMPORT-* を除く |",
@@ -417,9 +423,9 @@ def render_markdown(
         "",
         "各 `list_item_id` について、次のいずれかで下書きを探した。",
         "",
-        "1. ファイル名の `ID{番号}` / `_ID{番号}`",
+        "1. frontmatter の `list_item_id`",
         "2. frontmatter の `evidence_sources` 題名中の `(ID{番号})` / `（ID{番号}）`（本文のエラーコードは対象外）",
-        "3. `evidence_sources` 内の `source_id` 末尾 `-{番号}` / `_{番号}`（拡張行。推奨行は 1–2 のみ）",
+        "3. `evidence_sources` 内の `source_id` で **`list` または `-id` を含む**ものの末尾 `-{番号}` / `_{番号}`（拡張行。研修連番等は除外。判断は 1–2 の primary のみ）",
         "",
         "機械可読な一覧:",
         "",

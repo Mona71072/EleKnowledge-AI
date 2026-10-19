@@ -2,31 +2,31 @@
   "generated_on": "2026-10-19",
   "lists": {
     "total": 390,
-    "matched_primary": 304,
-    "unmatched_primary": 86,
+    "matched_primary": 283,
+    "unmatched_primary": 107,
     "duplicate_matches_primary": 23,
-    "matched_extended_with_source_id_suffix": 317,
-    "unmatched_extended_with_source_id_suffix": 73,
-    "duplicate_matches_extended": 34
+    "matched_extended_with_source_id_suffix": 293,
+    "unmatched_extended_with_source_id_suffix": 97,
+    "duplicate_matches_extended": 24
   },
   "onenote": {
     "total_pages": 1039,
-    "matched": 339,
-    "unmatched": 700,
+    "matched": 340,
+    "unmatched": 699,
     "emptyish_pages": 240
   },
-  "drafts_scanned": 630,
-  "high_importance_unmatched_lists": 10,
+  "drafts_scanned": 633,
+  "high_importance_unmatched_lists": 13,
   "unmatched_theme_buckets": {
-    "door": 13,
-    "power": 5,
+    "door": 14,
+    "power": 6,
     "clock_sets": 1,
-    "other": 46,
+    "other": 62,
     "comm": 2,
-    "install_dim": 7,
-    "group_call": 7,
+    "install_dim": 6,
+    "group_call": 10,
     "safety": 2,
-    "display": 3
+    "display": 4
   },
   "duplicate_list_matches": [
     {

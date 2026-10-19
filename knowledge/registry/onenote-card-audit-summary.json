@@ -1,0 +1,20 @@
+{
+  "card_onenote_refs": 185,
+  "unique_onenote_ids": 83,
+  "by_attach_source": {
+    "manual_or_other": 130,
+    "unknown": 15,
+    "title_hit": 11,
+    "title_hit_or_index": 29
+  },
+  "by_page_role": {
+    "hybrid": 50,
+    "cross_cutting": 19,
+    "cross_topic": 82,
+    "index": 20,
+    "content": 14
+  },
+  "wave61_63_links": 282,
+  "wave_on_card": 282,
+  "wave_pending_candidate": 0
+}

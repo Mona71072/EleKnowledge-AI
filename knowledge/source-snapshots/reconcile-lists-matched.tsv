@@ -48,25 +48,6 @@ list_item_id	record_id	record_ids	title	model	importance
 82	elv-axiez-links-brake-circuit-reinstatement-mismatch-id82	elv-axiez-links-brake-circuit-reinstatement-mismatch-id82	基板復帰ミスによる、エレベーター運転不能の件	AXIEZ-LINKS	重要
 83	elv-axiez-links-boon-grounding-misconnection-id69	elv-axiez-links-boon-grounding-misconnection-id69	アース線を異なるターミナル(128番)に結線してしまい、制御回路の絶縁不良の件	AXIEZ-LINKS	↑高
 84	elv-e-series-mrl-supply-voltage-conditions-id84	elv-e-series-mrl-supply-voltage-conditions-id84	【品質記録確認】E系MRLの電源電圧について		↑高
-87	elv-axiez-links-car-top-up-restriction-id87	elv-axiez-links-car-top-up-restriction-id87	RHQコネクタ取付忘れにより、本スロー出し後にかご上でUP運転できない	AXIEZ-LINKS	↓低
-88	elv-p1-board-maintenance-console-recognition-id88	elv-p1-board-maintenance-console-recognition-id88	メンテコンがP1基板を認識しない際の確認箇所		中
-89	elv-vfglb-jre-load-test-display-constraint-id89	elv-vfglb-jre-load-test-display-constraint-id89	JRE仕様時の負荷試験実施方法	VFGLB	↓低
-90	elv-axiez-links-wos-transition-removal-confusion-id90	elv-axiez-links-wos-transition-removal-confusion-id90	WOS用短絡コネクタ取外し間違いによる、本スロー後の不具合	AXIEZ-LINKS	↑高
-91	elv-vhp-announcement-landing-open-inhibit-id91	elv-vhp-announcement-landing-open-inhibit-id91	視覚障害者仕様(VHP)適用時、ランディングオープン(LO)しない件	VFGLF・VFGLB・VFGH	中
-92	elv-elecall-panic-open-landing-call-auto-register-id92	elv-elecall-panic-open-landing-call-auto-register-id92	パニックオープンと同時に乗場呼び自動登録されてしまう件	エレコール	↓低
-93	elv-vfglf-lhh-32x-display-board-procurement-id93	elv-vfglf-lhh-32x-display-board-procurement-id93	表示基板が手配される件	VFGLF	重要
-95	elv-vfglf-sd-t12-contactor-brake-not-releasing-id95	elv-vfglf-sd-t12-contactor-brake-not-releasing-id95	SD-T12コンタクタ不具合(LBA,LBB)	VFGLF	↑高
-96	elv-vfglf-sd-t21-contactor-not-picking-up-id96	elv-vfglf-sd-t21-contactor-not-picking-up-id96	SD-T21コンタクタ不具合(#5,M5,LBA)	VFGLF	↑高
-97	elv-vfglf-sd-t21-wos-contactor-operation-failure-id97	elv-vfglf-sd-t21-wos-contactor-operation-failure-id97	＃ ５ (SDT21)コンタクタ動作不良によるエレ走行不能の件	VFGLF	中
-98	elv-health-air-aircon-wrong-timer-relay-id98	elv-health-air-aircon-wrong-timer-relay-id98	タイマーリレー誤品によりヘルスエアーが起動しない		↑高
-100	work-bilnet-template-print-area-note-id100	work-bilnet-template-print-area-note-id100	BILNET雛形について		中
-101	elv-meld-battery-polarity-m1-card-damage-id101	elv-meld-battery-polarity-m1-card-damage-id101	MELDバッテリーの誤結線により、IPU基盤内M1カードが焼けた		中
-102	elv-vfgh-fire-service-relay-contact-automatic-operation-id102	elv-vfgh-fire-service-relay-contact-automatic-operation-id102	一次二次消防リレーの接触不良によりかごが自動運転ができない件	VFGH	中
-103	esc-svfc-post-photoelectric-sensor-standby-id103	esc-svfc-post-photoelectric-sensor-standby-id103	ポスト式光電センサー光軸ズレにより停止待機動作に移行しない件	SVFC	中
-104	elv-vfglb-car-top-station-order-mismatch-id104	elv-vfglb-car-top-station-order-mismatch-id104	かご上ステーションでのオーダー確認方法	VFGLB	中
-105	elv-vfglf-installation-portable-fault-door-buttons-id105	elv-vfglf-installation-portable-fault-door-buttons-id105	釦CPU基板からDOB,DCB信号が出力されず戸開閉釦が効かない件	VFGLF	中
-106	field-lub-236-guide-shoe-procurement-parts-id106	field-lub-236-guide-shoe-procurement-parts-id106	LUB-236ガイドシューベイク手配図番、東流品番について	全エレ機種	中
-109	elv-vfglb-cable-detachment-loose-terminal-id109	elv-vfglb-cable-detachment-loose-terminal-id109	トランスリアクトル箱のS0端子のボルトが弛んでいたため、引渡し前点検時の増し締め確認の際、ケーブルが端子から外れた件	VFGLB	重要
 110	catalog-elv-touchless-reference	catalog-elv-touchless-reference	最下階乗場ボタン（タッチレス仕様）が意図せずに登録される件	VFGLB	中
 111	elv-noise-cases-reference	elv-noise-cases-reference	【中部支情報】かご吊り車の弦振動に起因する振動騒音不具合	AXIEZ-LINKS	中
 112	reference-hold-small-air-conditioner-forced-operation-id112	reference-hold-small-air-conditioner-forced-operation-id112	小型エアコン（MD-20B-MI4）強制運転方法		↓低
@@ -185,6 +166,7 @@ list_item_id	record_id	record_ids	title	model	importance
 256	elv-car-fixing-device-arm-engagement-title-only-id256	elv-car-fixing-device-arm-engagement-title-only-id256	かご固定装置の固定腕が穴に結合しない件		
 257	safety-obstruction-protection-drawing-condition-conflict-id257	safety-obstruction-protection-drawing-condition-conflict-id257	LINKs R9,RT9 保護措置施工図記載の条件が間違っている件	VFGLF	重要
 258	elv-maintenance-console-pdf-display-protected-mode-hold-id258	elv-maintenance-console-pdf-display-protected-mode-hold-id258	メンテコン　トラブルシュートマニュアルが表示されない		↓低
+259	catalog-elv3-emergency-elevator-reference	catalog-elv3-emergency-elevator-reference	パソコン取付板が取り付けられない	KM-LD	↓低
 260	elv-isolation-transformer-secondary-voltage-inquiry-id260	elv-isolation-transformer-secondary-voltage-inquiry-id260	絶縁トランス適用時のCST,HSTの電圧値が高くなる件	MRL機種	中
 261	elv-car-top-harness-configuration-mismatch-board-damage-id261	elv-car-top-harness-configuration-mismatch-board-damage-id261	カゴ上ST内ハーネス誤手配によるCS基板損傷の件	全エレ機種	↑高
 262	safety-color-system-operation-review-hold-id262	safety-color-system-operation-review-hold-id262	安全カラーシステム運用について	全エレ機種	↓低
@@ -207,7 +189,7 @@ list_item_id	record_id	record_ids	title	model	importance
 284	elv-vfgr-sw-change	elv-vfgr-sw-change	VFGRの書換方法について	VFGR	↓低
 285	esc-safety-circuit-status-indication-mismatch-buzzer-id285	esc-safety-circuit-status-indication-mismatch-buzzer-id285	ESCの安全回路SW(A接点・B接点)について	SVFC	中
 286	knowhow-elv-2bc-group-error-annunciation-topology-caveat-20261009	knowhow-elv-2bc-group-error-annunciation-topology-caveat-20261009	群管理異常を発報させる方法	全エレ機種	中
-287	ELV_KM-LD回生コンバーター起動不能_カバー連動状態_ID287事例	ELV_KM-LD回生コンバーター起動不能_カバー連動状態_ID287事例	フタ（開放）スイッチの押し込み量が不足により、回生コンバータ結線切替時動かない	KM-LD	中
+287	elv-kmld-regenerative-converter-start-failure-cover-interlock-id287	elv-kmld-regenerative-converter-start-failure-cover-interlock-id287	フタ（開放）スイッチの押し込み量が不足により、回生コンバータ結線切替時動かない	KM-LD	中
 288	elv-primary-fire-service-operation-failure-safety-circuit-wiring-id288	elv-primary-fire-service-operation-failure-safety-circuit-wiring-id288	一次消防運転が正常に動作しない	CM-LB	
 289	elv-hos-service-suspension-not-triggered-indicator-configuration-id289	elv-hos-service-suspension-not-triggered-indicator-configuration-id289	運転休止のキースイッチを休止側に倒しても休止動作に移行しない。	全エレ機種	中
 290	catalog-elv-smoke-control-door-reference	catalog-elv-smoke-control-door-reference	非常用エレベーターで火災管制運転が必須となる条件	全エレ機種	中
@@ -279,21 +261,19 @@ list_item_id	record_id	record_ids	title	model	importance
 367	elv-construction-use-heavy-load-handling-id367	elv-construction-use-heavy-load-handling-id367	エレベーターにおける荷扱いに関する基準	全エレ機種	中
 368	elv-links-first-upward-run-car-shake-detection-id368	elv-links-first-upward-run-car-shake-detection-id368	LINKs特定条件下で、かご揺すり検出をしてしまう件	AXIEZ-LINKS	中
 369	elv-compensation-cable-suspension-failure-id369	elv-compensation-cable-suspension-failure-id369	重量が違うウウィスパーフレックス２本吊り現場でUボルトのサイズ間違いによって 破断した件	全エレ機種	中
-371	case-elv-mr-group-panel-power-disconnected-id371	case-elv-mr-group-panel-power-disconnected-id371	群管理盤への電源供給線が抜かれる	MR機種	中
-372	case-mrl-tie-bracket-reversed-installation-id372	case-mrl-tie-bracket-reversed-installation-id372	タイブラケットの正規取付向きについて	MRL機種	↓低
 376	catalog-elv-cwt-seismic-component-reference	catalog-elv-cwt-seismic-component-reference	S14耐震のため、釣合オモリの上部ガイドシュー取付台が余分に1セット手配される	MR機種	中
-378	knowhow-metrep-9ina-resubmission-id378	knowhow-metrep-9ina-resubmission-id378	METREP 9稲再申請に関する注意事項		中
-380	case-vfglf-end-limit-signal-connection-id380	case-vfglf-end-limit-signal-connection-id380	S21コネクタB2ピン抜けによる自動運転不良	VFGLF	中
 381	elv-door-drive-board-input-pulse-fault-id381	elv-door-drive-board-input-pulse-fault-id381	エンコーダ入力パルス０エラーのため、カゴドアが動かない件	全エレ機種	中
 382	elv-door-issues-reference	elv-door-issues-reference	気配り配線の挟み込みにより、通信エラーでカゴが動かない件	VFGLF	中
 383	elv-automatic-operation-issues	elv-automatic-operation-issues	電源電圧不足により、高速DN運転ができない件	全エレ機種	中
-384	case-elv-cm-ma-group-operation-2c-2bc-id384	case-elv-cm-ma-group-operation-2c-2bc-id384	3carで群管理運転せず、2C-2BC運転となる。	CM-MA	中
 385	elv-smoke-detector-access-switch-model-behavior-id385	elv-smoke-detector-access-switch-model-behavior-id385	新AXIEZとLINKsで煙感知器点検口を開けた時の動作が異なる件	MRL機種	中
 390	catalog-elv-p-s-wave-earthquake-sensors	catalog-elv-p-s-wave-earthquake-sensors	（識別情報を含む可能性があるため情報管理確認まで保留）	MR機種	中
 391	elv-load-test-mcb-rating-question-id391	elv-load-test-mcb-rating-question-id391	負荷試験の電流値がMCBブレーカー定格電流を超えてしまう件	全エレ機種	中
+392	case-elv-vfglf-brake-switch-stroke-id392	case-elv-vfglf-brake-switch-stroke-id392	ブレーキスイッチ設定不良で本スロー時カゴ運転不能の件	VFGLF	↑高
+394	case-elv-pit-trap-mounting-position-id394	case-elv-pit-trap-mounting-position-id394	ピットタラップの取付位置について	全エレ機種	↑高
 398	case-elv-axiez-links-car-flex-lighting-power-ground-fault-id398	case-elv-axiez-links-car-flex-lighting-power-ground-fault-id398	カゴが撓むことで照明安定化電源が地絡する件	AXIEZ-LINKS	重要
 410	elv-runby-forecast-switch-monitoring-not-reported-id410	elv-runby-forecast-switch-monitoring-not-reported-id410	保守ソフトの有無による監視盤表示の違い	VFGH	↓低
 411	elv-temporary-slow-issues	elv-temporary-slow-issues|elv-vfglf-resolver-wiring-break-id411	巻上機レゾルバ線が断線しており、空回しが出来ない件	VFGLF	中
+416	knowhow-elv-long-period-vibration-jumper-id416	knowhow-elv-long-period-vibration-jumper-id416	長周期振動感知器の短絡ジャンパについて	VFGH	↑高
 417	case-elv-vfglf-i-can-disconnected-hall-backup-unavailable-id417	case-elv-vfglf-i-can-disconnected-hall-backup-unavailable-id417	I-CAN未接続により乗場バックアップできない	VFGLF	↑高
 418	elv-sets-state-error-64c-id418	elv-sets-state-error-64c-id418	カゴ上での制御盤エラー確認時に64Cが消えない件	VFGLB	中
 420	elv-control-cable-hanging-height-pit-interference-id420	elv-control-cable-hanging-height-pit-interference-id420	検討不足による制御ケーブル吊り高さ基準外の件	MR機種	↑高
@@ -302,4 +282,3 @@ list_item_id	record_id	record_ids	title	model	importance
 423	elv-emergency-intercom-call-not-reported-id423	elv-emergency-intercom-call-not-reported-id423	【JRE物件】かご内非常釦使用の際のインターホン通報不良事案		↓低
 424	elv-door-closing-speed-difference-signal-wire-damage-id424	elv-door-closing-speed-difference-signal-wire-damage-id424	2C-2BCで戸開閉速度が施主認識と異なる件		
 427	esc-frequency-parameter-mismatch-id427	esc-frequency-parameter-mismatch-id427	周波数設定違いによる運転不能（ESC）	全エス機種	中
-429	case-vfglf-m14-meld-pin-assignment-id429	case-vfglf-m14-meld-pin-assignment-id429	M14コネクタ ピンアサイン間違い	VFGLF	中

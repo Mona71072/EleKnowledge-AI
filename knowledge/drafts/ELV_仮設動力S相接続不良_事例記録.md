@@ -1,3 +1,4 @@
+---
 schema_version: 1
 record_id: "elv-temporary-power-s-phase-intermittent-connection-case"
 record_version: 2

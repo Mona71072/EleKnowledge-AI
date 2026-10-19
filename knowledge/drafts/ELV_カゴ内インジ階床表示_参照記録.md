@@ -1,6 +1,5 @@
 ---
 schema_version: 1
----
 record_id: "catalog-elv-car-indicator-floor-display-reference"
 record_version: 3
 title: "かご内インジケータの階床・行先表示と設定上の注意"

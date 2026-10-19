@@ -15,24 +15,24 @@ cloud_approval: not_reviewed
 
 - **一致**: 同じ `list_item_id` または `onenote_id` が、既存の `knowledge/drafts/` にすでに紐づいている。新規事例カードは作らない。
 - **未整備**: スナップショット上の ID が、下書き側に見つからない。体系化候補として人がテーマを選ぶ。
-- **本文比較はしない**: ファイル名・frontmatter・根拠題名の ID のみ。
+- **本文比較はしない**: frontmatter の `list_item_id` と根拠題名の ID のみ。表示タイトルとファイル名は照合に使わない。
 
 ## 件数サマリ
 
 | 対象 | 総数 | 一致 | 未整備 | 備考 |
 | --- | ---: | ---: | ---: | --- |
-| Lists（推奨: ファイル名 + evidence の ID） | 390 | 304 | 86 | 重複一致 23 件 |
-| Lists（拡張: + source_id 末尾） | 390 | 317 | 73 | 重複 34 件・要確認 |
-| OneNote ページ | 1039 | 339 | 700 | 添付中心で実質空 240 件 |
-| 下書き走査 | 630 | — | — | IMPORT-* を除く |
+| Lists（推奨: `list_item_id` + evidence の ID） | 390 | 283 | 107 | 重複一致 23 件 |
+| Lists（拡張: + source_id 末尾） | 390 | 293 | 97 | 重複 24 件・要確認 |
+| OneNote ページ | 1039 | 340 | 699 | 添付中心で実質空 240 件 |
+| 下書き走査 | 633 | — | — | IMPORT-* を除く |
 
 ## Lists の一致ルール
 
 各 `list_item_id` について、次のいずれかで下書きを探した。
 
-1. ファイル名の `ID{番号}` / `_ID{番号}`
+1. frontmatter の `list_item_id`
 2. frontmatter の `evidence_sources` 題名中の `(ID{番号})` / `（ID{番号}）`（本文のエラーコードは対象外）
-3. `evidence_sources` 内の `source_id` 末尾 `-{番号}` / `_{番号}`（拡張行。推奨行は 1–2 のみ）
+3. `evidence_sources` 内の `source_id` で **`list` または `-id` を含む**ものの末尾 `-{番号}` / `_{番号}`（拡張行。研修連番等は除外。判断は 1–2 の primary のみ）
 
 機械可読な一覧:
 
@@ -50,29 +50,32 @@ cloud_approval: not_reviewed
 
 | theme_bucket | 件数 |
 | --- | ---: |
-| `other` | 46 |
-| `door` | 13 |
-| `install_dim` | 7 |
-| `group_call` | 7 |
-| `power` | 5 |
-| `display` | 3 |
+| `other` | 62 |
+| `door` | 14 |
+| `group_call` | 10 |
+| `power` | 6 |
+| `install_dim` | 6 |
+| `display` | 4 |
 | `comm` | 2 |
 | `safety` | 2 |
 | `clock_sets` | 1 |
 
 ## 優先してテーマ候補にしたい未整備（重要度 高 / 重要）
 
-件数: **10**（原因・対策の断定はしていない）
+件数: **13**（原因・対策の断定はしていない）
 
 | list_item_id | Model | 重要度 | タイトル（スナップショット） | theme_bucket |
 | --- | --- | --- | --- | --- |
-| 416 | VFGH | ↑高 | 長周期振動感知器の短絡ジャンパについて | `other` |
 | 413 | VFGH | 重要 | ピット点検口から出入り不可 | `install_dim` |
-| 394 | 全エレ機種 | ↑高 | ピットタラップの取付位置について | `install_dim` |
-| 392 | VFGLF | ↑高 | ブレーキスイッチ設定不良で本スロー時カゴ運転不能の件 | `other` |
 | 350 | VFGLF・VFGLB・VFGH | 重要 | UPS（アップピークサービス）動作しない件 | `other` |
 | 151 | VFGH | 重要 | P1基板不良によって、7SEGやWDTが点灯しなくなる | `display` |
 | 137 | CM-MA | ↑高 | 首下長さの異なるビスを用い巻上機カバーを取付け、異音が発生 | `other` |
+| 109 | VFGLB | 重要 | トランスリアクトル箱のS0端子のボルトが弛んでいたため、引渡し前点検時の増し締め確認の際、ケーブルが端子から外れた件 | `power` |
+| 98 | — | ↑高 | タイマーリレー誤品によりヘルスエアーが起動しない | `other` |
+| 96 | VFGLF | ↑高 | SD-T21コンタクタ不具合(#5,M5,LBA) | `other` |
+| 95 | VFGLF | ↑高 | SD-T12コンタクタ不具合(LBA,LBB) | `other` |
+| 93 | VFGLF | 重要 | 表示基板が手配される件 | `display` |
+| 90 | AXIEZ-LINKS | ↑高 | WOS用短絡コネクタ取外し間違いによる、本スロー後の不具合 | `other` |
 | 14 | 監視盤 | 重要 | （識別情報を含む可能性があるため情報管理確認まで保留） | `other` |
 | 2 | CM-MA | ↑高 | かご内振動 | `other` |
 | 1 | CM-MA | ↑高 | かご内振動 | `other` |

@@ -1,3 +1,4 @@
+---
 schema_version: 1
 record_id: "knowhow-elv-acoe-remote-stop-fan-runon"
 record_version: 1

@@ -1,56 +1,43 @@
 ---
 schema_version: 1
 record_id: "elv-hall-position-indicator-board-drawing-reference-id232"
-record_version: 1
+record_version: 3
 title: "乗場位置表示器基板の図番照会メモ（ID232）"
 category: "技術メモ【ELV】２"
-record_type: "reference_note"
+record_type: "knowhow"
 product: "エレベーター"
 model_type:
   - "MRL（原リスト記載。適用範囲未確認）"
 document_number: ""
 revision: ""
-record_version: 2
+effective_date: ""
 review_status: "in_review"
-record_type: "knowhow"
+publication_status: "not_published"
 classification: "unknown"
-source_path: "首都工・不具合情報共有リスト.xlsx"
+cloud_approval: "not_reviewed"
 keywords:
-source_filename: "首都工・不具合情報共有リスト.xlsx"
   - "乗場位置表示器"
+  - "図番照会"
+  - "購買番号"
+source_path: "首都工・不具合情報共有リスト.xlsx"
+source_filename: "首都工・不具合情報共有リスト.xlsx"
+onenote_id: ""
+related_ids: []
+attachment_paths: []
+reference_links: []
+document_references: []
+evidence_sources:
   - source_id: "evidence-list-hall-indicator-drawing-number-232"
     source_type: "vault_original"
     title: "首都工・不具合情報共有リスト.xlsx: 乗場位置表示器の図番照会（ID232）"
     source_path: "首都工・不具合情報共有リスト.xlsx"
-onenote_id: ""
+    s3_uri: ""
+    revision: ""
+    accessed_at: "2026-10-19"
+    supports:
       - "MRLの乗場位置表示器基板のN1コネクタ破損・交換必要との報告"
       - "外注製作の乗場位置表示器では品目表に購買番号のみ記載され詳細が不明で、照会により図番を得たとの報告"
       - "T-366およびYK0-B0102が購買番号であるとの識別"
-reference_links: []
-  knowledge_items:
-    - topic: "乗場位置表示器の図番と購買番号の区別"
-      statement: "ID232では、MRLのインジ付き乗場押釦の基板コネクタ破損により交換が必要となったが、品目表に図番がなかったと報告する。外注製作の乗場位置表示器では、品目表に購買番号T-366のみ記載され詳細が分からず、担当部門への照会で図番を得たとの記録がある。"
-      conditions:
-        - "MRLの事例としてリストに記載。"
-        - "外注製作の乗場位置表示器では購買番号のみ記載される場合があるとの原リスト説明。"
-      exceptions:
-        - "リストはYK0-B0102を購買番号とし、工事用の番号ではないと明記する。"
-      rationale: "購買番号を図面番号や工事用番号と混同しないため。"
-      verification_status: "source_recorded"
-      evidence_source_ids:
-        - "evidence-list-hall-indicator-drawing-number-232"
-  source_notes:
-    - "正式資料番号・図面番号の具体値はリストに記載されていない。照会で図番を得たとの記録のみ。"
-    - "T-366とYK0-B0102は原リスト上の購買番号。図面番号・正式資料番号として扱わない。"
-    - "現場名、担当者名、具体的な社内連絡経路は記録しない。"
-    - "破損・交換の事実、部品適合、照会後に得た図番、交換実施・結果、現行資料は別途確認していない。"
-    source_path: ""
-# 乗場位置表示器の図番と購買番号の区別（ID232）
-    revision: ""
-首都工・不具合情報共有リストID232は、MRLのインジ付き乗場押釦の基板コネクタが破損し交換が必要となったが、品目表に図番がなかった事例を報告する。リストによれば、外注製作の乗場位置表示器では品目表に購買番号T-366のみ記載され詳細が分からず、担当部門への照会で図番を得た。照会で得た図番自体はリストに記載されていない。
-    supports:
-同じリストはYK0-B0102を購買番号であり工事用ではないと明記する。T-366とYK0-B0102を図面番号・正式資料番号と混同しない。正式資料番号・図面番号、部品適合、交換実施・結果、現行資料は確認できていない。案件名・担当者名・社内連絡経路は記録しない。ID318の表示桁仕様不一致事例とは別の報告である。
-      - "共有リスト上、図番を関係部門へ照会したとの記載"
 structured_data:
   observation: "原リストは、乗場位置表示器基板のコネクタ破損と交換必要を報告し、品目表から図番を特定できなかったとしている。"
   limitations:
@@ -64,3 +51,5 @@ structured_data:
 首都工・不具合情報共有リストID232としてExcelに表示された内容は、乗場位置表示器基板のコネクタが破損し交換が必要だったとの報告と、品目表から図番を特定できなかったとの記載を含む。リストは関係部門への照会で図番を得たとしているが、リスト原文は直接確認できておらず、照会経路の詳細も記録しない。破損状況、部品適合、図番、交換実施・結果、現行資料は独立確認していない。
 
 案件名、担当者名、部品/購買識別番号、社内連絡経路は転載しない。本記録を部品選定・手配・交換の根拠や手順として使用しない。ID318の表示桁仕様不一致事例とは別の報告である。
+
+同じリストはYK0-B0102を購買番号であり工事用ではないと明記する。T-366とYK0-B0102を図面番号・正式資料番号と混同しない。正式資料番号・図面番号、部品適合、交換実施・結果、現行資料は確認できていない。

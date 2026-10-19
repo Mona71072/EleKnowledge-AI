@@ -1,3 +1,4 @@
+---
 schema_version: 1
 record_id: "knowhow-elv-er-buffer-stroke-stop-point-example"
 record_version: 2
