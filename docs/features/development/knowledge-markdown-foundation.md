@@ -25,6 +25,7 @@ Keep materials with different trust and runtime roles separate:
 | `docs/features/development/` | Design, schemas, lifecycle, and implementation decisions | No |
 | `tests/fixtures/knowledge/synthetic/` | Clearly synthetic source examples and normalized records | No |
 | `knowledge/drafts/` | User-selected curated Markdown snapshot, including engineering-business drafts | No; editing/schema exploration only |
+| `knowledge/source-snapshots/` | Redacted CSV-derived Markdown preserving Lists item IDs for later API reconciliation | No; source snapshot, not curated/published knowledge |
 | Future approved knowledge area | Explicitly approved Markdown snapshots with provenance | No; requires a separate publication allowlist |
 | Generated ingestion artifacts | Validated, transformed publication output | Only after publication approval and an approved isolated target |
 
@@ -88,6 +89,8 @@ EleKnowledge editing must follow the curated-record rules, not treat every Markd
 
 Treat OneNote pages and Microsoft Lists items as distinct source formats; do not assume that either source can be read until the owner approves the target, authentication method, permissions, and AI-processing boundary.
 
+The current CSV-derived Markdown is a point-in-time bootstrap snapshot. Preserve its `list_item_id` as the Microsoft Lists source item ID confirmed by the user; do not invent or replace it with a generated record ID. The snapshot is not live, may be stale, and does not include the full List link. A later read-only API phase must verify the ID in the authorized site/list, then add source link and update metadata without silently overwriting curated Markdown. The raw CSV remains local and is not copied into the repository.
+
 The proposed flow is:
 
 1. Read an explicitly authorized page or item and retain its stable source identifier, source link, retrieval time, and source revision when available.
@@ -95,9 +98,29 @@ The proposed flow is:
 3. Validate the normalized draft against the record schema and report missing or unresolved source material.
 4. Let a curator edit a proposal while preserving the source and evidence mapping.
 5. Have an accountable reviewer decide technical correctness, information classification, and publication separately.
-6. Publish an approved snapshot to an approved isolated data target; trigger retrieval indexing only through a separately authorized process.
+6. Publish an approved snapshot to an approved isolated data target; trigger retrieval indexing only through a separately authorized process. CSV/source snapshots and curated drafts remain outside RAG ingestion unless separately reviewed and published.
 
 The intake service must not follow arbitrary URLs, bypass source permissions, copy signed URLs or tokens into records, or treat a linked-but-unread document as evidence. Obsidian `[[WikiLink]]` and `![[embed]]` syntax must be resolved or reported as unresolved; do not silently render a broken link as a valid attachment.
+
+## CSV Snapshot to Live Lists API
+
+Use the provided `首都工・不具合情報共有リスト.csv` as a bootstrap snapshot for case discovery and curation, not as a raw repository dataset. It contains 390 rows and fields for site, equipment, contributors, assignees, error displays, attachments, and case descriptions. Keep the original CSV local; never commit it to this repository or send it to an AI service without explicit information-management approval.
+
+For the snapshot phase:
+
+1. Parse CSV with a standards-compliant CSV parser, preserving Japanese text, quoted delimiters/newlines, blank fields, and the original column names.
+2. Treat the `ID` column as a reported source identifier until it is verified against the live List. Do not use spreadsheet row numbers as IDs.
+3. Compare each source ID with existing curated `evidence_sources`, `document_references`, and case records before creating anything. Reuse an existing canonical `record_id` for the same case; keep genuinely distinct events separate.
+4. Create or update curated case Markdown from the row content, retaining source-attributed symptoms, reported cause/actions/outcome, and unknowns. Remove or hold site names, equipment/contract identifiers, people, contacts, and other restricted fields unless authorized. Keep individual error codes in case context; do not import the aggregate error-code table in this lane.
+5. Preserve missing/contradictory fields as unresolved. Do not convert a row's `status` or completion flag into a verified outcome.
+
+The CSV is a point-in-time export. Record its file identity and import time in a local migration manifest; do not claim it reflects the current List. Do not retain a second raw CSV copy in Git. Cases that cannot be safely curated remain in the approved local source with a hold reason, not in the repository snapshot.
+
+For the later live-List phase, add a read-only connector only after the list owner and administrators approve the tenant, site, exact list, authentication method, permission scope, AI-processing destination, retention, and link audience. Use the Microsoft List item ID as the source key only after confirming it matches the exported ID. Store source identity (`source_system`, `site_id`, `list_id`, `item_id`), last-modified time, retrieval time, and item web link in a protected source registry or provenance reference; keep credentials, access tokens, signed URLs, and unnecessary source fields out of Markdown and logs.
+
+The live API must link a source item to one or more curated `record_id`s without making the List row itself the published knowledge record. A source edit, deletion, or permission change creates a review/update proposal; it must not silently overwrite curated Markdown or automatically change RAG publication. Detect duplicates and preserve the distinction between the CSV snapshot, the current List item, and the curated interpretation. The connector remains read-only: no Lists write-back.
+
+Acceptance tests for this transition should cover duplicate/missing IDs, stable ID matching, edits and deletions since snapshot, field/attachment permission failures, source-link access, redaction of identifiers, stale snapshot notices, and a case record whose code is retained while the consolidated code table stays excluded.
 
 ## Source of Truth and Round Trip
 
@@ -143,4 +166,4 @@ Every fixture must be visibly marked synthetic and must be excluded from any pro
 
 ## Out of Scope
 
-This proposal does not implement Microsoft Graph access, a knowledge CRUD API, an editor UI, automatic bidirectional sync, OneNote/Lists write-back, raw OneNote/Lists export, AWS transfer of the separated code tables/confidential lane, Knowledge Base synchronization, or production deployment. The selected curated Markdown snapshot is already present for draft editing; any additional transfer or publication requires separate scope, owner approval, security review, and tests against an approved environment.
+This proposal does not yet implement Microsoft Graph access, a knowledge CRUD API, an editor UI, automatic bidirectional sync, OneNote/Lists write-back, raw OneNote/Lists export, AWS transfer of the separated code tables/confidential lane, Knowledge Base synchronization, or production deployment. The selected curated Markdown snapshot is already present for draft editing; the provided CSV is a local bootstrap source only. Live Lists reading or any additional transfer/publication requires separate scope, owner approval, security review, and tests against an approved environment.
