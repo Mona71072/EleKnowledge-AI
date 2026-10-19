@@ -45,3 +45,9 @@ docs/ops-ai-driven-dev.md    AIを用いた開発の共同運用
 > 最終検証: 2026-10-09 — #155 / #156のマージと文書の参照関係を確認。develop公開・実画面の確認結果は専用確認記録を参照。
 
 [公開・受入手順](legal-chat-prerelease.md) → [利用者マニュアル](user-manual/eleknowledge-user-manual.html) → [管理者確認表](user-manual/admin-verification-sheet.md)の順に読む。APIは[法令チャット補足](api/legal-chat.md)、PR根拠・未確認の実測項目は[確認記録](verification-2026-10-09-legal-chat-prerelease.md)。正式対象部門の決定や本番提供とは区別する。
+
+## ノウハウ確認画面の開発
+
+> 最終検証: 2026-10-20 — 初期実装範囲の文書を追加。公開・実データ送信・KBへの索引化は対象外。
+
+[担当者ワークスペースの実装範囲](features/development/knowledge-review-workbench.md)を参照する。元Markdownを選んで確認・編集し、OneNote追記案の確認・コピーと手動追加の記録を試す。構想と管理者への読取連携相談は[工技先輩の構想](concept-2026-10-19-kougi-senpai-knowledge-cycle.md)、既存カードとKBの関係は[二段検索の設計](features/development/card-kb-two-tier-retrieval.md)に分けている。
