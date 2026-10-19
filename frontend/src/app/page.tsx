@@ -13,6 +13,7 @@ import { getAnnouncements, Announcement } from '@/lib/announcements';
 import { AnnouncementsSection } from '@/components/announcements/AnnouncementsSection';
 import { MaintenanceBanner } from '@/components/announcements/MaintenanceBanner';
 import { AdminViewToggle } from '@/components/admin/AdminViewToggle';
+import { KnowledgeChatEntry } from '@/components/knowledge/KnowledgeChatEntry';
 
 const GUIDE_COLLAPSED_KEY = 'home:guideCollapsed';
 
@@ -316,6 +317,8 @@ export default function HomePage() {
                 </Card>
               </Link>
             )}
+
+            <KnowledgeChatEntry isAdmin={isAdmin} enabled={process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH === 'true'} />
 
             {isAdmin ? (
               <Link href="/troubleshooting" className="group block h-full">

@@ -16,10 +16,10 @@ function loadTsx(path, mocks) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
     fileName: filename.pathname,
   });
-  const module = { exports: {} };
+  const compiledModule = { exports: {} };
   const localRequire = (name) => Object.hasOwn(mocks, name) ? mocks[name] : require(name);
-  new Function('require', 'module', 'exports', outputText)(localRequire, module, module.exports);
-  return module.exports;
+  new Function('require', 'module', 'exports', outputText)(localRequire, compiledModule, compiledModule.exports);
+  return compiledModule.exports;
 }
 
 const Link = ({ children, href, ...props }) => createElement('a', { href, ...props }, children);
