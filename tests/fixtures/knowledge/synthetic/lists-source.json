@@ -1,0 +1,21 @@
+{
+  "fixture": "synthetic",
+  "source": "Microsoft Lists-like item; fictional, not retrieved from a tenant",
+  "id": "SYNTH-LIST-001",
+  "title": "架空テスト行",
+  "columns": {
+    "equipment": "SYNTH-C",
+    "symptom": "架空表示確認画面に値が出ないとの報告",
+    "reportedCause": "担当者による仮説。独立確認されていない",
+    "reportedActions": ["確認を試みたとの記載"],
+    "independentlyVerifiedActions": [],
+    "status": "complete",
+    "details": "結果は未記載"
+  },
+  "expectedHandling": {
+    "cause": "unverified",
+    "outcome": "unknown",
+    "statusDetailConflict": true,
+    "mustNotPublish": true
+  }
+}
