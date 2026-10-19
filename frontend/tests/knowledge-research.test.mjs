@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import ReactMarkdown from 'react-markdown';
+import * as researchClient from '../src/lib/knowledge-research.mjs';
 
 import {
   buildResearchNote,
@@ -394,4 +398,44 @@ test('does not create an adoptable note for clarify and not_found results', () =
   }
   assert.throws(() => buildResearchNote(null), (error) => error.code === 'validation');
   assert.throws(() => buildResearchNote({ mode: 'normal', query: 'q', responseType: 'pages', content: 'answer', sourceDocuments: [] }), (error) => error.code === 'validation');
+});
+
+function renderedCodeLiterals(markdown) {
+  const values = [];
+  renderToStaticMarkup(createElement(ReactMarkdown, {
+    components: { code: ({ children }) => {
+      values.push(String(children));
+      return createElement('code', null, children);
+    } },
+  }, markdown));
+  return values;
+}
+
+test('keeps untrusted source URI syntax inside literal Markdown code for export', async () => {
+  for (const sourceUri of [
+    's3://synthetic-bucket/docs/<img src="https://example.invalid/pixel.png">',
+    's3://synthetic-bucket/docs/file`name``![image](https://example.invalid/pixel.png)`',
+  ]) {
+    const answer = await queryKnowledgeSource({
+      baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '合成された構文試験',
+      fetchImpl: fetchOk(normalPayload({ sourceDocuments: [{ documentName: '合成資料', sourceUri }] })),
+    });
+    assert.ok(renderedCodeLiterals(buildResearchNote(answer)).includes(sourceUri));
+    assert.doesNotMatch(renderToStaticMarkup(createElement(ReactMarkdown, null, buildResearchNote(answer))), /<img\b/);
+    assert.equal(answer.sourceDocuments[0].sourceUri, sourceUri);
+  }
+});
+
+test('renders imported knowledge IDs as literals in generated target provenance', () => {
+  const knowledgeId = 'SYNTH-<img src="https://example.invalid/pixel.png">`';
+  const note = researchClient.buildResearchTargetNote({ knowledgeId, baseVersion: 1, manualBodyRevision: 0 });
+  assert.ok(renderedCodeLiterals(note).includes(knowledgeId));
+  assert.doesNotMatch(renderToStaticMarkup(createElement(ReactMarkdown, null, note)), /<img\b/);
+  assert.match(note, /原版 v1/);
+  assert.match(note, /検索時本文編集版 0/);
+  for (const target of [null, { knowledgeId: '', baseVersion: 1, manualBodyRevision: 0 },
+    { knowledgeId: 'SYNTH', baseVersion: 0, manualBodyRevision: 0 },
+    { knowledgeId: 'SYNTH', baseVersion: 1, manualBodyRevision: -1 }]) {
+    assert.throws(() => researchClient.buildResearchTargetNote(target));
+  }
 });
