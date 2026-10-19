@@ -5,8 +5,10 @@ This snapshot is for developing EleKnowledge's record, review, and editing workf
 ## Source and Selection
 
 - Source set: 654 Markdown files under the local `整備済み資料/技術資料/` directory.
-- Selected for this snapshot: 567 records. The first batch contains 3 records listed in [IMPORT-NOTES.md](IMPORT-NOTES.md); this batch adds 564 records.
-- The screening retained substantial, typed knowledge records such as catalogs, technical references, know-how, failure cases, and troubleshooting cases. Existing frontmatter and file content were copied without rewriting.
+- Selected for this snapshot: 573 records. The first batch contains 3 records listed in [IMPORT-NOTES.md](IMPORT-NOTES.md); the next batch adds the rest of the screened set, including six technical records restored after manual frontmatter review.
+- The screening retained substantial, typed knowledge records such as catalogs, technical references, know-how, failure cases, and troubleshooting cases. Existing frontmatter and file content were copied without rewriting, except for the snapshot-only attachment note in `ESC_変数定義.md`.
+- Six records initially flagged by an automated frontmatter scan were manually reviewed and included as technical drafts: `ELV_ACO-E遠方発停_送風機運転継続事例.md`, `ELV_ER運転_緩衝器ストローク事例.md`, `ELV_KM-LD回生コンバーター起動不能_カバー連動状態_ID287事例.md`, `ELV_LV5K_LV6K_CLT寸法_事例記録.md`, `ELV_カゴ内インジ階床表示_参照記録.md`, and `ELV_仮設動力S相接続不良_事例記録.md`. The first five retain unknown classification and unreviewed status. `ELV_カゴ内インジ階床表示_参照記録.md` has a malformed split frontmatter and is included specifically as a schema-repair example; do not infer missing metadata.
+- The ACO-E case retains its source HTTPS reference unchanged. Its access, rights, and currentness have not been verified; do not fetch it or treat it as evidence until approved.
 - Existing review, publication, classification, and cloud-approval fields are preserved. In particular, `unknown`, `in_review`, `not_published`, and `not_reviewed` remain unapproved states.
 
 ## Exclusions
