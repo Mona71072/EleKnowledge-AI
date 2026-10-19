@@ -18,6 +18,22 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 
 EleKnowledge の WAF ログ配信・WAF アラーム・専用通知 SNS は確認できなかった。テンプレートに定義されているリソースも、環境で確認できるまでは運用手順として利用しない。
 
+## 0.1 AWS 現況スナップショット（2026-10-19）
+
+> 最終検証: 2026-10-19 — AWS CLI 読み取り専用確認（東京リージョンのCloudFormation、Lambda、Amplify、Resource Groups Tagging API。機能E2E・通知到達・Amplifyの最新ビルドは未確認）
+
+| 確認対象 | 観測結果 |
+|---|---|
+| Phase 1 / Phase 2 / troubleshooting / monitoring / security-WAF / announcements-monitoring / chat-archive | CloudFormationスタックはいずれも `UPDATE_COMPLETE`。最終更新はスタックにより2026-08-26〜2026-10-14。 |
+| Bedrock KB関連スタック | `eleknowledge-law-kb-dev` は `UPDATE_COMPLETE`（2026-10-02）。移行台帳のPhase 1〜3一覧には含まれていない。 |
+| Legal RAGスタック | `eleknowledge-legal-rag-dev` は `ROLLBACK_COMPLETE`（2026-10-01）。稼働中として扱わない。 |
+| RAGモデル | Phase 2のCloudFormationパラメータは `global.anthropic.claude-sonnet-5`。本節の照会時点では§7.1の記載と一致。 |
+| Lambdaランタイム | EleKnowledgeのアプリ関数はPython 3.13。アカウント内の他システム関数は対象外。 |
+| Amplify | `Ele-Knowledge-dev` のWEBアプリを確認。最新ビルド・配信コミットは確認していない。 |
+| タグ | `Project=EleKnowledge` の108件すべてに旧 `Env` が残存。うち99件に3つの `gyoumu012` キーがそれぞれ存在。SAMからタグ定義を外しても、既存リソースのタグは消えない。 |
+
+この照会は読み取り専用で、東京リージョンと当時の認証プロファイルに限定する。スタック状態は機能の正常性を保証しない。ユーザー操作、メール通知到達、WAFの実遮断、Bedrock呼び出し、Amplify最新ビルドは別途確認が必要。既存の `Env` タグを一括削除する変更は行っていない。
+
 ## 1. 体制と通知
 
 > 最終検証: 2026-10-05 — 2026-09-30 の AWS 読み取り専用観測記録と develop の監視テンプレートを照合
