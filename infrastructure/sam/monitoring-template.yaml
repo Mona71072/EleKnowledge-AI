@@ -150,7 +150,6 @@ Resources:
         - Key: gyoumu012Usage
           Value: !Ref CostUsage
         - { Key: Project, Value: !Ref ProjectName }
-        - { Key: Env, Value: !Ref Environment }
         - { Key: ManagedBy, Value: SAM }
 
   AlertTopicPolicy:
