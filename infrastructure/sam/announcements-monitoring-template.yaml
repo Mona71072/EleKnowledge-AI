@@ -7,6 +7,15 @@ Description: >
   Additive stack; does not modify phase1/2/3 resources.
 
 Parameters:
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+    AllowedValues: [ele-knowledge]
+  CostUsage:
+    Type: String
+    Default: shared
+    AllowedValues: [development, user, shared]
+
   Environment:
     Type: String
     Default: dev
@@ -70,6 +79,9 @@ Globals:
         ENVIRONMENT: !Ref Environment
         ADMIN_GROUP_NAME: !Ref AdminGroupName
     Tags:
+      gyoumu012Project: !Ref CostProjectName
+      gyoumu012Component: shared
+      gyoumu012Usage: !Ref CostUsage
       Project: !Ref ProjectName
       Env: !Ref Environment
       ManagedBy: SAM
@@ -109,6 +121,12 @@ Resources:
           Projection:
             ProjectionType: ALL
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: announcements
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - { Key: Project, Value: !Ref ProjectName }
         - { Key: Env, Value: !Ref Environment }
         - { Key: ManagedBy, Value: SAM }
@@ -145,6 +163,12 @@ Resources:
           Projection:
             ProjectionType: ALL
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - { Key: Project, Value: !Ref ProjectName }
         - { Key: Env, Value: !Ref Environment }
         - { Key: ManagedBy, Value: SAM }
@@ -170,6 +194,13 @@ Resources:
   AnnouncementsReadRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: announcements
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub announcements-read-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -194,6 +225,13 @@ Resources:
   AnnouncementsWriteRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: announcements
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub announcements-write-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -220,6 +258,13 @@ Resources:
   AnnouncementsPublisherRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: announcements
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub announcements-publisher-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -244,6 +289,13 @@ Resources:
   MetricsReadRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub metrics-read-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -275,6 +327,13 @@ Resources:
   MetricsAggregatorRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub metrics-aggregator-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -324,6 +383,10 @@ Resources:
   AnnouncementsReadFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: announcements
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub announcements-read-${Environment}
       CodeUri: ../../lambda/announcements/read/
       Handler: app.lambda_handler
@@ -342,6 +405,10 @@ Resources:
   AnnouncementsWriteFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: announcements
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub announcements-write-${Environment}
       CodeUri: ../../lambda/announcements/write/
       Handler: app.lambda_handler
@@ -387,6 +454,10 @@ Resources:
   AnnouncementsPublisherFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: announcements
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub announcements-publisher-${Environment}
       CodeUri: ../../lambda/announcements/publisher/
       Handler: app.lambda_handler
@@ -406,6 +477,10 @@ Resources:
   MetricsReadFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: monitoring
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub metrics-read-${Environment}
       CodeUri: ../../lambda/metrics/read/
       Handler: app.lambda_handler
@@ -442,6 +517,10 @@ Resources:
   MetricsAggregatorFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: monitoring
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub metrics-aggregator-${Environment}
       CodeUri: ../../lambda/metrics/aggregator/
       Handler: app.lambda_handler
@@ -497,6 +576,7 @@ Resources:
   AppApi:
     Type: AWS::Serverless::Api
     Properties:
+      PropagateTags: true
       Name: !Sub announcements-monitoring-api-${Environment}
       StageName: !Ref Environment
       Cors:
@@ -552,6 +632,9 @@ Resources:
           DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         Feature: announcements-monitoring

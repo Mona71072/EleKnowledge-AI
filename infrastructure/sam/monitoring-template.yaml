@@ -22,6 +22,15 @@ Description: >-
 # ---------------------------------------------------------------------------
 
 Parameters:
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+    AllowedValues: [ele-knowledge]
+  CostUsage:
+    Type: String
+    Default: shared
+    AllowedValues: [development, user, shared]
+
   Environment:
     Type: String
     Default: dev
@@ -134,6 +143,12 @@ Resources:
       TopicName: !Sub eleknowledge-alerts-${Environment}
       DisplayName: !Sub EleKnowledge ${Environment} alerts
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - { Key: Project, Value: !Ref ProjectName }
         - { Key: Env, Value: !Ref Environment }
         - { Key: ManagedBy, Value: SAM }
@@ -192,6 +207,13 @@ Resources:
   RagApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-api-5xx
       AlarmDescription: !Sub "RAG API returned 5XX (Bedrock / KB / DynamoDB failure in rag Lambda) → 最初に見る場所: ランブック §2 / Logs Insights 保存クエリ EleKnowledge/${Environment}/rag-error-lines"
       Namespace: AWS/ApiGateway
@@ -209,6 +231,13 @@ Resources:
   ChatApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-api-5xx
       AlarmDescription: "Chat API (sessions / messages / feedback) returned 5XX → 最初に見る場所: ランブック §2 / 保存クエリ chat-error-lines"
       Namespace: AWS/ApiGateway
@@ -226,6 +255,13 @@ Resources:
   AuthApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-auth-api-5xx
       AlarmDescription: !Sub "Auth API (login / signup / verify) returned 5XX → 最初に見る場所: ランブック §2 / アクセスログ /aws/apigateway/auth-api-${Environment}（Cognito 障害）"
       Namespace: AWS/ApiGateway
@@ -243,6 +279,13 @@ Resources:
   AppApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-app-api-5xx
       AlarmDescription: "Announcements / metrics API returned 5XX → 最初に見る場所: ランブック §2 / 各 Lambda のログ（announcements-*, metrics-*）"
       Namespace: AWS/ApiGateway
@@ -260,6 +303,13 @@ Resources:
   TroubleshootingApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-troubleshooting-api-5xx
       AlarmDescription: "Troubleshooting API returned 5XX (metrics may be absent until MethodSettings are enabled) → 最初に見る場所: ランブック §2 / 各 Lambda のログ"
       Namespace: AWS/ApiGateway
@@ -300,6 +350,13 @@ Resources:
   RagApi4xxSpikeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-rag-api-4xx-spike
       AlarmDescription: "RAG API 4XX spike (check WAF IP allowlist vs Cognito token expiry) → 最初に見る場所: ランブック §5.1 / 保存クエリ api-4xx-breakdown（アクセスログ。errorType で WAF・認可・失効を切り分け）"
       Namespace: AWS/ApiGateway
@@ -317,6 +374,13 @@ Resources:
   ChatApi4xxSpikeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-chat-api-4xx-spike
       AlarmDescription: "Chat API 4XX spike → 最初に見る場所: ランブック §5.1 / 保存クエリ api-4xx-breakdown"
       Namespace: AWS/ApiGateway
@@ -334,6 +398,13 @@ Resources:
   AuthApi4xxSpikeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-auth-api-4xx-spike
       AlarmDescription: "Auth API 4XX spike (login failures / blocked IPs) → 最初に見る場所: ランブック §5.1 / 保存クエリ api-4xx-breakdown"
       Namespace: AWS/ApiGateway
@@ -354,6 +425,13 @@ Resources:
   RagThrottlesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-throttles
       AlarmDescription: "rag Lambda throttled (account concurrency limit) → 最初に見る場所: ランブック §2 / Lambda メトリクス ConcurrentExecutions"
       Namespace: AWS/Lambda
@@ -371,6 +449,13 @@ Resources:
   ChatThrottlesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-throttles
       AlarmDescription: "chat Lambda throttled → 最初に見る場所: ランブック §2 / Lambda メトリクス ConcurrentExecutions"
       Namespace: AWS/Lambda
@@ -388,6 +473,13 @@ Resources:
   LoginThrottlesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-login-throttles
       AlarmDescription: "login Lambda throttled → 最初に見る場所: ランブック §2 / Lambda メトリクス ConcurrentExecutions"
       Namespace: AWS/Lambda
@@ -408,6 +500,13 @@ Resources:
   MetricsAggregatorErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-metrics-aggregator-errors
       AlarmDescription: !Sub "Daily/hourly KPI aggregation failed (dashboard will be stale) → 最初に見る場所: ランブック §5.4 / /aws/lambda/metrics-aggregator-${Environment}"
       Namespace: AWS/Lambda
@@ -425,6 +524,13 @@ Resources:
   ArchiveErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-archive-errors
       AlarmDescription: "chatlogs stream -> S3 archive failed (records are retried 3 times then dropped) → 最初に見る場所: ランブック §5.5（24 時間以内に対処）"
       Namespace: AWS/Lambda
@@ -442,6 +548,13 @@ Resources:
   AnnouncementsPublisherErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-announcements-publisher-errors
       AlarmDescription: !Sub "Scheduled announcement promotion failed → 最初に見る場所: ランブック §2 / /aws/lambda/announcements-publisher-${Environment}"
       Namespace: AWS/Lambda
@@ -462,6 +575,13 @@ Resources:
   RagDurationP90Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-rag-duration-p90
       AlarmDescription: "rag Lambda p90 duration over 15 minutes is high (Bedrock / KB slow) → 最初に見る場所: ランブック §5.2 / 保存クエリ slow-requests、Bedrock メトリクス InvocationLatency"
       Namespace: AWS/Lambda
@@ -479,6 +599,13 @@ Resources:
   RagDurationMaxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-duration-max
       AlarmDescription: "A single rag invocation approached the API Gateway 29s limit (user likely saw 504) → 最初に見る場所: ランブック §5.2 / 保存クエリ slow-requests。連続するなら §7 の代替モデルへ"
       Namespace: AWS/Lambda
@@ -499,6 +626,13 @@ Resources:
   MetricsScheduleFailedAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-metrics-schedule-failed
       AlarmDescription: "EventBridge could not invoke the metrics aggregator → 最初に見る場所: ランブック §5.4"
       Namespace: AWS/Events
@@ -519,6 +653,13 @@ Resources:
   ChatLogsReadThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-chatlogs-read-throttle
       AlarmDescription: "DynamoDB throttled → 最初に見る場所: ランブック §2 / DynamoDB コンソールのメトリクス"
       Namespace: AWS/DynamoDB
@@ -536,6 +677,13 @@ Resources:
   ChatLogsWriteThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-chatlogs-write-throttle
       AlarmDescription: "DynamoDB throttled → 最初に見る場所: ランブック §2 / DynamoDB コンソールのメトリクス"
       Namespace: AWS/DynamoDB
@@ -553,6 +701,13 @@ Resources:
   SessionsWriteThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-sessions-write-throttle
       AlarmDescription: !Sub "DynamoDB throttled → 最初に見る場所: ランブック §2 / DynamoDB コンソールのメトリクス（sessions-${Environment} は未使用）"
       Namespace: AWS/DynamoDB
@@ -573,6 +728,13 @@ Resources:
   CognitoSignups40Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-cognito-signups-40-per-day
       AlarmDescription: "Sign-ups today (UTC day) reached 40. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99. → 最初に見る場所: ランブック §5.6（受付停止の告知を検討）"
       Namespace: AWS/Cognito
@@ -594,6 +756,13 @@ Resources:
   CognitoSignups45Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-signups-45-per-day
       AlarmDescription: "Sign-ups today (UTC day) reached 45. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99. → 最初に見る場所: ランブック §5.6"
       Namespace: AWS/Cognito
@@ -615,6 +784,13 @@ Resources:
   CognitoSignups50Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-signups-50-per-day
       AlarmDescription: "Sign-ups today (UTC day) reached 50. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99. → 最初に見る場所: ランブック §5.6"
       Namespace: AWS/Cognito
@@ -641,6 +817,13 @@ Resources:
   CognitoEmailErrorRule:
     Type: AWS::Events::Rule
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       Name: !Sub ${ProjectName}-${Environment}-cognito-email-errors
       Description: Cognito SignUp / ResendConfirmationCode / ForgotPassword failed with a quota or delivery error (CloudTrail)
       State: ENABLED
@@ -666,6 +849,13 @@ Resources:
   CognitoEmailErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-email-errors
       AlarmDescription: "A Cognito sign-up / resend / password-reset call failed with a quota or delivery error in the last 5 minutes (details in the EventBridge message). → 最初に見る場所: ランブック §5.6 / SNS 本文（API 名・エラーコード）"
       Namespace: AWS/Events
@@ -710,6 +900,13 @@ Resources:
   RagErrorLinesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-error-lines
       AlarmDescription: "rag Lambda logged an error line (catches failures returned as HTTP 500) → 最初に見る場所: ランブック §2 / 保存クエリ rag-error-lines"
       Namespace: !Sub ${ProjectName}/Logs
@@ -726,6 +923,13 @@ Resources:
   ChatErrorLinesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-error-lines
       AlarmDescription: "chat Lambda logged an error line → 最初に見る場所: ランブック §2 / 保存クエリ chat-error-lines"
       Namespace: !Sub ${ProjectName}/Logs
