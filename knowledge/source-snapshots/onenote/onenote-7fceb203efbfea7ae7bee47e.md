@@ -1,0 +1,20 @@
+---
+snapshot_type: "onenote_source_page"
+source_system: "OneNote"
+onenote_id: "401f288f-0e3f-4ada-b89d-14799070162d:36"
+knowledge_domain: "unknown"
+organizational_scope: "unknown"
+classification: "unknown"
+review_status: "unreviewed"
+publication_status: "not_published"
+cloud_approval: "not_reviewed"
+source_links_resolved: false
+attachments_included: false
+---
+
+> Source snapshot for EleKnowledge-side organization. Not curated, not verified, and not RAG-eligible.
+
+## OneNote content
+・ 黒本：昇降機総合品質保証マニュアル（国内版）
+
+[昇降機総合品質保証マニュアル（国内）]([URL omitted pending approved OneNote link resolution])\n

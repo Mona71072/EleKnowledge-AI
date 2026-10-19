@@ -25,7 +25,7 @@ Keep materials with different trust and runtime roles separate:
 | `docs/features/development/` | Design, schemas, lifecycle, and implementation decisions | No |
 | `tests/fixtures/knowledge/synthetic/` | Clearly synthetic source examples and normalized records | No |
 | `knowledge/drafts/` | User-selected curated Markdown snapshot, including engineering-business drafts | No; editing/schema exploration only |
-| `knowledge/source-snapshots/` | Redacted CSV-derived Markdown preserving Lists item IDs for later API reconciliation | No; source snapshot, not curated/published knowledge |
+| `knowledge/source-snapshots/` | Redacted CSV and screened OneNote Markdown snapshots preserving source IDs for later API reconciliation | No; source snapshot, not curated/published knowledge |
 | Future approved knowledge area | Explicitly approved Markdown snapshots with provenance | No; requires a separate publication allowlist |
 | Generated ingestion artifacts | Validated, transformed publication output | Only after publication approval and an approved isolated target |
 
@@ -122,6 +122,16 @@ The live API must link a source item to one or more curated `record_id`s without
 
 Acceptance tests for this transition should cover duplicate/missing IDs, stable ID matching, edits and deletions since snapshot, field/attachment permission failures, source-link access, redaction of identifiers, stale snapshot notices, and a case record whose code is retained while the consolidated code table stays excluded.
 
+## OneNote Markdown Snapshot to Live API
+
+The initial OneNote source snapshot is under `knowledge/source-snapshots/onenote/`. It contains 1,039 screened pages from 1,154 OneNote-ID Markdown exports. The exact exported `onenote_id` is preserved in each page's frontmatter; filenames are opaque hashes so source titles and paths are not exposed through directory listings. This exported ID is a stable source reference, but it is not yet verified as a Microsoft Graph page ID.
+
+The snapshot builder excludes pages flagged by confidential, credential, identity/customer, and error-table screens (the categories overlap). It does not include `.one` notebook files, recycle-bin content, attachment bytes, or original paths. URL values and `![[...]]` attachment embeds are replaced with unresolved placeholders. Existing wiki references are retained only as textual unresolved references. The page text has not been individually reviewed, source classification remains `unknown`, and the snapshot is not a RAG corpus.
+
+For later live OneNote integration, the read-only API must confirm each exported `onenote_id` against the authorized tenant/notebook/section and record the corresponding Graph page ID, current page URL, retrieval time, and modification time where available. Do not assume the exported ID is directly usable as the Graph ID, and do not infer an accessible link from a source title. Resolve URLs and attachment content only through the approved API permissions. Source changes create a review proposal; they do not overwrite a curated Markdown record or publish automatically.
+
+Acceptance tests should cover exact ID reconciliation, duplicate/missing IDs, page deletion/access revocation, stale snapshot detection, link and attachment permissions, redacted source URLs, and the rule that unresolved embeds/links are not treated as evidence.
+
 ## Source of Truth and Round Trip
 
 The local Vault remains the canonical editable source during the initial phase. Do not support concurrent editing of the same record in the Vault and application.
@@ -166,4 +176,4 @@ Every fixture must be visibly marked synthetic and must be excluded from any pro
 
 ## Out of Scope
 
-This proposal does not yet implement Microsoft Graph access, a knowledge CRUD API, an editor UI, automatic bidirectional sync, OneNote/Lists write-back, raw OneNote/Lists export, AWS transfer of the separated code tables/confidential lane, Knowledge Base synchronization, or production deployment. The selected curated Markdown snapshot is already present for draft editing; the provided CSV is a local bootstrap source only. Live Lists reading or any additional transfer/publication requires separate scope, owner approval, security review, and tests against an approved environment.
+This proposal does not yet implement Microsoft Graph access, a knowledge CRUD API, an editor UI, automatic bidirectional sync, OneNote/Lists write-back, unrestricted/raw OneNote/Lists export, AWS transfer of the separated code tables/confidential lane, Knowledge Base synchronization, or production deployment. Selected curated Markdown and screened OneNote/Lists source snapshots are already present for draft organization only. Live API reads, additional transfer, or publication require separate scope, owner approval, security review, and tests against an approved environment.
