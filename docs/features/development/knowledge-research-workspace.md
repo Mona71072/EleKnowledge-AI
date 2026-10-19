@@ -31,6 +31,10 @@ related-code:
 
 「編集案へ取り込む」で、選択した回答と出典を調査メモとしてローカルMarkdown本文へ追記する。これはAI回答の採用候補であり、技術承認・法的判断・KB本文の人手確認ではない。照合済みチェックを自動で付けない。本文編集と同じ版失効を通し、OneNote案との再照合を必要にする。元ファイル・OneNoteへ自動書込みしない。
 
+取り込み先は検索開始時の文書セッション・ID・原版・本文の作業版へ紐付ける。文書の再取込・別文書への切替・本文の手編集後は旧結果を表示できても取込み不可とし、再検索を案内する。ファイル未選択での調査は閲覧用であり、後から選んだファイルへ無警告で適用しない。同一検索の技術・法令両メモを順に追加する操作は許容し、その既知の追記だけでは相手側の結果を失効しない。取り込み先の条件を変える本文手編集は必ず失効させる。
+
+調査メモには検索モード・質問・クライアント受信日時、APIが返す回答日時（有効な場合）、sessionId/messageIdも追跡情報として残す。これらはAI回答の追跡用であり、資料の改訂版や技術承認の識別子ではない。API履歴は60日で失われ得るため、採用時の本文と出典も併せて保持する。
+
 ## 実装の分担と契約
 
 `knowledge-research.mjs`は`queryKnowledgeSource({baseUrl, getToken, fetchImpl?, mode, query, signal?, timeoutMs?})`、`researchSourceHref(source, mode)`、`buildResearchNote(answer)`を公開する。API応答は`content`、`responseType`、`sessionId`、`aiMessageId/messageId`、`sourceDocuments`、`pageCandidates`、`clarifyQuestions`を検証して正規化し、`.d.mts`で型を共有する。

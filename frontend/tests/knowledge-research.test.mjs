@@ -96,7 +96,55 @@ test('posts only the explicit query, mode, and empty filters with the Cognito ID
   assert.equal(answer.responseType, 'pages');
   assert.equal(answer.sessionId, 'session_normal_1');
   assert.equal(answer.messageId, 'assistant_1');
+  assert.equal(typeof answer.receivedAt, 'string');
+  assert.equal(Number.isNaN(Date.parse(answer.receivedAt)), false);
+  assert.equal(answer.responseTimestamp, undefined);
   assert.equal(answer.sourceDocuments[0].sourceUri, 's3://technical-kb/docs/install.pdf');
+});
+
+test('preserves a valid API answer timestamp and generates a separate client receive timestamp', async () => {
+  const responseTimestamp = '2026-10-20T03:04:05.000Z';
+  const before = Date.now();
+  const answer = await queryKnowledgeSource({
+    baseUrl: BASE,
+    getToken: async () => TOKEN,
+    fetchImpl: fetchOk(normalPayload({ timestamp: responseTimestamp, sessionId: 'session_[original]', aiMessageId: 'message_#1' })),
+    mode: 'normal',
+    query: '  回答時刻も確認  ',
+  });
+  const after = Date.now();
+
+  assert.equal(answer.responseTimestamp, responseTimestamp);
+  assert.ok(Date.parse(answer.receivedAt) >= before && Date.parse(answer.receivedAt) <= after);
+  assert.equal(answer.sessionId, 'session_[original]');
+  assert.equal(answer.messageId, 'message_#1');
+  const note = buildResearchNote(answer);
+  assert.match(note, /normal/);
+  assert.match(note, /回答時刻も確認/);
+  assert.match(note, new RegExp(responseTimestamp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(note, new RegExp(answer.receivedAt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(note, /session_\\\[original\\\]/);
+  assert.match(note, /message_\\#1/);
+  assert.match(note, /AI回答の追跡情報。資料の改訂版・承認情報ではない/);
+});
+
+test('keeps client receive time when the API answer timestamp is absent or invalid without inventing one', async () => {
+  for (const timestamp of [undefined, 'not-an-iso-date']) {
+    const payload = normalPayload();
+    if (timestamp !== undefined) payload.timestamp = timestamp;
+    const answer = await queryKnowledgeSource({
+      baseUrl: BASE,
+      getToken: async () => TOKEN,
+      fetchImpl: fetchOk(payload),
+      mode: 'normal',
+      query: 'timestamp omitted',
+    });
+    assert.equal(Number.isNaN(Date.parse(answer.receivedAt)), false);
+    assert.equal(answer.responseTimestamp, undefined);
+    const note = buildResearchNote(answer);
+    assert.match(note, /受信日時/);
+    assert.doesNotMatch(note, /回答日時|不明|unknown/i);
+  }
 });
 
 test('law mode is isolated in the request and normalizes the assistant message ID fallback', async () => {
@@ -153,13 +201,42 @@ test('rejects missing or malformed client configuration, non-text questions, and
 });
 
 test('allows explicit loopback HTTP endpoints for local development only', async () => {
-  await queryKnowledgeSource({
-    baseUrl: 'http://127.0.0.1:3198/dev',
-    getToken: async () => TOKEN,
-    fetchImpl: fetchOk(normalPayload()),
-    mode: 'normal',
-    query: 'local test',
-  });
+  const originalNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'test';
+  try {
+    await queryKnowledgeSource({
+      baseUrl: 'http://127.0.0.1:3198/dev',
+      getToken: async () => TOKEN,
+      fetchImpl: fetchOk(normalPayload()),
+      mode: 'normal',
+      query: 'local test',
+    });
+  } finally {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+  }
+});
+
+test('rejects loopback HTTP in production before requesting a token or sending a request', async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  let calls = 0;
+  try {
+    await assert.rejects(
+      queryKnowledgeSource({
+        baseUrl: 'http://localhost:3198/dev',
+        getToken: async () => { calls += 1; return TOKEN; },
+        fetchImpl: async () => { calls += 1; return response(normalPayload()); },
+        mode: 'normal',
+        query: 'production must reject loopback HTTP',
+      }),
+      (error) => error.code === 'config',
+    );
+    assert.equal(calls, 0);
+  } finally {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+  }
 });
 
 test('maps missing token, HTTP failures, network failures, and malformed response to safe Japanese errors', async () => {
