@@ -79,8 +79,6 @@ Resources:
           Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
 
@@ -145,7 +143,6 @@ Resources:
         gyoumu012Component: shared
         gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
-        Env: !Ref Environment
         ManagedBy: SAM
       Environment:
         Variables:
@@ -219,8 +216,6 @@ Resources:
           Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
 
@@ -239,8 +234,6 @@ Resources:
           Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
       WorkGroupConfiguration:
