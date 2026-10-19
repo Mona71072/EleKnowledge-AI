@@ -267,3 +267,37 @@ test('proposal export includes exact SHA-256 digests and keeps original metadata
   assert.equal(packet.hashes.oneNoteTextSha256, sha256(state.noteText));
   assert.equal(packet.proposal.oneNoteText.includes('Unconfirmed: long-term condition.'), true);
 });
+
+test('proposal export carries immutable OneNote placement receipts after later edits', async () => {
+  const destination = 'onenote:https://tenant.sharepoint.com/sites/engineering/page-42';
+  const transferText = 'Confirmed point.\nSource: Lists item 71.\nUnconfirmed: follow-up inspection.';
+  const base = workspace();
+  const reviewedState = reviewed(editOneNoteDraft(base, transferText));
+  const confirmedState = confirmOneNote(reviewedState, { checked: true });
+  const copied = markCopied(confirmedState, confirmedState.revision);
+  const placed = recordPlacement(copied, {
+    destination,
+    recordedAt: '2026-10-20T10:15:00+09:00',
+  });
+  const receipt = structuredClone(placed.placements[0]);
+  const editedAfterPlacement = editBody(placed, `${placed.body}\n\n## Later correction\nNew detail.`);
+  const packet = await exportProposal(editedAfterPlacement);
+
+  assert.deepEqual(editedAfterPlacement.placements[0], receipt);
+  assert.equal(packet.placements.length, 1);
+  assert.deepEqual(packet.placements[0], {
+    knowledgeId: 'case-cm-ma-71',
+    baseVersion: 3,
+    revision: receipt.revision,
+    text: transferText,
+    destination,
+    recordedAt: '2026-10-20T10:15:00+09:00',
+    textSha256: createHash('sha256').update(transferText, 'utf8').digest('hex'),
+  });
+
+  packet.placements[0].text = 'tampered exported copy';
+  packet.placements[0].destination = 'https://elsewhere.example/';
+  packet.placements.push({ text: 'injected' });
+  assert.deepEqual(editedAfterPlacement.placements[0], receipt);
+  assert.equal(editedAfterPlacement.placements.length, 1);
+});
