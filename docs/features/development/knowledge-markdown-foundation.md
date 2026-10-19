@@ -27,7 +27,7 @@ Keep materials with different trust and runtime roles separate:
 | Future approved knowledge area | Explicitly approved Markdown snapshots with provenance | No; requires a separate publication allowlist |
 | Generated ingestion artifacts | Validated, transformed publication output | Only after publication approval and an approved isolated target |
 
-Never infer publication eligibility from a file's presence in Git. Keep business operations, HR/qualification information, customer/site records, original OneNote exports, recycle-bin content, raw workbooks, credentials, and operational ledgers outside the knowledge area.
+Never infer publication eligibility from a file's presence in Git. Curated engineering-business information is in scope alongside technical knowledge. Keep personal/HR/qualification details, customer/site identifiers, raw OneNote exports, recycle-bin content, raw workbooks, credentials, and operational ledgers out unless separately approved.
 
 ## Record Model
 
@@ -45,6 +45,14 @@ The first schema exploration should cover these content types:
 Keep `review_status`, `publication_status`, `classification`, and `cloud_approval` independent. Only an explicit, reviewed publication allowlist may enter a retrieval source. Draft, excluded, unknown-classification, or unapproved records must not be indexed or used as answer evidence.
 
 The existing Vault schema is a draft, not yet a validated API contract. Before implementing a parser or API, compare field types and allowed values with the target storage and Knowledge Base constraints. Keep structured link collections in a record registry if the Knowledge Base metadata format cannot represent them safely.
+
+## Knowledge Domain and Organizational Scope
+
+`record_type` describes the shape of a record; it does not say whether the information is technical knowledge or engineering-business information. Add an independent `knowledge_domain` dimension. For this corpus, `engineering_business` is displayed as 「工技業務」 and can include business-oriented types such as `field_work_reference`, `policy`, `procedure`, `training`, and `quality_process_reference` when the content is suitable.
+
+Organizational scope is a separate dimension from both domain and record type. The proposed `organizational_scope` values are `team_rule` (課内ルール), `department_rule`, `company_rule` (社規), `company_standard`, `external_standard`, `equipment_specific`, and `unknown`. Assign a rule scope only when the source explicitly establishes its owner and applicability. Do not infer `company_rule` from `record_type: policy` or infer `team_rule` from a folder name; retain `unknown` until reviewed.
+
+An error code reported within an individual troubleshooting case may be retained with its symptom, source, conditions, and verification status. A consolidated error-code table or code-to-cause catalog is a different data class and is not part of this repository snapshot; keep it in the separately approved AWS handling lane. Curated display-reading guidance that does not reproduce the code table is not itself a code table.
 
 ## Source Intake and Curation
 
@@ -80,7 +88,7 @@ After human acceptance, update the local canonical record, increment its version
 
 ## Proposed Initial Test Set
 
-Begin with synthetic fixtures only. Use fictional identifiers and inert URLs such as `https://example.invalid/`; include no real machine values, source IDs, customer/site details, links, or attachment bytes.
+Use synthetic fixtures for parser and workflow tests alongside the curated draft snapshot for editor and schema exploration. Synthetic fixtures must use fictional identifiers and inert URLs such as `https://example.invalid/`; do not place real machine values, source IDs, customer/site details, links, or attachment bytes in fixtures.
 
 The fixtures should exercise:
 
@@ -103,4 +111,4 @@ Every fixture must be visibly marked synthetic and must be excluded from any pro
 
 ## Out of Scope
 
-This proposal does not implement Microsoft Graph access, a knowledge CRUD API, an editor UI, automatic bidirectional sync, OneNote/Lists write-back, real Vault data transfer, Knowledge Base synchronization, or production deployment. Each requires separate scope, owner approval, security review, and tests against an approved environment.
+This proposal does not implement Microsoft Graph access, a knowledge CRUD API, an editor UI, automatic bidirectional sync, OneNote/Lists write-back, raw OneNote/Lists export, AWS transfer of the separated code tables/confidential lane, Knowledge Base synchronization, or production deployment. Each requires separate scope, owner approval, security review, and tests against an approved environment.
