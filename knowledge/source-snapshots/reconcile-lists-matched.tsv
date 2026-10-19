@@ -259,6 +259,7 @@ list_item_id	record_id	record_ids	title	model	importance
 340	elv-scale-device-shipping-restraint-id340	elv-scale-device-shipping-restraint-id340	【ME-BL】秤固定金取り外しの件	ME-BL	中
 341	elv-iphone-vibration-noise-measurement-app-id341	elv-iphone-vibration-noise-measurement-app-id341	iPhone 振動騒音測定アプリとそのデータについて	全エレ機種	中
 343	elv-vfglf-control-panel-terminal-reference-id343	elv-vfglf-control-panel-terminal-reference-id343	VFGLF制御盤内端子台【M8】について	AXIEZ-LINKS	中
+345	knowhow-elv-links-wos-switch-dldp-connector-id345	knowhow-elv-links-wos-switch-dldp-connector-id345	LINKsでWOS工法に切り替える際にDL,DPコネクタが制御盤側に無い	全エレ機種	↑高
 347	catalog-elv-car-cwt-runby-mrl-reference	catalog-elv-car-cwt-runby-mrl-reference	かご下調整板を使用しないランバイ調整方法	MRL機種	↓低
 348	catalog-elv-position-switches-reference	catalog-elv-position-switches-reference	ピットが深い場合のER運転適用時、DOTが複数個付く理由	MR機種	
 351	elv-vfglf-flood-sensor-procurement-option-id351	elv-vfglf-flood-sensor-procurement-option-id351	冠水センサが手配されない件	VFGLF	↓低
@@ -290,8 +291,10 @@ list_item_id	record_id	record_ids	title	model	importance
 385	elv-smoke-detector-access-switch-model-behavior-id385	elv-smoke-detector-access-switch-model-behavior-id385	新AXIEZとLINKsで煙感知器点検口を開けた時の動作が異なる件	MRL機種	中
 390	catalog-elv-p-s-wave-earthquake-sensors	catalog-elv-p-s-wave-earthquake-sensors	（識別情報を含む可能性があるため情報管理確認まで保留）	MR機種	中
 391	elv-load-test-mcb-rating-question-id391	elv-load-test-mcb-rating-question-id391	負荷試験の電流値がMCBブレーカー定格電流を超えてしまう件	全エレ機種	中
+398	case-elv-axiez-links-car-flex-lighting-power-ground-fault-id398	case-elv-axiez-links-car-flex-lighting-power-ground-fault-id398	カゴが撓むことで照明安定化電源が地絡する件	AXIEZ-LINKS	重要
 410	elv-runby-forecast-switch-monitoring-not-reported-id410	elv-runby-forecast-switch-monitoring-not-reported-id410	保守ソフトの有無による監視盤表示の違い	VFGH	↓低
 411	elv-temporary-slow-issues	elv-temporary-slow-issues|elv-vfglf-resolver-wiring-break-id411	巻上機レゾルバ線が断線しており、空回しが出来ない件	VFGLF	中
+417	case-elv-vfglf-i-can-disconnected-hall-backup-unavailable-id417	case-elv-vfglf-i-can-disconnected-hall-backup-unavailable-id417	I-CAN未接続により乗場バックアップできない	VFGLF	↑高
 418	elv-sets-state-error-64c-id418	elv-sets-state-error-64c-id418	カゴ上での制御盤エラー確認時に64Cが消えない件	VFGLB	中
 420	elv-control-cable-hanging-height-pit-interference-id420	elv-control-cable-hanging-height-pit-interference-id420	検討不足による制御ケーブル吊り高さ基準外の件	MR機種	↑高
 421	elv-three-way-landing-stop-switch-id421	elv-three-way-landing-stop-switch-id421	三路式乗場休止スイッチの仕様について	VFGLB・VFGLF	中

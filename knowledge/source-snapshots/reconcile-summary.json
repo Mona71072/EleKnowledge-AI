@@ -2,12 +2,12 @@
   "generated_on": "2026-10-19",
   "lists": {
     "total": 390,
-    "matched_primary": 301,
-    "unmatched_primary": 89,
+    "matched_primary": 304,
+    "unmatched_primary": 86,
     "duplicate_matches_primary": 23,
-    "matched_extended_with_source_id_suffix": 315,
-    "unmatched_extended_with_source_id_suffix": 75,
-    "duplicate_matches_extended": 33
+    "matched_extended_with_source_id_suffix": 317,
+    "unmatched_extended_with_source_id_suffix": 73,
+    "duplicate_matches_extended": 34
   },
   "onenote": {
     "total_pages": 1039,
@@ -15,16 +15,16 @@
     "unmatched": 700,
     "emptyish_pages": 240
   },
-  "drafts_scanned": 627,
-  "high_importance_unmatched_lists": 13,
+  "drafts_scanned": 630,
+  "high_importance_unmatched_lists": 10,
   "unmatched_theme_buckets": {
     "door": 13,
-    "power": 6,
+    "power": 5,
     "clock_sets": 1,
-    "other": 47,
-    "group_call": 8,
+    "other": 46,
     "comm": 2,
     "install_dim": 7,
+    "group_call": 7,
     "safety": 2,
     "display": 3
   },

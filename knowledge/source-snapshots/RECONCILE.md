@@ -21,10 +21,10 @@ cloud_approval: not_reviewed
 
 | 対象 | 総数 | 一致 | 未整備 | 備考 |
 | --- | ---: | ---: | ---: | --- |
-| Lists（推奨: ファイル名 + evidence の ID） | 390 | 301 | 89 | 重複一致 23 件 |
-| Lists（拡張: + source_id 末尾） | 390 | 315 | 75 | 重複 33 件・要確認 |
+| Lists（推奨: ファイル名 + evidence の ID） | 390 | 304 | 86 | 重複一致 23 件 |
+| Lists（拡張: + source_id 末尾） | 390 | 317 | 73 | 重複 34 件・要確認 |
 | OneNote ページ | 1039 | 339 | 700 | 添付中心で実質空 240 件 |
-| 下書き走査 | 627 | — | — | IMPORT-* を除く |
+| 下書き走査 | 630 | — | — | IMPORT-* を除く |
 
 ## Lists の一致ルール
 
@@ -50,11 +50,11 @@ cloud_approval: not_reviewed
 
 | theme_bucket | 件数 |
 | --- | ---: |
-| `other` | 47 |
+| `other` | 46 |
 | `door` | 13 |
-| `group_call` | 8 |
 | `install_dim` | 7 |
-| `power` | 6 |
+| `group_call` | 7 |
+| `power` | 5 |
 | `display` | 3 |
 | `comm` | 2 |
 | `safety` | 2 |
@@ -62,18 +62,15 @@ cloud_approval: not_reviewed
 
 ## 優先してテーマ候補にしたい未整備（重要度 高 / 重要）
 
-件数: **13**（原因・対策の断定はしていない）
+件数: **10**（原因・対策の断定はしていない）
 
 | list_item_id | Model | 重要度 | タイトル（スナップショット） | theme_bucket |
 | --- | --- | --- | --- | --- |
-| 417 | VFGLF | ↑高 | I-CAN未接続により乗場バックアップできない | `group_call` |
 | 416 | VFGH | ↑高 | 長周期振動感知器の短絡ジャンパについて | `other` |
 | 413 | VFGH | 重要 | ピット点検口から出入り不可 | `install_dim` |
-| 398 | AXIEZ-LINKS | 重要 | カゴが撓むことで照明安定化電源が地絡する件 | `power` |
 | 394 | 全エレ機種 | ↑高 | ピットタラップの取付位置について | `install_dim` |
 | 392 | VFGLF | ↑高 | ブレーキスイッチ設定不良で本スロー時カゴ運転不能の件 | `other` |
 | 350 | VFGLF・VFGLB・VFGH | 重要 | UPS（アップピークサービス）動作しない件 | `other` |
-| 345 | 全エレ機種 | ↑高 | LINKsでWOS工法に切り替える際にDL,DPコネクタが制御盤側に無い | `other` |
 | 151 | VFGH | 重要 | P1基板不良によって、7SEGやWDTが点灯しなくなる | `display` |
 | 137 | CM-MA | ↑高 | 首下長さの異なるビスを用い巻上機カバーを取付け、異音が発生 | `other` |
 | 14 | 監視盤 | 重要 | （識別情報を含む可能性があるため情報管理確認まで保留） | `other` |

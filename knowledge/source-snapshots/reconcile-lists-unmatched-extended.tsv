@@ -46,7 +46,6 @@ list_item_id	title	model	importance	reported_status	theme_bucket
 395	冠水時管制運転(PER)の有無について	VFGLB・VFGLF	↓低	対応済み	other
 396	型板設定時のピアノ線間寸法計算について	MR機種	↓低	対応済み	install_dim
 397	M1カード不良により、自動運転中にカゴ急停止する件	VFGLF	中	対応済み	other
-398	カゴが撓むことで照明安定化電源が地絡する件	AXIEZ-LINKS	重要	対応済み	power
 400	アクチュエータ取り外しによるドア開閉不良の件	VFGLF	中	対応済み	door
 401	停止階よりも多くの着床プレートが品目手配されている。	VFGLF	↓低	対応済み	other
 402	CWT枠の中間ストッパー有無について(中間免震対応)	VFGH	↓低	対応不要	other
@@ -60,7 +59,6 @@ list_item_id	title	model	importance	reported_status	theme_bucket
 414	ラインLEDの配線地絡によりかご上STで伝送異常を検知する件	VFGLF	中	対応済み	comm
 415	ELSGW盤にPuTTYでアクセスできない	エレナビ	↓低	対応不要	other
 416	長周期振動感知器の短絡ジャンパについて	VFGH	↑高	対応不要	other
-417	I-CAN未接続により乗場バックアップできない	VFGLF	↑高	対応済み	group_call
 419	VFGLBにおける戸短検出時の解除方法の注意点	VFGLB	↓低	対応不要	door
 426	秤基板から電圧が出力されない	VFGH	中	対応済み	power
 428	短ランバイ適用物件における終端階運転制限	VFGH	中	対応不要	other
