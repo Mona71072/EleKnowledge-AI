@@ -20,6 +20,9 @@ const BASE = [
   'record_version: 3',
   'title: Governor mount vibration',
   'status: approved',
+  'source_refs:',
+  '  - ref_type: lists_item',
+  '    list_item_id: 71',
   'evidence_sources:',
   '  - source_id: lists-71',
   '    supports:',
@@ -86,6 +89,17 @@ test('parses both supported identity pairs and preserves Markdown and metadata',
   assert.equal(record.metadata.status, 'approved');
 });
 
+test('accepts CRLF Markdown and rejects a non-mapping or unsafe deeply nested frontmatter', () => {
+  const crlf = BASE.replaceAll('\n', '\r\n');
+  assert.equal(parsed(crlf).body, '# Governor mount vibration\r\n\r\nCheck the source record and verify the installation conditions.');
+
+  for (const invalid of [
+    '---\n- not-a-mapping\n---\nbody',
+    BASE.replace('structured_data:\n  model: CM-MA\n  verified_actions: []', 'structured_data: {nested: {__proto__: unsafe}}'),
+    `---\nknowledge_id: KH-1\ncard_version: 1\ntitle: Deep\n${'level: {'.repeat(34)}value${'}'.repeat(34)}\n---\nbody`,
+  ]) assert.throws(() => parseKnowledgeMarkdown(invalid));
+});
+
 test('rejects malformed, oversized, nul-containing, or identity-incomplete documents', () => {
   for (const invalid of [
     'plain markdown without frontmatter',
@@ -115,6 +129,8 @@ test('starts as an unpublished working copy even when source metadata says appro
   const state = workspace();
 
   assert.equal(state.document.metadata.status, 'approved');
+  assert.match(state.noteText, /Check the source record and verify the installation conditions\./);
+  assert.match(state.noteText, /Lists item 71/);
   assert.equal(state.revision, 0);
   assert.equal(state.reviewedRevision, null);
   assert.equal(state.copiedRevision, null);
@@ -128,12 +144,22 @@ test('body and OneNote draft edits are immutable and invalidate current review a
   const oneNoteEdited = editOneNoteDraft(bodyEdited, 'New condition: verify the model suffix.\nSource: Lists item 71.');
 
   assert.equal(original.body.includes('New condition'), false);
-  assert.equal(original.noteText, '');
+  assert.equal(original.noteText.startsWith('# Governor mount vibration'), true);
   assert.equal(oneNoteEdited.revision, original.revision + 2);
   assert.equal(oneNoteEdited.reviewedRevision, null);
   assert.equal(oneNoteEdited.copiedRevision, null);
   assert.equal(oneNoteEdited.kbReview.status, 'unverified');
   assert.equal(oneNoteEdited.noteText.startsWith('New condition:'), true);
+});
+
+test('rejects non-string or unsafe editor input without changing the previous state', () => {
+  const state = workspace();
+  assert.throws(() => editBody(state, null));
+  assert.throws(() => editBody(state, `bad\0body`));
+  assert.throws(() => editOneNoteDraft(state, {}));
+  assert.throws(() => editOneNoteDraft(state, `bad\0draft`));
+  assert.equal(state.revision, 0);
+  assert.equal(state.body.includes('bad'), false);
 });
 
 test('KB review requires a recognized status and retains the reference and reviewer note', () => {
@@ -145,7 +171,7 @@ test('KB review requires a recognized status and retains the reference and revie
   assert.equal(state.kbReview.status, 'reviewed');
   assert.equal(state.kbReview.reference, 'KB: C-6-R56.1, section 4, page 12');
   assert.equal(state.kbReview.note.includes('opened'), true);
-  assert.equal(state.reviewedRevision, state.revision);
+  assert.equal(state.reviewedRevision, null);
 });
 
 test('OneNote confirmation requires KB review and cannot be inferred from source status', () => {
@@ -166,6 +192,7 @@ test('copy acknowledgement is separate from OneNote placement and rejects stale 
   const state = confirmed(workspace());
 
   assert.throws(() => markCopied(state, state.revision - 1));
+  assert.throws(() => markCopied(reviewed(workspace()), 1));
   const copied = markCopied(state, state.revision);
   assert.equal(copied.copiedRevision, copied.revision);
   assert.deepEqual(copied.placements, []);
@@ -178,6 +205,8 @@ test('placement requires a current confirmed copy, a page URL, and a valid times
   for (const invalid of [
     { destination: 'https://example.com/page', recordedAt: 'not-a-date' },
     { destination: 'javascript:alert(1)', recordedAt: '2026-10-20T09:00:00+09:00' },
+    { destination: 'https://user:secret@example.com/page', recordedAt: '2026-10-20T09:00:00+09:00' },
+    { destination: 'https://example.com/page', recordedAt: '2026-02-30T09:00:00+09:00' },
     { destination: 'https://example.com/page' },
   ]) {
     assert.throws(() => recordPlacement(copied, invalid));
@@ -195,7 +224,7 @@ test('placement receipt pins the copied revision and text and stays unchanged af
   const confirmedDraft = confirmed(draft);
   const copied = markCopied(confirmedDraft, confirmedDraft.revision);
   const placed = recordPlacement(copied, {
-    destination: 'https://tenant.sharepoint.com/sites/engineering/Shared%20Documents/oneNotePage',
+    destination: 'onenote:https://tenant.sharepoint.com/sites/engineering/Shared%20Documents/oneNotePage',
     recordedAt: '2026-10-20T09:00:00+09:00',
   });
   const receiptBeforeEdit = structuredClone(placed.placements[0]);
@@ -213,7 +242,9 @@ test('OneNote draft is deterministic and carries sources and explicitly unconfir
   assert.equal(typeof state.noteText, 'string');
   assert.match(state.noteText, /Lists item 71/);
   assert.match(state.noteText, /未確認|unconfirmed/i);
-  assert.equal(editOneNoteDraft(state, state.noteText).noteText, state.noteText);
+  const edited = editOneNoteDraft(state, state.noteText);
+  assert.equal(edited.noteText, state.noteText);
+  assert.equal(edited.revision, state.revision + 1);
 });
 
 test('proposal export includes exact SHA-256 digests and keeps original metadata in its base record', async () => {
@@ -234,6 +265,5 @@ test('proposal export includes exact SHA-256 digests and keeps original metadata
   assert.equal(packet.hashes.baseMarkdownSha256, sha256(BASE));
   assert.equal(packet.hashes.bodySha256, sha256(state.body));
   assert.equal(packet.hashes.oneNoteTextSha256, sha256(state.noteText));
-  assert.equal(packet.proposal.markdown.includes('Unconfirmed: long-term condition.'), true);
+  assert.equal(packet.proposal.oneNoteText.includes('Unconfirmed: long-term condition.'), true);
 });
-
