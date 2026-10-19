@@ -47,6 +47,10 @@ export type ResearchAnswer = {
   responseType: KnowledgeResearchResponseType;
   sessionId: string;
   messageId: string;
+  /** Time the browser received the RAG HTTP response, recorded locally. */
+  receivedAt: string;
+  /** Original API response timestamp, retained only when it is valid ISO-8601. */
+  responseTimestamp?: string;
   sourceDocuments: ResearchSource[];
   pageCandidates: ResearchPageCandidate[];
   clarifyQuestions: string[];

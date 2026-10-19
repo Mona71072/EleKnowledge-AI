@@ -44,7 +44,9 @@ function safeEndpoint(baseUrl) {
     fail('config', 'RAG APIの接続先を確認してください');
   }
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname.toLowerCase());
-  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))
+  const nodeEnvironment = process.env.NODE_ENV;
+  const allowsLocalHttp = loopback && (nodeEnvironment === 'development' || nodeEnvironment === 'test');
+  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && allowsLocalHttp))
     || url.username || url.password || url.search || url.hash) {
     fail('config', 'RAG APIの接続先はHTTPSまたはローカル開発用HTTPで設定してください');
   }
@@ -104,6 +106,13 @@ function isDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+}
+
+function validIsoTimestamp(value) {
+  if (typeof value !== 'string') return undefined;
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/);
+  if (!match || !isDate(match[1]) || !Number.isFinite(Date.parse(value))) return undefined;
+  return value;
 }
 
 function safeLawCitation(value) {
@@ -170,7 +179,7 @@ function stringArray(value) {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
-function normalizeResponse(data, mode, query) {
+function normalizeResponse(data, mode, query, receivedAt) {
   if (!data || typeof data !== 'object' || Array.isArray(data)
     || typeof data.content !== 'string'
     || !RESPONSE_TYPES.has(data.responseType)
@@ -193,6 +202,8 @@ function normalizeResponse(data, mode, query) {
     responseType: data.responseType,
     sessionId: data.sessionId,
     messageId,
+    receivedAt,
+    ...(validIsoTimestamp(data.timestamp) ? { responseTimestamp: validIsoTimestamp(data.timestamp) } : {}),
     sourceDocuments: data.sourceDocuments.map((item) => cleanSource(item, mode)),
     pageCandidates: data.pageCandidates.map((item) => cleanSource(item, mode)),
     clarifyQuestions: [...data.clarifyQuestions],
@@ -261,6 +272,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
           : '検索を中止しました');
         fail('server', '検索サービスに接続できませんでした。時間をおいてお試しください');
       }
+      const receivedAt = new Date().toISOString();
       if (!response || typeof response.ok !== 'boolean') {
         fail('invalid_response', '検索サービスの応答を確認できませんでした');
       }
@@ -276,7 +288,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
       } catch {
         fail('invalid_response', '検索結果の形式を確認できませんでした');
       }
-      return normalizeResponse(data, mode, normalizedQuery);
+      return normalizeResponse(data, mode, normalizedQuery, receivedAt);
     })();
     return await Promise.race([operation, interruption]);
   } catch (error) {
@@ -355,6 +367,17 @@ export function buildResearchNote(answer) {
   const fence = codeFence(answer.content);
   const heading = answer.mode === 'law' ? '法令KB' : '技術KB';
   const refs = eligibleSources.map((source, index) => sourceReference(source, answer.mode, index));
+  const tracking = [
+    '#### AI回答の追跡情報',
+    '',
+    '> AI回答の追跡情報。資料の改訂版・承認情報ではない',
+    `- 検索モード: ${answer.mode === 'law' ? '法令KB' : '技術KB'} (${answer.mode})`,
+    `- 質問: ${escapeInline(answer.query)}`,
+    ...(validIsoTimestamp(answer.receivedAt) ? [`- 受信日時: ${answer.receivedAt}`] : []),
+    ...(validIsoTimestamp(answer.responseTimestamp) ? [`- API回答日時: ${answer.responseTimestamp}`] : []),
+    ...(typeof answer.sessionId === 'string' && answer.sessionId.trim() ? [`- sessionId: ${escapeInline(answer.sessionId)}`] : []),
+    ...(typeof answer.messageId === 'string' && answer.messageId.trim() ? [`- messageId: ${escapeInline(answer.messageId)}`] : []),
+  ];
   return [
     `### ${heading}の調査メモ（AI候補・未確認）`,
     '',
@@ -370,5 +393,7 @@ export function buildResearchNote(answer) {
     '#### 出典',
     '',
     ...refs,
+    '',
+    ...tracking,
   ].join('\n');
 }
