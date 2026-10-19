@@ -241,6 +241,13 @@ test('placement requires a current confirmed copy, a page URL, and a valid times
     destination: 'onenote:https://tenant.sharepoint.com/site/page',
     recordedAt: '2026-10-20T09:00:00+09:00',
   }));
+
+  const httpsReceipt = recordPlacement(copied, {
+    destination: 'https://example.com/page',
+    recordedAt: '2026-10-20T09:00:00+09:00',
+  });
+  assert.equal(httpsReceipt.placements[0].destinationVerified, false);
+  assert.equal(httpsReceipt.placements[0].verification, 'self_reported');
 });
 
 test('placement receipt pins the copied revision and text and stays unchanged after later edits', () => {
@@ -326,7 +333,7 @@ test('proposal export carries immutable OneNote placement receipts after later e
     verification: 'self_reported',
     textSha256: createHash('sha256').update(transferText, 'utf8').digest('hex'),
   });
-  assert.equal(packet.noteNeedsReconcile, false);
+  assert.equal(packet.noteNeedsReconcile, true);
 
   packet.placements[0].text = 'tampered exported copy';
   packet.placements[0].destination = 'https://elsewhere.example/';

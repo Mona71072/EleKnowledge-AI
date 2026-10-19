@@ -19,6 +19,8 @@ export type KnowledgeKbReview = {
 export type KnowledgePlacementReceipt = {
   destination: string;
   recordedAt: string;
+  destinationVerified: false;
+  verification: 'self_reported';
   baseVersion: number;
   revision: number;
   text: string;
@@ -36,6 +38,7 @@ export type KnowledgeWorkspaceState = {
   noteText: string;
   kbReview: KnowledgeKbReview;
   revision: number;
+  noteNeedsReconcile: boolean;
   reviewedRevision: number | null;
   copiedRevision: number | null;
   placements: KnowledgePlacementReceipt[];
@@ -56,6 +59,7 @@ export type KnowledgeProposalPacket = {
     publishable: false;
     state: 'working-proposal';
   };
+  noteNeedsReconcile: boolean;
   reviewedRevision: number | null;
   copiedRevision: number | null;
   placements: Array<KnowledgePlacementReceipt & { knowledgeId: string; textSha256: string }>;
@@ -77,7 +81,7 @@ export function setKbReview(
 ): KnowledgeWorkspaceState;
 export function confirmOneNote(
   state: KnowledgeWorkspaceState,
-  confirmation: { checked: true },
+  confirmation: { checked: true; noteReconciled?: true },
 ): KnowledgeWorkspaceState;
 export function markCopied(state: KnowledgeWorkspaceState, expectedRevision: number): KnowledgeWorkspaceState;
 export function recordPlacement(

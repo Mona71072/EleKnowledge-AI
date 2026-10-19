@@ -178,9 +178,6 @@ function makeOneNoteDraft(parsed) {
   return [
     `# ${parsed.title}：追記案`,
     '',
-    '## 現在のMarkdown本文（担当者が確認）',
-    parsed.body || '（本文がありません。担当者が内容を確認してください）',
-    '',
     '## 追加する要点',
     '（担当者が根拠を確認して記入）',
     '',
@@ -213,22 +210,24 @@ export function createWorkspace(parsed) {
       metadata,
     },
     body: parsed.body,
-    noteText: makeOneNoteDraft({ title: identity.title, metadata, body: parsed.body }),
+    noteText: makeOneNoteDraft({ title: identity.title, metadata }),
     kbReview: { status: 'unverified', reference: '', note: '' },
     revision: 0,
+    noteNeedsReconcile: false,
     reviewedRevision: null,
     copiedRevision: null,
     placements: [],
   };
 }
 
-function changed(state, patch) {
+function changed(state, patch, options = {}) {
   if (!state || typeof state !== 'object') fail('A workspace state is required.');
   return {
     ...state,
     ...patch,
     kbReview: { status: 'unverified', reference: '', note: '' },
     revision: state.revision + 1,
+    noteNeedsReconcile: options.noteNeedsReconcile ?? state.noteNeedsReconcile,
     reviewedRevision: null,
     copiedRevision: null,
     placements: [...state.placements],
@@ -238,7 +237,7 @@ function changed(state, patch) {
 export function editBody(state, body) {
   if (typeof body !== 'string') fail('Markdown body must be a string.');
   if (new TextEncoder().encode(body).byteLength > MAX_MARKDOWN_BYTES || body.includes('\0')) fail('Markdown body is invalid or too large.');
-  return changed(state, { body });
+  return changed(state, { body }, { noteNeedsReconcile: true });
 }
 
 export function editOneNoteDraft(state, text) {
@@ -258,10 +257,19 @@ export function setKbReview(state, review) {
 
 export function confirmOneNote(state, confirmation) {
   if (!confirmation || confirmation.checked !== true) fail('The content, evidence, applicability, and audience must be confirmed.');
+  if (state.noteNeedsReconcile && confirmation.noteReconciled !== true) {
+    fail('Reconcile the OneNote draft with the edited Markdown before confirming.');
+  }
   if (state.kbReview?.status !== 'reviewed' || !state.kbReview.reference || !state.kbReview.note) {
     fail('Review the KB evidence and record its reference before confirming.');
   }
-  return { ...state, reviewedRevision: state.revision, copiedRevision: null, placements: [...state.placements] };
+  return {
+    ...state,
+    noteNeedsReconcile: false,
+    reviewedRevision: state.revision,
+    copiedRevision: null,
+    placements: [...state.placements],
+  };
 }
 
 export function markCopied(state, expectedRevision) {
@@ -305,6 +313,8 @@ export function recordPlacement(state, placement) {
   const receipt = {
     destination: placement.destination,
     recordedAt: placement.recordedAt,
+    destinationVerified: false,
+    verification: 'self_reported',
     baseVersion: state.document.baseVersion,
     revision: state.revision,
     text: state.noteText,
@@ -337,6 +347,8 @@ export async function exportProposal(state) {
     text: receipt.text,
     destination: receipt.destination,
     recordedAt: receipt.recordedAt,
+    destinationVerified: false,
+    verification: 'self_reported',
     textSha256: await sha256(receipt.text),
   })));
   return {
@@ -354,6 +366,7 @@ export async function exportProposal(state) {
       publishable: false,
       state: 'working-proposal',
     },
+    noteNeedsReconcile: state.noteNeedsReconcile,
     reviewedRevision: state.reviewedRevision,
     copiedRevision: state.copiedRevision,
     placements,
