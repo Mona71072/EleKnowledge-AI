@@ -1,8 +1,10 @@
 # Draft Knowledge Snapshot
 
-This directory contains selected copies of curated Markdown from the local Vault for schema and workflow development. The Vault remains canonical. These files are not approved for RAG, publication, or operational decision-making.
+This directory contains selected copies of curated Markdown from the local Vault for schema and workflow development. The Vault remains canonical. These files are not approved for RAG, publication, or operational decision-making. See [IMPORT-SCOPE.md](IMPORT-SCOPE.md) for the full inclusion and exclusion criteria.
 
 The copied frontmatter states are preserved. Repository inclusion does not change review, classification, cloud approval, or publication status.
+
+The following three records were the first real-data batch:
 
 | Record | Source file | Current limitations |
 | --- | --- | --- |
@@ -10,6 +12,6 @@ The copied frontmatter states are preserved. Repository inclusion does not chang
 | `elv-model-abbreviations-user-image` v2 | `整備済み資料/技術資料/ELV_機種略称・制御方式一覧_提供画像.md` | Based on a user-provided image. Original image identity, joined-cell mapping, and current applicability remain unverified. |
 | `elv-inter-car-clock-setting-difference-id425` v1 | `整備済み資料/技術資料/ELV_号機間時計設定差_ID425事例.md` | Source is a user-provided extract; the underlying workbook row is unavailable for independent comparison. Cause and recurrence remain unknown. |
 
-No raw OneNote/Lists exports, image or other attachment bytes, business-process documents, personal/customer/site identifiers, credentials, or confidential records are included. In particular, no record marked `classification: confidential` is copied here.
+No raw OneNote/Lists exports, image or other attachment bytes, business-process documents, personal/customer/site identifiers, credentials, or records marked confidential are included.
 
-The three records retain their existing `in_review`, `not_published`, `unknown`, and `not_reviewed` state values. Do not add this directory to a Knowledge Base data-source prefix or ingestion manifest. Any later publication requires per-record information-management, technical review, and explicit cloud/publication approval.
+All copied records retain their existing review, publication, classification, and cloud-approval state values. Do not add this directory to a Knowledge Base data-source prefix or ingestion manifest. Any later publication requires per-record information-management, technical review, and explicit cloud/publication approval.
