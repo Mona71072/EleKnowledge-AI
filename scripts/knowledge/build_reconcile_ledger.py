@@ -35,17 +35,44 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return meta, body
 
 
+def frontmatter_text(text: str) -> str:
+    if not text.startswith("---"):
+        return ""
+    end = text.find("\n---", 3)
+    return text[3:end] if end != -1 else ""
+
+
+def evidence_sources_blob(text: str) -> str:
+    fm = frontmatter_text(text)
+    if not fm:
+        return ""
+    lines = fm.splitlines()
+    out: list[str] = []
+    in_block = False
+    for line in lines:
+        if line.startswith("evidence_sources:"):
+            in_block = True
+            out.append(line)
+            continue
+        if in_block:
+            if re.match(r"^[A-Za-z_]+:", line):
+                break
+            out.append(line)
+    return "\n".join(out)
+
+
 def list_ids_from_draft(path: Path, text: str, *, include_source_id_suffix: bool) -> set[str]:
+    """Match list item IDs only (not error codes in narrative body)."""
     ids: set[str] = set()
-    for m in re.finditer(r"ID(\d{1,5})", path.name):
+    for m in re.finditer(r"(?<![0-9])ID(\d{1,5})(?![0-9])", path.name):
         ids.add(m.group(1))
-    head = text[:12000]
-    for m in re.finditer(r"\(ID(\d{1,5})\)", head):
+    evidence = evidence_sources_blob(text)
+    for m in re.finditer(r"[（(]ID(\d{1,5})[）)]", evidence):
         ids.add(m.group(1))
-    for m in re.finditer(r"list_item_id:\s*[`\"']?(\d{1,5})", head, re.I):
+    for m in re.finditer(r"list_item_id:\s*[`\"']?(\d{1,5})", evidence, re.I):
         ids.add(m.group(1))
     if include_source_id_suffix:
-        for m in re.finditer(r'source_id:\s*"[^"]*[-_](\d{1,5})"', head):
+        for m in re.finditer(r'source_id:\s*"[^"]*[-_](\d{1,5})"', evidence):
             ids.add(m.group(1))
     return ids
 
@@ -112,6 +139,38 @@ def parse_lists_snapshot(path: Path) -> list[ListItem]:
     return items
 
 
+def onenote_body_emptyish(body: str) -> bool:
+    lines = [
+        ln.strip()
+        for ln in body.splitlines()
+        if ln.strip() and not ln.startswith(">") and ln.strip() != "## OneNote content"
+    ]
+    placeholder_prefixes = (
+        "[OneNote attachment reference omitted",
+        "OneNote reference (unresolved",
+        "◆OneNote reference (unresolved",
+    )
+    substantive_lines: list[str] = []
+    placeholder_chars = 0
+    total_non_ws = 0
+    for ln in lines:
+        if ln == "\\n":
+            continue
+        if any(ln.startswith(p) for p in placeholder_prefixes):
+            placeholder_chars += len(re.sub(r"\s+", "", ln))
+            continue
+        cleaned = re.sub(r"\s+", "", ln)
+        total_non_ws += len(cleaned)
+        substantive_lines.append(cleaned)
+    substantive = "".join(substantive_lines)
+    total_non_ws += placeholder_chars
+    if len(substantive) <= 15:
+        return True
+    if total_non_ws > 0 and placeholder_chars / total_non_ws >= 0.55 and len(substantive) < 80:
+        return True
+    return False
+
+
 def parse_onenote_pages() -> list[tuple[str, bool]]:
     pages: list[tuple[str, bool]] = []
     for path in sorted(ONENOTE_DIR.glob("onenote-*.md")):
@@ -120,20 +179,7 @@ def parse_onenote_pages() -> list[tuple[str, bool]]:
         oid = fm.get("onenote_id", "").strip().lower()
         if not oid:
             continue
-        lines = [
-            ln.strip()
-            for ln in body.splitlines()
-            if ln.strip() and not ln.startswith(">") and ln.strip() != "## OneNote content"
-        ]
-        content_lines = [
-            ln
-            for ln in lines
-            if not ln.startswith("[OneNote attachment reference omitted")
-            and not ln.startswith("OneNote reference (unresolved")
-            and ln != "\\n"
-        ]
-        emptyish = len("".join(content_lines)) < 40
-        pages.append((oid, emptyish))
+        pages.append((oid, onenote_body_emptyish(body)))
     return pages
 
 
@@ -154,27 +200,12 @@ def theme_bucket(title: str) -> str:
     return "other"
 
 
-def main() -> None:
-    draft_paths = [p for p in DRAFTS.glob("*.md") if not p.name.startswith("IMPORT")]
-    list_id_to_records = build_list_id_map(include_source_id_suffix=True)
-    list_id_to_records_conservative = build_list_id_map(include_source_id_suffix=False)
-    onenote_to_records: dict[str, list[str]] = defaultdict(list)
-
-    for path in draft_paths:
-        text = path.read_text(encoding="utf-8", errors="replace")
-        fm, _ = parse_frontmatter(text)
-        record_id = fm.get("record_id") or path.stem
-        oid = onenote_id_from_draft(text)
-        if oid:
-            onenote_to_records[oid].append(record_id)
-
-    list_items = parse_lists_snapshot(LISTS_SNAPSHOT)
-    onenote_pages = parse_onenote_pages()
-
+def classify_lists(
+    list_items: list[ListItem], list_id_to_records: dict[str, list[str]]
+) -> tuple[list[dict], list[dict], list[dict]]:
     matched_lists: list[dict] = []
     unmatched_lists: list[dict] = []
     duplicate_list_matches: list[dict] = []
-
     for item in list_items:
         records = sorted(set(list_id_to_records.get(item.list_item_id, [])))
         if len(records) > 1:
@@ -207,6 +238,30 @@ def main() -> None:
                     "theme_bucket": theme_bucket(item.title),
                 }
             )
+    return matched_lists, unmatched_lists, duplicate_list_matches
+
+
+def main() -> None:
+    draft_paths = [p for p in DRAFTS.glob("*.md") if not p.name.startswith("IMPORT")]
+    list_id_to_records = build_list_id_map(include_source_id_suffix=True)
+    list_id_to_records_primary = build_list_id_map(include_source_id_suffix=False)
+    onenote_to_records: dict[str, list[str]] = defaultdict(list)
+
+    for path in draft_paths:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        fm, _ = parse_frontmatter(text)
+        record_id = fm.get("record_id") or path.stem
+        oid = onenote_id_from_draft(text)
+        if oid:
+            onenote_to_records[oid].append(record_id)
+
+    list_items = parse_lists_snapshot(LISTS_SNAPSHOT)
+    onenote_pages = parse_onenote_pages()
+
+    matched_lists, unmatched_lists, duplicate_list_matches = classify_lists(
+        list_items, list_id_to_records_primary
+    )
+    matched_ext, unmatched_ext, duplicate_ext = classify_lists(list_items, list_id_to_records)
 
     onenote_ids = {oid for oid, _ in onenote_pages}
     draft_onenote_ids = set(onenote_to_records.keys())
@@ -239,6 +294,36 @@ def main() -> None:
                 ]
             )
 
+    with (OUT_DIR / "reconcile-lists-matched-extended.tsv").open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["list_item_id", "record_id", "record_ids", "title", "model", "importance"])
+        for row in sorted(matched_ext, key=lambda r: int(r["list_item_id"])):
+            w.writerow(
+                [
+                    row["list_item_id"],
+                    row["record_id"],
+                    "|".join(row["record_ids"]),
+                    row["title"],
+                    row["model"],
+                    row["importance"],
+                ]
+            )
+
+    with (OUT_DIR / "reconcile-lists-unmatched-extended.tsv").open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["list_item_id", "title", "model", "importance", "reported_status", "theme_bucket"])
+        for row in sorted(unmatched_ext, key=lambda r: int(r["list_item_id"])):
+            w.writerow(
+                [
+                    row["list_item_id"],
+                    row["title"],
+                    row["model"],
+                    row["importance"],
+                    row["reported_status"],
+                    row["theme_bucket"],
+                ]
+            )
+
     with (OUT_DIR / "reconcile-lists-unmatched.tsv").open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f, delimiter="\t")
         w.writerow(["list_item_id", "title", "model", "importance", "reported_status", "theme_bucket"])
@@ -258,19 +343,16 @@ def main() -> None:
         for oid in unmatched_onenote:
             f.write(oid + "\n")
 
-    conservative_matched = sum(
-        1 for item in list_items if list_id_to_records_conservative.get(item.list_item_id)
-    )
-
     summary = {
         "generated_on": date.today().isoformat(),
         "lists": {
             "total": len(list_items),
-            "matched": len(matched_lists),
-            "unmatched": len(unmatched_lists),
-            "duplicate_matches": len(duplicate_list_matches),
-            "matched_conservative_filename_or_title_id": conservative_matched,
-            "unmatched_conservative_filename_or_title_id": len(list_items) - conservative_matched,
+            "matched_primary": len(matched_lists),
+            "unmatched_primary": len(unmatched_lists),
+            "duplicate_matches_primary": len(duplicate_list_matches),
+            "matched_extended_with_source_id_suffix": len(matched_ext),
+            "unmatched_extended_with_source_id_suffix": len(unmatched_ext),
+            "duplicate_matches_extended": len(duplicate_ext),
         },
         "onenote": {
             "total_pages": len(onenote_pages),
@@ -301,6 +383,7 @@ def render_markdown(
     today = summary["generated_on"]
     ls = summary["lists"]
     on = summary["onenote"]
+    lp = ls
     lines = [
         "---",
         'snapshot_type: "source_reconciliation_ledger"',
@@ -325,9 +408,9 @@ def render_markdown(
         "",
         "| 対象 | 総数 | 一致 | 未整備 | 備考 |",
         "| --- | ---: | ---: | ---: | --- |",
-        f"| Lists（不具合情報共有リスト） | {ls['total']} | {ls['matched']} | {ls['unmatched']} | 重複一致 {ls['duplicate_matches']} 件 |",
-        f"| Lists（保守: ファイル名・`(ID)` のみ） | {ls['total']} | {ls['matched_conservative_filename_or_title_id']} | {ls['unmatched_conservative_filename_or_title_id']} | 参考比較 |",
-        f"| OneNote ページ | {on['total_pages']} | {on['matched']} | {on['unmatched']} | 本文ほぼ空 {on['emptyish_pages']} 件 |",
+        f"| Lists（推奨: ファイル名 + evidence の ID） | {lp['total']} | {lp['matched_primary']} | {lp['unmatched_primary']} | 重複一致 {lp['duplicate_matches_primary']} 件 |",
+        f"| Lists（拡張: + source_id 末尾） | {lp['total']} | {lp['matched_extended_with_source_id_suffix']} | {lp['unmatched_extended_with_source_id_suffix']} | 重複 {lp['duplicate_matches_extended']} 件・要確認 |",
+        f"| OneNote ページ | {on['total_pages']} | {on['matched']} | {on['unmatched']} | 添付中心で実質空 {on['emptyish_pages']} 件 |",
         f"| 下書き走査 | {summary['drafts_scanned']} | — | — | IMPORT-* を除く |",
         "",
         "## Lists の一致ルール",
@@ -335,13 +418,14 @@ def render_markdown(
         "各 `list_item_id` について、次のいずれかで下書きを探した。",
         "",
         "1. ファイル名の `ID{番号}` / `_ID{番号}`",
-        "2. frontmatter の `evidence_sources` 題名中の `(ID{番号})`",
-        "3. `source_id` 末尾の `-{番号}` / `_{番号}`（上表の保守行は 1–2 のみ）",
+        "2. frontmatter の `evidence_sources` 題名中の `(ID{番号})` / `（ID{番号}）`（本文のエラーコードは対象外）",
+        "3. `evidence_sources` 内の `source_id` 末尾 `-{番号}` / `_{番号}`（拡張行。推奨行は 1–2 のみ）",
         "",
         "機械可読な一覧:",
         "",
-        "- 一致: [reconcile-lists-matched.tsv](./reconcile-lists-matched.tsv)",
-        "- 未整備: [reconcile-lists-unmatched.tsv](./reconcile-lists-unmatched.tsv)",
+        "- 一致（推奨）: [reconcile-lists-matched.tsv](./reconcile-lists-matched.tsv)",
+        "- 未整備（推奨）: [reconcile-lists-unmatched.tsv](./reconcile-lists-unmatched.tsv)",
+        "- 一致 / 未整備（拡張）: [reconcile-lists-matched-extended.tsv](./reconcile-lists-matched-extended.tsv) / [reconcile-lists-unmatched-extended.tsv](./reconcile-lists-unmatched-extended.tsv)",
         "",
         "## OneNote の一致ルール",
         "",

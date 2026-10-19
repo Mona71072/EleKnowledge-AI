@@ -2,29 +2,30 @@
   "generated_on": "2026-10-19",
   "lists": {
     "total": 390,
-    "matched": 277,
-    "unmatched": 113,
-    "duplicate_matches": 18,
-    "matched_conservative_filename_or_title_id": 207,
-    "unmatched_conservative_filename_or_title_id": 183
+    "matched_primary": 301,
+    "unmatched_primary": 89,
+    "duplicate_matches_primary": 23,
+    "matched_extended_with_source_id_suffix": 315,
+    "unmatched_extended_with_source_id_suffix": 75,
+    "duplicate_matches_extended": 33
   },
   "onenote": {
     "total_pages": 1039,
     "matched": 339,
     "unmatched": 700,
-    "emptyish_pages": 213
+    "emptyish_pages": 240
   },
   "drafts_scanned": 627,
-  "high_importance_unmatched_lists": 20,
+  "high_importance_unmatched_lists": 13,
   "unmatched_theme_buckets": {
-    "door": 12,
-    "power": 9,
+    "door": 13,
+    "power": 6,
     "clock_sets": 1,
-    "other": 65,
-    "group_call": 10,
+    "other": 47,
+    "group_call": 8,
     "comm": 2,
     "install_dim": 7,
-    "safety": 4,
+    "safety": 2,
     "display": 3
   },
   "duplicate_list_matches": [
@@ -35,6 +36,14 @@
         "elv-vfglf-resolver-wiring-break-id411"
       ],
       "title": "巻上機レゾルバ線が断線しており、空回しが出来ない件"
+    },
+    {
+      "list_item_id": "319",
+      "record_ids": [
+        "case-elv-new-axiez-first-maintenance-as-door-open-portable-unavailable-id172",
+        "elv-vfgr-manual-operation-disabled-run-state-id319"
+      ],
+      "title": "VFGR機種かご上STのRUNトグルスイッチがOFF側に倒れており、運転ができない件"
     },
     {
       "list_item_id": "240",
@@ -61,12 +70,20 @@
       "title": "ヘルスエア併設エアコン動作不良の件"
     },
     {
-      "list_item_id": "190",
+      "list_item_id": "192",
       "record_ids": [
-        "field-work-1-rail-joint-inspection-criteria-relaxation-trial-id190",
-        "nexiez-vfglf-car-door-quality-check-english-notes"
+        "case-elv-emergency-junction-box-grommet-size-id192",
+        "catalog-elv3-emergency-elevator-reference"
       ],
-      "title": "【情報共有】レール継ぎ目据付簡素化目的による現場試行"
+      "title": "昇降路中間JBに取り付けるゴムブッシュサイズが不足する件"
+    },
+    {
+      "list_item_id": "189",
+      "record_ids": [
+        "case-elv-vfglb-group-call-role-setting-id189",
+        "elv-group-operation-issues"
+      ],
+      "title": "（識別情報を含む可能性があるため情報管理確認まで保留）"
     },
     {
       "list_item_id": "187",
@@ -77,30 +94,6 @@
       "title": "SETS基準位置書き込みが完了しない件"
     },
     {
-      "list_item_id": "183",
-      "record_ids": [
-        "case-elv-construction-use-door-reversal-detection-id183",
-        "elv-e-series-mrl-supply-voltage-conditions-id84"
-      ],
-      "title": "工事使用中、稀にドア開閉中に戸反転する件"
-    },
-    {
-      "list_item_id": "181",
-      "record_ids": [
-        "elv-automatic-operation-issues",
-        "nexway-vfgh-control-panel-quality-check-english-notes"
-      ],
-      "title": "客先電線が細くAC電源低下で、フルロードでE-STOPする件"
-    },
-    {
-      "list_item_id": "180",
-      "record_ids": [
-        "case-elv-wos-suppression-diode-failure-id180",
-        "nexiez-vfglf-car-door-quality-check-english-notes"
-      ],
-      "title": "コンダクタのダイオード不良により、かご運転不能になった件"
-    },
-    {
       "list_item_id": "179",
       "record_ids": [
         "case-elv-emergency-broadcast-low-volume-bgm-wiring-mismatch-id179",
@@ -109,12 +102,29 @@
       "title": "BGM結線ミスで非常放送の音量が小さい件"
     },
     {
-      "list_item_id": "177",
+      "list_item_id": "178",
       "record_ids": [
-        "case-elv-vfglb-terminal-switch-mechanical-failure-id177",
-        "nexway-vfgh-control-panel-quality-check-english-notes"
+        "case-elv-signage-video-noise-signal-conversion-id178",
+        "catalog-elv-signage-case-reference"
       ],
-      "title": "自動運転で最上階に着床後、起動不能になる件"
+      "title": "デジタルサイネージ映像にノイズが発生する件"
+    },
+    {
+      "list_item_id": "176",
+      "record_ids": [
+        "case-elv-normal-slow-unavailable-ground-connection-id176",
+        "elv-normal-slow-issues"
+      ],
+      "title": "アースが結線されておらず、本スローがでない件"
+    },
+    {
+      "list_item_id": "174",
+      "record_ids": [
+        "case-elv-vfglb-low-battery-meld-failure-entrapment-id174",
+        "elv-battery-issues-reference",
+        "elv-meld-operation-reference"
+      ],
+      "title": "バッテリー電圧が低く、MELD動作に移行せず閉じ込めになってしまう。"
     },
     {
       "list_item_id": "171",
@@ -133,6 +143,30 @@
       "title": "MELD の繋ぎ込み時、CP遮断をせずコンダクタが焼損した件"
     },
     {
+      "list_item_id": "165",
+      "record_ids": [
+        "case-elv-new-axiez-loop-wire-removal-constraint-id165",
+        "catalog-elv-panel-terminal-wiring-reference"
+      ],
+      "title": "制御盤内ねじ式ターミナル変更でループ線が外せない件"
+    },
+    {
+      "list_item_id": "162",
+      "record_ids": [
+        "case-elv-insulation-test-fire-alarm-panel-board-damage-id162",
+        "elv-insulation-resistance-test-review-hold"
+      ],
+      "title": "絶縁抵抗試験によって火報盤内基板が焼ける件"
+    },
+    {
+      "list_item_id": "158",
+      "record_ids": [
+        "case-elv-aiphone-ha-panel-error-elecall-id158",
+        "catalog-elv-elecall-troubleshooting-reference"
+      ],
+      "title": "HA（アイホン）の制御盤エラーでエレコールが動作しない件"
+    },
+    {
       "list_item_id": "149",
       "record_ids": [
         "case-elv-vfglf-scu20-gs3-setting-mismatch-id149",
@@ -141,38 +175,20 @@
       "title": "エレベーターとSCU-20盤との通信ができない件"
     },
     {
-      "list_item_id": "93",
+      "list_item_id": "132",
       "record_ids": [
-        "elv-vfglf-lhh-32x-display-board-procurement-id93",
-        "nexiez-vfglf-car-door-quality-check-english-notes"
+        "case-elv-vfglf-meld-connector-omission-id132",
+        "elv-meld-operation-reference"
       ],
-      "title": "表示基板が手配される件"
+      "title": "コネクタの差し忘れにて、客先ブレーカー遮断時にMELDが実動作しない件"
     },
     {
-      "list_item_id": "70",
+      "list_item_id": "113",
       "record_ids": [
-        "elv-km-ld-trunk-door-open-extension-misconnection-id70",
-        "nexiez-vfglf-car-door-quality-check-english-notes"
+        "case-elv-vfglf-resolver-board-free-run-unavailable-id113",
+        "elv-temporary-slow-issues"
       ],
-      "title": "コネクタ誤結により強制戸閉するまでドアが閉まってこない"
-    },
-    {
-      "list_item_id": "2",
-      "record_ids": [
-        "catalog-escalator-extra-specs-parent-body-state",
-        "training-m-series-2025-2",
-        "training-m-series-2026-2"
-      ],
-      "title": "かご内振動"
-    },
-    {
-      "list_item_id": "1",
-      "record_ids": [
-        "catalog-escalator-extra-specs-parent-body-state",
-        "training-m-series-2025-1",
-        "training-m-series-2026-1"
-      ],
-      "title": "かご内振動"
+      "title": "レゾルバ基板不具合による空回し不能"
     }
   ]
 }

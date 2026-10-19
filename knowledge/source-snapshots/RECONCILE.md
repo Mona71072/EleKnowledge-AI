@@ -21,9 +21,9 @@ cloud_approval: not_reviewed
 
 | 対象 | 総数 | 一致 | 未整備 | 備考 |
 | --- | ---: | ---: | ---: | --- |
-| Lists（不具合情報共有リスト） | 390 | 277 | 113 | 重複一致 18 件 |
-| Lists（保守: ファイル名・`(ID)` のみ） | 390 | 207 | 183 | 参考比較 |
-| OneNote ページ | 1039 | 339 | 700 | 本文ほぼ空 213 件 |
+| Lists（推奨: ファイル名 + evidence の ID） | 390 | 301 | 89 | 重複一致 23 件 |
+| Lists（拡張: + source_id 末尾） | 390 | 315 | 75 | 重複 33 件・要確認 |
+| OneNote ページ | 1039 | 339 | 700 | 添付中心で実質空 240 件 |
 | 下書き走査 | 627 | — | — | IMPORT-* を除く |
 
 ## Lists の一致ルール
@@ -31,13 +31,14 @@ cloud_approval: not_reviewed
 各 `list_item_id` について、次のいずれかで下書きを探した。
 
 1. ファイル名の `ID{番号}` / `_ID{番号}`
-2. frontmatter の `evidence_sources` 題名中の `(ID{番号})`
-3. `source_id` 末尾の `-{番号}` / `_{番号}`（上表の保守行は 1–2 のみ）
+2. frontmatter の `evidence_sources` 題名中の `(ID{番号})` / `（ID{番号}）`（本文のエラーコードは対象外）
+3. `evidence_sources` 内の `source_id` 末尾 `-{番号}` / `_{番号}`（拡張行。推奨行は 1–2 のみ）
 
 機械可読な一覧:
 
-- 一致: [reconcile-lists-matched.tsv](./reconcile-lists-matched.tsv)
-- 未整備: [reconcile-lists-unmatched.tsv](./reconcile-lists-unmatched.tsv)
+- 一致（推奨）: [reconcile-lists-matched.tsv](./reconcile-lists-matched.tsv)
+- 未整備（推奨）: [reconcile-lists-unmatched.tsv](./reconcile-lists-unmatched.tsv)
+- 一致 / 未整備（拡張）: [reconcile-lists-matched-extended.tsv](./reconcile-lists-matched-extended.tsv) / [reconcile-lists-unmatched-extended.tsv](./reconcile-lists-unmatched-extended.tsv)
 
 ## OneNote の一致ルール
 
@@ -49,19 +50,19 @@ cloud_approval: not_reviewed
 
 | theme_bucket | 件数 |
 | --- | ---: |
-| `other` | 65 |
-| `door` | 12 |
-| `group_call` | 10 |
-| `power` | 9 |
+| `other` | 47 |
+| `door` | 13 |
+| `group_call` | 8 |
 | `install_dim` | 7 |
-| `safety` | 4 |
+| `power` | 6 |
 | `display` | 3 |
 | `comm` | 2 |
+| `safety` | 2 |
 | `clock_sets` | 1 |
 
 ## 優先してテーマ候補にしたい未整備（重要度 高 / 重要）
 
-件数: **20**（原因・対策の断定はしていない）
+件数: **13**（原因・対策の断定はしていない）
 
 | list_item_id | Model | 重要度 | タイトル（スナップショット） | theme_bucket |
 | --- | --- | --- | --- | --- |
@@ -71,20 +72,13 @@ cloud_approval: not_reviewed
 | 398 | AXIEZ-LINKS | 重要 | カゴが撓むことで照明安定化電源が地絡する件 | `power` |
 | 394 | 全エレ機種 | ↑高 | ピットタラップの取付位置について | `install_dim` |
 | 392 | VFGLF | ↑高 | ブレーキスイッチ設定不良で本スロー時カゴ運転不能の件 | `other` |
-| 227 | — | ↑高 | 遮煙の大臣認定がある場合は火災管制運転とMELD（または戸閉保証用バッテリー盤）が必須！！ | `door` |
+| 350 | VFGLF・VFGLB・VFGH | 重要 | UPS（アップピークサービス）動作しない件 | `other` |
+| 345 | 全エレ機種 | ↑高 | LINKsでWOS工法に切り替える際にDL,DPコネクタが制御盤側に無い | `other` |
 | 151 | VFGH | 重要 | P1基板不良によって、7SEGやWDTが点灯しなくなる | `display` |
 | 137 | CM-MA | ↑高 | 首下長さの異なるビスを用い巻上機カバーを取付け、異音が発生 | `other` |
-| 118 | — | 重要 | 書換プログラム４　エラー対応 | `other` |
-| 83 | AXIEZ-LINKS | ↑高 | アース線を異なるターミナル(128番)に結線してしまい、制御回路の絶縁不良の件 | `other` |
-| 54 | KM-LD | 重要 | 客先電源の相間違い{PWFH(欠相・逆相)}により運転ができない件 | `power` |
-| 53 | CM-MA | ↑高 | 空回し時にM1カード焼損の件 | `other` |
-| 50 | AXIEZ-LINKS | 重要 | 巻上機の空回しが実施できない件 | `other` |
-| 46 | ME-CH | ↑高 | 相順の接続違いによって空回しができない件 | `other` |
-| 33 | AXIEZ-LINKS | ↑高 | 映像分配器箱をレールに取り付ける腕の数について | `other` |
-| 19 | CM-LB | ↑高 | 建築仮設分電盤ブレーカートリップ件 | `other` |
 | 14 | 監視盤 | 重要 | （識別情報を含む可能性があるため情報管理確認まで保留） | `other` |
-| 13 | VFGH | ↑高 | VIP運転時、客先タブレットで運転灯が光らない | `other` |
-| 11 | AXIEZ-LINKS | 重要 | FMS実施時にかごが動かない件 | `other` |
+| 2 | CM-MA | ↑高 | かご内振動 | `other` |
+| 1 | CM-MA | ↑高 | かご内振動 | `other` |
 
 ## 同一 list_item_id が複数下書きに付いた例（要確認）
 
@@ -93,20 +87,20 @@ ID 一致だけではどちらを正とするか決めない。担当者が確�
 | list_item_id | record_ids | タイトル |
 | --- | --- | --- |
 | 411 | `elv-temporary-slow-issues, elv-vfglf-resolver-wiring-break-id411` | 巻上機レゾルバ線が断線しており、空回しが出来ない件 |
+| 319 | `case-elv-new-axiez-first-maintenance-as-door-open-portable-unavailable-id172, elv-vfgr-manual-operation-disabled-run-state-id319` | VFGR機種かご上STのRUNトグルスイッチがOFF側に倒れており、運転ができない件 |
 | 240 | `case-elv-mbs-connection-car-indicator-off-id240, catalog-elv-sensors-reference` | ＭBS接続するとカゴ内インジ消灯する件 |
 | 233 | `elv-scu20-flash-rewrite-tool-compatibility-id233, elv-sw-change-reference` | SCU-20書換方法 |
 | 221 | `case-elv-health-air-aircon-relay-misselection-damage-id221, catalog-elv-health-air-reference` | ヘルスエア併設エアコン動作不良の件 |
-| 190 | `field-work-1-rail-joint-inspection-criteria-relaxation-trial-id190, nexiez-vfglf-car-door-quality-check-english-notes` | 【情報共有】レール継ぎ目据付簡素化目的による現場試行 |
+| 192 | `case-elv-emergency-junction-box-grommet-size-id192, catalog-elv3-emergency-elevator-reference` | 昇降路中間JBに取り付けるゴムブッシュサイズが不足する件 |
+| 189 | `case-elv-vfglb-group-call-role-setting-id189, elv-group-operation-issues` | （識別情報を含む可能性があるため情報管理確認まで保留） |
 | 187 | `case-elv-mrl-sets-position-write-direction-spec-id187, catalog-elv-sets-failure-reference` | SETS基準位置書き込みが完了しない件 |
-| 183 | `case-elv-construction-use-door-reversal-detection-id183, elv-e-series-mrl-supply-voltage-conditions-id84` | 工事使用中、稀にドア開閉中に戸反転する件 |
-| 181 | `elv-automatic-operation-issues, nexway-vfgh-control-panel-quality-check-english-notes` | 客先電線が細くAC電源低下で、フルロードでE-STOPする件 |
-| 180 | `case-elv-wos-suppression-diode-failure-id180, nexiez-vfglf-car-door-quality-check-english-notes` | コンダクタのダイオード不良により、かご運転不能になった件 |
 | 179 | `case-elv-emergency-broadcast-low-volume-bgm-wiring-mismatch-id179, catalog-elv-bgm-emergency-broadcast-reference` | BGM結線ミスで非常放送の音量が小さい件 |
-| 177 | `case-elv-vfglb-terminal-switch-mechanical-failure-id177, nexway-vfgh-control-panel-quality-check-english-notes` | 自動運転で最上階に着床後、起動不能になる件 |
+| 178 | `case-elv-signage-video-noise-signal-conversion-id178, catalog-elv-signage-case-reference` | デジタルサイネージ映像にノイズが発生する件 |
+| 176 | `case-elv-normal-slow-unavailable-ground-connection-id176, elv-normal-slow-issues` | アースが結線されておらず、本スローがでない件 |
+| 174 | `case-elv-vfglb-low-battery-meld-failure-entrapment-id174, elv-battery-issues-reference, elv-meld-operation-reference` | バッテリー電圧が低く、MELD動作に移行せず閉じ込めになってしまう。 |
 | 171 | `case-elv-e-can-special-operation-hall-call-failure-id171, elv-group-operation-issues` | E-CAN通信不良によるNS動作しない件（+α＜群管理盤エラー見かた＞） |
 | 167 | `case-elv-meld-contactor-damage-id167, elv-meld-operation-reference` | MELD の繋ぎ込み時、CP遮断をせずコンダクタが焼損した件 |
-| 149 | `case-elv-vfglf-scu20-gs3-setting-mismatch-id149, elv-group-operation-issues` | エレベーターとSCU-20盤との通信ができない件 |
-| 93 | `elv-vfglf-lhh-32x-display-board-procurement-id93, nexiez-vfglf-car-door-quality-check-english-notes` | 表示基板が手配される件 |
+| 165 | `case-elv-new-axiez-loop-wire-removal-constraint-id165, catalog-elv-panel-terminal-wiring-reference` | 制御盤内ねじ式ターミナル変更でループ線が外せない件 |
 
 ## この台帳の範囲外
 
