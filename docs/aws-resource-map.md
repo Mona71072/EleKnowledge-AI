@@ -6,6 +6,10 @@ related-code: infrastructure/sam/, amplify.yml
 
 # AWS Resource Map
 
+> 最終検証: 2026-10-15 — タグ運用への参照のみ更新。下記のリソース一覧全体は再検証していない。
+
+Cost allocation uses the three `gyoumu012` keys defined in [Cost allocation tag operations](ops-cost-allocation-tags.md). The legacy tags below remain for compatibility; `Env` is not a cost allocation dimension.
+
 EleKnowledge resources are identified by tags, not by a shared name prefix:
 
 - `Project=EleKnowledge`

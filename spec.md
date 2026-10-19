@@ -4,7 +4,7 @@
 
 **プロジェクト名:** EleKnowledge
 **バージョン:** 1.2.0
-**最終更新日:** 2026-10-09
+**最終更新日:** 2026-10-15
 **作成者:** Development Team
 **ステータス:** Phase 1 / 2 の開発環境 stack は `UPDATE_COMPLETE`（機能仕様書と利用者向け E2E は再検証中）・Phase 3 は開発中（AWS リソースあり、利用者向け E2E 未確認）
 
@@ -67,6 +67,7 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 | 項目 | 現在の状態 | 参照先 |
 |------|------------|--------|
 | AWS リソース・運用 | 2026-09-30 開発環境の読み取り専用スナップショット。IaC との差・未確認項目を含む | [AWS Resource Map](docs/aws-resource-map.md) ／ [運用ランブック](docs/ops-runbook.md) ／ [文書整備状況の確認記録](docs/verification-2026-09-30-current-state.md) |
+| コスト配分タグ | 2026-10-15に3キーを104リソースへ付与・再読取確認。管理部門での有効化・請求への反映は未確認 | [タグ運用](docs/ops-cost-allocation-tags.md) ／ [リソース別台帳](docs/cost-allocation-resource-register.md) |
 | 日次 KPI v2 | 設計。AWS の毎時ルールは確認したが、現在の aggregator は日次 UTC 集計 | [KPI v2 設計](docs/design-2026-09-10-metrics-v2.md) |
 | 検索トレース | 設計・実装前 | [検索トレース設計](docs/design-2026-09-10-retrieval-trace.md) |
 | RAG 検索評価 | v2 候補はラベル確認前。正解資料・ページ確定前に採点しない | [評価セット v2](docs/eval-2026-09-25-golden-set-v2.md) ／ [評価運用の注意](docs/decisions-2026-07-29-layer1-eval-ops.md) |
