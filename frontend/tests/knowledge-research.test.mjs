@@ -242,6 +242,51 @@ test('only accepts verified e-Gov law citations and keeps API-provided legal dat
   assert.equal(researchSourceHref(valid, 'unexpected'), undefined);
 });
 
+test('preserves an API-provided e-Gov enforcement-version path and article anchor', async () => {
+  const lawId = '347M50002000032';
+  const versionedUrl = `https://laws.e-gov.go.jp/law/${lawId}/20240401_506M60000002012#Mp-At_518`;
+  const payload = lawPayload({
+    sourceDocuments: [{
+      documentName: '労働安全衛生規則 第518条',
+      sourceUri: versionedUrl,
+      lawCitation: { ...lawPayload().sourceDocuments[0].lawCitation, sourceUrl: versionedUrl },
+    }],
+  });
+  const answer = await queryKnowledgeSource({
+    baseUrl: BASE,
+    getToken: async () => TOKEN,
+    fetchImpl: fetchOk(payload),
+    mode: 'law',
+    query: '作業床の端部',
+  });
+
+  assert.equal(answer.sourceDocuments[0].lawCitation.sourceUrl, versionedUrl);
+  assert.equal(researchSourceHref(answer.sourceDocuments[0], 'law'), versionedUrl);
+  assert.match(buildResearchNote(answer), new RegExp(versionedUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+  for (const sourceUrl of [
+    `https://attacker.example.test/law/${lawId}/20240401_506M60000002012#Mp-At_518`,
+    `https://laws.e-gov.go.jp/law/999M99999999999/20240401_506M60000002012#Mp-At_518`,
+    `https://user:secret@laws.e-gov.go.jp/law/${lawId}/20240401_506M60000002012#Mp-At_518`,
+    `https://laws.e-gov.go.jp/law/${lawId}/20240401_506M60000002012?token=secret#Mp-At_518`,
+  ]) {
+    assert.equal(researchSourceHref({ lawCitation: { ...lawPayload().sourceDocuments[0].lawCitation, sourceUrl } }, 'law'), undefined);
+  }
+});
+
+test('rejects research notes when no source is valid for the answer mode', () => {
+  const citationOnly = lawPayload().sourceDocuments[0].lawCitation;
+  const base = { query: 'question', responseType: 'pages', content: 'answer', sessionId: 'session_1', messageId: 'message_1', pageCandidates: [], clarifyQuestions: [] };
+  const unusableSources = [
+    { ...base, mode: 'normal', sourceDocuments: [{ documentName: '法令URLだけ', lawCitation: citationOnly }] },
+    { ...base, mode: 'law', sourceDocuments: [{ documentName: 'S3 URIだけ', sourceUri: 's3://technical-kb/docs/manual.pdf' }] },
+    { ...base, mode: 'law', sourceDocuments: [{ documentName: '壊れた法令出典', sourceUri: 'https://attacker.example.test/law/x', lawCitation: { ...citationOnly, sourceUrl: 'https://attacker.example.test/law/347M50002000032' } }] },
+  ];
+  for (const answer of unusableSources) {
+    assert.throws(() => buildResearchNote(answer), (error) => error.code === 'validation');
+  }
+});
+
 test('strips signed source URLs from normalized results and keeps a deterministic labeled research note', async () => {
   const signed = 'https://technical-kb.s3.ap-northeast-1.amazonaws.com/docs/a.pdf?X-Amz-Signature=must-not-leak';
   const answer = await queryKnowledgeSource({
