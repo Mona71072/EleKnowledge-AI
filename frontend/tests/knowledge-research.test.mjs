@@ -132,6 +132,26 @@ test('validates blank, oversized, unsupported-mode, and malformed endpoint input
   assert.equal(calls, 0);
 });
 
+test('rejects missing or malformed client configuration, non-text questions, and already-aborted work', async () => {
+  const base = { getToken: async () => TOKEN, fetchImpl: fetchOk(normalPayload()), mode: 'normal', query: 'question' };
+  for (const options of [
+    { ...base, baseUrl: '' },
+    { ...base, baseUrl: 'not a URL' },
+    { ...base, baseUrl: 'https://api.example.test', getToken: null },
+    { ...base, baseUrl: 'https://api.example.test', fetchImpl: null },
+    { ...base, baseUrl: 'https://api.example.test', timeoutMs: 0 },
+    { ...base, baseUrl: 'https://api.example.test', query: 42 },
+  ]) {
+    await assert.rejects(queryKnowledgeSource(options), (error) => ['config', 'validation'].includes(error.code));
+  }
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    queryKnowledgeSource({ ...base, baseUrl: 'https://api.example.test', signal: controller.signal }),
+    (error) => error.code === 'cancelled',
+  );
+});
+
 test('allows explicit loopback HTTP endpoints for local development only', async () => {
   await queryKnowledgeSource({
     baseUrl: 'http://127.0.0.1:3198/dev',
@@ -148,6 +168,12 @@ test('maps missing token, HTTP failures, network failures, and malformed respons
     [() => queryKnowledgeSource({ baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: async () => response({ message: 'secret server traceback' }, 403), mode: 'law', query: 'question' }), 'unavailable'],
     [() => queryKnowledgeSource({ baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: async () => { throw new Error('secret network detail'); }, mode: 'normal', query: 'question' }), 'server'],
     [() => queryKnowledgeSource({ baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: fetchOk({ ...normalPayload(), content: 9 }), mode: 'normal', query: 'question' }), 'invalid_response'],
+    [() => queryKnowledgeSource({ baseUrl: BASE, getToken: async () => { throw new Error('secret auth detail'); }, fetchImpl: fetchOk(normalPayload()), mode: 'normal', query: 'question' }), 'auth'],
+    [() => queryKnowledgeSource({ baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: async () => response({}, 500), mode: 'normal', query: 'question' }), 'server'],
+    [() => queryKnowledgeSource({ baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: async () => response({}, 404), mode: 'normal', query: 'question' }), 'unavailable'],
+    [() => queryKnowledgeSource({ baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: async () => response({}, 401), mode: 'normal', query: 'question' }), 'auth'],
+    [() => queryKnowledgeSource({ baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: async () => ({ ok: true, json: async () => { throw new Error('bad json'); } }), mode: 'normal', query: 'question' }), 'invalid_response'],
+    [() => queryKnowledgeSource({ baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: async () => null, mode: 'normal', query: 'question' }), 'invalid_response'],
   ];
 
   for (const [run, code] of cases) {
@@ -197,13 +223,23 @@ test('maps S3 and legacy signed S3 sources to authenticated document relay and r
   );
   assert.equal(researchSourceHref({ sourceUri: 'javascript:alert(1)' }, 'normal'), undefined);
   assert.equal(researchSourceHref({ sourceUri: 'https://attacker.example.test/doc.pdf' }, 'normal'), undefined);
+  assert.equal(researchSourceHref({ sourceUri: 's3://bad bucket/secret?x=y' }, 'normal'), undefined);
+  assert.equal(researchSourceHref({ sourceUri: 'https://s3.ap-northeast-1.amazonaws.com/technical-kb/docs/install.pdf?X-Amz-Signature=secret' }, 'normal'), `/doc?uri=${encodeURIComponent('s3://technical-kb/docs/install.pdf')}`);
+  assert.equal(researchSourceHref({ sourceUri: 'https://technical-kb.s3.amazonaws.com/docs/install.pdf' }, 'normal'), `/doc?uri=${encodeURIComponent('s3://technical-kb/docs/install.pdf')}`);
+  assert.equal(researchSourceHref({ sourceUri: 's3://technical-kb/docs/install.pdf', pageNumber: -1 }, 'normal'), `/doc?uri=${encodeURIComponent('s3://technical-kb/docs/install.pdf')}`);
+  assert.equal(researchSourceHref({ sourceUri: 's3://technical-kb/docs/install.pdf' }, 'unexpected'), undefined);
+  assert.equal(researchSourceHref(null, 'normal'), undefined);
 });
 
 test('only accepts verified e-Gov law citations and keeps API-provided legal dates and references', () => {
   const valid = lawPayload().sourceDocuments[0];
   assert.equal(researchSourceHref(valid, 'law'), valid.lawCitation.sourceUrl);
   assert.equal(researchSourceHref({ ...valid, lawCitation: { ...valid.lawCitation, sourceUrl: 'https://evil.example.test/law/347M50002000032' } }, 'law'), undefined);
+  assert.equal(researchSourceHref({ ...valid, lawCitation: { ...valid.lawCitation, effectiveDate: '2025-02-30' } }, 'law'), undefined);
+  assert.equal(researchSourceHref({ ...valid, lawCitation: { ...valid.lawCitation, sourceUrl: 'https://laws.e-gov.go.jp.evil.test/law/347M50002000032' } }, 'law'), undefined);
+  assert.equal(researchSourceHref({ ...valid, lawCitation: { ...valid.lawCitation, sourceUrl: 'javascript:alert(1)' } }, 'law'), undefined);
   assert.equal(researchSourceHref({ sourceUri: valid.lawCitation.sourceUrl }, 'law'), undefined);
+  assert.equal(researchSourceHref(valid, 'unexpected'), undefined);
 });
 
 test('strips signed source URLs from normalized results and keeps a deterministic labeled research note', async () => {
@@ -234,4 +270,6 @@ test('does not create an adoptable note for clarify and not_found results', () =
       (error) => error.code === 'validation',
     );
   }
+  assert.throws(() => buildResearchNote(null), (error) => error.code === 'validation');
+  assert.throws(() => buildResearchNote({ mode: 'normal', query: 'q', responseType: 'pages', content: 'answer', sourceDocuments: [] }), (error) => error.code === 'validation');
 });
