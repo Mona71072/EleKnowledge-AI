@@ -102,3 +102,18 @@ GitHubメタデータでは#155は2026-10-09 19:46:03 JSTにマージ済み（`7
 - 画像: [developホーム](user-manual/images/29-law-home-develop.png)、[develop法令初期画面](user-manual/images/30-law-empty-develop.png)。マニュアルの図11-1 / 11-2をこの2画像へ更新した。その他の回答画像の撮影元は本記録で保持し、利用者本文にはブランチ名を記載しない。
 - ローカル検証: フロント既存テスト46件成功。今回のクラウド設定変更による新規コード差分はなく、配信側でNext.jsビルド・型検査が成功したことも確認した。
 - 参照: [npm include / omit](https://docs.npmjs.com/cli/v11/using-npm/config#include)、[Amplifyブランチ環境変数](https://docs.aws.amazon.com/amplify/latest/APIReference/API_Branch.html)。`NODE_ENV=production`下でもビルドに必要なdev依存をインストールするための設定として使用した。
+
+## 7. dev全文補完の反映と直接Lambda統合検証
+
+> 最終検証: 2026-10-14 — boto3で既存法令ソース・暗号化設定・CloudFormation差分を確認し、dev限定でSAM反映後に合成ユーザーの直接Lambda呼出しと件数ログを照合。
+
+- ユーザーの「devで動かす」の指示に基づく試行。反映元は未マージの#177 `f80aee277fa41bc2ec59581b4ba69b9d6a3e3bb1`。当時のdevelop `20871803`を統合済みのソースであり、#177がdevelopへマージ済みという意味ではない。
+- 事前確認では法令有効化とKB指定は成立していたが、全文補完用バケット設定は空だった。既存Managed KBコネクターから同一アカウントの資料バケットと`kb/egov/` prefixを照合した。既存バケットはAWS管理キー`alias/aws/s3`によるSSE-KMS。新しいKMSキー・バケット・KBの作成やデータ再同期は行っていない。
+- `EleKnowledge-dev-phase2`の既存パラメーターを保持し、法令バケット名だけ設定した。変更セットはChatApi / ChatManagementFunction / RagApi / RagFunction / RagLambdaRoleのModify 5件、ReplacementはすべてFalse、Add / Removeなし。実行直前にも既存パラメーターが準備時から不変であることを確認した。適用後は`UPDATE_COMPLETE`。
+- 合成ユーザーの法令質問1件を直接Lambdaへ送信し、HTTP相当200・FunctionErrorなし、所要10.18秒、responseType=pagesを確認した。出典10件のうち全文補完6件・部分4件、部分理由は`document_limit`、参照本文合計4,084文字。件数ログも一致した。1試行の結果であり、品質評価・p95測定ではない。
+- 試験が作成した会話2行だけを所有者条件付きで削除した。通常ユーザーの会話は操作していない。DynamoDB Stream由来の合成試験アーカイブは削除していない。
+- この確認は直接Lambda統合試験であり、Cognito / API Gateway / ブラウザを通るE2Eは未実施。既存の実画面・実アカウント確認を、この新しい反映版のE2E合格に読み替えない。本番環境は今回の反映対象外。
+- 証跡は#177の検証報告と、実行端末の未追跡ローカル記録`law-runtime-verification-local.json` / `law-changeset-detail-local.json`に保持。共有文書にはアカウントID・実リソース識別子・質問/回答/引用全文・認証情報を含めない。
+- 試行を停止する場合は、既存パラメーターを保持して`LawDataBucketName`を空にする変更セットの差分を確認して適用する。フロントの非表示だけをAPI停止とは扱わない。
+
+この節だけを追加検証したため、文書全体のfrontmatter `last-verified`は進めていない。
