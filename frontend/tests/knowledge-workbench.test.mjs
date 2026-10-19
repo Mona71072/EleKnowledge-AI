@@ -129,8 +129,12 @@ test('starts as an unpublished working copy even when source metadata says appro
   const state = workspace();
 
   assert.equal(state.document.metadata.status, 'approved');
-  assert.match(state.noteText, /Check the source record and verify the installation conditions\./);
+  assert.doesNotMatch(state.noteText, /Check the source record and verify the installation conditions\./);
+  assert.match(state.noteText, /追加する要点/);
+  assert.match(state.noteText, /適用条件・注意点/);
+  assert.match(state.noteText, /未確認事項/);
   assert.match(state.noteText, /Lists item 71/);
+  assert.equal(state.noteNeedsReconcile, false);
   assert.equal(state.revision, 0);
   assert.equal(state.reviewedRevision, null);
   assert.equal(state.copiedRevision, null);
@@ -150,6 +154,27 @@ test('body and OneNote draft edits are immutable and invalidate current review a
   assert.equal(oneNoteEdited.copiedRevision, null);
   assert.equal(oneNoteEdited.kbReview.status, 'unverified');
   assert.equal(oneNoteEdited.noteText.startsWith('New condition:'), true);
+  assert.equal(bodyEdited.noteNeedsReconcile, true);
+  assert.equal(oneNoteEdited.noteNeedsReconcile, true);
+  assert.equal(bodyEdited.noteText, copied.noteText);
+});
+
+test('OneNote draft edits do not reconcile a changed Markdown body; confirmation requires an explicit reconciliation', () => {
+  const original = workspace();
+  const bodyEdited = editBody(original, `${original.body}\n\n## New condition\nCheck the model suffix.`);
+  const noteEdited = editOneNoteDraft(bodyEdited, 'Manually revised OneNote note.\nUnconfirmed: effect on other models.');
+  const kbReviewed = reviewed(noteEdited);
+
+  assert.equal(noteEdited.noteNeedsReconcile, true);
+  assert.equal(noteEdited.noteText, 'Manually revised OneNote note.\nUnconfirmed: effect on other models.');
+  assert.throws(() => confirmOneNote(kbReviewed, { checked: true }));
+  const reconciled = confirmOneNote(kbReviewed, { checked: true, noteReconciled: true });
+  assert.equal(reconciled.noteNeedsReconcile, false);
+  assert.equal(reconciled.reviewedRevision, reconciled.revision);
+
+  const noteOnlyEdit = editOneNoteDraft(original, 'Note-only edit.');
+  assert.equal(noteOnlyEdit.noteNeedsReconcile, false);
+  assert.doesNotThrow(() => confirmOneNote(reviewed(noteOnlyEdit), { checked: true }));
 });
 
 test('rejects non-string or unsafe editor input without changing the previous state', () => {
@@ -234,6 +259,8 @@ test('placement receipt pins the copied revision and text and stays unchanged af
   assert.deepEqual(next.placements[0], receiptBeforeEdit);
   assert.equal(receiptBeforeEdit.revision, confirmedDraft.revision);
   assert.equal(receiptBeforeEdit.text, copied.noteText);
+  assert.equal(receiptBeforeEdit.destinationVerified, false);
+  assert.equal(receiptBeforeEdit.verification, 'self_reported');
   assert.equal(next.copiedRevision, null);
 });
 
@@ -266,6 +293,7 @@ test('proposal export includes exact SHA-256 digests and keeps original metadata
   assert.equal(packet.hashes.bodySha256, sha256(state.body));
   assert.equal(packet.hashes.oneNoteTextSha256, sha256(state.noteText));
   assert.equal(packet.proposal.oneNoteText.includes('Unconfirmed: long-term condition.'), true);
+  assert.equal(packet.noteNeedsReconcile, true);
 });
 
 test('proposal export carries immutable OneNote placement receipts after later edits', async () => {
@@ -294,8 +322,11 @@ test('proposal export carries immutable OneNote placement receipts after later e
     text: transferText,
     destination,
     recordedAt: '2026-10-20T10:15:00+09:00',
+    destinationVerified: false,
+    verification: 'self_reported',
     textSha256: createHash('sha256').update(transferText, 'utf8').digest('hex'),
   });
+  assert.equal(packet.noteNeedsReconcile, false);
 
   packet.placements[0].text = 'tampered exported copy';
   packet.placements[0].destination = 'https://elsewhere.example/';
