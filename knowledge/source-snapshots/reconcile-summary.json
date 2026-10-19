@@ -1,0 +1,178 @@
+{
+  "generated_on": "2026-10-19",
+  "lists": {
+    "total": 390,
+    "matched": 277,
+    "unmatched": 113,
+    "duplicate_matches": 18,
+    "matched_conservative_filename_or_title_id": 207,
+    "unmatched_conservative_filename_or_title_id": 183
+  },
+  "onenote": {
+    "total_pages": 1039,
+    "matched": 339,
+    "unmatched": 700,
+    "emptyish_pages": 213
+  },
+  "drafts_scanned": 627,
+  "high_importance_unmatched_lists": 20,
+  "unmatched_theme_buckets": {
+    "door": 12,
+    "power": 9,
+    "clock_sets": 1,
+    "other": 65,
+    "group_call": 10,
+    "comm": 2,
+    "install_dim": 7,
+    "safety": 4,
+    "display": 3
+  },
+  "duplicate_list_matches": [
+    {
+      "list_item_id": "411",
+      "record_ids": [
+        "elv-temporary-slow-issues",
+        "elv-vfglf-resolver-wiring-break-id411"
+      ],
+      "title": "巻上機レゾルバ線が断線しており、空回しが出来ない件"
+    },
+    {
+      "list_item_id": "240",
+      "record_ids": [
+        "case-elv-mbs-connection-car-indicator-off-id240",
+        "catalog-elv-sensors-reference"
+      ],
+      "title": "ＭBS接続するとカゴ内インジ消灯する件"
+    },
+    {
+      "list_item_id": "233",
+      "record_ids": [
+        "elv-scu20-flash-rewrite-tool-compatibility-id233",
+        "elv-sw-change-reference"
+      ],
+      "title": "SCU-20書換方法"
+    },
+    {
+      "list_item_id": "221",
+      "record_ids": [
+        "case-elv-health-air-aircon-relay-misselection-damage-id221",
+        "catalog-elv-health-air-reference"
+      ],
+      "title": "ヘルスエア併設エアコン動作不良の件"
+    },
+    {
+      "list_item_id": "190",
+      "record_ids": [
+        "field-work-1-rail-joint-inspection-criteria-relaxation-trial-id190",
+        "nexiez-vfglf-car-door-quality-check-english-notes"
+      ],
+      "title": "【情報共有】レール継ぎ目据付簡素化目的による現場試行"
+    },
+    {
+      "list_item_id": "187",
+      "record_ids": [
+        "case-elv-mrl-sets-position-write-direction-spec-id187",
+        "catalog-elv-sets-failure-reference"
+      ],
+      "title": "SETS基準位置書き込みが完了しない件"
+    },
+    {
+      "list_item_id": "183",
+      "record_ids": [
+        "case-elv-construction-use-door-reversal-detection-id183",
+        "elv-e-series-mrl-supply-voltage-conditions-id84"
+      ],
+      "title": "工事使用中、稀にドア開閉中に戸反転する件"
+    },
+    {
+      "list_item_id": "181",
+      "record_ids": [
+        "elv-automatic-operation-issues",
+        "nexway-vfgh-control-panel-quality-check-english-notes"
+      ],
+      "title": "客先電線が細くAC電源低下で、フルロードでE-STOPする件"
+    },
+    {
+      "list_item_id": "180",
+      "record_ids": [
+        "case-elv-wos-suppression-diode-failure-id180",
+        "nexiez-vfglf-car-door-quality-check-english-notes"
+      ],
+      "title": "コンダクタのダイオード不良により、かご運転不能になった件"
+    },
+    {
+      "list_item_id": "179",
+      "record_ids": [
+        "case-elv-emergency-broadcast-low-volume-bgm-wiring-mismatch-id179",
+        "catalog-elv-bgm-emergency-broadcast-reference"
+      ],
+      "title": "BGM結線ミスで非常放送の音量が小さい件"
+    },
+    {
+      "list_item_id": "177",
+      "record_ids": [
+        "case-elv-vfglb-terminal-switch-mechanical-failure-id177",
+        "nexway-vfgh-control-panel-quality-check-english-notes"
+      ],
+      "title": "自動運転で最上階に着床後、起動不能になる件"
+    },
+    {
+      "list_item_id": "171",
+      "record_ids": [
+        "case-elv-e-can-special-operation-hall-call-failure-id171",
+        "elv-group-operation-issues"
+      ],
+      "title": "E-CAN通信不良によるNS動作しない件（+α＜群管理盤エラー見かた＞）"
+    },
+    {
+      "list_item_id": "167",
+      "record_ids": [
+        "case-elv-meld-contactor-damage-id167",
+        "elv-meld-operation-reference"
+      ],
+      "title": "MELD の繋ぎ込み時、CP遮断をせずコンダクタが焼損した件"
+    },
+    {
+      "list_item_id": "149",
+      "record_ids": [
+        "case-elv-vfglf-scu20-gs3-setting-mismatch-id149",
+        "elv-group-operation-issues"
+      ],
+      "title": "エレベーターとSCU-20盤との通信ができない件"
+    },
+    {
+      "list_item_id": "93",
+      "record_ids": [
+        "elv-vfglf-lhh-32x-display-board-procurement-id93",
+        "nexiez-vfglf-car-door-quality-check-english-notes"
+      ],
+      "title": "表示基板が手配される件"
+    },
+    {
+      "list_item_id": "70",
+      "record_ids": [
+        "elv-km-ld-trunk-door-open-extension-misconnection-id70",
+        "nexiez-vfglf-car-door-quality-check-english-notes"
+      ],
+      "title": "コネクタ誤結により強制戸閉するまでドアが閉まってこない"
+    },
+    {
+      "list_item_id": "2",
+      "record_ids": [
+        "catalog-escalator-extra-specs-parent-body-state",
+        "training-m-series-2025-2",
+        "training-m-series-2026-2"
+      ],
+      "title": "かご内振動"
+    },
+    {
+      "list_item_id": "1",
+      "record_ids": [
+        "catalog-escalator-extra-specs-parent-body-state",
+        "training-m-series-2025-1",
+        "training-m-series-2026-1"
+      ],
+      "title": "かご内振動"
+    }
+  ]
+}
