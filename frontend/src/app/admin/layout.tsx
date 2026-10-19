@@ -109,6 +109,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           ),
         }]
       : []),
+    ...(process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH === 'true'
+      ? [{
+          href: '/admin/knowledge/research',
+          label: '工技先輩',
+          icon: (
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16h6m-3-14a9 9 0 100 18 9 9 0 000-18z" />
+            </svg>
+          ),
+        }]
+      : []),
     {
       href: '/admin/announcements',
       label: 'お知らせ管理',
@@ -148,7 +159,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </Button>
           </div>
         </div>
-        <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex gap-1" aria-label="管理コンソール">
+        <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex gap-1 overflow-x-auto whitespace-nowrap" aria-label="管理コンソール">
           {subNav.map((item) => {
             const active = pathname === item.href;
             return (
@@ -164,6 +175,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               >
                 {item.icon}
                 {item.label}
+                {item.href === '/admin/knowledge/research' && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-900">開発中</span>}
               </Link>
             );
           })}

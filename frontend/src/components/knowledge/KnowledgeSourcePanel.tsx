@@ -106,7 +106,7 @@ export function KnowledgeSourcePanel({ metadata, kbStatus }: Props) {
         <div className={`rounded-lg border px-3 py-2 text-xs ${kbStatus === 'reviewed' ? 'border-green-200 bg-green-50 text-green-900' : kbStatus === 'conflict' ? 'border-red-200 bg-red-50 text-red-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
           <p className="font-semibold">今回のKB確認: {kbStatus === 'reviewed' ? '担当者が本文を手動確認' : kbStatus === 'conflict' ? '食い違いあり' : '未確認'}</p>
           {kbRefs.length > 0 && <p className="mt-1">カード側の状態: {kbRefs.map((ref) => statusLabel(String(ref.kb_verify_status || 'pending'))).join(' / ')}</p>}
-          <p className="mt-1">この画面はKBを検索・取得していません。</p>
+          <p className="mt-1">出典一覧の表示だけでは、KB本文を確認済みにはなりません。</p>
         </div>
       </div>
     </section>

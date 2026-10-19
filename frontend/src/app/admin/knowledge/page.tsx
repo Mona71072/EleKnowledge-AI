@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { KnowledgeWorkbench } from '@/components/knowledge/KnowledgeWorkbench';
 
 export default function AdminKnowledgePage() {
@@ -12,5 +13,13 @@ export default function AdminKnowledgePage() {
     );
   }
 
-  return <KnowledgeWorkbench />;
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-violet-200 bg-violet-50 p-4">
+        <p className="text-sm text-gray-800">技術KB・法令KBとの照合機能を開発中です。</p>
+        <Link href="/admin/knowledge/research" className="mt-2 inline-flex text-sm font-semibold text-violet-800 underline underline-offset-2">工技先輩の照合画面を開く</Link>
+      </div>
+      <KnowledgeWorkbench />
+    </div>
+  );
 }

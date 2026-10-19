@@ -10,6 +10,8 @@ related-code:
 
 # ノウハウ確認ワークスペース: アプリ組込みの初期範囲
 
+本書は単独の確認・編集画面`/admin/knowledge`の契約。技術KB・法令KBへの照会と、選択した回答の編集候補への取込みを追加する`/admin/knowledge/research`は[照合画面の契約](knowledge-research-workspace.md)で管理する。照合画面でもローカルMarkdownを自動送信しない。
+
 > 最終検証: 2026-10-20 — ユーザー指定の `feature/knowledge-reconcile-prep` のカード契約と、PR #191の合意を確認して実装範囲を定義。実装・テスト結果は本文末へ追記する。
 
 ## 目的と範囲

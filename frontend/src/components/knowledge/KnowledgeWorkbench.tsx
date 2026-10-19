@@ -18,6 +18,7 @@ import {
 import { KnowledgeMarkdownPanel } from './KnowledgeMarkdownPanel';
 import { KnowledgeOneNotePanel } from './KnowledgeOneNotePanel';
 import { KnowledgeSourcePanel } from './KnowledgeSourcePanel';
+import { KnowledgeResearchWorkspace } from './KnowledgeResearchWorkspace';
 
 
 function downloadFile(filename: string, content: string, type: string) {
@@ -36,7 +37,30 @@ function cleanFilename(value: string): string {
   return value.replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 100) || 'knowledge';
 }
 
-export function KnowledgeWorkbench() {
+type ResearchTargetContext = {
+  key: string;
+  label: string;
+  knowledgeId: string;
+  baseVersion: number;
+  manualBodyRevision: number;
+};
+
+function createResearchTargetContext(
+  session: number,
+  knowledgeId: string,
+  baseVersion: number,
+  manualBodyRevision: number,
+): ResearchTargetContext {
+  return {
+    key: JSON.stringify([session, knowledgeId, baseVersion, manualBodyRevision]),
+    label: `${knowledgeId} · 原版 v${baseVersion} · 本文編集版 ${manualBodyRevision}`,
+    knowledgeId,
+    baseVersion,
+    manualBodyRevision,
+  };
+}
+
+export function KnowledgeWorkbench({ research = false }: { research?: boolean }) {
   const [parsed, setParsed] = useState<KnowledgeParsedMarkdown | null>(null);
   const [workspace, setWorkspace] = useState<KnowledgeWorkspaceState | null>(null);
   const workspaceRef = useRef<KnowledgeWorkspaceState | null>(null);
@@ -46,12 +70,19 @@ export function KnowledgeWorkbench() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [documentSession, setDocumentSession] = useState(0);
+  const [researchTarget, setResearchTarget] = useState<ResearchTargetContext | null>(null);
+  const researchTargetRef = useRef<ResearchTargetContext | null>(null);
   const [currentFilename, setCurrentFilename] = useState('');
   const importToken = useRef(0);
 
   const replaceWorkspace = (next: KnowledgeWorkspaceState) => {
     workspaceRef.current = next;
     setWorkspace(next);
+  };
+
+  const replaceResearchTarget = (next: ResearchTargetContext | null) => {
+    researchTargetRef.current = next;
+    setResearchTarget(next);
   };
 
   const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -73,6 +104,7 @@ export function KnowledgeWorkbench() {
       replaceWorkspace(nextWorkspace);
       setDocumentSession(token);
       setCurrentFilename(file.name);
+      replaceResearchTarget(createResearchTargetContext(token, nextWorkspace.document.id, nextWorkspace.document.baseVersion, nextWorkspace.revision));
       setKbDraft(nextWorkspace.kbReview);
       setConfirmed(false);
       setMessage(`「${file.name}」を読み込みました。内容はこの画面内だけで扱われます。`);
@@ -200,9 +232,11 @@ export function KnowledgeWorkbench() {
     <div className="space-y-6">
       <header className="rounded-xl border border-blue-200 bg-blue-50 p-5">
         <p className="text-xs font-semibold uppercase tracking-wide text-blue-800">担当者の確認用</p>
-        <h1 className="mt-1 text-2xl font-bold text-gray-950">ノウハウ確認</h1>
+        <h1 className="mt-1 text-2xl font-bold text-gray-950">{research ? '工技先輩（開発中）' : 'ノウハウ確認'}</h1>
         <p className="mt-2 max-w-4xl text-sm leading-6 text-gray-700">
-          自分で選んだMarkdownを確認し、修正候補とOneNoteへの追記文を作ります。内容はサーバーへ送られず、元ファイルも変更しません。画面を閉じたり別ファイルを読み込むと、保存していない作業は消えます。
+          {research
+            ? '技術KB・法令KBの回答を比較し、選んだ回答を調査メモ候補としてMarkdownへ取り込みます。ファイルは選んだ後もブラウザー内だけで扱い、自分が送信する質問だけを検索APIへ送ります。'
+            : '自分で選んだMarkdownを確認し、修正候補とOneNoteへの追記文を作ります。内容はサーバーへ送られず、元ファイルも変更しません。画面を閉じたり別ファイルを読み込むと、保存していない作業は消えます。'}
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <label className="inline-flex cursor-pointer items-center rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2">
@@ -216,6 +250,37 @@ export function KnowledgeWorkbench() {
         {message && <p role="status" className="mt-3 text-sm text-green-800">{message}</p>}
         {error && <p role="alert" className="mt-3 text-sm text-red-800">{error}</p>}
       </header>
+
+      {research && (
+        <KnowledgeResearchWorkspace
+          canAdopt={Boolean(active)}
+          contextKey={researchTarget?.key ?? null}
+          targetLabel={researchTarget?.label ?? ''}
+          onAdopt={(note, expectedContextKey) => {
+            const current = workspaceRef.current;
+            const target = researchTargetRef.current;
+            if (!current || !target) {
+              setMessage('調査メモを取り込むには、先にMarkdownを選んでください。');
+              return;
+            }
+            if (!expectedContextKey || expectedContextKey !== target.key) {
+              setMessage('対象Markdownまたは本文が変わりました。現在のファイルと本文を指定して、もう一度照合してください。');
+              return;
+            }
+            try {
+              const provenance = `> 調査対象: ${target.knowledgeId} · 原版 v${target.baseVersion} · 検索時本文編集版 ${target.manualBodyRevision}`;
+              const next = editBody(current, `${current.body.trimEnd()}\n\n${provenance}\n\n${note}`);
+              replaceWorkspace(next);
+              setKbDraft(next.kbReview);
+              setConfirmed(false);
+              setError('');
+              setMessage('選択した回答を調査メモ候補としてMarkdown本文へ追記しました。OneNote追記案との整合を確認してください。');
+            } catch {
+              setError('調査メモを取り込めませんでした。Markdown本文の上限を確認してください。');
+            }
+          }}
+        />
+      )}
 
       {!active || !parsed ? (
         <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
@@ -234,6 +299,7 @@ export function KnowledgeWorkbench() {
                 try {
                   const next = editBody(active, body);
                   replaceWorkspace(next);
+                  replaceResearchTarget(createResearchTargetContext(documentSession, next.document.id, next.document.baseVersion, next.revision));
                   setKbDraft(next.kbReview);
                   setConfirmed(false);
                   setMessage('');

@@ -60,7 +60,7 @@ export function KnowledgeOneNotePanel({
     <section className="rounded-xl border border-gray-200 bg-white shadow-sm" aria-label="OneNote追記案と確認">
       <div className="border-b border-gray-200 px-4 py-3">
         <h2 className="font-semibold text-gray-900">OneNoteへの追記案</h2>
-        <p className="mt-1 text-xs text-gray-500">AIによる生成・KB検索・OneNoteへの自動書込みは行いません。</p>
+        <p className="mt-1 text-xs text-gray-500">追記案は担当者が編集します。OneNoteへの自動書込みは行いません。</p>
       </div>
       <div className="space-y-4 p-4">
         {noteNeedsReconcile && (
@@ -113,7 +113,7 @@ export function KnowledgeOneNotePanel({
             className={`${inputClass} resize-y`}
             placeholder="本文を見て確認した内容、条件の違い、保留点を記録します。"
           />
-          <p className="text-xs text-gray-500">資料名の登録だけでは本文確認済みになりません。この画面は資料を開いたり検索したりしません。</p>
+          <p className="text-xs text-gray-500">資料名の登録だけでは本文確認済みになりません。この欄は資料を開いたり検索したりしません。</p>
         </fieldset>
 
         <label className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">

@@ -123,8 +123,8 @@ test('preserves a valid API answer timestamp and generates a separate client rec
   assert.match(note, /回答時刻も確認/);
   assert.match(note, new RegExp(responseTimestamp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(note, new RegExp(answer.receivedAt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(note, /session_\\\[original\\\]/);
-  assert.match(note, /message_\\#1/);
+  assert.match(note, /session\\_\\\[original\\\]/);
+  assert.match(note, /message\\_\\#1/);
   assert.match(note, /AI回答の追跡情報。資料の改訂版・承認情報ではない/);
 });
 
