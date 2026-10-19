@@ -8,7 +8,7 @@ related-code: infrastructure/sam/, amplify.yml
 
 > 最終検証: 2026-10-19 — コスト配分タグの説明とSAMが付与するタグを照合。リソース一覧全体は再検証していない。
 
-Cost allocation uses the three `gyoumu012` keys defined in [Cost allocation tag operations](ops-cost-allocation-tags.md). SAM continues to set `Project` and `ManagedBy`; it no longer sets the legacy `Env` tag. Existing resources may retain `Env` until their next stack update; deployed tags have not been rechecked here.
+Cost allocation uses the three `gyoumu012` keys defined in [Cost allocation tag operations](ops-cost-allocation-tags.md). SAM templates no longer declare the legacy `Env` resource tag. AWS read-only inspection on 2026-10-19 found that existing deployed resources still retain `Env`; a stack update did not remove it. See the dated live-environment observation below.
 
 EleKnowledge resources are identified by tags, not by a shared name prefix:
 
@@ -35,6 +35,24 @@ This is a time-bounded observation, not a guarantee of current state. The AWS en
 | Phase 3 | Troubleshooting stack, API, Lambda functions, and tables were present. | User-facing availability and end-to-end behavior were not verified. See the development specification and sequence document. |
 
 These observations do not include delivery tests for SNS/Budget notifications or a user-facing E2E test. Do not copy account IDs, email addresses, or other secret values into this inventory.
+
+## Development environment observation (2026-10-19)
+
+> 最終検証: 2026-10-19 — AWS CLI 読み取り専用確認（東京リージョンのCloudFormation、Lambda、Amplify、Resource Groups Tagging API。機能E2E・通知到達・Amplifyの最新ビルドは未確認）
+
+This dated snapshot records deployed state; `UPDATE_COMPLETE` means the stack update completed, not that every user-facing flow is healthy.
+
+| Stack / service | AWS observation | Interpretation |
+| --- | --- | --- |
+| Phase 1, Phase 2, troubleshooting, monitoring, security/WAF, announcements/monitoring, chat archive | All listed stacks were `UPDATE_COMPLETE`. Latest updates ranged from 2026-08-26 (troubleshooting) through 2026-10-14 (Phase 2, announcements, archive). | These deployed stacks exist. The resource map's SAM inventory does not alone prove API availability or end-to-end behavior. |
+| Bedrock knowledge-base resources | `eleknowledge-law-kb-dev` was `UPDATE_COMPLETE` (2026-10-02). | This live stack is not included in the migration inventory's Phase 1–3 list. Its ownership and migration scope need explicit documentation. |
+| Legal RAG deployment attempt | `eleknowledge-legal-rag-dev` was `ROLLBACK_COMPLETE` (2026-10-01). | Do not describe this stack as deployed successfully. |
+| Lambda runtime | EleKnowledge application functions observed in the region use Python 3.13. | Other unrelated account functions use other runtimes; this is not an account-wide runtime statement. |
+| RAG model | Phase 2 CloudFormation parameter `BedrockModelId` was `global.anthropic.claude-sonnet-5`. | Matches the current model recorded in the runbook at inspection time. |
+| Amplify | App `Ele-Knowledge-dev` exists with platform `WEB`. | The app's presence does not verify the latest branch build or deployed frontend revision. |
+| Resource tags | Among 108 resources returned with `Project=EleKnowledge`, all 108 still had `Env`; 99 had each of `gyoumu012Project`, `gyoumu012Component`, and `gyoumu012Usage`. | Removing `Env` from templates does not remove that tag from existing resources. Nine resources in this result set lacked each new cost key. Do not mass-edit deployed tags as part of this documentation change. |
+
+The read was limited to `ap-northeast-1` and the active AWS profile. It did not validate CloudFront, WAF behavior, Bedrock invocation health, mail delivery, or user-facing E2E flows. Do not copy account IDs, ARNs, email addresses, or tag values beyond the documented project keys into this inventory.
 
 ## Phase 1 - Auth and Base Data
 
