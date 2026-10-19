@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { getIdToken } from '@/lib/auth-helpers';
 import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
+import { KnowledgeComparisonPanel } from './KnowledgeComparisonPanel';
 import {
   buildResearchNote,
   queryKnowledgeSource,
@@ -15,11 +16,11 @@ import {
 type Mode = 'normal' | 'law';
 type LaneState =
   | { status: 'idle' | 'loading' | 'cancelled' }
-  | { status: 'success'; answer: ResearchAnswer; contextKey: string | null; targetLabel: string }
+  | { status: 'success'; answer: ResearchAnswer; contextKey: string | null; targetLabel: string; searchId: number }
   | { status: 'error'; message: string };
 
 type Props = {
-  onAdopt: (note: string, expectedContextKey: string | null) => void;
+  onAdopt: (note: string, expectedContextKey: string | null) => boolean;
   canAdopt?: boolean;
   contextKey: string | null;
   targetLabel: string;
@@ -63,7 +64,7 @@ function ResultLane({
 }: {
   mode: Mode;
   state: LaneState;
-  onAdopt: (answer: ResearchAnswer, expectedContextKey: string | null) => void;
+  onAdopt: (answer: ResearchAnswer, expectedContextKey: string | null) => boolean;
   canAdopt: boolean;
   currentContextKey: string | null;
 }) {
@@ -107,7 +108,7 @@ function LaneAnswer({
 }: {
   answer: ResearchAnswer;
   mode: Mode;
-  onAdopt: (answer: ResearchAnswer, expectedContextKey: string | null) => void;
+  onAdopt: (answer: ResearchAnswer, expectedContextKey: string | null) => boolean;
   canAdopt: boolean;
   currentContextKey: string | null;
   searchedContextKey: string | null;
@@ -261,7 +262,7 @@ export function KnowledgeResearchWorkspace({ onAdopt, canAdopt = false, contextK
           query: submitted,
           signal: abort.signal,
         });
-        return { status: 'success', answer, contextKey: searchedContextKey, targetLabel: searchedTargetLabel };
+        return { status: 'success', answer, contextKey: searchedContextKey, targetLabel: searchedTargetLabel, searchId: run };
       } catch (reason) {
         if ((reason as { name?: string } | null)?.name === 'AbortError') return { status: 'cancelled' };
         return { status: 'error', message: errorMessage(reason, mode) };
@@ -278,13 +279,46 @@ export function KnowledgeResearchWorkspace({ onAdopt, canAdopt = false, contextK
     setRunning(false);
   };
 
-  const adopt = (answer: ResearchAnswer, expectedContextKey: string | null) => {
+  const adopt = (answer: ResearchAnswer, expectedContextKey: string | null): boolean => {
     try {
-      onAdopt(buildResearchNote(answer), expectedContextKey);
+      return onAdopt(buildResearchNote(answer), expectedContextKey);
     } catch {
       setError('調査メモを作れませんでした。回答本文と出典を確認してください。');
+      return false;
     }
   };
+
+  const technicalState = lanes.normal;
+  const lawState = lanes.law;
+  const comparisonReady = Boolean(
+    canAdopt
+      && contextKey
+      && technicalState.status === 'success'
+      && lawState.status === 'success'
+      && technicalState.searchId === lawState.searchId
+      && technicalState.contextKey === contextKey
+      && lawState.contextKey === contextKey
+      && technicalState.answer.mode === 'normal'
+      && lawState.answer.mode === 'law'
+      && technicalState.answer.responseType === 'pages'
+      && lawState.answer.responseType === 'pages'
+      && technicalState.answer.query === submittedQuery
+      && lawState.answer.query === submittedQuery
+      && technicalState.answer.query === lawState.answer.query
+      && technicalState.answer.sourceDocuments.some((source) => Boolean(safeHref('normal', source)))
+      && lawState.answer.sourceDocuments.some((source) => Boolean(safeHref('law', source))),
+  );
+  const comparisonKey = comparisonReady && technicalState.status === 'success' && lawState.status === 'success'
+    ? JSON.stringify([
+        technicalState.searchId,
+        contextKey,
+        technicalState.answer.query,
+        technicalState.answer.sessionId,
+        technicalState.answer.messageId,
+        lawState.answer.sessionId,
+        lawState.answer.messageId,
+      ])
+    : '';
 
   return (
     <section className="space-y-5 rounded-2xl border border-violet-200 bg-violet-50/60 p-4 sm:p-6" aria-label="技術KBと法令KBの照合">
@@ -322,6 +356,20 @@ export function KnowledgeResearchWorkspace({ onAdopt, canAdopt = false, contextK
         <ResultLane mode="normal" state={lanes.normal} onAdopt={adopt} canAdopt={canAdopt} currentContextKey={contextKey} />
         <ResultLane mode="law" state={lanes.law} onAdopt={adopt} canAdopt={canAdopt} currentContextKey={contextKey} />
       </div>
+      {comparisonReady && technicalState.status === 'success' && lawState.status === 'success' ? (
+        <KnowledgeComparisonPanel
+          key={comparisonKey}
+          technical={technicalState.answer}
+          law={lawState.answer}
+          contextKey={contextKey as string}
+          targetLabel={targetLabel}
+          onAdopt={onAdopt}
+        />
+      ) : submittedQuery ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm leading-6 text-gray-700">
+          照合まとめは、同じ対象・同じ質問について技術KBと法令KBの両方に根拠付き回答がそろうと作成できます。片側の失敗・未収載・聞き返しや、対象本文の変更がある場合はまとめを取り込めません。
+        </div>
+      ) : null}
       <p className="text-xs leading-5 text-gray-600">検索結果は参考情報です。KBにないことと検索に失敗したことは別に扱います。内容の適用条件・矛盾・技術判断は担当者が確認してください。取り込みはローカルMarkdownの調査メモ候補で、OneNoteや原本へは書き込みません。</p>
     </section>
   );
