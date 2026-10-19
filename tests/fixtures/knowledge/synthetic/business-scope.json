@@ -1,0 +1,45 @@
+{
+  "fixture": "synthetic",
+  "description": "架空の規則を用いた業務domainと適用scopeの判定fixture。実在の社内規則ではない。",
+  "records": [
+    {
+      "record_id": "SYNTH-POLICY-TEAM-001",
+      "record_type": "policy",
+      "knowledge_domain": "engineering_business",
+      "organizational_scope": "team_rule",
+      "title": "架空の課内ルール",
+      "statement": "合成例。架空のチーム内で文書の確認担当を記録する規則。",
+      "scope_evidence": "合成例の原資料が課内ルールと明記している。",
+      "review_status": "unreviewed",
+      "publication_status": "not_published",
+      "classification": "unknown",
+      "cloud_approval": "not_reviewed"
+    },
+    {
+      "record_id": "SYNTH-POLICY-COMPANY-001",
+      "record_type": "policy",
+      "knowledge_domain": "engineering_business",
+      "organizational_scope": "company_rule",
+      "title": "架空の社規",
+      "statement": "合成例。架空の会社全体に適用される規則。",
+      "scope_evidence": "合成例の原資料が会社規則と明記している。",
+      "review_status": "unreviewed",
+      "publication_status": "not_published",
+      "classification": "unknown",
+      "cloud_approval": "not_reviewed"
+    },
+    {
+      "record_id": "SYNTH-POLICY-UNKNOWN-001",
+      "record_type": "policy",
+      "knowledge_domain": "engineering_business",
+      "organizational_scope": "unknown",
+      "title": "適用範囲が不明な架空規則",
+      "statement": "合成例。原資料に適用組織の明記がない。",
+      "scope_evidence": "",
+      "review_status": "unreviewed",
+      "publication_status": "not_published",
+      "classification": "unknown",
+      "cloud_approval": "not_reviewed"
+    }
+  ]
+}
