@@ -56,6 +56,9 @@ export type KnowledgeProposalPacket = {
     publishable: false;
     state: 'working-proposal';
   };
+  reviewedRevision: number | null;
+  copiedRevision: number | null;
+  placements: Array<KnowledgePlacementReceipt & { knowledgeId: string; textSha256: string }>;
   kbReview: KnowledgeKbReview;
   hashes: {
     baseMarkdownSha256: string;

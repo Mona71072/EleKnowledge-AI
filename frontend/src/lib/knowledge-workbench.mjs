@@ -330,6 +330,15 @@ function createProposalMarkdown(state) {
 
 export async function exportProposal(state) {
   const baseMarkdown = state.document.baseMarkdown;
+  const placements = await Promise.all(state.placements.map(async (receipt) => ({
+    knowledgeId: state.document.id,
+    baseVersion: receipt.baseVersion,
+    revision: receipt.revision,
+    text: receipt.text,
+    destination: receipt.destination,
+    recordedAt: receipt.recordedAt,
+    textSha256: await sha256(receipt.text),
+  })));
   return {
     format: PROPOSAL_FORMAT,
     base: {
@@ -345,6 +354,9 @@ export async function exportProposal(state) {
       publishable: false,
       state: 'working-proposal',
     },
+    reviewedRevision: state.reviewedRevision,
+    copiedRevision: state.copiedRevision,
+    placements,
     kbReview: cloneSafe(state.kbReview),
     hashes: {
       baseMarkdownSha256: await sha256(baseMarkdown),
@@ -353,4 +365,3 @@ export async function exportProposal(state) {
     },
   };
 }
-

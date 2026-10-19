@@ -284,6 +284,8 @@ test('proposal export carries immutable OneNote placement receipts after later e
   const packet = await exportProposal(editedAfterPlacement);
 
   assert.deepEqual(editedAfterPlacement.placements[0], receipt);
+  assert.equal(packet.reviewedRevision, null);
+  assert.equal(packet.copiedRevision, null);
   assert.equal(packet.placements.length, 1);
   assert.deepEqual(packet.placements[0], {
     knowledgeId: 'case-cm-ma-71',

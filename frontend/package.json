@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
+    "test:knowledge": "node --test --experimental-test-coverage --test-coverage-include=src/lib/knowledge-workbench.mjs --test-coverage-lines=80 --test-coverage-branches=80 tests/knowledge-workbench.test.mjs",
     "audit:production": "node scripts/check-production-audit.mjs",
     "audit:all": "node scripts/check-all-audit.mjs",
     "test:lint-dependencies": "node --test tests/dependencies/*.test.mjs",
