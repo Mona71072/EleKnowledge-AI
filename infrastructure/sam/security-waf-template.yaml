@@ -105,8 +105,6 @@ Resources:
           Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
 
@@ -128,8 +126,6 @@ Resources:
           Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
 
@@ -150,8 +146,6 @@ Resources:
           Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
 
@@ -176,8 +170,6 @@ Resources:
           Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
       VisibilityConfig:
