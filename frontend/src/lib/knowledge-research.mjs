@@ -133,15 +133,19 @@ function safeEgovUrl(value, lawId) {
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.hostname !== 'laws.e-gov.go.jp'
-      || url.username || url.password || url.search || url.hash
-      || url.pathname !== `/law/${lawId}`) return undefined;
+      || url.username || url.password || url.search) return undefined;
+    const lawPath = `/law/${lawId}`;
+    const isLawPath = url.pathname === lawPath;
+    const versionPath = new RegExp(`^${lawPath}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`);
+    if (!isLawPath && !versionPath.test(url.pathname)) return undefined;
+    if (url.hash && !/^#[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(url.hash)) return undefined;
     return url.href;
   } catch {
     return undefined;
   }
 }
 
-function cleanSource(source) {
+function cleanSource(source, mode) {
   if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
   const result = {};
   for (const field of RESPONSE_FIELDS) {
@@ -150,10 +154,15 @@ function cleanSource(source) {
       || (typeof value === 'number' && Number.isFinite(value))) result[field] = value;
   }
   if (Number.isSafeInteger(source.pageNumber) && source.pageNumber > 0) result.pageNumber = source.pageNumber;
-  const uri = safeSourceUri(source.sourceUri);
-  if (uri) result.sourceUri = uri;
-  const citation = safeLawCitation(source.lawCitation);
-  if (citation) result.lawCitation = citation;
+  if (mode === 'law') {
+    const citation = safeLawCitation(source.lawCitation);
+    const sourceUri = citation ? safeEgovUrl(source.sourceUri, citation.lawId) : undefined;
+    if (citation) result.lawCitation = citation;
+    if (sourceUri && sourceUri === citation.sourceUrl) result.sourceUri = sourceUri;
+  } else {
+    const uri = safeSourceUri(source.sourceUri);
+    if (uri) result.sourceUri = uri;
+  }
   return result;
 }
 
@@ -167,8 +176,8 @@ function normalizeResponse(data, mode, query) {
     || !RESPONSE_TYPES.has(data.responseType)
     || typeof data.sessionId !== 'string' || !data.sessionId.trim()
     || !stringArray(data.clarifyQuestions)
-    || !Array.isArray(data.sourceDocuments) || !data.sourceDocuments.every((item) => cleanSource(item) !== null)
-    || !Array.isArray(data.pageCandidates) || !data.pageCandidates.every((item) => cleanSource(item) !== null)) {
+    || !Array.isArray(data.sourceDocuments) || !data.sourceDocuments.every((item) => cleanSource(item, mode) !== null)
+    || !Array.isArray(data.pageCandidates) || !data.pageCandidates.every((item) => cleanSource(item, mode) !== null)) {
     fail('invalid_response', '検索結果の形式を確認できませんでした。もう一度お試しください');
   }
   const messageId = typeof data.aiMessageId === 'string' && data.aiMessageId.trim()
@@ -184,8 +193,8 @@ function normalizeResponse(data, mode, query) {
     responseType: data.responseType,
     sessionId: data.sessionId,
     messageId,
-    sourceDocuments: data.sourceDocuments.map(cleanSource),
-    pageCandidates: data.pageCandidates.map(cleanSource),
+    sourceDocuments: data.sourceDocuments.map((item) => cleanSource(item, mode)),
+    pageCandidates: data.pageCandidates.map((item) => cleanSource(item, mode)),
     clarifyQuestions: [...data.clarifyQuestions],
   };
 }
@@ -339,9 +348,13 @@ export function buildResearchNote(answer) {
     || !Array.isArray(answer.sourceDocuments) || answer.sourceDocuments.length === 0) {
     fail('validation', '根拠資料を含む検索結果だけを調査候補にできます');
   }
+  const eligibleSources = answer.sourceDocuments.filter((source) => researchSourceHref(source, answer.mode));
+  if (eligibleSources.length === 0) {
+    fail('validation', 'この検索モードで確認できる出典がないため調査候補にできません');
+  }
   const fence = codeFence(answer.content);
   const heading = answer.mode === 'law' ? '法令KB' : '技術KB';
-  const refs = answer.sourceDocuments.map((source, index) => sourceReference(source, answer.mode, index));
+  const refs = eligibleSources.map((source, index) => sourceReference(source, answer.mode, index));
   return [
     `### ${heading}の調査メモ（AI候補・未確認）`,
     '',
