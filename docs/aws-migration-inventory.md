@@ -6,12 +6,15 @@ related-code: infrastructure/sam/, amplify.yml
 
 # AWS Migration Inventory
 
+> 最終検証: 2026-10-19 — リソース識別タグをSAMの現行設定と照合。移行対象一覧は再検証していない。
+
 EleKnowledge resources to recreate in the new AWS account on `ap-northeast-1`.
 Resource ownership should be identified with tags, not long names:
 
 - `Project=EleKnowledge`
-- `Env=dev` or `Env=prd`
 - `ManagedBy=SAM`
+
+SAM no longer sets the legacy `Env` resource tag. Existing resources may retain it until their next stack update; deployed tags have not been rechecked here. The `Environment` parameter still selects the deployment environment.
 
 Use [AWS Migration Runbook](aws-migration-runbook.md) for the end-to-end deployment and verification procedure.
 See [AWS Resource Map](aws-resource-map.md) for the resource name, component type, and purpose table.
