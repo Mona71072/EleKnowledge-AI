@@ -3,6 +3,10 @@ status: development
 last-verified: 2026-10-20
 related-code:
   - frontend/src/app/admin/knowledge/research/page.tsx
+  - frontend/src/app/knowledge/chat/page.tsx
+  - frontend/src/app/knowledge/chat/layout.tsx
+  - frontend/src/components/knowledge/KnowledgeChatEntry.tsx
+  - frontend/tests/knowledge-chat-entry.test.mjs
   - frontend/src/components/knowledge/KnowledgeResearchWorkspace.tsx
   - frontend/src/lib/knowledge-research.mjs
   - frontend/src/lib/knowledge-comparison.mjs
@@ -21,7 +25,8 @@ related-code:
 
 ## 今回実装する接続
 
-- `/admin/knowledge/research`に「工技先輩（開発中）」を追加。既存のノウハウ機能フラグを使い、通常画面と分ける。既存admin利用者の試行用であり、新しい利用者へのadmin付与はしない。
+- `/admin/knowledge/research`とユーザー画面側の`/knowledge/chat`に「工技先輩（開発中）」を設け、同じ検索・編集コンポーネントを利用する。通常ホームの入口は管理者かつ`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH=true`の場合だけ表示し、一般ユーザーには予告カードも表示しない。既存admin利用者の試行用であり、新しい利用者へのadmin付与はしない。
+- `/knowledge/chat`は既存`AdminOnlyGuard`で囲み、管理者確認中・未認証・非管理者には検索・編集UIをマウントしない。未認証はログインへ誘導し、非管理者は権限案内とホームへのリンクを表示する。フラグOFFなら管理者にも無効の案内だけを表示する。画面は通常のホームへ戻れる独立ページとし、Markdown未選択でも質問できる。これらは画面の表示制御であり、既存APIのJWT認証・userId分離を代替しない。静的配信のコードを秘密にする仕組みでもない。
 - 技術KBと法令KBは既存`POST /rag/query`へ、同じ明示入力の質問を`mode: normal`と`mode: law`で並列送信する。CognitoのID tokenをAuthorizationに使い、userIdを本文へ追加しない。モード間でsessionIdを共有しない。
 - 初期版は毎回独立した問い合わせとし、履歴継続は既存チャットの各モードへのリンクで行う。APIが作る履歴は通常・法令それぞれ別であり、既存の60日保持対象となることを送信前に表示する。
 - ローカルMarkdown・OneNote案・メタデータ・ファイル名を自動送信しない。送信対象は質問欄だけ。資料をもとに質問する場合は利用者が質問欄へ必要な内容を入力して確認する。
