@@ -5,7 +5,10 @@ related-code:
   - frontend/src/app/admin/knowledge/research/page.tsx
   - frontend/src/components/knowledge/KnowledgeResearchWorkspace.tsx
   - frontend/src/lib/knowledge-research.mjs
+  - frontend/src/lib/knowledge-comparison.mjs
+  - frontend/src/components/knowledge/KnowledgeComparisonPanel.tsx
   - frontend/tests/knowledge-research.test.mjs
+  - frontend/tests/knowledge-comparison.test.mjs
 ---
 
 # 工技先輩の開発画面：ノウハウ・技術KB・法令KBの照合
@@ -34,6 +37,19 @@ related-code:
 取り込み先は検索開始時の文書セッション・ID・原版・本文の作業版へ紐付ける。文書の再取込・別文書への切替・本文の手編集後は旧結果を表示できても取込み不可とし、再検索を案内する。ファイル未選択での調査は閲覧用であり、後から選んだファイルへ無警告で適用しない。同一検索の技術・法令両メモを順に追加する操作は許容し、その既知の追記だけでは相手側の結果を失効しない。取り込み先の条件を変える本文手編集は必ず失効させる。
 
 調査メモには検索モード・質問・クライアント受信日時、APIが返す回答日時（有効な場合）、sessionId/messageIdも追跡情報として残す。これらはAI回答の追跡用であり、資料の改訂版や技術承認の識別子ではない。API履歴は60日で失われ得るため、採用時の本文と出典も併せて保持する。
+
+### 担当者による照合まとめ
+
+同じ質問・対象本文で得た両方の回答を、担当者が「一致している / 条件が違う / 食い違いあり / 判断保留」に整理できるようにする。初期値は判断保留。これはAI回答の比較メモであり、原資料本文の確認・技術承認・法的判断として扱わない。
+
+- 比較して分かったことと適用条件・対象外を必須入力とし、それぞれ4000文字まで。判断保留・食い違いありの場合は未確認事項・次に確認することも必須。いずれの文章も自動生成・自動送信しない。
+- 同じ質問のnormal/law各1件で、両方が根拠リンクを持つ回答の場合にだけ保存可能。片側失敗・未収載・聞き返し・別質問・別文書・手編集後の旧回答は使わない。
+- メモは回答ペアと対象本文の版に紐付ける。再検索・文書再取込・本文手編集で以前の入力・取り込み済み表示を破棄し、新しい回答へ持ち越さない。片側の回答が更新されても同様。
+- 「照合まとめをMarkdownへ取り込む」で、入力した比較内容・条件・保留事項と、両回答の本文・出典・追跡情報をローカルの修正候補へ追記する。未知の項目を「なし」「解決済み」と補完しない。Markdown構文やHTMLを入力しても構造の外へ実行・展開しない。
+- 親の編集状態への追記成功を受け取ってから取り込み済みと表示し、同一内容の重複クリックを防ぐ。入力変更後は別の作業メモとして再取込み可能。追記失敗時に取り込み済みと表示しない。
+- 既存の本文編集と同様、KB手動確認・OneNoteの確認/コピー状態を失効させる。本文へメモを追記しただけでは、食い違いの解消・公開・承認を成立させない。
+
+`buildComparisonNote({technical, law, assessment})`を純粋関数として実装し、型付きの`assessment`は`status: consistent|conditions_differ|conflict|unresolved`、`findings`、`applicability`、`unresolvedPoints`を持つ。UIは既存の文書対象キーを使い、親への`onAdopt`が返す成功/失敗を確認する。
 
 ## 実装の分担と契約
 
