@@ -75,8 +75,8 @@ test('creates a deterministic unapproved comparison note with both answers, sour
   assert.match(note, /事業者は作業床の端に墜落防止措置を講じる/);
   assert.match(note, /s3:\/\/technical-kb\/docs\/install\.pdf/);
   assert.match(note, /20240401_506M60000002012#Mp-At_518/);
-  assert.match(note, /session_technical_1/);
-  assert.match(note, /message_law_1/);
+  assert.match(note, /session\\_technical\\_1/);
+  assert.match(note, /message\\_law\\_1/);
   assert.equal(note, buildComparisonNote(input));
   assert.equal(JSON.stringify(input), before);
 });
@@ -136,6 +136,16 @@ test('validates required assessment text, status, NULs, and 4000-character limit
   ]) {
     assert.throws(() => buildComparisonNote({ technical: technical(), law: law(), assessment: invalidAssessment }), (error) => error.code === 'validation');
   }
+  assert.doesNotThrow(() => buildComparisonNote({
+    technical: technical(),
+    law: law(),
+    assessment: assessment({ status: 'consistent', findings: '😀'.repeat(4_000), unresolvedPoints: '' }),
+  }));
+  assert.throws(() => buildComparisonNote({
+    technical: technical(),
+    law: law(),
+    assessment: assessment({ status: 'consistent', findings: '😀'.repeat(4_001), unresolvedPoints: '' }),
+  }), (error) => error.code === 'validation');
 });
 
 test('preserves hostile user text and answer text inside escaped Markdown or dynamically sized code fences', () => {
@@ -149,7 +159,8 @@ test('preserves hostile user text and answer text inside escaped Markdown or dyn
   assert.ok(note.includes(hostile));
   assert.ok(note.includes('<script>alert(1)</script>'));
   assert.ok(note.includes('````'));
-  assert.match(note, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.ok(note.includes('````text\n' + hostile + '\n````'));
+  assert.ok(note.includes('````\n' + hostile + '\n````'));
 });
 
 test('marks optional unresolved items as unfilled rather than claiming none or resolved', () => {
