@@ -19,6 +19,7 @@ import { KnowledgeMarkdownPanel } from './KnowledgeMarkdownPanel';
 import { KnowledgeOneNotePanel } from './KnowledgeOneNotePanel';
 import { KnowledgeSourcePanel } from './KnowledgeSourcePanel';
 import { KnowledgeResearchWorkspace } from './KnowledgeResearchWorkspace';
+import { buildResearchTargetNote } from '@/lib/knowledge-research.mjs';
 
 
 function downloadFile(filename: string, content: string, type: string) {
@@ -261,22 +262,24 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
             const target = researchTargetRef.current;
             if (!current || !target) {
               setMessage('調査メモを取り込むには、先にMarkdownを選んでください。');
-              return;
+              return false;
             }
             if (!expectedContextKey || expectedContextKey !== target.key) {
               setMessage('対象Markdownまたは本文が変わりました。現在のファイルと本文を指定して、もう一度照合してください。');
-              return;
+              return false;
             }
             try {
-              const provenance = `> 調査対象: ${target.knowledgeId} · 原版 v${target.baseVersion} · 検索時本文編集版 ${target.manualBodyRevision}`;
+              const provenance = buildResearchTargetNote(target);
               const next = editBody(current, `${current.body.trimEnd()}\n\n${provenance}\n\n${note}`);
               replaceWorkspace(next);
               setKbDraft(next.kbReview);
               setConfirmed(false);
               setError('');
-              setMessage('選択した回答を調査メモ候補としてMarkdown本文へ追記しました。OneNote追記案との整合を確認してください。');
+              setMessage('調査メモ候補をMarkdown本文へ追記しました。OneNote追記案との整合を確認してください。');
+              return true;
             } catch {
               setError('調査メモを取り込めませんでした。Markdown本文の上限を確認してください。');
+              return false;
             }
           }}
         />

@@ -330,8 +330,24 @@ function escapeInline(value) {
 }
 
 function codeFence(value) {
-  const longest = Math.max(0, ...String(value).matchAll(/`+/g).map((match) => match[0].length));
+  const longest = Math.max(0, ...Array.from(String(value).matchAll(/`+/g), (match) => match[0].length));
   return '`'.repeat(Math.max(3, longest + 1));
+}
+
+function literalCode(value) {
+  const delimiter = codeFence(value);
+  return `${delimiter} ${value} ${delimiter}`;
+}
+
+/** Preserve imported identity as literal text in generated Markdown provenance. */
+export function buildResearchTargetNote(target) {
+  if (!target || typeof target.knowledgeId !== 'string' || !target.knowledgeId.trim()
+    || target.knowledgeId.length > 200 || /[\r\n\0]/u.test(target.knowledgeId)
+    || !Number.isSafeInteger(target.baseVersion) || target.baseVersion < 1
+    || !Number.isSafeInteger(target.manualBodyRevision) || target.manualBodyRevision < 0) {
+    fail('validation', '調査対象のIDと版を確認してください');
+  }
+  return `> 調査対象: ${literalCode(target.knowledgeId)} · 原版 v${target.baseVersion} · 検索時本文編集版 ${target.manualBodyRevision}`;
 }
 
 function sourceReference(source, mode, index) {
@@ -345,7 +361,7 @@ function sourceReference(source, mode, index) {
   const uri = safeSourceUri(source.sourceUri);
   if (!uri) return `- ${title}（安全に表示できる出典URLなし）`;
   const page = Number.isSafeInteger(source.pageNumber) && source.pageNumber > 0 ? ` p.${source.pageNumber}` : '';
-  return `- ${title}${page} — ${uri}`;
+  return `- ${title}${page} — ${literalCode(uri)}`;
 }
 
 /**

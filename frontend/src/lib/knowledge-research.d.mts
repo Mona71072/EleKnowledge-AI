@@ -77,3 +77,9 @@ export function researchSourceHref(
 ): string | undefined;
 
 export function buildResearchNote(answer: ResearchAnswer): string;
+
+export function buildResearchTargetNote(target: {
+  knowledgeId: string;
+  baseVersion: number;
+  manualBodyRevision: number;
+}): string;
