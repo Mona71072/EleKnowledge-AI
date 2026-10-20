@@ -106,6 +106,36 @@ test('posts only the explicit query, mode, and empty filters with the Cognito ID
   assert.equal(answer.sourceDocuments[0].sourceUri, 's3://technical-kb/docs/install.pdf');
 });
 
+test('continues only the requested mode session and rejects invalid or mismatched session identifiers', async () => {
+  const requests = [];
+  const continuation = await queryKnowledgeSource({
+    baseUrl: BASE,
+    getToken: async () => TOKEN,
+    fetchImpl: fetchOk(normalPayload({ sessionId: 'session_normal_1' }), (_url, init) => requests.push(JSON.parse(init.body))),
+    mode: 'normal',
+    query: '続きの質問',
+    sessionId: 'session_normal_1',
+  });
+  assert.deepEqual(requests[0], {
+    query: '続きの質問', mode: 'normal', filters: {}, sessionId: 'session_normal_1',
+  });
+  assert.equal(continuation.sessionId, 'session_normal_1');
+
+  const invalidIds = ['', ' ', 'x'.repeat(129), 'bad\nvalue', 'bad\u0000value'];
+  for (const sessionId of invalidIds) {
+    await assert.rejects(queryKnowledgeSource({
+      baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: fetchOk(normalPayload()),
+      mode: 'normal', query: 'continued', sessionId,
+    }), (error) => error.code === 'validation');
+  }
+  await assert.rejects(queryKnowledgeSource({
+    baseUrl: BASE,
+    getToken: async () => TOKEN,
+    fetchImpl: fetchOk(normalPayload({ sessionId: 'another-session' })),
+    mode: 'normal', query: 'continued', sessionId: 'session_normal_1',
+  }), (error) => error.code === 'invalid_response');
+});
+
 test('preserves a valid API answer timestamp and generates a separate client receive timestamp', async () => {
   const responseTimestamp = '2026-10-20T03:04:05.000Z';
   const before = Date.now();

@@ -31,9 +31,11 @@ const entry = () => loadTsx('../src/components/knowledge/KnowledgeChatEntry.tsx'
 test('admin sees a user-side chat entry when the development flag is enabled', () => {
   const html = renderToStaticMarkup(createElement(entry(), { isAdmin: true, enabled: true }));
   assert.match(html, /href="\/knowledge\/chat"/);
-  assert.match(html, /工技先輩/);
+  assert.match(html, /先輩チャット/);
   assert.match(html, /開発中/);
   assert.match(html, /管理者/);
+  assert.match(html, /技術KBや法令KBについて会話形式で質問/);
+  assert.doesNotMatch(html, /Markdownを選ぶ|編集案へ取り込/);
 });
 
 test('nonadmins and unresolved membership see no chat entry or placeholder', () => {
@@ -51,7 +53,7 @@ test('disabled or unspecified flag hides the entry even from admins', () => {
 function renderRoute(gate, enabled) {
   const previous = process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH;
   process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH = enabled;
-  let workbenchRenders = 0;
+  let chatRenders = 0;
   try {
     const { AdminOnlyGuard } = loadTsx('../src/components/auth/AdminOnlyGuard.tsx', {
       'next/link': Link,
@@ -63,49 +65,68 @@ function renderRoute(gate, enabled) {
     }).default;
     const Page = loadTsx('../src/app/knowledge/chat/page.tsx', {
       'next/link': Link,
-      '@/components/knowledge/KnowledgeWorkbench': {
-        KnowledgeWorkbench: ({ research }) => {
-          workbenchRenders += 1;
-          assert.equal(research, true);
-          return createElement('form', { 'aria-label': 'KB質問' });
+      '@/components/knowledge/KnowledgeSenpaiChat': {
+        KnowledgeSenpaiChat: () => {
+          chatRenders += 1;
+          return createElement('section', { 'aria-label': '先輩チャット' }, createElement('form', { 'aria-label': '先輩への質問' }));
         },
       },
     }).default;
-    return { html: renderToStaticMarkup(createElement(Layout, null, createElement(Page))), workbenchRenders };
+    return { html: renderToStaticMarkup(createElement(Layout, null, createElement(Page))), chatRenders };
   } finally {
     if (previous === undefined) delete process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH;
     else process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH = previous;
   }
 }
 
-test('direct user-side route mounts the shared research workspace for admins', () => {
-  const { html, workbenchRenders } = renderRoute('ok', 'true');
-  assert.equal(workbenchRenders, 1);
-  assert.match(html, /aria-label="KB質問"/);
+test('direct user-side route mounts a conversational chat for admins', () => {
+  const { html, chatRenders } = renderRoute('ok', 'true');
+  assert.equal(chatRenders, 1);
+  assert.match(html, /aria-label="先輩チャット"/);
+  assert.match(html, /aria-label="先輩への質問"/);
   assert.match(html, /href="\/"/);
-  assert.doesNotMatch(html, /href="\/admin/);
+  assert.doesNotMatch(html, /href="\/admin|Markdownを選ぶ/);
 });
 
 test('direct route denies nonadmins before mounting the question/editor UI', () => {
-  const { html, workbenchRenders } = renderRoute('denied', 'true');
-  assert.equal(workbenchRenders, 0);
+  const { html, chatRenders } = renderRoute('denied', 'true');
+  assert.equal(chatRenders, 0);
   assert.match(html, /管理者権限が必要です/);
   assert.doesNotMatch(html, /<form/);
 });
 
 test('membership pending, including login redirect, never mounts the workspace', () => {
-  const { html, workbenchRenders } = renderRoute('loading', 'true');
-  assert.equal(workbenchRenders, 0);
+  const { html, chatRenders } = renderRoute('loading', 'true');
+  assert.equal(chatRenders, 0);
   assert.match(html, /読み込み中/);
   assert.doesNotMatch(html, /<form/);
 });
 
 test('disabled route explains availability without mounting the workspace', () => {
   for (const enabled of ['false', '', 'TRUE']) {
-    const { html, workbenchRenders } = renderRoute('ok', enabled);
-    assert.equal(workbenchRenders, 0);
+    const { html, chatRenders } = renderRoute('ok', enabled);
+    assert.equal(chatRenders, 0);
     assert.match(html, /無効/);
     assert.match(html, /href="\/"/);
     assert.doesNotMatch(html, /<form/);
   }
+});
+
+test('chat page starts as an empty conversation with a message composer and reset action', () => {
+  const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
+    'next/link': Link,
+    '@/lib/knowledge-senpai-chat.mjs': {
+      createSenpaiChat: () => ({ getSnapshot: () => ({ turns: [], running: false }), send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+    },
+    '@/lib/knowledge-research.mjs': { researchSourceHref: () => null },
+  }).KnowledgeSenpaiChat;
+  const html = renderToStaticMarkup(createElement(Chat));
+
+  assert.match(html, /aria-label="先輩チャット"/);
+  assert.match(html, /aria-label="質問を入力"/);
+  assert.match(html, /質問を送信/);
+  assert.match(html, /新しい相談/);
+  assert.match(html, /技術KB/);
+  assert.match(html, /法令KB/);
+  assert.doesNotMatch(html, /Markdownファイルを選択|照合まとめ/);
 });

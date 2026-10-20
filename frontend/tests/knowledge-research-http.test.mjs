@@ -56,6 +56,37 @@ test('real HTTP sends independent mode requests and only the explicit question',
   }
 });
 
+test('real HTTP follow-up carries only that mode session while initial requests stay unchanged', async (t) => {
+  const requests = [];
+  const baseUrl = await localApi(t, async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw);
+    requests.push(body);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ...payload(body.mode), sessionId: body.sessionId || `synthetic-${body.mode}` }));
+  });
+
+  const firstAnswers = await Promise.all(['normal', 'law'].map((mode) => queryKnowledgeSource({
+    baseUrl, mode, query: '最初の質問', getToken: async () => 'synthetic-token',
+  })));
+  const nextAnswers = await Promise.all(['normal', 'law'].map((mode, index) => queryKnowledgeSource({
+    baseUrl,
+    mode,
+    query: '追加の質問',
+    sessionId: firstAnswers[index].sessionId,
+    getToken: async () => 'synthetic-token',
+  })));
+
+  assert.deepEqual(requests, [
+    { query: '最初の質問', mode: 'normal', filters: {} },
+    { query: '最初の質問', mode: 'law', filters: {} },
+    { query: '追加の質問', mode: 'normal', filters: {}, sessionId: 'synthetic-normal' },
+    { query: '追加の質問', mode: 'law', filters: {}, sessionId: 'synthetic-law' },
+  ]);
+  assert.deepEqual(nextAnswers.map((answer) => answer.sessionId), ['synthetic-normal', 'synthetic-law']);
+});
+
 test('a real HTTP law-gate failure leaves the technical result available', async (t) => {
   const baseUrl = await localApi(t, async (req, res) => {
     let raw = '';
