@@ -190,6 +190,38 @@ related-code: scripts/ops/apply_cost_allocation_tags.py, infrastructure/sam/
 
 外部所有の共有KB・S3・検索基盤は、他システムへの影響と配賦方法が未確認のため対象外。IAM等の非課金メタデータも網羅していない。
 
+## 2026-10-20の追加確認（19件）
+
+> 最終検証: 2026-10-20 — 対象19件のProject・所有元・用途と新3キーをサービス別API / CloudFormationで再読取り。初期104件全表の再検証ではない。
+
+以下は#193の7スタックによるEnv削除の管理範囲外にあった19件を、ユーザー依頼で追加確認した記録。Ele-Knowledgeプロジェクトの対象外という意味ではない。初期台帳と重なる項目があり、104件へ19件を加算しない。
+
+全19件で `gyoumu012Project=ele-knowledge` と各表のComponent / Usageを確認した。18件は付与済みで、法令KBスタック1件だけに新3キーを追加した。旧Envは保持。KBとデータソースの設定・実体IDも不変で、請求側の有効化は未確認。詳細な適用経緯・検証境界・残作業の正本は[運用文書の実施記録](ops-cost-allocation-tags.md#2026-10-20のaws反映追加確認)。
+
+| 台帳ID | サービス | リソース識別名 | Component | Usage | 今回の確認 |
+|---|---|---|---|---|---|
+| `CT-edcf1bb2d324` | Amplify | Ele-Knowledge-dev（Amplifyアプリ） | `shared` | `shared` | 既存の新3キーを再確認 |
+| `CT-f6be3f4015bc` | Bedrock | 法令KB（LawKnowledgeBase） | `legal-rag` | `development` | 既存の新3キーを再確認 |
+| `CT-cee204a7cdac` | Bedrock | 既存RAG推論プロファイル | `rag` | `shared` | 既存の新3キーを再確認 |
+| `CT-44f51944463b` | CloudFormation | eleknowledge-law-kb-dev（専用スタック） | `legal-rag` | `development` | 新3キーを追加・検証 |
+| `CT-b9f224e17792` | CloudWatch Logs | API Gateway実行ログ（認証） | `shared` | `shared` | 既存の新3キーを再確認 |
+| `CT-7be3fe80dea8` | CloudWatch Logs | API Gateway実行ログ（チャット） | `shared` | `shared` | 既存の新3キーを再確認 |
+| `CT-13c46e70e27c` | CloudWatch Logs | API Gateway実行ログ（お知らせ・集計） | `shared` | `shared` | 既存の新3キーを再確認 |
+| `CT-67abc58911bc` | CloudWatch Logs | API Gateway実行ログ（RAG） | `rag` | `shared` | 既存の新3キーを再確認 |
+| `CT-78115c6d9e1e` | CloudWatch Logs | Lambdaログ: EleKnowledge-dev-phase1-DomainGuardFunction-`<generated-suffix>` | `shared` | `shared` | 既存の新3キーを再確認 |
+| `CT-9a28b4e5cf49` | CloudWatch Logs | Lambdaログ: announcements-read-dev | `announcements` | `shared` | 既存の新3キーを再確認 |
+| `CT-71cb99ca2bb8` | CloudWatch Logs | Lambdaログ: announcements-write-dev | `announcements` | `shared` | 既存の新3キーを再確認 |
+| `CT-bd17e92448dc` | CloudWatch Logs | Lambdaログ: chat-dev | `shared` | `shared` | 既存の新3キーを再確認 |
+| `CT-24cad6a00566` | CloudWatch Logs | Lambdaログ: eleknowledge-chat-archive-dev | `shared` | `shared` | 既存の新3キーを再確認 |
+| `CT-53978b16ad91` | CloudWatch Logs | Lambdaログ: eleknowledge-cognito-domain-guard-dev | `shared` | `shared` | 既存の新3キーを再確認 |
+| `CT-9fdefb6e947c` | CloudWatch Logs | Lambdaログ: login-dev | `shared` | `shared` | 既存の新3キーを再確認 |
+| `CT-5d3aaeffe11d` | CloudWatch Logs | Lambdaログ: metrics-aggregator-dev | `monitoring` | `shared` | 既存の新3キーを再確認 |
+| `CT-0445c6b3f0b3` | CloudWatch Logs | Lambdaログ: metrics-read-dev | `monitoring` | `shared` | 既存の新3キーを再確認 |
+| `CT-ea7712fdc983` | CloudWatch Logs | Lambdaログ: rag-dev | `rag` | `shared` | 既存の新3キーを再確認 |
+| `CT-fc136daaf6e4` | S3 | 先輩チャット専用索引S3（実名非掲載） | `rag` | `development` | 既存の新3キーを再確認 |
+
+この表は対象19件の時点確認であり、法令KBの移行対象合意や全AWSリソースの棚卸しを兼ねない。ARNと台帳IDの対応、適用前後・再読取は未追跡の `eval-results/cost-tags/env193-20261020/` に保持した。
+
 ## 更新・差分確認の手順
 
 1. デプロイ後と月次に、運用文書の手順でAWSの計画・検証結果を新しいファイル名で取得する。失敗・未検証行を確認済みとして台帳へ取り込まない。

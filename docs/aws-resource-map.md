@@ -6,9 +6,9 @@ related-code: infrastructure/sam/, amplify.yml
 
 # AWS Resource Map
 
-> 最終検証: 2026-10-19 — コスト配分タグの説明とSAMが付与するタグを照合。リソース一覧全体は再検証していない。
+> 最終検証: 2026-10-20 — 冒頭のタグ説明と同日反映記録への案内を照合。リソース一覧全体は再検証していない。
 
-Cost allocation uses the three `gyoumu012` keys defined in [Cost allocation tag operations](ops-cost-allocation-tags.md). SAM templates no longer declare the legacy `Env` resource tag. AWS read-only inspection on 2026-10-19 found that existing deployed resources still retain `Env`; a stack update did not remove it. See the dated live-environment observation below.
+Cost allocation uses the three `gyoumu012` keys defined in [Cost allocation tag operations](ops-cost-allocation-tags.md). SAM templates no longer declare the legacy `Env` resource tag. The 2026-10-19 observation below is historical; the subsequent 2026-10-20 tag rollout and verification are recorded separately below.
 
 EleKnowledge resources are identified by tags, not by a shared name prefix:
 
@@ -50,9 +50,19 @@ This dated snapshot records deployed state; `UPDATE_COMPLETE` means the stack up
 | Lambda runtime | EleKnowledge application functions observed in the region use Python 3.13. | Other unrelated account functions use other runtimes; this is not an account-wide runtime statement. |
 | RAG model | Phase 2 CloudFormation parameter `BedrockModelId` was `global.anthropic.claude-sonnet-5`. | Matches the current model recorded in the runbook at inspection time. |
 | Amplify | App `Ele-Knowledge-dev` exists with platform `WEB`. | The app's presence does not verify the latest branch build or deployed frontend revision. |
-| Resource tags | Among 108 resources returned with `Project=EleKnowledge`, all 108 still had `Env`; 99 had each of `gyoumu012Project`, `gyoumu012Component`, and `gyoumu012Usage`. | Removing `Env` from templates does not remove that tag from existing resources. Nine resources in this result set lacked each new cost key. Do not mass-edit deployed tags as part of this documentation change. |
+| Resource tags | Among 108 resources returned with `Project=EleKnowledge`, all 108 still had `Env`; 99 had each of `gyoumu012Project`, `gyoumu012Component`, and `gyoumu012Usage`. | This is the 10/19 result set. Template edits alone do not change deployed tags; the explicit 10/20 stack updates and follow-up checks are recorded below. |
 
 The read was limited to `ap-northeast-1` and the active AWS profile. It did not validate CloudFront, WAF behavior, Bedrock invocation health, mail delivery, or user-facing E2E flows. Do not copy account IDs, ARNs, email addresses, or tag values beyond the documented project keys into this inventory.
+
+## Tag rollout verification (2026-10-20)
+
+> 最終検証: 2026-10-20 — 承認されたタグ変更セットと適用後の実読取り。コード・設定・実体ID・KB設定の保持を照合。機能E2E・請求有効化は未確認。
+
+PR #193's Env-tag removal was applied to the existing seven dev stacks; all reached `UPDATE_COMPLETE`. In the 110-resource verification set, all 75 resources with Env under those stacks had it removed, with no changes to other tags. The 19 remaining resources were outside those seven stacks, not outside the Ele-Knowledge project.
+
+A subsequent cost-tag check confirmed all three new keys on 18 of those 19 resources. The missing keys on the dedicated law KB stack were added through a tag-only CloudFormation change set. All 19 then passed the cost-tag check; their Env tags remain. These overlapping result sets are not a new account-wide inventory. The law KB tagging does not decide its migration scope.
+
+See [the authoritative operation record](ops-cost-allocation-tags.md#2026-10-20のaws反映追加確認) and [the resource register supplement](cost-allocation-resource-register.md#2026-10-20の追加確認19件). Billing activation remains unverified because `ListCostAllocationTags` was denied for the member account; resource tagging and billing activation are distinct.
 
 ## Phase 1 - Auth and Base Data
 

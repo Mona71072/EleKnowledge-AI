@@ -10,7 +10,7 @@ related-code: scripts/ops/apply_cost_allocation_tags.py, infrastructure/sam/
 
 ## 決定と適用範囲
 
-> 最終検証: 2026-10-19 — SAMテンプレート・samconfigのEnvタグ付与停止と、Environmentパラメータ維持を照合。AWS未適用。
+> 最終検証: 2026-10-20 — Envタグ付与停止・環境パラメーター維持と同日のAWS適用結果への案内を照合。
 
 2026-10-15、ユーザーが本会話で3軸の採用、AWS反映、文書化を依頼した。monaの口頭承諾はユーザー申告として記録する（承諾日そのものは未確認）。この記録はPRマージの許可を兼ねない。
 
@@ -28,7 +28,7 @@ related-code: scripts/ops/apply_cost_allocation_tags.py, infrastructure/sam/
 
 `Component=shared` と `Usage=shared` はそれぞれ機能間共用、利用区分間共用を意味する。未設定・帰属未確認を `shared` へ自動変換しない。`dev` というリソース名だけで `Usage=development` と判断しない。
 
-本アカウントは単一環境で、本番は別AWSアカウントへリリースするため、`Env` はコスト配分の軸に含めない。SAMテンプレートと `samconfig` から `Env` リソースタグ・スタックタグの付与をやめる。既存リソースのタグ状態は次回の通常スタック更新後に再読取して確認する。本変更ではAWSへ適用しない。SAMの `Environment` / `ProjectName` パラメータと、それらを使うリソース名・アプリ設定は維持する。
+本アカウントは単一環境で、本番は別AWSアカウントへリリースするため、`Env` はコスト配分の軸に含めない。SAMテンプレートと `samconfig` から `Env` リソースタグ・スタックタグの付与をやめる。SAMの `Environment` / `ProjectName` パラメータと、それらを使うリソース名・アプリ設定は維持する。2026-10-20のAWS適用範囲と残るタグは「2026-10-20のAWS反映・追加確認」を参照する。
 
 ## 初期分類と変更手順
 
@@ -62,7 +62,11 @@ python scripts/ops/apply_cost_allocation_tags.py --profile $profileName --expect
 
 ## コスト配分タグの有効化依頼
 
-リソースへのタグ付与と、請求へのタグ有効化は別作業である。2026-10-15の実査では、このメンバーアカウントから `ce:ListCostAllocationTags` は拒否された（Linked account doesn't have access to cost allocation tags）。有効化済みとは扱わない。
+> 最終検証: 2026-10-20 — 19:41 JSTのCost Explorer API照会とAWS公式の管理アカウント条件を照合。有効化状態そのものは取得不可。
+
+リソースへのタグ付与と、請求へのタグ有効化は別作業である。2026-10-15に続き、2026-10-20 19:41 JSTの `ce:ListCostAllocationTags` も `AccessDeniedException`（Linked account doesn't have access to cost allocation tags）だった。これは有効化状態を参照できないことを示し、無効であると判明したわけではない。
+
+AWS Organizationsのメンバーアカウントからは、管理者権限があってもコスト配分タグ管理画面を利用できない。管理アカウントへログインできる担当者が「請求とコスト管理」→「コスト配分タグ」で3キーの `Active` を確認する。管理アカウントへのアクセスがなければ管理部門へ確認する。タグ付与成功を有効化済み・請求データ反映済みの証拠にはしない。
 
 管理部門へ渡す依頼文（本タスクから送信はしない）:
 
@@ -75,11 +79,13 @@ python scripts/ops/apply_cost_allocation_tags.py --profile $profileName --expect
 
 ## 費用分離の限界と残作業
 
+> 最終検証: 2026-10-20 — この節のCloudFormationタグ反映方法と法令KBスタックへの適用記録を照合。他の費用分離・モデル経路の残作業は再検証していない。
+
 - 共用Lambda・API・S3等の開発／ユーザー利用はリソースタグだけでは分離できない。利用統計に基づく配賦、またはリソース分離が必要。配賦ルールは別途合意する。
 - BedrockはApplication Inference Profileへタグを付け、実際にそのプロファイルを呼び出す経路の推論費を追跡する。KB・Lambdaへのタグのみで全推論費を帰属済みとはしない。埋め込み・再ランキング・Agent等も呼出経路別に確認する。
 - 現在の `rag-dev` は `global.anthropic.claude-sonnet-5` を直接指定している。既存Application Inference Profileへ3タグを付けても、現在の生成推論費はそのプロファイルへ帰属しない。既存ランブック§7.2にはSCPによる利用拒否の記録があるため、今回はモデル・呼出経路・SCPを変更せず、従来のトークン数×単価による推計を継続する。SCP制約そのものは今回再現試験していない。
 - 既存の外部スタック所有KB・S3・検索基盤は、他システムの費用を含み得るため今回の一括タグ付与対象外とする。
-- CloudFormationスタック本体へのResource Groups Tagging APIによる変更は、更新処理を誘発する可能性があるため行わない。スタックタグは次回の通常デプロイで反映する。
+- CloudFormationスタック本体へのResource Groups Tagging APIによる変更は、更新処理を誘発する可能性があるため行わない。スタックタグは変更セットで適用範囲を確認して反映する。2026-10-20の法令KBスタックへの補完も、この方法で実施した。
 - タグ非対応・継承タグのみの子リソース、税・サポート等は3タグだけで全額を直接帰属できるとはしない。
 - プロジェクト予算・通知先・共用費の配賦方法は、タグ有効化と請求確認後に整備する。
 
@@ -108,11 +114,40 @@ Usage別は `shared` 90件、`development` 14件、`user` 0件。これはタグ
 
 PR作成時には最新developへ差分を移し、廃止済みの共有個人設定を復活させず `.example.toml` へタグを反映した。SAM・運用スクリプト・テストの変更は文書と分離した実装PRで管理し、ここに記載したAWSタグ付与の実施記録と、今後のIaC反映を区別する。
 
+## 2026-10-20のAWS反映・追加確認
+
+> 最終検証: 2026-10-20 — CloudFormation変更セット・適用後読取り、サービス別タグAPI、Cognito設定、Bedrock KB / データソース設定、保存済み実行証跡を照合。機能E2Eと請求側の有効化は未確認。
+
+ユーザーが本会話で#193のAWS適用を依頼した。続いて、残る19件もEle-Knowledgeリソースであれば新しいコストタグを付与するよう依頼した。検索対象や利用者の追加・除外、法令KBの移行対象決定を兼ねない。
+
+### #193の旧Envタグ削除
+
+Phase 1 / Phase 2 / アーカイブ / お知らせ・集計 / 監視 / WAF / トラブルシューティングの既存dev **7スタックすべてがUPDATE_COMPLETE**。適用後の検証は19:38 JSTまでに完了した。[#193のAWS反映記録](https://github.com/yukiworkspace/EleKnowledge-AI/pull/193#issuecomment-6289028676)も参照する。
+
+稼働中Originalテンプレートを基準にEnvタグだけを除き、既存パラメーター・Outputs・実体ID、LambdaのコードSHA・環境変数・モデル設定、DynamoDBのTTL・GSI、WAF設定を保持した。Cognito固有の `UserPoolTags` も反映し、タグ以外の認証設定が不変であることを実読取りで照合した。再package、データ移行、KB同期、IAM権限変更は行っていない。#195の機能反映でもない。
+
+既存110リソースのタグを照合し、このEnv削除では**Env以外のタグの変化0件**。照合対象のうち7スタック管理下でEnvがあった75件は、75件すべてで削除を確認した。残る19件は当該7スタックの管理範囲外であり、削除不要と判断したものではない。
+
+途中でPhase 2の日本語パラメーター説明文3か所の文字化けを検出して後続を停止した。ASCIIエスケープしたJSONで元の説明文を復元し、最終テンプレートの完全一致・稼働設定の不変を確認して再開した。以後の変更セットも、AWS側で保持された適用予定テンプレートが準備内容と一致することを実行前に確認した。
+
+### 残る19件の新3キー確認・補完
+
+対象は自動生成等のログ14件、法令KBとそのスタック2件、Amplify・既存推論プロファイル・先輩チャット専用索引S3が各1件。Projectタグ、所有スタック、用途と既存分類を照合し、Ele-Knowledge所有として確認した。
+
+**18件には新3キーが付与済みで、現在値も一致。** 不足していた `eleknowledge-law-kb-dev` スタック1件に、ユーザー依頼を受けて `gyoumu012Project=ele-knowledge` / `gyoumu012Component=legal-rag` / `gyoumu012Usage=development` を追加した。CloudFormationの `UsePreviousTemplate` と既存パラメーター保持でタグだけの変更セットを適用し、19:46 JSTにUPDATE_COMPLETEと読み戻しを確認した。KB・データソース設定、既存タグ、テンプレート、パラメーター、Outputs、実体IDは維持した。KB同期・データ取込はしていない。
+
+最終再照合で**19件すべてに新3キーが揃い、不足0件**。個別の用途と分類は[リソース別台帳の追加確認](cost-allocation-resource-register.md#2026-10-20の追加確認19件)を参照する。新タグ補完は旧Envの追加削除ではないため、この19件のEnvは残っている。請求側の有効化状況は引き続き未確認。
+
+110件はEnv削除後の照合母集団、19件はそこから切り出した追加確認対象、104件は10/15の初期台帳であり、相互に重なる。足し算して総リソース数や今回の新規付与件数にしない。
+
+変更前・変更セット・読み戻し・追加タグ照合の詳細はGit除外済みの `eval-results/cost-tags/env193-20261020/` に保存した。内部ARN・アカウント値・個人の認証設定を共有文書へ転記していない。台帳・マップ・ランブックはこの実施記録を参照し、請求の有効化確認は別の残作業として管理する。
+
 ## 一次情報
 
 - [AWS TagResources API](https://docs.aws.amazon.com/resourcegroupstagging/latest/APIReference/API_TagResources.html): リージョン制約、20件上限、部分失敗、CloudFormation更新の注意点。
 - [AWS SAM API](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-api.html): `PropagateTags` による生成リソースへのタグ伝播。
 - [コスト配分タグの有効化](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/activating-tags.html): リソースタグとは別の有効化作業。
+- [ユーザー定義コスト配分タグ](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/custom-tags.html): 管理アカウント・組織に属さない単独アカウントに限定される管理画面のアクセス条件。
 - [Bedrock inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles.html): 推論プロファイルによる推論費追跡。
 - [コスト配分タグのバックフィル](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/cost-allocation-backfill.html): 最大12か月と過去の付与条件。
 - AWS実査: STS、Resource Groups Tagging API（東京・バージニア・大阪）、Bedrock ListInferenceProfiles、Cost Explorer ListCostAllocationTags。

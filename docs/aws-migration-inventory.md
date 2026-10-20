@@ -6,7 +6,7 @@ related-code: infrastructure/sam/, amplify.yml
 
 # AWS Migration Inventory
 
-> 最終検証: 2026-10-19 — リソース識別タグをSAMの現行設定と照合。移行対象一覧は再検証していない。
+> 最終検証: 2026-10-20 — 冒頭のタグ説明と同日反映記録への案内を照合。移行対象一覧は再検証していない。
 
 EleKnowledge resources to recreate in the new AWS account on `ap-northeast-1`.
 Resource ownership should be identified with tags, not long names:
@@ -14,10 +14,16 @@ Resource ownership should be identified with tags, not long names:
 - `Project=EleKnowledge`
 - `ManagedBy=SAM`
 
-SAM templates no longer declare the legacy `Env` resource tag; the `Environment` parameter still selects the deployment environment. AWS read-only inspection on 2026-10-19 found `Env` still present on all 108 resources returned with `Project=EleKnowledge`, including after their stack updates. Of these, 99 had each of the three `gyoumu012` cost-allocation keys. Treat template tags and already-deployed resource tags as separate states; this inventory does not authorize bulk tag changes.
+SAM templates no longer declare the legacy `Env` resource tag; the `Environment` parameter still selects the deployment environment. The 2026-10-19 read found Env on 108 resources and each new cost key on 99 of that result set. These counts are historical; see the dated follow-up below for the explicit 10/20 updates. This inventory does not authorize bulk tag changes.
 
 Use [AWS Migration Runbook](aws-migration-runbook.md) for the end-to-end deployment and verification procedure.
 See [AWS Resource Map](aws-resource-map.md) for the resource name, component type, and purpose table.
+
+## Tag follow-up (2026-10-20)
+
+> 最終検証: 2026-10-20 — タグ適用・読み戻し証跡と移行範囲の未決事項を照合。移行対象一覧全体は再検証していない。
+
+The seven existing dev stacks corresponding to PR #193 completed Env-tag removal. The 19 resources outside those stacks were also checked for the new cost keys, and the dedicated law KB stack's missing keys were added. This cost-tag assignment is not approval to add the law KB, its data, or other resources to the migration scope. Keep the scope review in the next section pending. See [the operation record](ops-cost-allocation-tags.md#2026-10-20のaws反映追加確認) for counts, preservation checks, remaining Env tags, and unverified billing activation.
 
 ## Migration Target
 
