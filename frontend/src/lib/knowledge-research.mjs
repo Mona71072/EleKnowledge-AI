@@ -290,7 +290,7 @@ function cleanKnowhow(value) {
   };
 }
 
-function normalizeResponse(data, mode, query, receivedAt, expectedSessionId, includeKnowhow) {
+function normalizeResponse(data, mode, query, receivedAt, expectedSessionId, includeKnowhow, senpaiConversationId, senpaiTurnId) {
   if (!data || typeof data !== 'object' || Array.isArray(data)
     || typeof data.content !== 'string'
     || !RESPONSE_TYPES.has(data.responseType)
@@ -316,6 +316,10 @@ function normalizeResponse(data, mode, query, receivedAt, expectedSessionId, inc
   if (expectedSessionId !== undefined && data.sessionId !== expectedSessionId) {
     fail('invalid_response', '会話の識別情報が一致しないため、続きの回答を表示できません');
   }
+  if (senpaiConversationId !== undefined
+    && (data.senpaiConversationId !== senpaiConversationId || data.senpaiTurnId !== senpaiTurnId)) {
+    fail('invalid_response', '相談履歴の識別情報が一致しないため、回答を表示できません');
+  }
   return {
     mode,
     query,
@@ -328,8 +332,30 @@ function normalizeResponse(data, mode, query, receivedAt, expectedSessionId, inc
     sourceDocuments: data.sourceDocuments.map((item) => cleanSource(item, mode)),
     pageCandidates: data.pageCandidates.map((item) => cleanSource(item, mode)),
     clarifyQuestions: [...data.clarifyQuestions],
+    ...(senpaiConversationId !== undefined ? { senpaiConversationId, senpaiTurnId } : {}),
     ...(includeKnowhow ? { knowhow } : {}),
   };
+}
+
+/** Normalize a persisted assistant record through the same citation and Markdown checks as live RAG. */
+export function normalizeStoredResearchAnswer({ record, mode, query, conversationId, turnId }) {
+  if (!record || typeof record !== 'object' || (mode !== 'normal' && mode !== 'law')
+    || typeof conversationId !== 'string' || typeof turnId !== 'string') {
+    fail('invalid_response', '保存された回答の形式を確認できませんでした');
+  }
+  const includeKnowhow = Object.hasOwn(record, 'knowhow');
+  if (includeKnowhow && mode !== 'normal') fail('invalid_response', '保存された回答の形式を確認できませんでした');
+  const receivedAt = validIsoTimestamp(record.timestamp) || new Date().toISOString();
+  const normalizedRecord = { ...record };
+  for (const field of ['sourceDocuments', 'pageCandidates', 'clarifyQuestions']) {
+    if (!Object.hasOwn(record, field)) normalizedRecord[field] = [];
+  }
+  const answer = normalizeResponse({
+    ...normalizedRecord,
+    aiMessageId: normalizedRecord.aiMessageId || normalizedRecord.messageId,
+  }, mode, query, receivedAt, record.sessionId, includeKnowhow, conversationId, turnId);
+  if (answer.messageId !== record.messageId) fail('invalid_response', '保存された回答の識別情報が一致しません');
+  return answer;
 }
 
 /**
@@ -337,7 +363,7 @@ function normalizeResponse(data, mode, query, receivedAt, expectedSessionId, inc
  * The Markdown and any local metadata are deliberately not accepted by this API.
  * @param {{baseUrl:string, getToken:()=>Promise<string|null|undefined>, fetchImpl?:typeof fetch, mode:'normal'|'law', query:string, sessionId?:string, signal?:AbortSignal, timeoutMs?:number, includeKnowhow?:boolean}} options
  */
-export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS, includeKnowhow }) {
+export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS, includeKnowhow, senpaiConversationId, senpaiTurnId }) {
   const endpoint = safeEndpoint(baseUrl);
   const normalizedQuery = validateQuery(query, mode);
   if (includeKnowhow !== undefined && typeof includeKnowhow !== 'boolean') {
@@ -345,6 +371,12 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
   }
   if (includeKnowhow === true && mode !== 'normal') {
     fail('validation', 'ノウハウMarkdown検索は技術KBでのみ利用できます');
+  }
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+  if ((senpaiConversationId === undefined) !== (senpaiTurnId === undefined)
+    || (senpaiConversationId !== undefined
+      && (!UUID.test(senpaiConversationId) || !UUID.test(senpaiTurnId)))) {
+    fail('validation', '相談履歴の識別情報を確認してください');
   }
   if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId.trim()
     || sessionId.length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(sessionId))) {
@@ -395,7 +427,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
         response = await fetchImpl(`${endpoint}/rag/query`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: normalizedQuery, mode, filters: {}, ...(sessionId !== undefined ? { sessionId } : {}), ...(includeKnowhow === true ? { includeKnowhow: true } : {}) }),
+          body: JSON.stringify({ query: normalizedQuery, mode, filters: {}, ...(sessionId !== undefined ? { sessionId } : {}), ...(includeKnowhow === true ? { includeKnowhow: true } : {}), ...(senpaiConversationId !== undefined ? { senpaiConversationId, senpaiTurnId } : {}) }),
           signal: controller.signal,
         });
       } catch {
@@ -421,7 +453,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
       } catch {
         fail('invalid_response', '検索結果の形式を確認できませんでした');
       }
-      return normalizeResponse(data, mode, normalizedQuery, receivedAt, sessionId, includeKnowhow === true);
+      return normalizeResponse(data, mode, normalizedQuery, receivedAt, sessionId, includeKnowhow === true, senpaiConversationId, senpaiTurnId);
     })();
     return await Promise.race([operation, interruption]);
   } catch (error) {

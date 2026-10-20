@@ -566,11 +566,25 @@ def enqueue_session_title(session_id: str, message_id: str, user_id: str, query:
     except Exception as error:  # noqa: BLE001
         print(f"[rag] stage=session_title_enqueue {telemetry._exception_label(error)}")
 
+
+def _dynamodb_compatible(value):
+    """Copy JSON-like payloads while converting floats rejected by DynamoDB."""
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {key: _dynamodb_compatible(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_dynamodb_compatible(item) for item in value]
+    return value
+
+
 def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: str,
                              citations: list = None, source_documents: list = None,
                              response_type: str = None, page_candidates: list = None,
                              clarify_questions: list = None, query_filters: dict = None,
-                             session_title: str = None, rag_mode: str = 'normal'):
+                             session_title: str = None, rag_mode: str = 'normal',
+                             senpai_conversation_id: str = None, senpai_turn_id: str = None,
+                             knowhow: dict = None):
     """Save message to DynamoDB with TTL.
 
     responseType / pageCandidates / clarifyQuestions / queryFilters も保存し、
@@ -593,31 +607,48 @@ def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: 
     # 日別集計用（metricDay / metricDayShard。GSI metricDayShard-timestamp-index）。timestamp と同じ時刻から導く
     item.update(chatlog_metric_keys.metric_day_keys(now_utc, message_id))
     
+    try:
+        valid_senpai_tags = (
+            isinstance(senpai_conversation_id, str)
+            and isinstance(senpai_turn_id, str)
+            and str(uuid.UUID(senpai_conversation_id)) == senpai_conversation_id.lower()
+            and str(uuid.UUID(senpai_turn_id)) == senpai_turn_id.lower()
+        )
+    except (ValueError, AttributeError, TypeError):
+        valid_senpai_tags = False
+    tagged_assistant = role == 'assistant' and valid_senpai_tags
+
     if citations:
         item['citations'] = citations
     
-    if source_documents:
-        item['sourceDocuments'] = source_documents
+    if source_documents or tagged_assistant:
+        item['sourceDocuments'] = source_documents or []
 
     if response_type:
         item['responseType'] = response_type
-    if page_candidates:
+    if page_candidates or tagged_assistant:
         # DynamoDB は float 不可 → Decimal
         normalized = []
-        for c in page_candidates:
+        for c in page_candidates or []:
             row = dict(c)
             if 'relevance' in row and row['relevance'] is not None:
                 row['relevance'] = Decimal(str(row['relevance']))
             normalized.append(row)
         item['pageCandidates'] = normalized
-    if clarify_questions:
-        item['clarifyQuestions'] = clarify_questions
+    if clarify_questions or tagged_assistant:
+        item['clarifyQuestions'] = clarify_questions or []
     if query_filters is not None:
         # 失敗一覧・ゴールデン候補用（空 filters も「未指定」として残す）
         item['queryFilters'] = query_filters
     if session_title:
         # 履歴一覧の見出し。生成は最初のやりとりだけなので、その1件に持たせる
         item['sessionTitle'] = session_title
+    if valid_senpai_tags:
+        item['senpaiConversationId'] = senpai_conversation_id
+        item['senpaiTurnId'] = senpai_turn_id
+    if knowhow is not None and role == 'assistant' and valid_senpai_tags:
+        # Preserve the exact retrieval payload/version used for this saved answer.
+        item['knowhow'] = _dynamodb_compatible(knowhow)
 
     chatlogs_table.put_item(Item=item)
     return message_id
@@ -2191,6 +2222,53 @@ def get_session_rag_mode(session_id: str) -> str | None:
     return None
 
 
+def get_session_senpai_conversation_id(session_id: str) -> tuple[bool, str | None]:
+    """Return whether a session is tagged and its single consistent conversation ID."""
+    tagged = False
+    conversation_ids = set()
+    malformed = False
+    exclusive_start_key = None
+    for _page_number in range(25):
+        query = {
+            'KeyConditionExpression': 'sessionId = :sid',
+            'ExpressionAttributeValues': {':sid': session_id},
+            'Limit': 500,
+        }
+        if exclusive_start_key:
+            query['ExclusiveStartKey'] = exclusive_start_key
+        response = chatlogs_table.query(**query)
+        if not isinstance(response, dict):
+            return False, None
+        for item in response.get('Items', []):
+            has_conversation = 'senpaiConversationId' in item
+            has_turn = 'senpaiTurnId' in item
+            if not has_conversation and not has_turn:
+                continue
+            tagged = True
+            value = item.get('senpaiConversationId')
+            turn_id = item.get('senpaiTurnId')
+            try:
+                if (
+                    not has_conversation or not has_turn
+                    or str(uuid.UUID(value)) != value.lower()
+                    or str(uuid.UUID(turn_id)) != turn_id.lower()
+                ):
+                    malformed = True
+                else:
+                    conversation_ids.add(value)
+            except (ValueError, AttributeError, TypeError):
+                malformed = True
+        exclusive_start_key = response.get('LastEvaluatedKey')
+        if not exclusive_start_key:
+            break
+    else:
+        # Truncation cannot establish whether this is a legacy or tagged session.
+        return True, None
+    if malformed or len(conversation_ids) > 1:
+        return True, None
+    return tagged, next(iter(conversation_ids), None)
+
+
 def get_chat_history(session_id: str, limit: int = 10, mode: str = 'normal') -> list:
     """Get recent chat history for this mode (legacy messages are normal).
 
@@ -2356,6 +2434,39 @@ def handle_rag_request(event, context, started_at):
                 }, ensure_ascii=False),
             }
 
+        has_senpai_conversation_id = 'senpaiConversationId' in body
+        has_senpai_turn_id = 'senpaiTurnId' in body
+        if has_senpai_conversation_id != has_senpai_turn_id:
+            return validation_error('senpaiConversationId and senpaiTurnId must be provided together')
+        senpai_conversation_id = body.get('senpaiConversationId')
+        senpai_turn_id = body.get('senpaiTurnId')
+        senpai_tagged = has_senpai_conversation_id
+        if senpai_tagged:
+            try:
+                valid_ids = all(
+                    isinstance(value, str) and str(uuid.UUID(value)) == value.lower()
+                    for value in (senpai_conversation_id, senpai_turn_id)
+                )
+            except (ValueError, AttributeError, TypeError):
+                valid_ids = False
+            if not valid_ids:
+                return validation_error('Senpai identifiers must be UUIDs')
+            if ENVIRONMENT != 'dev' or not is_admin_caller(event):
+                return {
+                    'statusCode': 403,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'FeatureUnavailable',
+                        'message': '先輩チャットは開発環境の管理者のみ利用できます',
+                    }, ensure_ascii=False),
+                }
+            if requested_mode in ('normal', 'spec') and not include_knowhow:
+                return validation_error('includeKnowhow is required for tagged normal requests')
+        senpai_response_fields = (
+            {'senpaiConversationId': senpai_conversation_id, 'senpaiTurnId': senpai_turn_id}
+            if senpai_tagged else {}
+        )
+
         if requested_mode == 'law' and not law_rag_is_enabled(
             ENVIRONMENT, LAW_RAG_ENABLED, LAW_KNOWLEDGE_BASE_ID
         ):
@@ -2436,6 +2547,19 @@ def handle_rag_request(event, context, started_at):
                         'message': 'このチャットモードでは既存セッションを再利用できません',
                     }, ensure_ascii=False),
                 }
+            stored_tagged, stored_conversation_id = get_session_senpai_conversation_id(session_id)
+            if (
+                (senpai_tagged and (not stored_tagged or stored_conversation_id != senpai_conversation_id))
+                or (not senpai_tagged and stored_tagged)
+            ):
+                return {
+                    'statusCode': 409,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'SenpaiConversationMismatch',
+                        'message': 'このセッションは別の相談に属しています',
+                    }, ensure_ascii=False),
+                }
 
         # Get chat history for context
         chat_history = get_chat_history(session_id, limit=5, mode=mode)
@@ -2497,6 +2621,8 @@ def handle_rag_request(event, context, started_at):
             user_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='user', content=query,
                 rag_mode=mode,
+                senpai_conversation_id=senpai_conversation_id if senpai_tagged else None,
+                senpai_turn_id=senpai_turn_id if senpai_tagged else None,
             )
             if not chat_history:
                 enqueue_session_title(session_id, user_message_id, user_id, query)
@@ -2506,12 +2632,16 @@ def handle_rag_request(event, context, started_at):
                 clarify_questions=clarify_questions,
                 query_filters=filters or {},
                 rag_mode=mode,
+                senpai_conversation_id=senpai_conversation_id if senpai_tagged else None,
+                senpai_turn_id=senpai_turn_id if senpai_tagged else None,
+                knowhow=knowhow_payload,
             )
             return {
                 'statusCode': 200,
                 'headers': headers,
                 'body': json.dumps({
                     'sessionId': session_id,
+                    **senpai_response_fields,
                     'sessionTitle': session_title,
                     'userMessageId': user_message_id,
                     'aiMessageId': ai_message_id,
@@ -2610,6 +2740,8 @@ def handle_rag_request(event, context, started_at):
             user_message_id = save_message_to_dynamodb(
                 session_id=session_id, user_id=user_id, role='user', content=query,
                 rag_mode=mode,
+                senpai_conversation_id=senpai_conversation_id if senpai_tagged else None,
+                senpai_turn_id=senpai_turn_id if senpai_tagged else None,
             )
             if not chat_history:
                 enqueue_session_title(session_id, user_message_id, user_id, query)
@@ -2619,6 +2751,9 @@ def handle_rag_request(event, context, started_at):
                 response_type=response_type, page_candidates=page_candidates,
                 query_filters=filters or {},
                 rag_mode=mode,
+                senpai_conversation_id=senpai_conversation_id if senpai_tagged else None,
+                senpai_turn_id=senpai_turn_id if senpai_tagged else None,
+                knowhow=knowhow_payload,
             )
             for doc in source_documents:
                 doc['relevance'] = float(doc['relevance'])
@@ -2627,6 +2762,7 @@ def handle_rag_request(event, context, started_at):
                 'headers': headers,
                 'body': json.dumps({
                     'sessionId': session_id,
+                    **senpai_response_fields,
                     'sessionTitle': session_title,
                     'userMessageId': user_message_id,
                     'aiMessageId': ai_message_id,
@@ -2685,6 +2821,8 @@ def handle_rag_request(event, context, started_at):
             role='user',
             content=query,
             rag_mode=mode,
+            senpai_conversation_id=senpai_conversation_id if senpai_tagged else None,
+            senpai_turn_id=senpai_turn_id if senpai_tagged else None,
         )
         if not chat_history:
             enqueue_session_title(session_id, user_message_id, user_id, query)
@@ -2700,6 +2838,9 @@ def handle_rag_request(event, context, started_at):
             page_candidates=page_candidates,
             query_filters=filters or {},
             rag_mode=mode,
+            senpai_conversation_id=senpai_conversation_id if senpai_tagged else None,
+            senpai_turn_id=senpai_turn_id if senpai_tagged else None,
+            knowhow=knowhow_payload,
         )
 
         for doc in source_documents:
@@ -2710,6 +2851,7 @@ def handle_rag_request(event, context, started_at):
             'headers': headers,
             'body': json.dumps({
                 'sessionId': session_id,
+                **senpai_response_fields,
                 'sessionTitle': session_title,
                 'userMessageId': user_message_id,
                 'aiMessageId': ai_message_id,

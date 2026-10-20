@@ -204,7 +204,7 @@ test('dispose aborts pending work and prevents later change notifications', asyn
 });
 
 test('uses one stable conversation UUID and a distinct turn UUID pair on every send', async () => {
-  const ids = ['10000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000002'];
+  const ids = ['10000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000002', '30000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000001'];
   const calls = [];
   const chat = createSenpaiChat({
     createId: () => ids.shift(),
@@ -225,7 +225,7 @@ test('uses one stable conversation UUID and a distinct turn UUID pair on every s
   assert.deepEqual(calls.map((call) => call.senpaiTurnId), [snapshot.turns[0].senpaiTurnId, snapshot.turns[0].senpaiTurnId, snapshot.turns[1].senpaiTurnId, snapshot.turns[1].senpaiTurnId]);
   chat.reset();
   await chat.send('新規相談');
-  assert.equal(chat.getSnapshot().conversationId, '20000000-0000-4000-8000-000000000001');
+  assert.equal(chat.getSnapshot().conversationId, '30000000-0000-4000-8000-000000000001');
   chat.dispose();
 });
 
@@ -246,8 +246,8 @@ test('restores complete history with separate lane sessions and refuses incomple
       id: 1,
       senpaiTurnId: '20000000-0000-4000-8000-000000000001',
       query: '保存済みの質問',
-      normal: { status: 'success', answer: answer('normal', 'normal-restored', '保存済みの質問') },
-      law: { status: 'success', answer: answer('law', 'law-restored', '保存済みの質問') },
+      normal: { status: 'success', answer: { ...answer('normal', 'normal-restored', '保存済みの質問'), senpaiConversationId: conversationId, senpaiTurnId: '20000000-0000-4000-8000-000000000001' } },
+      law: { status: 'success', answer: { ...answer('law', 'law-restored', '保存済みの質問'), senpaiConversationId: conversationId, senpaiTurnId: '20000000-0000-4000-8000-000000000001' } },
     }],
   });
   assert.equal(chat.getSnapshot().conversationId, conversationId);
@@ -255,7 +255,60 @@ test('restores complete history with separate lane sessions and refuses incomple
   assert.deepEqual(calls.map((call) => call.sessionId), ['normal-restored', 'law-restored']);
   assert.ok(calls.every((call) => call.senpaiConversationId === conversationId));
 
-  assert.throws(() => chat.restore({ conversationId, complete: false, turns: [] }), (error) => error.code === 'validation');
+  chat.restore({ conversationId, complete: false, turns: [] });
+  assert.equal(chat.getSnapshot().complete, false);
   await assert.rejects(chat.send('不完全履歴からの送信'), (error) => error.code === 'validation');
+  chat.dispose();
+});
+
+test('restores a missing lane as paused while the healthy lane continues independently', async () => {
+  const calls = [];
+  const conversationId = '10000000-0000-4000-8000-000000000001';
+  const turnId = '20000000-0000-4000-8000-000000000001';
+  const chat = createSenpaiChat({
+    createId: () => '30000000-0000-4000-8000-000000000001',
+    querySource: async (request) => {
+      calls.push(request);
+      return answer(request.mode, request.sessionId || `${request.mode}-restored`, request.query);
+    },
+  });
+  chat.restore({
+    conversationId, complete: true,
+    turns: [
+      {
+        id: 1, senpaiTurnId: turnId, query: '前の保存済み質問',
+        normal: { status: 'success', answer: { ...answer('normal', 'normal-session', '前の保存済み質問'), senpaiConversationId: conversationId, senpaiTurnId: turnId } },
+        law: { status: 'success', answer: { ...answer('law', 'law-session', '前の保存済み質問'), senpaiConversationId: conversationId, senpaiTurnId: turnId } },
+      },
+      {
+        id: 2, senpaiTurnId: '20000000-0000-4000-8000-000000000002', query: '最後の保存済み質問',
+        normal: { status: 'success', answer: { ...answer('normal', 'normal-session', '最後の保存済み質問'), senpaiConversationId: conversationId, senpaiTurnId: '20000000-0000-4000-8000-000000000002' } },
+        law: { status: 'paused', message: '法令KBの回答は保存されていません' },
+      },
+    ],
+  });
+  await chat.send('技術KBで続ける質問');
+  assert.deepEqual(calls.map(({ mode, sessionId }) => ({ mode, sessionId })), [{ mode: 'normal', sessionId: 'normal-session' }]);
+  assert.equal(chat.getSnapshot().turns[2].law.status, 'paused');
+  chat.dispose();
+});
+
+test('rejects restored histories with duplicate turn UUIDs or colliding mode sessions', () => {
+  const conversationId = '10000000-0000-4000-8000-000000000001';
+  const firstId = '20000000-0000-4000-8000-000000000001';
+  const restoredTurn = (id, senpaiTurnId, normalSession, lawSession, query) => ({
+    id, senpaiTurnId, query,
+    normal: { status: 'success', answer: { ...answer('normal', normalSession, query), senpaiConversationId: conversationId, senpaiTurnId } },
+    law: { status: 'success', answer: { ...answer('law', lawSession, query), senpaiConversationId: conversationId, senpaiTurnId } },
+  });
+  const chat = createSenpaiChat({ querySource: async () => answer('normal', 'session') });
+  assert.throws(() => chat.restore({
+    conversationId, complete: true,
+    turns: [restoredTurn(1, firstId, 'normal-session', 'law-session', '質問1'), restoredTurn(2, firstId, 'normal-session', 'law-session', '質問2')],
+  }), (error) => error.code === 'validation');
+  assert.throws(() => chat.restore({
+    conversationId, complete: true,
+    turns: [restoredTurn(1, firstId, 'shared-session', 'shared-session', '質問1')],
+  }), (error) => error.code === 'validation');
   chat.dispose();
 });

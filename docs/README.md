@@ -54,4 +54,6 @@ docs/ops-ai-driven-dev.md    AIを用いた開発の共同運用
 
 技術KB・法令KBを調べながら編集する開発版は[工技先輩の照合画面](features/development/knowledge-research-workspace.md)へ。実検索の接続確認と、ローカルHTTPテストダブルによる画面検証を区別して記録する。
 
+先輩チャットは通常チャットと同様に左側の相談履歴から開き直せる構成とする。履歴対応にはフロントに加え、RAGとchat-managementの両Lambdaの更新が必要である。[相談履歴の契約](features/development/knowledge-research-workspace.md#先輩チャットの相談履歴)を参照する。
+
 先輩チャットからの自動探索は[Markdown検索の実装範囲](features/development/knowledge-markdown-retrieval.md)を参照する。取込対象の版・ハッシュを固定した一覧と、サーバー側の管理者認可を用い、カード全件を静的画面へ埋め込まない。

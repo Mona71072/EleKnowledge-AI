@@ -77,12 +77,24 @@ export type ResearchAnswer = {
   clarifyQuestions: string[];
   /** Present only when the caller explicitly requested Markdown retrieval. */
   knowhow?: ResearchKnowhow;
+  /** Present only for Senpai history requests. */
+  senpaiConversationId?: string;
+  /** Present only for Senpai history requests. */
+  senpaiTurnId?: string;
 };
 
 export class KnowledgeResearchError extends Error {
   readonly code: KnowledgeResearchErrorCode;
   constructor(code: KnowledgeResearchErrorCode, message: string);
 }
+
+export function normalizeStoredResearchAnswer(options: {
+  record: Record<string, unknown>;
+  mode: KnowledgeResearchMode;
+  query: string;
+  conversationId: string;
+  turnId: string;
+}): ResearchAnswer;
 
 export function queryKnowledgeSource(options: {
   baseUrl: string;
@@ -96,6 +108,9 @@ export function queryKnowledgeSource(options: {
   timeoutMs?: number;
   /** Retrieve the server-authorized Markdown index for normal mode only. */
   includeKnowhow?: boolean;
+  /** Paired UUID tags used only by the Senpai conversation. */
+  senpaiConversationId?: string;
+  senpaiTurnId?: string;
 }): Promise<ResearchAnswer>;
 
 export function researchSourceHref(

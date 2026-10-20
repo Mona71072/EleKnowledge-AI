@@ -155,9 +155,6 @@ test('sends paired Senpai history UUIDs only when supplied and requires the resp
   assert.equal(body.senpaiTurnId, turnId);
   assert.equal(answer.senpaiConversationId, conversationId);
   assert.equal(answer.senpaiTurnId, turnId);
-  assert.deepEqual(JSON.parse(JSON.stringify({ query: 'ordinary', mode: 'normal', filters: {} })), {
-    query: 'ordinary', mode: 'normal', filters: {},
-  });
   for (const overrides of [
     { senpaiConversationId: conversationId },
     { senpaiTurnId: turnId },

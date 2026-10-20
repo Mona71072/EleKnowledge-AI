@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSenpaiHistory } from '@/hooks/useSenpaiHistory';
+import { SenpaiConversationSidebar } from './SenpaiConversationSidebar';
 import { getIdToken } from '@/lib/auth-helpers';
 import { createSenpaiChat, type SenpaiChatController, type SenpaiChatLane, type SenpaiChatSnapshot } from '@/lib/knowledge-senpai-chat.mjs';
 import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
@@ -24,11 +26,13 @@ function useController(
     let mounted = true;
     mountedRef.current = true;
     const controller = createSenpaiChat({
-      querySource: ({ mode, query, sessionId, signal }) => queryKnowledgeSource({
+      querySource: ({ mode, query, sessionId, senpaiConversationId, senpaiTurnId, signal }) => queryKnowledgeSource({
         baseUrl: process.env.NEXT_PUBLIC_RAG_API_URL || '',
         getToken: getIdToken,
         mode,
         query,
+        senpaiConversationId,
+        senpaiTurnId,
         ...(sessionId ? { sessionId } : {}),
         ...(mode === 'normal' ? { includeKnowhow: true } : {}),
         signal,
@@ -75,7 +79,7 @@ function KnowhowReferences({ answer }: { answer: import('@/lib/knowledge-researc
   return (
     <section aria-label="参照したノウハウMarkdown" className="rounded-lg border border-violet-200 bg-violet-50/70 p-3">
       <h5 className="text-xs font-semibold text-violet-950">参照したノウハウMarkdown</h5>
-      <p className="mt-1 text-xs leading-5 text-violet-950">サーバーで検索が許可されたノウハウMarkdownから、関連する候補を見つけました。これは探索の手掛かりで、技術的な根拠や承認を示しません。</p>
+      <p className="mt-1 text-xs leading-5 text-violet-950">サーバーで検索が許可されたノウハウMarkdownから、関連する候補を見つけました。記載の版・状態はこの回答時点のものです。これは探索の手掛かりで、技術的な根拠や承認を示しません。</p>
       <ul className="mt-2 space-y-3">
         {knowhow.matches.map((match) => (
           <li key={`${match.knowledgeId}-${match.cardVersion}`} className="rounded-md border border-violet-100 bg-white p-3 text-xs text-gray-800">
@@ -205,6 +209,7 @@ export function KnowledgeSenpaiChat() {
   const [snapshot, setSnapshot] = useState<SenpaiChatSnapshot>(EMPTY_SNAPSHOT);
   const [question, setQuestion] = useState('');
   const [sendError, setSendError] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const controllerRef = useRef<SenpaiChatController | null>(null);
   const mountedRef = useRef(false);
   const requestIdRef = useRef(0);
@@ -212,6 +217,7 @@ export function KnowledgeSenpaiChat() {
   const nearBottomRef = useRef(true);
   const scrollAfterSendRef = useRef(false);
   useController(setSnapshot, controllerRef, mountedRef);
+  const history = useSenpaiHistory(snapshot, controllerRef);
   useEffect(() => {
     const transcript = transcriptRef.current;
     if (!transcript) return;
@@ -222,13 +228,13 @@ export function KnowledgeSenpaiChat() {
     scrollAfterSendRef.current = false;
   }, [snapshot]);
   const latestTurn = snapshot.turns.at(-1);
-  const continuationPaused = !snapshot.running && Boolean(latestTurn)
-    && [latestTurn!.normal, latestTurn!.law].every((lane) => lane.status !== 'success');
+  const continuationPaused = snapshot.complete === false || (!snapshot.running && Boolean(latestTurn)
+    && [latestTurn!.normal, latestTurn!.law].every((lane) => lane.status !== 'success'));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const query = question.trim();
-    if (!query || snapshot.running || continuationPaused || !controllerRef.current) return;
+    if (!query || snapshot.running || continuationPaused || history.opening || !controllerRef.current) return;
     const controller = controllerRef.current;
     const requestId = ++requestIdRef.current;
     setSendError('');
@@ -246,10 +252,25 @@ export function KnowledgeSenpaiChat() {
 
   function startNewChat() {
     requestIdRef.current += 1;
+    history.resetSelection();
     controllerRef.current?.reset();
     setQuestion('');
     setSendError('');
     setSnapshot(EMPTY_SNAPSHOT);
+    setSidebarOpen(false);
+  }
+
+  function openSavedChat(conversationId: string) {
+    if (conversationId === snapshot.conversationId && !history.opening) {
+      setSidebarOpen(false);
+      return;
+    }
+    requestIdRef.current += 1;
+    setQuestion('');
+    setSendError('');
+    setSidebarOpen(false);
+    nearBottomRef.current = true;
+    void history.openConversation(conversationId);
   }
 
   function cancelSearch() {
@@ -258,18 +279,24 @@ export function KnowledgeSenpaiChat() {
   }
 
   return (
-    <section aria-label="先輩チャット" className="mx-auto flex h-[calc(100dvh-6rem)] min-h-[24rem] max-h-[56rem] max-w-6xl flex-col overflow-hidden rounded-2xl border border-violet-200 bg-white shadow-sm">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gradient-to-r from-violet-50 to-indigo-50 px-4 py-4 sm:px-6">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">先輩チャット</h1>
-          <p className="mt-1 text-sm text-gray-600">サーバーで検索が許可されたノウハウMarkdownを参考に技術KBを調べ、法令KBにも質問します。会話を続けながら回答と出典を確認できます。</p>
+    <section aria-label="先輩チャット" className="flex h-dvh min-h-[24rem] flex-col overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white px-4 py-2.5 shadow-sm sm:px-6">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <button type="button" aria-label="履歴を開く" aria-controls="senpai-history" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 md:hidden"><svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg></button>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 text-white" aria-hidden="true">先</span>
+          <div><p className="hidden text-lg font-bold leading-tight text-gray-900 sm:block">EleKnowledge</p><h1 className="text-sm font-semibold text-gray-900 sm:text-xs sm:font-normal sm:text-gray-500">先輩チャット</h1></div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-xs font-semibold text-violet-900">開発中・管理者限定</span>
-          <Link href="/admin/knowledge/research" className="text-xs font-semibold text-violet-800 underline underline-offset-2">ノウハウの確認・編集</Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="hidden rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-900 sm:inline">開発中・管理者限定</span>
+          <Link href="/admin/knowledge/research" aria-label="ノウハウの確認・編集" className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-semibold text-violet-800"><span className="hidden sm:inline">ノウハウの確認・編集</span><span className="sm:hidden">編集</span></Link>
+          <Link href="/" aria-label="ホームへ戻る" className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"><span className="hidden sm:inline">ホームへ戻る</span><span className="sm:hidden">ホーム</span></Link>
         </div>
       </header>
-
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <SenpaiConversationSidebar open={sidebarOpen} entries={history.entries} selectedId={snapshot.conversationId} loading={history.loading} error={history.error} complete={history.complete} onNew={startNewChat} onSelect={openSavedChat} onClose={() => setSidebarOpen(false)} onRetry={history.refresh} />
+        <main className="flex min-w-0 flex-1 flex-col">
+          {history.openError && <p role="alert" className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{history.openError}</p>}
+          {history.opening && <p role="status" className="border-b border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900">相談履歴を開いています…</p>}
       <div ref={transcriptRef} onScroll={(event) => {
         const transcript = event.currentTarget;
         nearBottomRef.current = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 80;
@@ -277,12 +304,12 @@ export function KnowledgeSenpaiChat() {
         {snapshot.turns.length === 0 ? (
           <div className="mx-auto max-w-2xl rounded-2xl border border-dashed border-violet-200 bg-violet-50/60 p-6 text-center">
             <h2 className="text-base font-semibold text-gray-900">どんなことを調べますか？</h2>
-            <p className="mt-2 text-sm leading-6 text-gray-600">質問すると、サーバーの許可済みノウハウMarkdownを参考に技術KBを調べ、法令KBにも個別に問い合わせます。回答は出典とともに分けて表示します。</p>
+            <p className="mt-2 text-sm leading-6 text-gray-600">サーバーで検索が許可されたノウハウMarkdownを参考に技術KBを調べ、法令KBにも個別に問い合わせます。回答は出典とともに分けて表示します。</p>
             <p className="mt-2 text-xs leading-5 text-gray-600">ローカルファイルは送信されません。ノウハウMarkdownは参考情報として表示し、Markdownの編集やOneNoteへの追記は行いません。</p>
-            <p className="mt-3 text-xs leading-5 text-gray-600">技術チャットと法令チャットの履歴は、それぞれの履歴に60日間保存されます。先輩チャットのまとめ表示は保存されないため、このページを再読み込みすると表示が消えます。</p>
+            <p className="mt-3 text-xs leading-5 text-gray-600">相談履歴は60日間保存されます。ページを再読み込みした後も、左側の履歴から相談を開き直せます。</p>
           </div>
         ) : snapshot.turns.map((turn) => <ChatTurnView key={turn.id} turn={turn} />)}
-        {continuationPaused && <p role="status" className="mx-auto max-w-2xl rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">両方の検索が失敗または中止されたため、この相談では続けて質問できません。内容を確認し、「新しい相談」から再開してください。</p>}
+        {continuationPaused && <p role="status" className="mx-auto max-w-2xl rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">{snapshot.complete === false ? '相談履歴の一部を確認できないため、表示のみ利用できます。' : '両方の検索が失敗または中止されたため、この相談では続けて質問できません。'}内容を確認し、「新しい相談」から再開してください。</p>}
       </div>
 
       <footer className="shrink-0 border-t border-gray-200 bg-gray-50 px-4 py-4 sm:px-6">
@@ -293,7 +320,7 @@ export function KnowledgeSenpaiChat() {
             aria-label="質問を入力"
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
-            disabled={snapshot.running || continuationPaused}
+            disabled={snapshot.running || continuationPaused || history.opening}
             rows={2}
             maxLength={2000}
             placeholder="例: この機器の交換作業で注意する点は？根拠となる資料も教えてください。"
@@ -302,14 +329,16 @@ export function KnowledgeSenpaiChat() {
           {sendError && <p role="alert" className="text-sm text-red-700">{sendError}</p>}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex gap-2">
-              <button type="submit" disabled={snapshot.running || continuationPaused || !question.trim()} className="rounded-lg bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800 focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-50">質問を送信</button>
+              <button type="submit" disabled={snapshot.running || continuationPaused || history.opening || !question.trim()} className="rounded-lg bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800 focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-50">質問を送信</button>
               {snapshot.running && <button type="button" onClick={cancelSearch} className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-400">中止</button>}
-              <button type="button" onClick={startNewChat} disabled={snapshot.turns.length === 0 && !snapshot.running} className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-50">新しい相談</button>
+              <button type="button" onClick={startNewChat} disabled={snapshot.turns.length === 0 && !snapshot.running && !history.opening} className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-50">新しい相談</button>
             </div>
             <span className="text-xs text-gray-500">質問のみを技術KB・法令KBへ個別に送ります。サーバー許可済みMarkdownを参考検索します。ローカルファイルの送信やMarkdown編集、OneNote追記は行いません。</span>
           </div>
         </form>
       </footer>
+        </main>
+      </div>
     </section>
   );
 }

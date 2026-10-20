@@ -7,6 +7,7 @@ import re
 import os
 import boto3
 import time
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import unquote
 from botocore.exceptions import ClientError
@@ -53,6 +54,10 @@ TRIAGE_STATUSES = frozenset({'open', 'in_progress', 'done', 'wontfix'})
 TRIAGE_CAUSES = frozenset({'search', 'snippet', 'writing', 'clarify', 'kb_missing', 'scope', 'user', 'other'})
 TRIAGE_NOTE_MAX = 200
 TRIAGE_REF_MAX = 100
+SENPAI_HISTORY_MAX_PAGES = 25
+SENPAI_HISTORY_PAGE_SIZE = 500
+SENPAI_HISTORY_MAX_MESSAGES = 400
+SENPAI_HISTORY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 # ヒント（§9.3）: 上位スコアが「弱い」とみなす仮の閾値。トレース実装後に実測で決める
 WEAK_SCORE_THRESHOLD = 0.45
 
@@ -330,6 +335,8 @@ def get_sessions_by_user(user_id: str, limit: int = 50, mode: str = None) -> lis
                 if (
                     session_id
                     and not str(session_id).startswith('wish-')
+                    and 'senpaiConversationId' not in message
+                    and 'senpaiTurnId' not in message
                     and (mode is None or message_mode == mode)
                 ):
                     matching_session_ids.add(session_id)
@@ -348,6 +355,9 @@ def get_sessions_by_user(user_id: str, limit: int = 50, mode: str = None) -> lis
                 continue
             # 改善要望（product_wish）はチャット履歴一覧に出さない
             if str(session_id).startswith('wish-'):
+                continue
+            # 先輩相談は相談IDでグループ化する専用一覧だけに表示する。
+            if 'senpaiConversationId' in msg or 'senpaiTurnId' in msg:
                 continue
             timestamp = msg['timestamp']
             session = sessions_dict.get(session_id)
@@ -403,6 +413,178 @@ def get_sessions_by_user(user_id: str, limit: int = 50, mode: str = None) -> lis
         
     except ClientError as e:
         raise
+
+
+def _valid_senpai_conversation_id(value: str) -> bool:
+    """Return whether a path conversation ID is a canonical UUID."""
+    if not isinstance(value, str):
+        return False
+    try:
+        return str(uuid.UUID(value)) == value.lower()
+    except (ValueError, AttributeError):
+        return False
+
+
+def _query_user_history(user_id: str) -> tuple[list, bool]:
+    """Read a bounded user's ChatLogs history through the existing user GSI."""
+    items = []
+    exclusive_start_key = None
+    complete = True
+    for _page_number in range(SENPAI_HISTORY_MAX_PAGES):
+        query = {
+            'IndexName': 'userId-timestamp-index',
+            'KeyConditionExpression': 'userId = :uid',
+            'ExpressionAttributeValues': {':uid': user_id},
+            'ScanIndexForward': False,
+            'Limit': SENPAI_HISTORY_PAGE_SIZE,
+        }
+        if exclusive_start_key:
+            query['ExclusiveStartKey'] = exclusive_start_key
+        response = chatlogs_table.query(**query)
+        items.extend(response.get('Items') or [])
+        exclusive_start_key = response.get('LastEvaluatedKey')
+        if not exclusive_start_key:
+            break
+    else:
+        complete = False
+    return items, complete
+
+
+def _visible_senpai_item(item: dict, now: int) -> bool:
+    """Keep only live, visible, explicitly tagged Senpai conversation rows."""
+    if item.get('deleted') is True or item.get('role') == 'product_wish':
+        return False
+    ttl = item.get('ttl')
+    if ttl is not None:
+        try:
+            if int(ttl) <= now:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return (
+        _valid_senpai_conversation_id(item.get('senpaiConversationId'))
+        and _valid_senpai_conversation_id(item.get('senpaiTurnId'))
+    )
+
+
+def get_senpai_sessions_by_user(user_id: str) -> tuple[list, bool]:
+    """Group a bounded set of the caller's live tagged messages by conversation."""
+    items, complete = _query_user_history(user_id)
+    now = int(time.time())
+    grouped = {}
+    for item in items:
+        if item.get('userId') != user_id or not _visible_senpai_item(item, now):
+            continue
+        conversation_id = item['senpaiConversationId']
+        group = grouped.setdefault(conversation_id, {
+            'conversationId': conversation_id,
+            'title': None,
+            'createdAt': item.get('timestamp'),
+            'lastMessageTime': item.get('timestamp'),
+            'messageCount': 0,
+            '_turnIds': set(),
+            '_firstQuestionAt': None,
+            '_ttl': 0,
+        })
+        timestamp = item.get('timestamp') or ''
+        if not group['createdAt'] or timestamp < group['createdAt']:
+            group['createdAt'] = timestamp
+        if timestamp > (group['lastMessageTime'] or ''):
+            group['lastMessageTime'] = timestamp
+        if item.get('role') == 'user':
+            turn_id = item.get('senpaiTurnId')
+            if turn_id not in group['_turnIds']:
+                group['_turnIds'].add(turn_id)
+                group['messageCount'] += 1
+            if group['_firstQuestionAt'] is None or timestamp < group['_firstQuestionAt']:
+                group['_firstQuestionAt'] = timestamp
+                group['title'] = item.get('content') or 'Untitled'
+        try:
+            group['_ttl'] = max(group['_ttl'], int(item.get('ttl') or 0))
+        except (TypeError, ValueError):
+            pass
+    sessions = []
+    for session in grouped.values():
+        if not session['messageCount']:
+            complete = False
+            continue
+        sessions.append(session)
+    sessions.sort(key=lambda row: row['lastMessageTime'] or '', reverse=True)
+    if len(sessions) > 50:
+        complete = False
+    sessions = sessions[:50]
+    for session in sessions:
+        ttl = session.pop('_ttl')
+        session.pop('_firstQuestionAt')
+        session.pop('_turnIds')
+        session['title'] = build_session_title(session['title'])
+        session['daysUntilDeletion'] = calculate_days_until_deletion(ttl)
+    return sessions, complete
+
+
+def get_senpai_messages_by_user(user_id: str, conversation_id: str) -> tuple[list, bool]:
+    """Return newest whole turns within bounded row and serialized-body limits."""
+    items, complete = _query_user_history(user_id)
+    now = int(time.time())
+    grouped = {}
+    for item in items:
+        if item.get('userId') != user_id or item.get('senpaiConversationId') != conversation_id:
+            continue
+        if not _visible_senpai_item(item, now):
+            complete = False
+            continue
+        if item.get('role') not in ('user', 'assistant'):
+            complete = False
+            continue
+        group_key = (item.get('ragMode') or 'normal', item['senpaiTurnId'])
+        grouped.setdefault(group_key, []).append(item)
+
+    turn_groups = []
+    for key, rows in grouped.items():
+        user_rows = [row for row in rows if row.get('role') == 'user']
+        if not user_rows:
+            # TTL or incomplete writes can leave an assistant without its question.
+            complete = False
+            continue
+        rows = sorted(rows, key=lambda row: (row.get('timestamp') or '', row.get('messageId') or ''))
+        for row in rows:
+            if 'ttl' in row:
+                row['daysUntilDeletion'] = calculate_days_until_deletion(row['ttl'])
+        newest_time = max((row.get('timestamp') or '') for row in rows)
+        turn_groups.append((newest_time, key, rows))
+
+    turn_groups.sort(key=lambda group: (group[0], group[1]), reverse=True)
+    envelope = {
+        'context': 'senpai',
+        'conversationId': conversation_id,
+        'complete': False,
+        'readOnly': False,
+        'messages': [],
+    }
+    base_bytes = len(json.dumps(envelope, cls=DecimalEncoder, ensure_ascii=False).encode('utf-8')) - 2
+    selected = []
+    selected_message_bytes = 0
+    for _newest_time, _key, rows in turn_groups:
+        if len(selected) + len(rows) > SENPAI_HISTORY_MAX_MESSAGES:
+            complete = False
+            break
+        row_sizes = [
+            len(json.dumps(row, cls=DecimalEncoder, ensure_ascii=False).encode('utf-8'))
+            for row in rows
+        ]
+        candidate_count = len(selected) + len(rows)
+        candidate_bytes = (
+            base_bytes + selected_message_bytes + sum(row_sizes)
+            + max(0, candidate_count - 1) * 2
+        )
+        if candidate_bytes > SENPAI_HISTORY_MAX_RESPONSE_BYTES:
+            complete = False
+            break
+        selected.extend(rows)
+        selected_message_bytes += sum(row_sizes)
+
+    selected.sort(key=lambda row: (row.get('timestamp') or '', row.get('messageId') or ''))
+    return selected, complete
 
 
 def get_session_messages(session_id: str, limit: int = 100, fetch_all: bool = False) -> list:
@@ -935,6 +1117,7 @@ def lambda_handler(event, context):
         resource = _chat_resource(path)
         path_parameters = event.get('pathParameters', {})
         query_parameters = event.get('queryStringParameters', {}) or {}
+        requested_context = query_parameters.get('context')
         
         # Parse body if present
         body = {}
@@ -956,6 +1139,28 @@ def lambda_handler(event, context):
                 })
             }
 
+        if requested_context not in (None, 'senpai'):
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'ValidationError',
+                    'message': 'Unsupported history context',
+                }),
+            }
+        if requested_context == 'senpai' and not (
+            http_method == 'GET'
+            and (path == '/chat/sessions' or ('/chat/sessions/' in path and path.endswith('/messages')))
+        ):
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'ValidationError',
+                    'message': 'context=senpai is supported only for history reads',
+                }),
+            }
+
         # 他人のセッションを指す要求は、存在有無を漏らさないよう一律 404 に丸める
         not_found = {
             'statusCode': 404,
@@ -968,6 +1173,34 @@ def lambda_handler(event, context):
 
         # Route: GET /chat/sessions - List user sessions
         if http_method == 'GET' and path == '/chat/sessions':
+            if requested_context == 'senpai':
+                if not is_admin(event):
+                    return {
+                        'statusCode': 403,
+                        'headers': headers,
+                        'body': json.dumps({
+                            'error': 'Forbidden',
+                            'message': 'Admin privileges required',
+                        }),
+                    }
+                if query_parameters.get('mode') is not None:
+                    return {
+                        'statusCode': 400,
+                        'headers': headers,
+                        'body': json.dumps({
+                            'error': 'ValidationError',
+                            'message': 'mode cannot be combined with context=senpai',
+                        }),
+                    }
+                sessions, complete = get_senpai_sessions_by_user(caller_id)
+                return {
+                    'statusCode': 200,
+                    'headers': headers,
+                    'body': json.dumps(
+                        {'context': 'senpai', 'complete': complete, 'sessions': sessions},
+                        cls=DecimalEncoder, ensure_ascii=False,
+                    ),
+                }
             # userId クエリパラメータは廃止。自分のセッションのみ返す。
             requested_mode = query_parameters.get('mode')
             if requested_mode not in (None, 'normal', 'law'):
@@ -1001,6 +1234,49 @@ def lambda_handler(event, context):
                     })
                 }
 
+            if requested_context == 'senpai':
+                if not is_admin(event):
+                    return {
+                        'statusCode': 403,
+                        'headers': headers,
+                        'body': json.dumps({
+                            'error': 'Forbidden',
+                            'message': 'Admin privileges required',
+                        }),
+                    }
+                if query_parameters.get('mode') is not None:
+                    return {
+                        'statusCode': 400,
+                        'headers': headers,
+                        'body': json.dumps({
+                            'error': 'ValidationError',
+                            'message': 'mode cannot be combined with context=senpai',
+                        }),
+                    }
+                if not _valid_senpai_conversation_id(session_id):
+                    return {
+                        'statusCode': 400,
+                        'headers': headers,
+                        'body': json.dumps({
+                            'error': 'ValidationError',
+                            'message': 'conversationId must be a UUID',
+                        }),
+                    }
+                messages, complete = get_senpai_messages_by_user(caller_id, session_id)
+                if not messages:
+                    return not_found
+                return {
+                    'statusCode': 200,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'context': 'senpai',
+                        'conversationId': session_id,
+                        'complete': complete,
+                        'readOnly': False,
+                        'messages': messages,
+                    }, cls=DecimalEncoder, ensure_ascii=False),
+                }
+
             # admin は PDCA（失敗一覧からの照合）のため他ユーザーのセッションも
             # 「読み取りのみ」許可する。書き込み系（RAG 送信・削除・feedback）は
             # 従来どおり所有者限定のまま。
@@ -1009,6 +1285,13 @@ def lambda_handler(event, context):
                 return not_found
 
             messages = get_session_messages(session_id)
+            if not is_admin(event) and any(
+                'senpaiConversationId' in message
+                or 'senpaiTurnId' in message
+                or 'knowhow' in message
+                for message in messages
+            ):
+                return not_found
             requested_mode = query_parameters.get('mode')
             if requested_mode not in (None, 'normal', 'law'):
                 return {

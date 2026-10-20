@@ -49,6 +49,77 @@ test('lists only Senpai-context sessions and uses the authenticated shared chat 
   }), (error) => error.code === 'invalid_response');
 });
 
+test('bounds token acquisition and reports history timeout without exposing details', async () => {
+  await assert.rejects(getSenpaiConversations({
+    baseUrl: BASE, getToken: () => new Promise(() => {}), timeoutMs: 5,
+    fetchImpl: async () => { throw new Error('must not fetch'); },
+  }), (error) => error.code === 'timeout' && /時間内/u.test(error.message));
+});
+
+test('cancels pending token acquisition and rejects invalid or untrusted endpoints before auth', async () => {
+  const controller = new AbortController();
+  const pending = getSenpaiConversations({
+    baseUrl: BASE, getToken: () => new Promise(() => {}), signal: controller.signal,
+    fetchImpl: async () => { throw new Error('must not fetch'); },
+  });
+  controller.abort();
+  await assert.rejects(pending, (error) => error.code === 'cancelled');
+
+  let calls = 0;
+  for (const baseUrl of ['not a URL', 'http://api.example.test', 'https://user:pass@example.test/dev', 'https://example.test/path?token=x']) {
+    await assert.rejects(getSenpaiConversations({
+      baseUrl, getToken: async () => { calls += 1; return TOKEN; }, fetchImpl: async () => response({}),
+    }), (error) => error.code === 'config');
+  }
+  assert.equal(calls, 0);
+});
+
+test('maps auth, authorization, server, network, and malformed HTTP failures to safe errors', async () => {
+  let fetchCalls = 0;
+  await assert.rejects(getSenpaiConversations({
+    baseUrl: BASE, getToken: async () => { throw new Error('private auth details'); },
+    fetchImpl: async () => { fetchCalls += 1; return response({}); },
+  }), (error) => error.code === 'auth' && !/private auth details/u.test(error.message));
+  await assert.rejects(getSenpaiConversations({
+    baseUrl: BASE, getToken: async () => '', fetchImpl: async () => { fetchCalls += 1; return response({}); },
+  }), (error) => error.code === 'auth');
+  assert.equal(fetchCalls, 0);
+
+  for (const [status, code] of [[401, 'auth'], [403, 'unavailable'], [503, 'server'], [400, 'unavailable']]) {
+    await assert.rejects(getSenpaiConversations({
+      baseUrl: BASE, getToken: async () => TOKEN,
+      fetchImpl: async () => response({ detail: 'private server response' }, status),
+    }), (error) => error.code === code && !/private server response/u.test(error.message));
+  }
+  await assert.rejects(getSenpaiConversations({
+    baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: async () => { throw new Error('private network detail'); },
+  }), (error) => error.code === 'server' && !/private network detail/u.test(error.message));
+  await assert.rejects(getSenpaiConversations({
+    baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: async () => ({ status: 200 }),
+  }), (error) => error.code === 'invalid_response');
+  await assert.rejects(getSenpaiConversations({
+    baseUrl: BASE, getToken: async () => TOKEN, fetchImpl: async () => ({ ...response({}), json: async () => { throw new Error('private parse detail'); } }),
+  }), (error) => error.code === 'invalid_response' && !/private parse detail/u.test(error.message));
+});
+
+test('honors an already-aborted signal and aborts a pending history fetch', async () => {
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort();
+  await assert.rejects(getSenpaiConversations({
+    baseUrl: BASE, getToken: async () => TOKEN, signal: alreadyAborted.signal,
+  }), (error) => error.code === 'cancelled');
+
+  const controller = new AbortController();
+  const pending = getSenpaiConversations({
+    baseUrl: BASE, getToken: async () => TOKEN, signal: controller.signal,
+    fetchImpl: async (_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+    }),
+  });
+  controller.abort();
+  await assert.rejects(pending, (error) => error.code === 'cancelled');
+});
+
 test('pairs saved lane messages by turn UUID and question and keeps server knowhow card data', async () => {
   const knowhow = {
     status: 'matched', indexVersion: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -73,6 +144,33 @@ test('pairs saved lane messages by turn UUID and question and keeps server knowh
   assert.equal(result.turns[0].law.answer.sessionId, 'law-session');
 });
 
+test('defaults only absent stored response arrays for pages, not_found, and clarify', async () => {
+  const responseTypes = ['pages', 'not_found', 'clarify'];
+  const ids = responseTypes.map((_, index) => `20000000-0000-4000-8000-00000000000${index + 1}`);
+  const messages = responseTypes.flatMap((responseType, index) => {
+    const savedUser = row('user', 'normal', {
+      senpaiTurnId: ids[index], messageId: `user-${index}`, content: `質問 ${index}`,
+    });
+    const savedAssistant = row('assistant', 'normal', {
+      senpaiTurnId: ids[index], messageId: `assistant-${index}`, content: `回答 ${index}`, responseType,
+    });
+    delete savedAssistant.sourceDocuments;
+    delete savedAssistant.pageCandidates;
+    delete savedAssistant.clarifyQuestions;
+    return [savedUser, savedAssistant];
+  });
+  const result = await readSenpaiConversation({
+    baseUrl: BASE, getToken: async () => TOKEN, conversationId,
+    fetchImpl: historyFetch({ context: 'senpai', conversationId, complete: true, readOnly: false, messages }),
+  });
+  assert.deepEqual(result.turns.map((turn) => turn.normal.answer.responseType), responseTypes);
+  for (const turn of result.turns) {
+    assert.deepEqual(turn.normal.answer.sourceDocuments, []);
+    assert.deepEqual(turn.normal.answer.pageCandidates, []);
+    assert.deepEqual(turn.normal.answer.clarifyQuestions, []);
+  }
+});
+
 test('keeps an unpaired saved lane paused and rejects mismatched or incomplete history', async () => {
   const missingLaw = await readSenpaiConversation({
     baseUrl: BASE, getToken: async () => TOKEN, conversationId,
@@ -80,14 +178,16 @@ test('keeps an unpaired saved lane paused and rejects mismatched or incomplete h
   });
   assert.equal(missingLaw.turns[0].law.status, 'paused');
   assert.match(missingLaw.turns[0].law.message, /保存/);
+  assert.equal(missingLaw.complete, true);
 
   for (const payload of [
     { context: 'ordinary', conversationId, complete: true, readOnly: false, messages: [] },
     { context: 'senpai', conversationId: '30000000-0000-4000-8000-000000000001', complete: true, readOnly: false, messages: [] },
-    { context: 'senpai', conversationId, complete: false, readOnly: false, messages: [] },
     { context: 'senpai', conversationId, complete: true, readOnly: true, messages: [] },
     { context: 'senpai', conversationId, complete: true, readOnly: false, messages: [row('user', 'normal', { senpaiConversationId: '30000000-0000-4000-8000-000000000001' })] },
     { context: 'senpai', conversationId, complete: true, readOnly: false, messages: [row('user', 'normal'), row('user', 'normal')] },
+    { context: 'senpai', conversationId, complete: true, readOnly: false, messages: [row('user', 'normal'), row('user', 'law', { userId: 'another-user', messageId: 'user-law-message' })] },
+    { context: 'senpai', conversationId, complete: true, readOnly: false, messages: [row('user', 'normal'), row('assistant', 'normal', { sourceDocuments: null })] },
   ]) {
     await assert.rejects(readSenpaiConversation({
       baseUrl: BASE, getToken: async () => TOKEN, conversationId, fetchImpl: historyFetch(payload),

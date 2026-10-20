@@ -18,7 +18,12 @@ function loadTsx(path, mocks) {
     fileName: filename.pathname,
   });
   const compiledModule = { exports: {} };
-  const localRequire = (name) => Object.hasOwn(mocks, name) ? mocks[name] : require(name);
+  const localRequire = (name) => {
+    if (Object.hasOwn(mocks, name)) return mocks[name];
+    if (name === './SenpaiConversationSidebar') return loadTsx('../src/components/knowledge/SenpaiConversationSidebar.tsx', {});
+    if (name === '@/hooks/useSenpaiHistory') return { useSenpaiHistory: () => ({ entries: [], loading: false, error: '', complete: true, opening: false, openError: '', openConversation: async () => {}, resetSelection() {}, refresh() {} }) };
+    return require(name);
+  };
   new Function('require', 'module', 'exports', outputText)(localRequire, compiledModule, compiledModule.exports);
   return compiledModule.exports;
 }
@@ -27,6 +32,10 @@ const Link = ({ children, href, ...props }) => createElement('a', { href, ...pro
 
 function findElement(root, predicate) {
   if (!root || typeof root !== 'object') return null;
+  if (Array.isArray(root)) {
+    for (const item of root) { const found = findElement(item, predicate); if (found) return found; }
+    return null;
+  }
   if (typeof root.type === 'string' && predicate(root)) return root;
   const children = root.props?.children;
   const list = Array.isArray(children) ? children : [children];
@@ -154,7 +163,6 @@ test('direct user-side route mounts a conversational chat for admins', () => {
   assert.equal(chatRenders, 1);
   assert.match(html, /aria-label="先輩チャット"/);
   assert.match(html, /aria-label="先輩への質問"/);
-  assert.match(html, /href="\/"/);
   assert.doesNotMatch(html, /href="\/admin|Markdownを選ぶ/);
 });
 
@@ -198,6 +206,7 @@ test('chat page starts as an empty conversation with a message composer and rese
   assert.match(html, /aria-label="質問を入力"/);
   assert.match(html, /質問を送信/);
   assert.match(html, /新しい相談/);
+  assert.match(html, /href="\/"/);
   assert.match(html, /技術KB/);
   assert.match(html, /法令KB/);
   assert.doesNotMatch(html, /Markdownファイルを選択|照合まとめ/);
@@ -392,4 +401,27 @@ test('law source displays the returned law number, provision reference, and effe
   assert.match(html, /令和八年法律第一号/);
   assert.match(html, /第十二条/);
   assert.match(html, /2026-04-01/);
+});
+
+test('history sidebar selects the requested consultation, escapes titles, and distinguishes errors from empty history', () => {
+  const { SenpaiConversationSidebar } = loadTsx('../src/components/knowledge/SenpaiConversationSidebar.tsx', {});
+  const selected = [];
+  const props = {
+    open: true, entries: [{ conversationId: '11111111-1111-4111-8111-111111111111', title: '<img src=x>質問', createdAt: '2026-10-20T00:00:00Z', lastMessageTime: '2026-10-20T00:00:00Z', messageCount: 2, daysUntilDeletion: 59 }],
+    selectedId: '11111111-1111-4111-8111-111111111111', loading: false, error: '', complete: true,
+    onNew() {}, onSelect: (id) => selected.push(id), onClose() {}, onRetry() {},
+  };
+  const tree = SenpaiConversationSidebar(props);
+  const current = findElement(tree, (element) => element.type === 'button' && element.props['aria-current'] === 'page');
+  current.props.onClick();
+  assert.deepEqual(selected, [props.selectedId]);
+  const html = renderToStaticMarkup(tree);
+  assert.match(html, /&lt;img src=x&gt;質問/);
+  assert.doesNotMatch(html, /<img\b/);
+  assert.match(html.replace(/<!--.*?-->/gu, ''), /2件の質問/);
+  assert.match(html, /履歴メニューを閉じる/);
+  const failed = renderToStaticMarkup(createElement(SenpaiConversationSidebar, { ...props, entries: [], error: '履歴の取得失敗' }));
+  assert.match(failed, /履歴の取得失敗/);
+  assert.match(failed, /履歴を再取得/);
+  assert.doesNotMatch(failed, /履歴はまだありません/);
 });
