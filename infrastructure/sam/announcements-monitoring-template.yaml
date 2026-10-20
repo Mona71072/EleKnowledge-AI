@@ -83,7 +83,6 @@ Globals:
       gyoumu012Component: shared
       gyoumu012Usage: !Ref CostUsage
       Project: !Ref ProjectName
-      Env: !Ref Environment
       ManagedBy: SAM
       Feature: announcements-monitoring
 
@@ -128,7 +127,6 @@ Resources:
         - Key: gyoumu012Usage
           Value: !Ref CostUsage
         - { Key: Project, Value: !Ref ProjectName }
-        - { Key: Env, Value: !Ref Environment }
         - { Key: ManagedBy, Value: SAM }
         - { Key: Feature, Value: announcements-monitoring }
 
@@ -170,7 +168,6 @@ Resources:
         - Key: gyoumu012Usage
           Value: !Ref CostUsage
         - { Key: Project, Value: !Ref ProjectName }
-        - { Key: Env, Value: !Ref Environment }
         - { Key: ManagedBy, Value: SAM }
         - { Key: Feature, Value: announcements-monitoring }
 
@@ -185,7 +182,6 @@ Resources:
       Description: USD per million tokens by Bedrock model id (JSON)
       Tags:
         Project: !Ref ProjectName
-        Env: !Ref Environment
         ManagedBy: SAM
 
   # ==========================================================================
@@ -636,7 +632,6 @@ Resources:
         gyoumu012Component: shared
         gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
-        Env: !Ref Environment
         Feature: announcements-monitoring
 
   # API Gateway アクセスログの受け皿（rag / chat / auth と同じ命名）
