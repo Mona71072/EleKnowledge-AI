@@ -23,6 +23,8 @@ function loadTsx(path, mocks) {
     if (name === './SenpaiConversationSidebar') return loadTsx('../src/components/knowledge/SenpaiConversationSidebar.tsx', {});
     if (name === '@/data/kbModelTypes') return loadTsx('../src/data/kbModelTypes.ts', {});
     if (name === '@/lib/knowledge-senpai-synthesis.mjs') return { requestSenpaiSynthesis: async () => ({}) };
+    if (name === '@/lib/knowledge-senpai-field-report.mjs') return require('../src/lib/knowledge-senpai-field-report.mjs');
+    if (name === './SenpaiFieldReportForm') return loadTsx('../src/components/knowledge/SenpaiFieldReportForm.tsx', { '@/lib/auth-helpers': { getIdToken: async () => 'test-token' } });
     if (name === '@/hooks/useSenpaiHistory') return { useSenpaiHistory: () => ({ entries: [], loading: false, error: '', complete: true, opening: false, openError: '', openConversation: async () => {}, resetSelection() {}, refresh() {} }) };
     return require(name);
   };
@@ -642,4 +644,52 @@ test('labels the new scope-verification keys and never renders an undefined labe
   const unverified = structuredClone(answer);
   unverified.knowhow.matches[0].modelScope = { scope_status: 'pending' };
   assert.match(html(synthesisChat({ normal: lane('success', { answer: unverified }) }).render), /未確認/);
+});
+
+function withFieldReportsFlag(value, fn) {
+  const previous = process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS;
+  if (value === undefined) delete process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS;
+  else process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS = value;
+  try { return fn(); } finally {
+    if (previous === undefined) delete process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS;
+    else process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS = previous;
+  }
+}
+
+test('「結果を残す」 is hidden unless the development flag is on', () => {
+  for (const flag of [undefined, 'false']) {
+    withFieldReportsFlag(flag, () => assert.doesNotMatch(html(synthesisChat().render), /結果を残す/));
+  }
+});
+
+test('「結果を残す」 appears only after a settled turn with at least one answer', () => {
+  withFieldReportsFlag('true', () => {
+    assert.match(html(synthesisChat().render), /結果を残す/);
+    assert.match(html(synthesisChat({ law: lane('error', { message: 'x' }) }).render), /結果を残す/);
+    assert.doesNotMatch(html(synthesisChat({}, { running: true }).render), /結果を残す/);
+    assert.doesNotMatch(html(synthesisChat({ law: lane('loading') }).render), /結果を残す/);
+    assert.doesNotMatch(html(synthesisChat({ normal: lane('error'), law: lane('cancelled') }).render), /結果を残す/);
+    assert.doesNotMatch(html(synthesisChat({ senpaiTurnId: undefined }).render), /結果を残す/);
+  });
+});
+
+test('the field report form starts closed, copies nothing, and shows a sent report as unconfirmed', () => {
+  const { SenpaiFieldReportForm } = loadTsx('../src/components/knowledge/SenpaiFieldReportForm.tsx', {
+    '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
+  });
+  const turn = {
+    id: 1, senpaiTurnId: TURN_UUID, query: '相談本文ZZZ', modelType: 'NEXCUBE',
+    normal: lane('success', { answer: baseAnswer('normal') }), law: lane('success', { answer: baseAnswer('law') }),
+  };
+  const conversationId = '10000000-0000-4000-8000-000000000001';
+  const closed = renderToStaticMarkup(createElement(SenpaiFieldReportForm, { conversationId, turn, onSent() {} }));
+  assert.match(closed, /<button[^>]*>結果を残す<\/button>/);
+  assert.doesNotMatch(closed, /相談本文ZZZ|textarea/);
+  const sent = renderToStaticMarkup(createElement(SenpaiFieldReportForm, {
+    conversationId, turn, onSent() {},
+    sent: { reportId: 'r', senpaiConversationId: conversationId, senpaiTurnId: TURN_UUID, createdAt: '2026-10-20T00:00:00Z', finding: 'x', reviewState: 'unconfirmed', cardReactions: [] },
+  }));
+  assert.match(sent, /送信済みです（未確認）/);
+  assert.doesNotMatch(sent, /<button/);
+  assert.equal(renderToStaticMarkup(createElement(SenpaiFieldReportForm, { turn, onSent() {} })), '');
 });

@@ -100,6 +100,14 @@ Parameters:
       Enable the admin-only prototype "工技先輩のまとめ" (POST /rag/senpai/synthesis).
       Effective only when Environment is dev. Each call invokes BedrockModelId once.
 
+  SenpaiFieldReportsEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Enable the admin-only 先輩チャット「結果を残す」 (/rag/senpai/field-reports).
+      Effective only when Environment is dev; the table, role and function are created only then.
+
   KnowhowIndexBucket:
     Type: String
     Default: ''
@@ -383,6 +391,9 @@ Conditions:
   SenpaiSynthesisDevEnabled: !And
     - !Equals [!Ref Environment, dev]
     - !Equals [!Ref SenpaiSynthesisEnabled, 'true']
+  SenpaiFieldReportsDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref SenpaiFieldReportsEnabled, 'true']
 
 Globals:
   Function:
@@ -846,6 +857,154 @@ Resources:
             Path: /rag/senpai/synthesis
             Method: POST
 
+  # ============================================================================
+  # Senpai field reports「結果を残す」(dev-only, off by default; all resources conditional)
+  # ============================================================================
+  # 未確認の観測候補。作成から FIELD_REPORT_TTL_DAYS で TTL 削除（確認後の扱いは担当者画面で決める）。
+  SenpaiFieldReportsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: SenpaiFieldReportsDevEnabled
+    Properties:
+      TableName: !Sub senpai-field-reports-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: reportId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+        - AttributeName: reviewState
+          AttributeType: S
+      KeySchema:
+        - AttributeName: reportId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        # 本人の報告の読み取り（GET）
+        - IndexName: userId-createdAt-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # 担当者による状態別の書き出し（Scan を使わないため）
+        - IndexName: reviewState-createdAt-index
+          KeySchema:
+            - AttributeName: reviewState
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+
+  SenpaiFieldReportLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: SenpaiFieldReportsDevEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # 自分の相談の実在確認（ユーザー GSI の Query のみ）。ChatLogs への書き込みは持たない。
+        - PolicyName: ChatLogsTurnRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub
+                    - ${TableArn}/index/userId-timestamp-index
+                    - TableArn:
+                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+        # 報告 1 件の条件付き保存・再取得と、本人の一覧（Scan は許可しない）。
+        - PolicyName: FieldReportsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource:
+                  - !GetAtt SenpaiFieldReportsTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub ${SenpaiFieldReportsTable.Arn}/index/userId-createdAt-index
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "2"
+
+  SenpaiFieldReportFunction:
+    Type: AWS::Serverless::Function
+    Condition: SenpaiFieldReportsDevEnabled
+    Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+      FunctionName: !Sub senpai-field-report-${Environment}
+      CodeUri: ../../lambda/rag/senpai-field-report/
+      Handler: app.lambda_handler
+      Description: Dev-only 先輩チャット「結果を残す」 field report candidates (save and list own)
+      Role: !GetAtt SenpaiFieldReportLambdaRole.Arn
+      # DynamoDB の Query（最大 10 ページ）と 1 件の保存だけ。モデル呼び出しはない。
+      Timeout: 15
+      MemorySize: 256
+      Environment:
+        Variables:
+          SENPAI_FIELD_REPORTS_ENABLED: 'true'
+          ENVIRONMENT: !Ref Environment
+          ADMIN_GROUP_NAME: admin
+          FIELD_REPORT_TTL_DAYS: '180'
+          FIELD_REPORTS_TABLE: !Ref SenpaiFieldReportsTable
+          CHATLOGS_TABLE:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+      Events:
+        FieldReportCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/senpai/field-reports
+            Method: POST
+        FieldReportList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/senpai/field-reports
+            Method: GET
+
   ChatManagementFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1083,6 +1242,11 @@ Outputs:
     Export:
       Name: !Sub ${ProjectName}-${Environment}-RagFunctionArn
   
+  SenpaiFieldReportFunctionArn:
+    Condition: SenpaiFieldReportsDevEnabled
+    Description: Senpai field reports (dev-only) Lambda Function ARN
+    Value: !GetAtt SenpaiFieldReportFunction.Arn
+
   SenpaiSynthesisFunctionArn:
     Description: Senpai synthesis (dev-only prototype) Lambda Function ARN
     Value: !GetAtt SenpaiSynthesisFunction.Arn

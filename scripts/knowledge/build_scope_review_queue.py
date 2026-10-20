@@ -9,13 +9,20 @@ correct the scope and mark it verified.
 Reads ``knowledge/cards/**/*.md`` only (no network) and writes a deterministic
 Markdown file; re-running without card changes produces identical output.
 
+Field reports from 先輩チャット「結果を残す」 close the loop: ``--field-reports`` takes an
+exported JSON of report candidates (no AWS calls here), stores a counts-only aggregate
+(``queues/scope-review/field-reports.json``: card IDs, versions, reaction counts per model,
+latest date; never report text or people) and puts cards that field reports contradict
+first, in section P0. Later runs without the option reuse the committed aggregate.
+
 Usage:
-    python scripts/knowledge/build_scope_review_queue.py
+    python scripts/knowledge/build_scope_review_queue.py [--field-reports export.json]
 """
 from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import re
 import sys
 from collections import Counter
@@ -29,6 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 KNOWLEDGE_ROOT = REPO_ROOT / "knowledge"
 RETRIEVAL_PATH = REPO_ROOT / "lambda" / "rag" / "rag-function" / "knowhow_retrieval.py"
 DEFAULT_OUTPUT = KNOWLEDGE_ROOT / "queues" / "scope-review" / "QUEUE.md"
+FIELD_REPORT_AGGREGATE = Path("queues") / "scope-review" / "field-reports.json"
 COMMAND = "python scripts/knowledge/build_scope_review_queue.py"
 CARD_DIRS = ("case-summaries", "practice-guides")
 PRODUCT_KEYS = ("product_lines", "model_abbreviations", "lists_model_label", "observed_on")
@@ -36,13 +44,24 @@ BROAD_FIELDS = ("may_apply_to", "scope_note", "lists_model_label")
 BROAD_PATTERN = re.compile(r"全エレ|全機種|全エス|共通|一般")
 FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|\Z)", re.DOTALL)
 
+# SYNC: must equal REACTIONS / REVIEW_STATES in lambda/rag/senpai-field-report/field_report_vocab.py
+# and frontend/src/lib/knowledge-senpai-field-report.mjs (tests/unit/test_senpai_field_report_sync.py).
+FIELD_REPORT_REACTIONS = ("matched", "not_matched", "unsure")
+FIELD_REPORT_REVIEW_STATES = ("unconfirmed", "awaiting_review", "reflected", "held_or_rejected")
+# Only reports nobody has handled yet reorder the queue.
+OPEN_REVIEW_STATES = frozenset({"unconfirmed", "awaiting_review"})
+ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
+DATE_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2})T")
+
 PRIORITY_TITLES = {
+    "P0": "P0 現場の報告で確認が必要（当てはまらなかった／カードと違う機種で報告）",
     "P1": "P1 矛盾の疑い（機種名があるのに適用範囲が広いと読める）",
     "P2": "P2 機種を名指し・未検証（検証すれば機種フィルタで除外対象になる）",
     "P3": "P3 制御方式・略称のみ・未検証",
     "P4": "P4 汎用ラベル／空（対応不要の情報）",
 }
 ACTIONS = {
+    "P0": "報告の内容（担当者用の書き出し）と原文を照合し、model_scope と本文の条件を直す。検証済みでも見直す",
     "P1": "適用範囲を確認する。全機種対応なら product_lines / lists_model_label を全エレ機種へ直し、特定機種のみなら may_apply_to / scope_note を直して、検証済みにする",
     "P2": "product_lines が正しければ検証済みにする（以後、他機種を選んだときに除外される）",
     "P3": "機種フィルタ対象外。全機種対応なら lists_model_label を全エレ機種へ",
@@ -64,12 +83,23 @@ class Row:
 
 
 @dataclass(frozen=True)
+class CardInfo:
+    """Every readable card, verified or not, for joining field reports."""
+
+    title: str
+    link: str
+    section: str
+    scope: dict
+
+
+@dataclass(frozen=True)
 class Inventory:
     """Result of scanning the cards: queue rows, verified count, unreadable cards."""
 
     rows: tuple[Row, ...]
     verified: int
     unreadable: tuple[str, ...]
+    cards: dict
 
 
 def load_retrieval(path: Path = RETRIEVAL_PATH) -> ModuleType:
@@ -149,6 +179,7 @@ def scan(root: Path = KNOWLEDGE_ROOT) -> Inventory:
     retrieval = load_retrieval()
     rows: list[Row] = []
     unreadable: list[str] = []
+    cards: dict[str, CardInfo] = {}
     verified = 0
     for path in _card_paths(root):
         try:
@@ -160,26 +191,195 @@ def scan(root: Path = KNOWLEDGE_ROOT) -> Inventory:
         if not isinstance(scope, dict):
             unreadable.append(path.stem)
             continue
+        knowledge_id = str(data.get("knowledge_id") or path.stem)
+        title = str(data.get("title") or "")
+        link = "../../" + path.relative_to(root).as_posix()
         if scope.get("scope_status") == "verified":
             verified += 1
+            cards[knowledge_id] = CardInfo(title, link, "検証済み", scope)
             continue
         priority, signal = _classify(scope, retrieval)
+        cards[knowledge_id] = CardInfo(title, link, priority, scope)
         rows.append(Row(
             priority=priority,
-            knowledge_id=str(data.get("knowledge_id") or path.stem),
-            title=str(data.get("title") or ""),
-            link="../../" + path.relative_to(root).as_posix(),
+            knowledge_id=knowledge_id,
+            title=title,
+            link=link,
             product_lines=_as_list(scope.get("product_lines")),
             lists_model_label=_as_list(scope.get("lists_model_label")),
             control_methods=_as_list(scope.get("control_methods")),
             signal=signal,
         ))
-    return Inventory(tuple(sorted(rows, key=lambda r: (r.priority, r.knowledge_id))), verified, tuple(unreadable))
+    return Inventory(
+        tuple(sorted(rows, key=lambda r: (r.priority, r.knowledge_id))), verified, tuple(unreadable), cards,
+    )
 
 
 def collect_rows(root: Path = KNOWLEDGE_ROOT) -> tuple[Row, ...]:
     """Return the queue rows for unverified cards, ordered by priority then ID."""
     return scan(root).rows
+
+
+def load_field_report_export(path: Path) -> list:
+    """Read an exported JSON of field reports: a list, or ``{"items": [...]}``."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(data, dict) and isinstance(data.get("items"), list):
+        return data["items"]
+    if isinstance(data, list):
+        return data
+    raise ValueError("field report export must be a list or an object with items")
+
+
+def _report_reactions(report) -> list | None:
+    if not isinstance(report, dict) or report.get("reviewState") not in FIELD_REPORT_REVIEW_STATES:
+        return None
+    reactions = report.get("cardReactions")
+    if not isinstance(reactions, list):
+        return None
+    valid = []
+    for entry in reactions:
+        if (isinstance(entry, dict) and isinstance(entry.get("knowledgeId"), str)
+                and ID_PATTERN.match(entry["knowledgeId"]) and type(entry.get("cardVersion")) is int
+                and entry.get("reaction") in FIELD_REPORT_REACTIONS):
+            valid.append(entry)
+    return valid
+
+
+def _report_model(report: dict) -> str:
+    model = report.get("modelType") or report.get("turnModelType") or ""
+    return model if isinstance(model, str) and len(model) <= 50 else ""
+
+
+def aggregate_field_reports(reports: list) -> dict:
+    """Counts-only aggregate per card. Report text, people and conversation IDs are dropped."""
+    cards: dict[str, dict] = {}
+    counted = skipped = 0
+    for report in reports:
+        reactions = _report_reactions(report)
+        if reactions is None or report["reviewState"] not in OPEN_REVIEW_STATES:
+            skipped += 1
+            continue
+        counted += 1
+        model = _report_model(report)
+        found = DATE_PATTERN.match(str(report.get("createdAt") or ""))
+        for entry in reactions:
+            card = cards.setdefault(entry["knowledgeId"], {"versions": set(), "reactions": {}, "latestReportDate": ""})
+            card["versions"].add(entry["cardVersion"])
+            counts = card["reactions"].setdefault(model, dict.fromkeys(FIELD_REPORT_REACTIONS, 0))
+            counts[entry["reaction"]] += 1
+            if found and found.group(1) > card["latestReportDate"]:
+                card["latestReportDate"] = found.group(1)
+    return {
+        "counted": counted,
+        "skipped": skipped,
+        "cards": {
+            knowledge_id: {
+                "versions": sorted(card["versions"]),
+                "reactions": {key: card["reactions"][key] for key in sorted(card["reactions"])},
+                "latestReportDate": card["latestReportDate"],
+            }
+            for knowledge_id, card in sorted(cards.items())
+        },
+    }
+
+
+def write_field_report_aggregate(reports: list, root: Path = KNOWLEDGE_ROOT) -> Path:
+    """Store the counts-only aggregate next to the queue (deterministic JSON)."""
+    path = root / FIELD_REPORT_AGGREGATE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(aggregate_field_reports(reports), ensure_ascii=False, indent=2, sort_keys=True)
+    path.write_text(text + "\n", encoding="utf-8")
+    return path
+
+
+def _read_aggregate(root: Path) -> dict | None:
+    path = root / FIELD_REPORT_AGGREGATE
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) and isinstance(data.get("cards"), dict) else None
+
+
+def _other_model(scope: dict, model: str, retrieval: ModuleType) -> bool:
+    """True when every recognized product value of the card names a product other than ``model``."""
+    if model not in retrieval.MODEL_ALIASES:
+        return False
+    kinds = {
+        retrieval._classify_model_value(value, model)
+        for key in PRODUCT_KEYS for value in _as_list(scope.get(key))
+    } - {"unknown"}
+    return kinds == {"conflicting"}
+
+
+@dataclass(frozen=True)
+class FieldRow:
+    """One card with open field reports."""
+
+    knowledge_id: str
+    card: CardInfo | None
+    totals: dict
+    other_model: int
+    models: tuple[str, ...]
+    latest: str
+
+    @property
+    def needs_review(self) -> bool:
+        return self.totals["not_matched"] > 0 or self.other_model > 0
+
+    @property
+    def sort_key(self) -> tuple:
+        return (-self.totals["not_matched"], -self.other_model, -sum(self.totals.values()), self.knowledge_id)
+
+
+def _field_rows(aggregate: dict, cards: dict, retrieval: ModuleType) -> list[FieldRow]:
+    rows = []
+    for knowledge_id, entry in aggregate["cards"].items():
+        card = cards.get(knowledge_id)
+        totals = dict.fromkeys(FIELD_REPORT_REACTIONS, 0)
+        other = 0
+        for model, counts in (entry.get("reactions") or {}).items():
+            reports = 0
+            for reaction in FIELD_REPORT_REACTIONS:
+                totals[reaction] += int(counts.get(reaction, 0))
+                reports += int(counts.get(reaction, 0))
+            if card is not None and _other_model(card.scope, model, retrieval):
+                other += reports
+        models = tuple(sorted(model for model in entry.get("reactions") or {} if model))
+        rows.append(FieldRow(knowledge_id, card, totals, other, models, str(entry.get("latestReportDate") or "")))
+    return sorted(rows, key=lambda row: row.sort_key)
+
+
+def _field_section(aggregate: dict | None, cards: dict, retrieval: ModuleType) -> tuple[list[str], int]:
+    if aggregate is None:
+        return ["現場の報告はまだ集計されていません（`--field-reports <書き出しJSON>` で取り込む）。"], 0
+    rows = _field_rows(aggregate, cards, retrieval)
+    review = [row for row in rows if row.needs_review]
+    lines = [
+        f"先輩チャット「結果を残す」の未確認・確認待ちの報告 {aggregate.get('counted', 0)} 件から集計"
+        "（件数のみ。報告の本文・投稿者は含めない）。報告は観測であり、確認済みの事実ではない。",
+        "",
+    ]
+    if review:
+        lines += [
+            "| カード | タイトル | 通常の区分 | 当てはまらなかった | カードと違う機種 | 当てはまった | 分からない | 報告の機種 | 最新 | 推奨対応 |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |",
+        ]
+        for row in review:
+            card = row.card
+            name = f"[{row.knowledge_id}]({card.link})" if card else f"{row.knowledge_id}（カードが見つからない）"
+            lines.append(
+                f"| {name} | {_cell(card.title if card else '')} | {card.section if card else '—'} "
+                f"| {row.totals['not_matched']} | {row.other_model} | {row.totals['matched']} "
+                f"| {row.totals['unsure']} | {_cell(row.models)} | {row.latest or '—'} | {ACTIONS['P0']} |"
+            )
+    else:
+        lines.append("（確認が必要な報告なし）")
+    reference = [row for row in rows if not row.needs_review]
+    if reference:
+        lines += ["", "参考（当てはまった・分からないのみ）: " + ", ".join(
+            f"{row.knowledge_id}（{sum(row.totals.values())} 件）" for row in reference
+        )]
+    return lines, len(review)
 
 
 def _cell(values) -> str:
@@ -216,6 +416,7 @@ def render_queue(root: Path = KNOWLEDGE_ROOT) -> str:
     """Render the full queue Markdown deterministically."""
     inventory = scan(root)
     counts = Counter(row.priority for row in inventory.rows)
+    field_lines, counts["P0"] = _field_section(_read_aggregate(root), inventory.cards, load_retrieval())
     lines = [
         "# scope-review queue",
         "",
@@ -249,11 +450,15 @@ def render_queue(root: Path = KNOWLEDGE_ROOT) -> str:
         "| 区分 | 件数 |",
         "| --- | ---: |",
     ]
-    for key in ("P1", "P2", "P3", "P4"):
+    for key in ("P0", "P1", "P2", "P3", "P4"):
         lines.append(f"| {PRIORITY_TITLES[key]} | {counts[key]} |")
     lines += [
         f"| 検証済み（キュー対象外） | {inventory.verified} |",
         f"| 読み込み不可 | {len(inventory.unreadable)} |",
+        "",
+        f"## {PRIORITY_TITLES['P0']}（{counts['P0']} 件）",
+        "",
+        *field_lines,
         "",
     ]
     for key in ("P1", "P2", "P3", "P4"):
@@ -275,7 +480,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate the scope review queue.")
     parser.add_argument("--knowledge-root", type=Path, default=KNOWLEDGE_ROOT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--field-reports", type=Path, default=None,
+                        help="exported JSON of 先輩チャット field reports (stored as a counts-only aggregate)")
     args = parser.parse_args(argv)
+    if args.field_reports is not None:
+        written = write_field_report_aggregate(load_field_report_export(args.field_reports), args.knowledge_root)
+        print(f"wrote {written}", file=sys.stderr)
     text = render_queue(args.knowledge_root)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(text, encoding="utf-8")

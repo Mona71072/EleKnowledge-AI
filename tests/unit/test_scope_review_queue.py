@@ -90,3 +90,112 @@ def test_unparseable_card_is_reported_not_fatal(cards_root):
     (cards_root / "cards" / "practice-guides" / "KH-BAD.md").write_text("---\n: [\n---\n", encoding="utf-8")
 
     assert "KH-BAD" in _module().render_queue(cards_root)
+
+
+# --- field reports (「結果を残す」) -------------------------------------------
+
+import json  # noqa: E402
+
+AXIEZ_CARD = '  product_lines: ["AXIEZ"]\n  scope_status: verified\n  scope_verified_by: r\n  scope_verified_at: "2026-10-20"'
+
+
+def _report(card_id, reaction, *, model="NEXCUBE", turn_model=None, state="unconfirmed", version=1,
+            created="2026-10-20T01:00:00Z", finding="現場の本文ZZZ-FINDING", user="user-ZZZ"):
+    report = {
+        "reportId": f"field-report-{card_id}-{reaction}-{created}", "userId": user,
+        "senpaiConversationId": "conv-ZZZ", "senpaiTurnId": "turn-ZZZ", "createdAt": created,
+        "finding": finding, "condition": "条件ZZZ-CONDITION", "reviewState": state,
+        "cardReactions": [{"knowledgeId": card_id, "cardVersion": version, "reaction": reaction,
+                           "cardScopeStatus": "verified", "cardProductScope": ["AXIEZ"]}],
+    }
+    if model:
+        report["modelType"] = model
+    if turn_model:
+        report["turnModelType"] = turn_model
+    return report
+
+
+@pytest.fixture
+def reports_root(cards_root):
+    _write_card(cards_root, "KH-AX", AXIEZ_CARD, title="AXIEZ 検証済みカード")
+    return cards_root
+
+
+def _export(tmp_path, reports, wrap=False):
+    path = tmp_path / "export.json"
+    path.write_text(json.dumps({"items": reports} if wrap else reports, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_aggregate_counts_reactions_by_model_and_drops_text_and_people(reports_root, tmp_path):
+    module = _module()
+    export = _export(tmp_path, [
+        _report("KH-AX", "not_matched"),
+        _report("KH-AX", "not_matched", model=None, turn_model="AXIEZ", created="2026-10-21T00:00:00Z"),
+        _report("KH-AX", "matched", model=None),
+        _report("KH-P2", "unsure"),
+        _report("KH-P2", "not_matched", state="reflected"),
+        _report("KH-P2", "not_matched", state="held_or_rejected"),
+        {"broken": True},
+    ], wrap=True)
+    aggregate = module.aggregate_field_reports(module.load_field_report_export(export))
+    assert aggregate["cards"]["KH-AX"] == {
+        "versions": [1],
+        "reactions": {
+            "": {"matched": 1, "not_matched": 0, "unsure": 0},
+            "AXIEZ": {"matched": 0, "not_matched": 1, "unsure": 0},
+            "NEXCUBE": {"matched": 0, "not_matched": 1, "unsure": 0},
+        },
+        "latestReportDate": "2026-10-21",
+    }
+    assert aggregate["cards"]["KH-P2"]["reactions"] == {"NEXCUBE": {"matched": 0, "not_matched": 0, "unsure": 1}}
+    assert aggregate["counted"] == 4 and aggregate["skipped"] == 3
+    text = json.dumps(aggregate, ensure_ascii=False)
+    for secret in ("ZZZ-FINDING", "ZZZ-CONDITION", "user-ZZZ", "conv-ZZZ", "turn-ZZZ"):
+        assert secret not in text
+
+
+def test_export_must_be_a_list_or_items_object(tmp_path):
+    path = tmp_path / "bad.json"
+    path.write_text('{"reports": []}', encoding="utf-8")
+    with pytest.raises(ValueError):
+        _module().load_field_report_export(path)
+
+
+def test_p0_lists_not_matched_and_other_model_reports_first_including_verified(reports_root, tmp_path):
+    module = _module()
+    export = _export(tmp_path, [
+        _report("KH-AX", "matched", model="NEXCUBE"),      # other model than the card's AXIEZ
+        _report("KH-P2", "not_matched", model="AXIEZ-LINKs"),
+        _report("KH-P2", "not_matched", model="AXIEZ-LINKs"),
+        _report("KH-P3", "matched", model="AXIEZ"),         # control-code only: no mismatch, only matched
+        _report("KH-GONE", "not_matched"),
+    ])
+    module.write_field_report_aggregate(module.load_field_report_export(export), reports_root)
+    queue = module.render_queue(reports_root)
+    p0 = queue.split("## P0", 1)[1].split("\n## P1", 1)[0]
+    assert queue.index("## P0") < queue.index("## P1")
+    assert p0.index("[KH-P2]") < p0.index("[KH-AX]")
+    assert "検証済み" in p0.split("[KH-AX]", 1)[1].split("\n", 1)[0]
+    assert "[KH-P3]" not in p0 and "KH-P3" in p0  # listed only in the reference line
+    assert "KH-GONE" in p0  # unknown card is surfaced, not dropped
+    assert "ZZZ" not in queue
+
+
+def test_queue_without_aggregate_has_empty_p0_and_is_deterministic(cards_root):
+    module = _module()
+    queue = module.render_queue(cards_root)
+    assert "## P0" in queue and "現場の報告はまだ集計されていません" in queue
+    assert queue == module.render_queue(cards_root)
+
+
+def test_main_with_field_reports_writes_aggregate_and_queue(reports_root, tmp_path):
+    module = _module()
+    export = _export(tmp_path, [_report("KH-AX", "not_matched")])
+    out = tmp_path / "QUEUE.md"
+    assert module.main(["--knowledge-root", str(reports_root), "--output", str(out),
+                        "--field-reports", str(export)]) == 0
+    aggregate_path = reports_root / "queues" / "scope-review" / "field-reports.json"
+    assert json.loads(aggregate_path.read_text(encoding="utf-8"))["cards"]["KH-AX"]
+    assert out.read_text(encoding="utf-8") == module.render_queue(reports_root)
+    assert "[KH-AX]" in out.read_text(encoding="utf-8").split("## P1", 1)[0]

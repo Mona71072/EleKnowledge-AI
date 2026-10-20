@@ -4,9 +4,11 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSenpaiHistory } from '@/hooks/useSenpaiHistory';
 import { SenpaiConversationSidebar } from './SenpaiConversationSidebar';
+import { SenpaiFieldReportForm } from './SenpaiFieldReportForm';
 import { getIdToken } from '@/lib/auth-helpers';
 import { createSenpaiChat, type SenpaiChatController, type SenpaiChatLane, type SenpaiChatSnapshot, type SenpaiChatTurn } from '@/lib/knowledge-senpai-chat.mjs';
 import { requestSenpaiSynthesis } from '@/lib/knowledge-senpai-synthesis.mjs';
+import { listFieldReports, type FieldReport } from '@/lib/knowledge-senpai-field-report.mjs';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
 import {
@@ -17,6 +19,8 @@ import {
 } from '@/lib/knowledge-research.mjs';
 
 const EMPTY_SNAPSHOT: SenpaiChatSnapshot = { turns: [], running: false };
+// 「結果を残す」は SAM の SenpaiFieldReportsEnabled と合わせて有効化する（既定オフ）。
+const FIELD_REPORTS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS === 'true';
 const inputClass = 'w-full resize-y rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm leading-6 text-gray-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200';
 
 function useController(
@@ -60,6 +64,35 @@ function useController(
       controller.dispose();
     };
   }, [controllerRef, mountedRef, setSnapshot]);
+}
+
+/** Reports the caller already sent for the open conversation, keyed by senpaiTurnId. */
+function useFieldReports(conversationId: string | undefined, running: boolean) {
+  const [reports, setReports] = useState<Record<string, FieldReport>>({});
+  useEffect(() => {
+    setReports({});
+    if (!FIELD_REPORTS_ENABLED || !conversationId || running) return;
+    const controller = new AbortController();
+    listFieldReports({
+      baseUrl: process.env.NEXT_PUBLIC_RAG_API_URL || '', getToken: getIdToken, conversationId, signal: controller.signal,
+    }).then((byTurn) => {
+      if (!controller.signal.aborted) setReports(byTurn);
+    }).catch(() => {
+      // Missing "sent" marks only re-show the form; the server keeps one report per turn.
+    });
+    return () => controller.abort();
+  }, [conversationId, running]);
+  function markSent(report: FieldReport) {
+    setReports((current) => ({ ...current, [report.senpaiTurnId]: report }));
+  }
+  return { reports, markSent };
+}
+
+function canReport(turn: SenpaiChatTurn, running: boolean) {
+  const lanes = [turn.normal, turn.law];
+  return FIELD_REPORTS_ENABLED && !running && Boolean(turn.senpaiTurnId)
+    && lanes.every((lane) => lane.status !== 'loading')
+    && lanes.some((lane) => lane.status === 'success');
 }
 
 function sourceTitle(source: ResearchCitationSource, mode: KnowledgeResearchMode) {
@@ -248,7 +281,14 @@ function SynthesisSection({ turn, running, onSynthesize }: {
   );
 }
 
-function ChatTurnView({ turn, running, onSynthesize }: { turn: SenpaiChatTurn; running: boolean; onSynthesize: (turnId: number) => void }) {
+function ChatTurnView({ turn, running, onSynthesize, conversationId, report, onReportSent }: {
+  turn: SenpaiChatTurn;
+  running: boolean;
+  onSynthesize: (turnId: number) => void;
+  conversationId?: string;
+  report?: FieldReport;
+  onReportSent: (report: FieldReport) => void;
+}) {
   return (
     <article className="space-y-4 border-b border-gray-200 pb-5 last:border-0" aria-label={`相談 ${turn.id}`}>
       <div className="ml-auto max-w-3xl rounded-2xl rounded-br-sm bg-violet-700 px-4 py-3 text-sm leading-6 text-white shadow-sm">
@@ -270,6 +310,11 @@ function ChatTurnView({ turn, running, onSynthesize }: { turn: SenpaiChatTurn; r
           </section>
         </div>
         <p className="mt-3 text-xs text-gray-500">各KBの回答を個別に表示しています。必要に応じて根拠と適用条件を確認してください。</p>
+        {canReport(turn, running) && (
+          <div className="mt-3">
+            <SenpaiFieldReportForm conversationId={conversationId} turn={turn} sent={turn.senpaiTurnId ? report : undefined} onSent={onReportSent} />
+          </div>
+        )}
       </div>
     </article>
   );
@@ -289,6 +334,7 @@ export function KnowledgeSenpaiChat() {
   const scrollAfterSendRef = useRef(false);
   useController(setSnapshot, controllerRef, mountedRef);
   const history = useSenpaiHistory(snapshot, controllerRef);
+  const fieldReports = useFieldReports(snapshot.conversationId, snapshot.running);
   useEffect(() => {
     const transcript = transcriptRef.current;
     if (!transcript) return;
@@ -381,10 +427,10 @@ export function KnowledgeSenpaiChat() {
           <div className="mx-auto max-w-2xl rounded-2xl border border-dashed border-violet-200 bg-violet-50/60 p-6 text-center">
             <h2 className="text-base font-semibold text-gray-900">どんなことを調べますか？</h2>
             <p className="mt-2 text-sm leading-6 text-gray-600">サーバーで検索が許可されたノウハウMarkdownを参考に技術KBを調べ、法令KBにも個別に問い合わせます。回答は出典とともに分けて表示します。</p>
-            <p className="mt-2 text-xs leading-5 text-gray-600">ローカルファイルは送信されません。ノウハウMarkdownは参考情報として表示し、Markdownの編集やOneNoteへの追記は行いません。</p>
+            <p className="mt-2 text-xs leading-5 text-gray-600">ローカルファイルは送信されません。ノウハウMarkdownは参考情報として表示し、Markdownの編集やOneNoteへの追記は行いません。{FIELD_REPORTS_ENABLED && '「結果を残す」で送った内容は未確認の報告として担当者が確認します。'}</p>
             <p className="mt-3 text-xs leading-5 text-gray-600">相談履歴は60日間保存されます。ページを再読み込みした後も、左側の履歴から相談を開き直せます。</p>
           </div>
-        ) : snapshot.turns.map((turn) => <ChatTurnView key={turn.id} turn={turn} running={snapshot.running} onSynthesize={requestSynthesis} />)}
+        ) : snapshot.turns.map((turn) => <ChatTurnView key={`${snapshot.conversationId ?? 'new'}-${turn.id}`} turn={turn} running={snapshot.running} onSynthesize={requestSynthesis} conversationId={snapshot.conversationId} report={turn.senpaiTurnId ? fieldReports.reports[turn.senpaiTurnId] : undefined} onReportSent={fieldReports.markSent} />)}
         {continuationPaused && <p role="status" className="mx-auto max-w-2xl rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">{snapshot.complete === false ? '相談履歴の一部を確認できないため、表示のみ利用できます。' : '両方の検索が失敗または中止されたため、この相談では続けて質問できません。'}内容を確認し、「新しい相談」から再開してください。</p>}
       </div>
 
