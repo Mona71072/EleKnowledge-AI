@@ -625,3 +625,31 @@ test('renders imported knowledge IDs as literals in generated target provenance'
     assert.throws(() => researchClient.buildResearchTargetNote(target));
   }
 });
+
+test('sends the optional model filter only for normal mode and never for law mode', async () => {
+  const bodies = [];
+  const run = (mode, extra) => queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode, query: '機種指定', ...extra,
+    fetchImpl: fetchOk(normalPayload(), (_url, init) => bodies.push(JSON.parse(init.body))),
+  });
+  await run('normal', { modelType: ' AXIEZ ' });
+  await run('law', { modelType: 'AXIEZ' });
+  await run('normal', {});
+
+  assert.deepEqual(bodies[0].filters, { modelType: 'AXIEZ' });
+  assert.deepEqual(bodies[1].filters, {});
+  assert.deepEqual(bodies[2].filters, {});
+});
+
+test('rejects malformed model filters before authentication or fetch', async () => {
+  let calls = 0;
+  const common = {
+    baseUrl: BASE, getToken: async () => { calls += 1; return TOKEN; },
+    fetchImpl: async () => { calls += 1; return response(normalPayload()); },
+    query: 'question', mode: 'normal',
+  };
+  for (const modelType of ['', '   ', 1, null, 'a'.repeat(65), 'AX\u0000IEZ']) {
+    await assert.rejects(queryKnowledgeSource({ ...common, modelType }), (error) => error.code === 'validation');
+  }
+  assert.equal(calls, 0);
+});

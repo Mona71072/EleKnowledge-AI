@@ -312,3 +312,36 @@ test('rejects restored histories with duplicate turn UUIDs or colliding mode ses
   }), (error) => error.code === 'validation');
   chat.dispose();
 });
+
+test('passes an optional model type to both lanes and records it on that turn only', async () => {
+  const calls = [];
+  const chat = createSenpaiChat({
+    querySource: async (request) => {
+      calls.push(request);
+      return answer(request.mode, request.mode === 'normal' ? 'technical-session' : 'law-session', request.query);
+    },
+  });
+
+  await chat.send('機種つき', { modelType: ' AXIEZ ' });
+  await chat.send('機種なし');
+  await chat.send('空指定', { modelType: '   ' });
+
+  assert.deepEqual(calls.map((call) => call.modelType), ['AXIEZ', 'AXIEZ', undefined, undefined, undefined, undefined]);
+  assert.equal(Object.hasOwn(calls[2], 'modelType'), false);
+  const { turns } = chat.getSnapshot();
+  assert.equal(turns[0].modelType, 'AXIEZ');
+  assert.equal(Object.hasOwn(turns[1], 'modelType'), false);
+  assert.equal(Object.hasOwn(turns[2], 'modelType'), false);
+  chat.dispose();
+});
+
+test('rejects a non-string model type before creating a turn', async () => {
+  let calls = 0;
+  const chat = createSenpaiChat({ querySource: async () => { calls += 1; return answer('normal', 's'); } });
+
+  await assert.rejects(chat.send('質問', { modelType: 3 }), (error) => error.code === 'validation');
+
+  assert.equal(calls, 0);
+  assert.equal(chat.getSnapshot().turns.length, 0);
+  chat.dispose();
+});

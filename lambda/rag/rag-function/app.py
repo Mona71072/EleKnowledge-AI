@@ -2580,7 +2580,9 @@ def handle_rag_request(event, context, started_at):
                     compose_search_query(query, chat_history), chat_history,
                     request_deadline=request_deadline,
                 )
-                knowhow_result = search_index(knowhow_index, knowhow_search_query)
+                knowhow_result = search_index(
+                    knowhow_index, knowhow_search_query, model_type=filters.get('modelType')
+                )
                 knowhow_hints = derive_kb_hints(knowhow_result['matches'])
                 knowhow_payload = {
                     'status': knowhow_result['status'],

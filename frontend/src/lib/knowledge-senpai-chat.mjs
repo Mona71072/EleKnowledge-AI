@@ -21,6 +21,7 @@ function cloneTurn(turn) {
   return Object.freeze({
     id: turn.id,
     ...(turn.senpaiTurnId ? { senpaiTurnId: turn.senpaiTurnId } : {}),
+    ...(turn.modelType ? { modelType: turn.modelType } : {}),
     query: turn.query,
     normal: Object.freeze({ ...turn.normal, ...(turn.normal.answer ? { answer: freezeCopy(turn.normal.answer) } : {}) }),
     law: Object.freeze({ ...turn.law, ...(turn.law.answer ? { answer: freezeCopy(turn.law.answer) } : {}) }),
@@ -149,11 +150,12 @@ export function createSenpaiChat({ querySource, onChange = () => {}, createId = 
     return { status, ...(message ? { message } : {}) };
   }
 
-  async function runLane(run, mode, query) {
+  async function runLane(run, mode, query, modelType) {
     const priorSessionId = sessionIds[mode];
     try {
       const answer = await querySource({
         mode, query,
+        ...(modelType ? { modelType } : {}),
         ...(priorSessionId ? { sessionId: priorSessionId } : {}),
         senpaiConversationId: conversationId,
         senpaiTurnId: run.senpaiTurnId,
@@ -191,7 +193,7 @@ export function createSenpaiChat({ querySource, onChange = () => {}, createId = 
     notify();
   }
 
-  async function send(query) {
+  async function send(query, options = {}) {
     if (disposed) return;
     if (running) throw chatError('回答を待ってから、次の質問を送信してください');
     if (complete === false) throw chatError('相談履歴が途中までのため、続きの質問は送信できません');
@@ -199,6 +201,10 @@ export function createSenpaiChat({ querySource, onChange = () => {}, createId = 
       throw chatError('質問を入力してください（2,000文字以内）');
     }
     const normalizedQuery = query.trim();
+    if (options?.modelType !== undefined && typeof options.modelType !== 'string') {
+      throw chatError('機種の指定を確認してください');
+    }
+    const modelType = options?.modelType?.trim() || undefined;
     const nextConversationId = conversationId || createId();
     const senpaiTurnId = createId();
     if (!UUID.test(nextConversationId) || !UUID.test(senpaiTurnId) || nextConversationId === senpaiTurnId
@@ -210,13 +216,14 @@ export function createSenpaiChat({ querySource, onChange = () => {}, createId = 
     const run = { turnId, senpaiTurnId, generation, controller: new AbortController() };
     turns = [...turns, {
       id: turnId, senpaiTurnId, query: normalizedQuery,
+      ...(modelType ? { modelType } : {}),
       normal: pausedReasons.normal ? makeLane('paused', pausedReasons.normal) : makeLane('loading'),
       law: pausedReasons.law ? makeLane('paused', pausedReasons.law) : makeLane('loading'),
     }];
     active = run;
     running = true;
     notify();
-    await Promise.all(MODES.filter((mode) => !pausedReasons[mode]).map((mode) => runLane(run, mode, normalizedQuery)));
+    await Promise.all(MODES.filter((mode) => !pausedReasons[mode]).map((mode) => runLane(run, mode, normalizedQuery, modelType)));
     if (isCurrent(run)) {
       checkSessionCollision(run);
       running = false;

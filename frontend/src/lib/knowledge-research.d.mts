@@ -108,6 +108,8 @@ export function queryKnowledgeSource(options: {
   timeoutMs?: number;
   /** Retrieve the server-authorized Markdown index for normal mode only. */
   includeKnowhow?: boolean;
+  /** UI model key sent as a filter in normal mode; ignored in law mode. */
+  modelType?: string;
   /** Paired UUID tags used only by the Senpai conversation. */
   senpaiConversationId?: string;
   senpaiTurnId?: string;

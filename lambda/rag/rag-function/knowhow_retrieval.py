@@ -42,6 +42,26 @@ MODEL_SCOPE_KEYS = frozenset({
     "model_abbreviations", "observed_on", "product_lines", "scope_note",
     "conditions",
 })
+# Only fields stating where a card DOES apply may influence ranking; excludes,
+# may_apply_to and scope_note describe exclusions or unconfirmed scope.
+POSITIVE_SCOPE_KEYS = (
+    "control_methods", "door_families", "door_types", "guide_systems",
+    "lists_model_label", "machine_room", "model_abbreviations", "observed_on",
+    "product_lines", "conditions",
+)
+MODEL_CLASSIFY_KEYS = ("product_lines", "model_abbreviations", "lists_model_label", "observed_on")
+# Keys mirror app.UI_MODEL_FILTERS; values are normalized aliases found in card scopes.
+MODEL_ALIASES = {
+    "AXIEZ": frozenset({"axiez", "axiez(ke-wf・ke-hf)", "駅舎エレ"}),
+    "AXIEZ-LINKs": frozenset({"axiez-links"}),
+    "NEXCUBE": frozenset({"nexcube", "nexcube limited", "特注機械室レスエレベーター"}),
+    "メルシティ": frozenset({"メルシティ"}),
+    "メルワイド": frozenset({"メルワイド"}),
+    "エスカレーター": frozenset({"エスカレーター", "escalator"}),
+}
+ESCALATOR_KEY = "エスカレーター"
+GENERIC_ELEVATOR_LABEL = "全エレ機種"
+GENERIC_ESCALATOR_LABEL = "全エス機種"
 
 _cache: dict[str, Any] = {"identity": None, "expires": 0.0, "index": None,
                          "version_id": None, "etag": None}
@@ -244,12 +264,22 @@ def _feature_text(value: str) -> tuple[set[str], set[str]]:
     return _query_features(value)
 
 
+def _scope_text(card: dict, keys=POSITIVE_SCOPE_KEYS) -> str:
+    return " ".join(item for item in _scope_values(card, keys))
+
+
+def _scope_values(card: dict, keys) -> list[str]:
+    values = []
+    for key in keys:
+        raw = card["modelScope"].get(key, [])
+        values.extend(str(item) for item in (raw if isinstance(raw, list) else [raw]))
+    return values
+
+
 def _score_card(card: dict, query_grams: set[str], query_words: set[str]) -> float:
+    scope_values = _scope_text(card)
     text = " ".join([
-        card["title"], " ".join(card["searchTerms"]),
-        " ".join(str(value) for values in card["modelScope"].values()
-                 for value in (values if isinstance(values, list) else [values])),
-        card["body"],
+        card["title"], " ".join(card["searchTerms"]), scope_values, card["body"],
     ])
     doc_grams, doc_words = _feature_text(text)
     if not query_grams and not query_words:
@@ -258,8 +288,6 @@ def _score_card(card: dict, query_grams: set[str], query_words: set[str]) -> flo
     # matching helps discovery but cannot make a one-character query meaningful.
     title_grams, title_words = _feature_text(card["title"])
     term_grams, term_words = _feature_text(" ".join(card["searchTerms"]))
-    scope_values = " ".join(str(value) for values in card["modelScope"].values()
-                             for value in (values if isinstance(values, list) else [values]))
     scope_grams, scope_words = _feature_text(scope_values)
     weighted_total = len(query_grams) + 2 * len(query_words)
     matched = (
@@ -275,16 +303,54 @@ def _score_card(card: dict, query_grams: set[str], query_words: set[str]) -> flo
     return matched / max(weighted_total, 1)
 
 
-def search_index(index: dict, query: str) -> dict:
-    """Return up to three whole relevant cards under one combined body-size budget."""
+def normalize_model_label(value: str) -> str:
+    return _normalize(value).strip()
+
+
+def _classify_model_value(value: str, model_type: str) -> str:
+    label = normalize_model_label(value)
+    if label in MODEL_ALIASES[model_type]:
+        return "matched"
+    is_escalator = model_type == ESCALATOR_KEY
+    if label == normalize_model_label(GENERIC_ELEVATOR_LABEL):
+        return "conflicting" if is_escalator else "general"
+    if label == normalize_model_label(GENERIC_ESCALATOR_LABEL):
+        return "general" if is_escalator else "conflicting"
+    if any(label in aliases for aliases in MODEL_ALIASES.values()):
+        return "conflicting"
+    return "unknown"
+
+
+def _conflicts_with_model(card: dict, model_type: str) -> bool:
+    """True when the card's recognized product scope names only other products.
+
+    Unrecognized values (control codes, sub-attributes) are ignored; a card with
+    no recognized product value, or any matched/general one, is never dropped.
+    """
+    kinds = {
+        _classify_model_value(value, model_type)
+        for value in _scope_values(card, MODEL_CLASSIFY_KEYS)
+    } - {"unknown"}
+    return kinds == {"conflicting"}
+
+
+def search_index(index: dict, query: str, model_type: str | None = None) -> dict:
+    """Return up to three whole relevant cards under one combined body-size budget.
+
+    ``model_type`` (a UI model key) drops cards whose recognized product scope names
+    only other products; unknown keys and unrecognized codes never filter.
+    """
     index = validate_index(index)
     if not isinstance(query, str) or len(query) > 12000:
         raise KnowhowIndexError("query is invalid")
     query_grams, query_words = _query_features(query)
     if not query_grams and not query_words:
         return {"status": "not_found", "indexVersion": index["indexVersion"], "matches": []}
+    candidates = index["cards"]
+    if model_type in MODEL_ALIASES:
+        candidates = [card for card in candidates if not _conflicts_with_model(card, model_type)]
     ranked = sorted(
-        ((_score_card(card, query_grams, query_words), card) for card in index["cards"]),
+        ((_score_card(card, query_grams, query_words), card) for card in candidates),
         key=lambda item: (-item[0], item[1]["knowledgeId"]),
     )
     matches = []

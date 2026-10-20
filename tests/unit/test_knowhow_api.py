@@ -1,6 +1,7 @@
 """The Markdown retrieval extension is opt-in and admin-gated at the API boundary."""
-import json
 import hashlib
+import json
+import types
 
 
 def _event(body, *, groups="admin"):
@@ -264,3 +265,43 @@ def test_index_bucket_must_be_separate_from_ordinary_document_buckets(rag_app, m
         _event({"query": "かごの走行中振動", "includeKnowhow": True}), None, 0
     )
     assert response["statusCode"] == 503
+
+
+def _two_product_index():
+    index = _index()
+    other = dict(index["cards"][0])
+    other.update(
+        knowledgeId="KH-SYN-ESC",
+        sourceRefs=[{"ref_type": "kb_document", "document_number": "E-1-ESC", "kb_filename": "ESC-1.pdf"}],
+        modelScope={"product_lines": ["escalator"]},
+    )
+    return {**index, "cards": [index["cards"][0], other]}
+
+
+def _matched_ids(response):
+    return [m["knowledgeId"] for m in json.loads(response["body"])["knowhow"]["matches"]]
+
+
+def test_model_type_filter_excludes_cards_scoped_only_to_another_product(rag_app, monkeypatch):
+    captured = _configure_successful_pipeline(rag_app, monkeypatch)
+    monkeypatch.setattr(rag_app, "load_index", lambda **_kwargs: _two_product_index())
+    request = {"query": "かごの走行中振動", "includeKnowhow": True}
+
+    unfiltered = rag_app.handle_rag_request(_event(request), None, 0)
+    assert sorted(_matched_ids(unfiltered)) == ["KH-SYN-001", "KH-SYN-ESC"]
+
+    filtered = rag_app.handle_rag_request(
+        _event({**request, "filters": {"modelType": "AXIEZ"}}), None, 0
+    )
+    assert _matched_ids(filtered) == ["KH-SYN-001"]
+    assert "E-1-ESC" not in captured["search_query"]
+    assert "ESC-1.pdf" not in captured["search_query"]
+
+
+def test_knowhow_model_vocabulary_covers_every_ui_model_filter(rag_app):
+    retrieval = types.SimpleNamespace(**rag_app.search_index.__globals__)
+
+    assert set(retrieval.MODEL_ALIASES) == set(rag_app.UI_MODEL_FILTERS)
+    for key, targets in rag_app.UI_MODEL_FILTERS.items():
+        for target in targets:
+            assert retrieval.normalize_model_label(target) in retrieval.MODEL_ALIASES[key]

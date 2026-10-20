@@ -21,6 +21,7 @@ function loadTsx(path, mocks) {
   const localRequire = (name) => {
     if (Object.hasOwn(mocks, name)) return mocks[name];
     if (name === './SenpaiConversationSidebar') return loadTsx('../src/components/knowledge/SenpaiConversationSidebar.tsx', {});
+    if (name === '@/data/kbModelTypes') return loadTsx('../src/data/kbModelTypes.ts', {});
     if (name === '@/hooks/useSenpaiHistory') return { useSenpaiHistory: () => ({ entries: [], loading: false, error: '', complete: true, opening: false, openError: '', openConversation: async () => {}, resetSelection() {}, refresh() {} }) };
     return require(name);
   };
@@ -345,6 +346,82 @@ test('late completion from an old相談 does not erase a newer draft', async () 
   view = render();
 
   assert.equal(findElement(view, (element) => element.type === 'textarea' && element.props['aria-label'] === '質問を入力').props.value, '新しい相談の下書き');
+});
+
+test('optional model select defaults to unspecified and offers the six UI model keys', () => {
+  const render = loadInteractiveChat({
+    initialSnapshot: { turns: [], running: false },
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+  });
+  render();
+  const html = renderToStaticMarkup(render());
+
+  assert.match(html, /機種（任意）/);
+  assert.match(html, /<option value="" selected="">指定しない<\/option>|<option value="">指定しない<\/option>/);
+  for (const key of ['AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター']) {
+    assert.match(html, new RegExp(`<option value="${key}"`));
+  }
+});
+
+test('chosen model is sent only when non-empty and is kept across turns', async () => {
+  const sent = [];
+  const render = loadInteractiveChat({
+    initialSnapshot: { turns: [], running: false },
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async (...args) => { sent.push(args); }, cancel() {}, reset() {}, dispose() {} }),
+  });
+  const submitWith = async (question) => {
+    findElement(render(), (el) => el.type === 'textarea').props.onChange({ target: { value: question } });
+    await findElement(render(), (el) => el.type === 'form').props.onSubmit({ preventDefault() {} });
+  };
+  render();
+  await submitWith('指定なし');
+  findElement(render(), (el) => el.type === 'select').props.onChange({ target: { value: 'NEXCUBE' } });
+  await submitWith('NEXCUBE一回目');
+  await submitWith('NEXCUBE二回目');
+
+  assert.deepEqual(sent, [['指定なし'], ['NEXCUBE一回目', { modelType: 'NEXCUBE' }], ['NEXCUBE二回目', { modelType: 'NEXCUBE' }]]);
+});
+
+test('Senpai chat forwards the model type to the research query', async () => {
+  const React = require('react');
+  let querySource;
+  const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
+    react: { ...React, useEffect(effect) { effect(); }, useState(initial) { return [initial, () => {}]; }, useRef(initial) { return { current: initial }; } },
+    'next/link': Link,
+    '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
+    '@/lib/chat-session-link.mjs': { buildChatSessionHref: () => '/chat' },
+    '@/lib/knowledge-senpai-chat.mjs': {
+      createSenpaiChat: (options) => {
+        querySource = options.querySource;
+        return { getSnapshot: () => ({ turns: [], running: false }), send: async () => {}, cancel() {}, reset() {}, dispose() {} };
+      },
+    },
+    '@/lib/knowledge-research.mjs': { queryKnowledgeSource: async (options) => options, researchSourceHref: () => null },
+  }).KnowledgeSenpaiChat;
+  Chat();
+  const withModel = await querySource({ mode: 'normal', query: '質問', modelType: 'AXIEZ', signal: new AbortController().signal });
+  const without = await querySource({ mode: 'normal', query: '質問', signal: new AbortController().signal });
+
+  assert.equal(withModel.modelType, 'AXIEZ');
+  assert.equal(Object.hasOwn(without, 'modelType'), false);
+});
+
+test('a turn shows the model it was filtered by only when one was chosen', () => {
+  const render = loadInteractiveChat({
+    initialSnapshot: {
+      running: false,
+      turns: [
+        { id: 1, query: '指定あり', modelType: 'AXIEZ', normal: lane('loading'), law: lane('loading') },
+        { id: 2, query: '指定なし', normal: lane('loading'), law: lane('loading') },
+      ],
+    },
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+  });
+  render();
+  const html = renderToStaticMarkup(render());
+
+  assert.equal((html.match(/機種: /g) || []).length, 1);
+  assert.match(html, /機種: AXIEZ/);
 });
 
 test('safe lane errors are shown and a healthy lane answer remains visible', () => {

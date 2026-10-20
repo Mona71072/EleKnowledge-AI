@@ -6,6 +6,7 @@ import { useSenpaiHistory } from '@/hooks/useSenpaiHistory';
 import { SenpaiConversationSidebar } from './SenpaiConversationSidebar';
 import { getIdToken } from '@/lib/auth-helpers';
 import { createSenpaiChat, type SenpaiChatController, type SenpaiChatLane, type SenpaiChatSnapshot } from '@/lib/knowledge-senpai-chat.mjs';
+import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
 import {
   queryKnowledgeSource,
@@ -26,11 +27,12 @@ function useController(
     let mounted = true;
     mountedRef.current = true;
     const controller = createSenpaiChat({
-      querySource: ({ mode, query, sessionId, senpaiConversationId, senpaiTurnId, signal }) => queryKnowledgeSource({
+      querySource: ({ mode, query, modelType, sessionId, senpaiConversationId, senpaiTurnId, signal }) => queryKnowledgeSource({
         baseUrl: process.env.NEXT_PUBLIC_RAG_API_URL || '',
         getToken: getIdToken,
         mode,
         query,
+        ...(modelType ? { modelType } : {}),
         senpaiConversationId,
         senpaiTurnId,
         ...(sessionId ? { sessionId } : {}),
@@ -186,6 +188,7 @@ function ChatTurnView({ turn }: { turn: SenpaiChatSnapshot['turns'][number] }) {
       <div className="ml-auto max-w-3xl rounded-2xl rounded-br-sm bg-violet-700 px-4 py-3 text-sm leading-6 text-white shadow-sm">
         <h3 className="mb-1 text-xs font-semibold text-violet-100">あなた</h3>
         <p className="whitespace-pre-wrap break-words">{turn.query}</p>
+        {turn.modelType && <p className="mt-2 inline-block rounded-full bg-violet-600 px-2 py-0.5 text-xs font-semibold text-white">機種: {turn.modelType}</p>}
       </div>
       <div className="max-w-4xl rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-4 shadow-sm">
         <h3 className="mb-3 text-sm font-semibold text-gray-900">工技先輩の回答</h3>
@@ -208,6 +211,7 @@ function ChatTurnView({ turn }: { turn: SenpaiChatSnapshot['turns'][number] }) {
 export function KnowledgeSenpaiChat() {
   const [snapshot, setSnapshot] = useState<SenpaiChatSnapshot>(EMPTY_SNAPSHOT);
   const [question, setQuestion] = useState('');
+  const [modelType, setModelType] = useState('');
   const [sendError, setSendError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const controllerRef = useRef<SenpaiChatController | null>(null);
@@ -241,7 +245,7 @@ export function KnowledgeSenpaiChat() {
     setQuestion('');
     scrollAfterSendRef.current = true;
     try {
-      await controller.send(query);
+      await controller.send(query, ...(modelType ? [{ modelType }] : []));
     } catch (error) {
       const code = (error as { code?: string } | null)?.code;
       if (mountedRef.current && controllerRef.current === controller && requestIdRef.current === requestId) {
@@ -314,6 +318,20 @@ export function KnowledgeSenpaiChat() {
 
       <footer className="shrink-0 border-t border-gray-200 bg-gray-50 px-4 py-4 sm:px-6">
         <form onSubmit={submit} className="mx-auto max-w-5xl space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="senpai-chat-model" className="text-sm font-semibold text-gray-800">機種（任意）</label>
+            <select
+              id="senpai-chat-model"
+              value={modelType}
+              onChange={(event) => setModelType(event.target.value)}
+              disabled={snapshot.running || continuationPaused || history.opening}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
+            >
+              <option value="">指定しない</option>
+              {ALL_MODEL_TYPES.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
+            </select>
+            <span className="text-xs text-gray-500">技術KBとノウハウの検索を、その機種に絞り込みます（法令KBは対象外）。</span>
+          </div>
           <label htmlFor="senpai-chat-question" className="block text-sm font-semibold text-gray-800">質問を入力</label>
           <textarea
             id="senpai-chat-question"

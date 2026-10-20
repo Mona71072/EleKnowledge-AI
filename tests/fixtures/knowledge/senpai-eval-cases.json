@@ -1,0 +1,266 @@
+{
+  "schemaVersion": 1,
+  "purpose": "senpai-knowhow-retrieval-eval-draft",
+  "status": "draft",
+  "notes": "たたき台。質問文は実カードの内容から人が言い換えて作成した。knowledgeId は knowledge/cards の knowledge_id と一致させている。mustInclude / mustNotInclude は検索層（search_index）の判定だけを対象とし、回答の正しさ（矛盾の扱い・古い情報の扱い・KB への誘導）は rationale に書いた観点で人が回答を読んで確認する。索引（.private-knowhow/index.json）は承認済みの選定カードだけを含むため、索引に含まれないカードは FAIL になりうる。モデル絞り込み（modelType）の仕様は検索関数の実装に合わせて後で調整する。",
+  "cases": [
+    {
+      "id": "SE-001",
+      "category": "markdown_sufficient",
+      "query": "かご内の2画面表示のインジケータが、2画面仕様なのに1画面しか映りません。どこを確認すればいいですか。",
+      "modelType": "AXIEZ-LINKs",
+      "expect": {
+        "mustInclude": ["KH-LINKS-CID-DS-DUAL-142"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "CID-DS の 2 画面不発という症状からパラメータ設定ミスの原因と対応までが Markdown だけで答えられるかを見る。"
+    },
+    {
+      "id": "SE-002",
+      "category": "markdown_sufficient",
+      "query": "エスカレーターが自動運転のときに停止待機に入らず、ずっと動いたままになります。上部の光電センサーを先に見るべきでしょうか。",
+      "expect": {
+        "mustInclude": ["KH-ESC-SVFC-PHOTO-STANDBY-103"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "ポスト式光電センサーのずれが原因として先に挙がるかを確認する。回答では低速待機の別件（301）との区別も見る。"
+    },
+    {
+      "id": "SE-003",
+      "category": "markdown_sufficient",
+      "query": "LINKs の終点付近で、おもりのランバイ値を180で設定したけど、技術評価では145になっていると言われました。OH の見方が分からないです。",
+      "expect": {
+        "mustInclude": ["KH-LINKS-SHORT-OH-RUNBY-163"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "品目の OH とランバイ値の読み方がカードだけで説明できるかを見る。"
+    },
+    {
+      "id": "SE-004",
+      "category": "markdown_sufficient",
+      "query": "MBS-800 の受光側が緑色に点滅していて、戸が閉まったあと強制的に戸閉になります。故障ですか。",
+      "expect": {
+        "mustInclude": ["KH-LINKS-MBS-800-RECEIVER-4"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "受光側の緑点滅が正常動作の場合があることをカードから答えられるかを見る。"
+    },
+    {
+      "id": "SE-005",
+      "category": "needs_kb",
+      "query": "1D2G で戸閉はするのに戸開しません。かご上で 421 CAN 異常が出ていて、D21 も点きません。PAD の取付を確認すればいいですか。",
+      "expect": {
+        "mustInclude": ["KH-ALL-1D2G-PAD-REVERSED-324"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "原因の当たりは付くが、3 桁エラーの保守資料（C-18-D60.1-J）の確認が必要で KB 確認は pending。回答が KB 確認へ誘導しているかを人が見る。"
+    },
+    {
+      "id": "SE-006",
+      "category": "needs_kb",
+      "query": "1D2G の 2 停止で、最下階のリア側だけ動きません。DL を短絡させる暫定の方法はありますか。",
+      "expect": {
+        "mustInclude": ["KH-LINKS-DL-SHORT-12"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "正規の方法が未確立の暫定手順なので、回答は現場判断に任せず稲電・据付の確認を促す必要があるかを人が見る。"
+    },
+    {
+      "id": "SE-007",
+      "category": "needs_kb",
+      "query": "LV0K-7-2S のドア駆動基板でエラー 328 が出ました。レゾルバ異常とあります。どの順番で切り分ければいいですか。",
+      "expect": {
+        "mustInclude": ["KH-LV0K-7-2S-DOOR-RESOLVER-328-439"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "切り分け順は Lists 439 の参照が必要で、Markdown の要約だけで手順を断定していないかを人が見る。"
+    },
+    {
+      "id": "SE-008",
+      "category": "no_markdown",
+      "query": "来週の東京の天気と、傘が必要かどうかを教えてください。",
+      "expect": {
+        "mustInclude": [],
+        "mustNotInclude": [],
+        "status": "not_found"
+      },
+      "rationale": "エレベーター知識カードの範囲外の質問で not_found になるかを見る。索引に該当カードがないことを確認する。"
+    },
+    {
+      "id": "SE-009",
+      "category": "no_markdown",
+      "query": "育児休業の申請書を提出する期限はいつまでですか。",
+      "expect": {
+        "mustInclude": [],
+        "mustNotInclude": [],
+        "status": "not_found"
+      },
+      "rationale": "社内制度の質問で、カードが無いときに無関係なカードを返さないかを見る。"
+    },
+    {
+      "id": "SE-010",
+      "category": "condition_mismatch",
+      "query": "LV5K-2S の戸で、戸閉の終端付近が一時的に加速したように見えます。CLT は 5 mm にしてあります。",
+      "expect": {
+        "mustInclude": ["KH-LV5K-LV6K-CLT-432"],
+        "mustNotInclude": ["KH-LV0K-7-2S-DOOR-RESOLVER-328-439"],
+        "status": "matched"
+      },
+      "rationale": "LV5K/LV6K の CLT 基準が出て、LV0K-7-2S（328）の事例が混ざらないかを見る。回答では CLT 3-4 mm の基準と 5 mm の扱いを区別しているかも見る。"
+    },
+    {
+      "id": "SE-011",
+      "category": "condition_mismatch",
+      "query": "LV5K-2S のかごドアを開閉するとキュルキュルと異音がします。G 寸法や STS ベルトを確認すればよいですか。",
+      "expect": {
+        "mustInclude": ["KH-LV5K-2S-DOOR-NOISE-433"],
+        "mustNotInclude": ["KH-LV0K-7-2S-DOOR-RESOLVER-328-439"],
+        "status": "matched"
+      },
+      "rationale": "戸型 LV5K-2S の異音事例が出て、LV0K-7-2S のレゾルバ事例が出ないかを見る。"
+    },
+    {
+      "id": "SE-012",
+      "category": "conflict",
+      "query": "LINKs の制御盤の横保護線のケーブル条件が、図面のページによって違って見えます。どちらが正しいのですか。",
+      "expect": {
+        "mustInclude": ["KH-LINKS-R9-LATERAL-WIRE-DRAW-257"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "図面ページ間の不一致を検索で拾えるかを見る。回答では片方を黙って正解にせず、施工図の正本確認が必要と書いているかを人が見る。"
+    },
+    {
+      "id": "SE-013",
+      "category": "conflict",
+      "query": "KM-LD の DOR-1280 を交換したら戸が低速になり、ゲート SW が認識されません。図面の副番と部品が違うようです。",
+      "expect": {
+        "mustInclude": ["KH-KM-LD-DOR1280-REV-370"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "図面副番と現物の不一致が原因候補として挙がるかを見る。回答が図面と現物のどちらを正とするか断定していないかを人が見る。"
+    },
+    {
+      "id": "SE-014",
+      "category": "stale_or_unauthorized",
+      "query": "手動運転にするとヘルスエアのエアコンが止まる仕様だと聞きましたが、今もそうなのでしょうか。",
+      "expect": {
+        "mustInclude": ["KH-ALL-AC-RUN-MANUAL-255"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "カードは旧認識と現行仕様の食い違いを扱う。回答が旧い動作を現行として述べていないか、改定の扱いを人が確認する。検索層では判定できない。"
+    },
+    {
+      "id": "SE-015",
+      "category": "stale_or_unauthorized",
+      "query": "ピットのトラップの位置はどの基準で決めればいいですか。根拠の資料も知りたいです。",
+      "expect": {
+        "mustInclude": ["KH-PIT-TRAP-POSITION-394"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "カードの KB 参照（S-EL-323）はカタログに無い。回答がその資料を確認済みとして引用していないかを人が見る。"
+    },
+    {
+      "id": "SE-016",
+      "category": "search_limit",
+      "query": "LINKs の据付、試験、調整で確認する手順と異音、ドア、制御盤、エラー、故障の原因をまとめて教えてください。",
+      "expect": {
+        "mustInclude": [],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "広い質問で候補が多くても返却は 3 件以下に抑えられるかを見る。回答が 3 件以外の事例を混ぜていないかも人が見る。"
+    },
+    {
+      "id": "SE-017",
+      "category": "search_limit",
+      "query": "エレベーターの不具合で、原因と対策、調査の手順、確認の順番を一度に知りたいです。",
+      "expect": {
+        "mustInclude": [],
+        "mustNotInclude": [],
+        "status": "any"
+      },
+      "rationale": "抽象的で多くのカードに当たりうる質問で、上限 3 件を超えないかを見る。status は matched または not_found のどちらでもよい。"
+    },
+    {
+      "id": "SE-018",
+      "category": "excludes_not_boost",
+      "query": "LV5K-2S の戸の調整で、G 寸法と STS ベルトの平行度をどう見直せばいいですか。",
+      "expect": {
+        "mustInclude": ["KH-LV5K-2S-DOOR-NOISE-433"],
+        "mustNotInclude": ["KH-ALL-KEIAIN-DOOR-WIRING-407"],
+        "status": "matched"
+      },
+      "rationale": "407 の excludes にだけある「LV5K-only 戸型調整」という語で 407 が上がらないかを見る。"
+    },
+    {
+      "id": "SE-019",
+      "category": "excludes_not_boost",
+      "query": "WOS 単体の現場で、DL・DP のコネクタが無くても問題ないでしょうか。",
+      "expect": {
+        "mustInclude": [],
+        "mustNotInclude": ["KH-LINKS-WOS-DLDP-345"],
+        "status": "any"
+      },
+      "rationale": "345 の excludes（足場工法・WOS 単体のみは対象外）の語だけでは上がらないかを見る。本文にも DL/DP の語があるため判定が難しく、要確認。"
+    },
+    {
+      "id": "SE-020",
+      "category": "model_filter",
+      "query": "3 台群管理で 2C-2BC の状態になってしまいます。工事中の影響でしょうか。",
+      "modelType": "NEXCUBE",
+      "expect": {
+        "mustInclude": ["KH-CM-MA-3CAR-GROUP-2C2BC-384"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "NEXCUBE 指定で Nexcube スコープのカードが出るかを見る。"
+    },
+    {
+      "id": "SE-021",
+      "category": "model_filter",
+      "query": "3 台群管理で 2C-2BC の状態になってしまいます。工事中の影響でしょうか。",
+      "modelType": "AXIEZ-LINKs",
+      "expect": {
+        "mustInclude": [],
+        "mustNotInclude": ["KH-CM-MA-3CAR-GROUP-2C2BC-384"],
+        "status": "any"
+      },
+      "rationale": "AXIEZ-LINKs 指定で Nexcube 専用の CM-MA カードが出ないかを見る。"
+    },
+    {
+      "id": "SE-022",
+      "category": "model_filter",
+      "query": "MBS-800 の受光器が緑に点滅していて、戸が強制的に閉まります。",
+      "modelType": "NEXCUBE",
+      "expect": {
+        "mustInclude": [],
+        "mustNotInclude": ["KH-LINKS-MBS-800-RECEIVER-4"],
+        "status": "any"
+      },
+      "rationale": "AXIEZ-LINKs 専用のカードが NEXCUBE 指定で出ないかを見る。"
+    },
+    {
+      "id": "SE-023",
+      "category": "model_filter",
+      "query": "ドアの開閉ボタンが効きません。DOR-1280D の D14 や DCB/DOB を確認すればいいですか。",
+      "modelType": "AXIEZ-LINKs",
+      "expect": {
+        "mustInclude": ["KH-VFGLF-DOR-DOB-403"],
+        "mustNotInclude": [],
+        "status": "matched"
+      },
+      "rationale": "AXIEZ-LINKs 指定で、同じ製品に絞られたカードが出るかを見る。"
+    }
+  ]
+}

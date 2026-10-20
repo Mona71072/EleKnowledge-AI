@@ -11,6 +11,8 @@ export type SenpaiChatLane = {
 export type SenpaiChatTurn = {
   id: number;
   senpaiTurnId?: string;
+  /** Model filter chosen for this turn; absent when none was given. */
+  modelType?: string;
   query: string;
   normal: SenpaiChatLane;
   law: SenpaiChatLane;
@@ -27,6 +29,7 @@ export type SenpaiChatSnapshot = {
 export type SenpaiChatQuerySource = (request: {
   mode: KnowledgeResearchMode;
   query: string;
+  modelType?: string;
   sessionId?: string;
   senpaiConversationId: string;
   senpaiTurnId: string;
@@ -35,7 +38,7 @@ export type SenpaiChatQuerySource = (request: {
 
 export type SenpaiChatController = {
   getSnapshot(): SenpaiChatSnapshot;
-  send(query: string): Promise<void>;
+  send(query: string, options?: { modelType?: string }): Promise<void>;
   cancel(): void;
   reset(): void;
   /** Replace current state from a validated server history response. */
