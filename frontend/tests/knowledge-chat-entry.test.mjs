@@ -5,6 +5,7 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
+import { parse } from 'yaml';
 
 const require = createRequire(import.meta.url);
 
@@ -86,6 +87,16 @@ const entry = () => loadTsx('../src/components/knowledge/KnowledgeChatEntry.tsx'
   'next/link': Link,
   '@/components/ui/Card': { Card: ({ children, className }) => createElement('div', { className }, children) },
 }).KnowledgeChatEntry;
+
+test('Amplify dev deployment enables the real Senpai entry for admins only', () => {
+  const buildSpec = parse(readFileSync(new URL('../../amplify.yml', import.meta.url), 'utf8'));
+  const variables = buildSpec.env.variables;
+  assert.match(variables.NEXT_PUBLIC_RAG_API_URL, /\/dev$/);
+  const enabled = variables.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH === 'true';
+  const Entry = entry();
+  assert.match(renderToStaticMarkup(createElement(Entry, { isAdmin: true, enabled })), /href="\/knowledge\/chat"/);
+  assert.equal(renderToStaticMarkup(createElement(Entry, { isAdmin: false, enabled })), '');
+});
 
 test('admin sees a user-side chat entry when the development flag is enabled', () => {
   const html = renderToStaticMarkup(createElement(entry(), { isAdmin: true, enabled: true }));
