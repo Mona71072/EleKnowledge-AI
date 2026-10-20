@@ -8,6 +8,8 @@ related-code: []
 
 キーマンへの共有資料と、開発側・キーマンで使用する質問箱Forms原稿を保管します。利用者向けFAQ・マニュアルは既存の [user-manual/](../user-manual/README.md) にまとめています。
 
+新規作成・改訂時の体裁は [配布資料の共通デザイン基準](../distribution-design.md) を参照します。
+
 ## 採用版
 
 | 資料 | 用途 |
