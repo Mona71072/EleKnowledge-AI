@@ -199,3 +199,95 @@ def test_main_with_field_reports_writes_aggregate_and_queue(reports_root, tmp_pa
     assert json.loads(aggregate_path.read_text(encoding="utf-8"))["cards"]["KH-AX"]
     assert out.read_text(encoding="utf-8") == module.render_queue(reports_root)
     assert "[KH-AX]" in out.read_text(encoding="utf-8").split("## P1", 1)[0]
+
+
+def _write_ref_card(root: Path, knowledge_id: str, refs_yaml: str, *, title: str = "重複カード",
+                    scope_yaml: str = '  product_lines: ["AXIEZ"]') -> None:
+    directory = root / "cards" / "practice-guides"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{knowledge_id}.md").write_text(
+        f"---\nknowledge_id: {knowledge_id}\nkind: practice_guide\nstatus: draft\n"
+        f"title: \"{title}\"\nmodel_scope:\n{scope_yaml}\nsource_refs:\n{refs_yaml}\n---\n\n# body\n",
+        encoding="utf-8",
+    )
+
+
+def _lists_ref(item: str, onenote: str | None = None) -> str:
+    text = f"  - ref_type: lists_item\n    list_item_id: \"{item}\"\n"
+    if onenote:
+        text += f"  - ref_type: onenote_page\n    onenote_id: \"{onenote}\"\n"
+    return text.rstrip("\n")
+
+
+def test_duplicate_groups_share_a_lists_item_number(tmp_path):
+    module = _module()
+    root = tmp_path / "knowledge"
+    _write_ref_card(root, "KH-D2", _lists_ref("153"), title="B")
+    _write_ref_card(root, "KH-D1", _lists_ref("153"), title="A")
+    _write_ref_card(root, "KH-D3", _lists_ref("153"), title="C")
+    _write_ref_card(root, "KH-X1", _lists_ref("7"))
+    _write_ref_card(root, "KH-X2", _lists_ref("8"))
+    _write_card(root, "KH-NOREF", "  product_lines: [\"AXIEZ\"]")
+
+    groups = module.duplicate_groups(root)
+
+    assert [(g.list_item_id, g.knowledge_ids) for g in groups] == [("153", ("KH-D1", "KH-D2", "KH-D3"))]
+
+
+def test_duplicate_groups_sorted_numerically_and_include_verified_cards(tmp_path):
+    module = _module()
+    root = tmp_path / "knowledge"
+    for kid, item in (("KH-A", "19"), ("KH-B", "19"), ("KH-C", "123"), ("KH-D", "123")):
+        _write_ref_card(root, kid, _lists_ref(item))
+    _write_ref_card(
+        root, "KH-V", _lists_ref("19"),
+        scope_yaml='  product_lines: ["AXIEZ"]\n  scope_status: verified\n'
+                   '  scope_verified_by: r\n  scope_verified_at: "2026-10-20"',
+    )
+
+    groups = module.duplicate_groups(root)
+
+    assert [g.list_item_id for g in groups] == ["19", "123"]
+    assert groups[0].knowledge_ids == ("KH-A", "KH-B", "KH-V")
+
+
+def test_duplicate_group_notes_shared_onenote_id(tmp_path):
+    module = _module()
+    root = tmp_path / "knowledge"
+    _write_ref_card(root, "KH-A", _lists_ref("5", "{u}:1"))
+    _write_ref_card(root, "KH-B", _lists_ref("5", "{u}:1"))
+    _write_ref_card(root, "KH-C", _lists_ref("6", "{u}:1"))
+    _write_ref_card(root, "KH-D", _lists_ref("6", "{u}:2"))
+
+    five, six = module.duplicate_groups(root)
+
+    assert five.shared_onenote_ids == ("{u}:1",)
+    assert six.shared_onenote_ids == ()
+    assert six.knowledge_ids == ("KH-C", "KH-D")
+
+
+def test_queue_has_duplicate_section_with_links_titles_and_actions(tmp_path):
+    module = _module()
+    root = tmp_path / "knowledge"
+    _write_ref_card(root, "KH-A", _lists_ref("153"), title="床A")
+    _write_ref_card(root, "KH-B", _lists_ref("153"), title="床B")
+    _write_ref_card(root, "KH-C", _lists_ref("9"))
+
+    text = module.render_queue(root)
+
+    assert text == module.render_queue(root)
+    section = text.split("## 重複の疑い（同じ Lists 番号）", 1)[1]
+    assert "[KH-A](../../cards/practice-guides/KH-A.md)" in section
+    assert "[KH-B](../../cards/practice-guides/KH-B.md)" in section
+    assert "床A" in section and "床B" in section
+    assert "統合する" in section and "関連を明記" in section
+    assert "KH-C" not in section
+    assert "| 重複の疑い（同じ Lists 番号） | 1 |" in text
+    assert text.index("## P4") < text.index("## 重複の疑い")
+
+
+def test_queue_duplicate_section_says_none_when_no_duplicates(cards_root):
+    text = _module().render_queue(cards_root)
+    section = text.split("## 重複の疑い（同じ Lists 番号）", 1)[1]
+    assert "（なし）" in section
+    assert "| 重複の疑い（同じ Lists 番号） | 0 |" in text

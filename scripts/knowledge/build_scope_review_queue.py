@@ -53,6 +53,9 @@ OPEN_REVIEW_STATES = frozenset({"unconfirmed", "awaiting_review"})
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
 DATE_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2})T")
 
+DUPLICATE_TITLE = "重複の疑い（同じ Lists 番号）"
+DUPLICATE_ACTION = "内容が同じなら統合する。役割が違うなら、片方に関連を明記して役割を分ける"
+
 PRIORITY_TITLES = {
     "P0": "P0 現場の報告で確認が必要（当てはまらなかった／カードと違う機種で報告）",
     "P1": "P1 矛盾の疑い（機種名があるのに適用範囲が広いと読める）",
@@ -90,6 +93,15 @@ class CardInfo:
     link: str
     section: str
     scope: dict
+
+
+@dataclass(frozen=True)
+class DuplicateGroup:
+    """Cards that cite the same Lists item, so they compete for search slots."""
+
+    list_item_id: str
+    knowledge_ids: tuple[str, ...]
+    shared_onenote_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -213,6 +225,45 @@ def scan(root: Path = KNOWLEDGE_ROOT) -> Inventory:
     return Inventory(
         tuple(sorted(rows, key=lambda r: (r.priority, r.knowledge_id))), verified, tuple(unreadable), cards,
     )
+
+
+def _refs(data: dict, ref_type: str, key: str) -> set[str]:
+    refs = data.get("source_refs")
+    if not isinstance(refs, list):
+        return set()
+    return {
+        str(ref[key]).strip() for ref in refs
+        if isinstance(ref, dict) and ref.get("ref_type") == ref_type and str(ref.get(key) or "").strip()
+    }
+
+
+def duplicate_groups(root: Path = KNOWLEDGE_ROOT) -> tuple[DuplicateGroup, ...]:
+    """Group cards (verified or not) that share a ``lists_item`` ``list_item_id``.
+
+    Ordered by Lists number (numeric when possible), members by knowledge ID."""
+    by_item: dict[str, list[tuple[str, set[str]]]] = {}
+    for path in _card_paths(root):
+        try:
+            data = _read_card(path)
+        except (ValueError, yaml.YAMLError, OSError):
+            continue
+        knowledge_id = str(data.get("knowledge_id") or path.stem)
+        onenote = _refs(data, "onenote_page", "onenote_id")
+        for item in _refs(data, "lists_item", "list_item_id"):
+            by_item.setdefault(item, []).append((knowledge_id, onenote))
+    groups = []
+    for item, members in by_item.items():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda member: member[0])
+        shared = sorted({
+            onenote for _, ids in members for onenote in ids
+            if sum(onenote in other for _, other in members) >= 2
+        })
+        groups.append(DuplicateGroup(item, tuple(kid for kid, _ in members), tuple(shared)))
+    return tuple(sorted(groups, key=lambda g: (not g.list_item_id.isdigit(),
+                                               int(g.list_item_id) if g.list_item_id.isdigit() else 0,
+                                               g.list_item_id)))
 
 
 def collect_rows(root: Path = KNOWLEDGE_ROOT) -> tuple[Row, ...]:
@@ -412,10 +463,31 @@ def _generic_section(rows: list[Row]) -> list[str]:
     ]
 
 
+def _duplicate_section(groups: tuple[DuplicateGroup, ...], cards: dict) -> list[str]:
+    if not groups:
+        return ["（なし）"]
+    lines = [
+        "同じ Lists 番号を `source_refs` に持つカード。内容が近いと検索の枠を取り合う。"
+        "検証済みカードも含む。OneNote ページも共通のグループは強い重複の疑い。",
+        "",
+        "| Lists 番号 | カード | タイトル | 共通の OneNote | 推奨対応 |",
+        "| ---: | --- | --- | --- | --- |",
+    ]
+    for group in groups:
+        links = [f"[{kid}]({cards[kid].link})" if kid in cards else kid for kid in group.knowledge_ids]
+        titles = [cards[kid].title if kid in cards else "" for kid in group.knowledge_ids]
+        lines.append(
+            f"| {group.list_item_id} | {'<br>'.join(links)} | {'<br>'.join(_cell(t) for t in titles)} "
+            f"| {_cell(group.shared_onenote_ids)} | {DUPLICATE_ACTION} |"
+        )
+    return lines
+
+
 def render_queue(root: Path = KNOWLEDGE_ROOT) -> str:
     """Render the full queue Markdown deterministically."""
     inventory = scan(root)
     counts = Counter(row.priority for row in inventory.rows)
+    duplicates = duplicate_groups(root)
     field_lines, counts["P0"] = _field_section(_read_aggregate(root), inventory.cards, load_retrieval())
     lines = [
         "# scope-review queue",
@@ -426,7 +498,9 @@ def render_queue(root: Path = KNOWLEDGE_ROOT) -> str:
         "",
         "Senpai の機種フィルタ（UI「機種（任意）」）は、**人が適用範囲を確認したカード**"
         "（`scope_status: verified`）だけを除外対象にします。Lists の機種欄は信頼できないため、"
-        "未検証のカードは除外されません。このキューは未検証カードを確認の優先度順に並べたものです。",
+        "未検証のカードは除外されません。このキューは未検証カードを確認の優先度順に並べたものです。"
+        "末尾の「重複の疑い（同じ Lists 番号）」は、適用範囲とは別に、同じ Lists 項目を根拠にした"
+        "複数のカードを挙げ、統合か役割分けの判断材料にします。",
         "",
         "## 訂正の手順",
         "",
@@ -453,6 +527,7 @@ def render_queue(root: Path = KNOWLEDGE_ROOT) -> str:
     for key in ("P0", "P1", "P2", "P3", "P4"):
         lines.append(f"| {PRIORITY_TITLES[key]} | {counts[key]} |")
     lines += [
+        f"| {DUPLICATE_TITLE} | {len(duplicates)} |",
         f"| 検証済み（キュー対象外） | {inventory.verified} |",
         f"| 読み込み不可 | {len(inventory.unreadable)} |",
         "",
@@ -466,6 +541,8 @@ def render_queue(root: Path = KNOWLEDGE_ROOT) -> str:
         lines += [f"## {PRIORITY_TITLES[key]}（{len(rows)} 件）", ""]
         lines += _generic_section(rows) if key == "P4" else (_table(rows, key) if rows else ["（なし）"])
         lines.append("")
+    lines += [f"## {DUPLICATE_TITLE}（{len(duplicates)} グループ）", "",
+              *_duplicate_section(duplicates, inventory.cards), ""]
     if inventory.unreadable:
         lines += [
             "## 読み込み不可のカード", "",

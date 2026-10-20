@@ -222,13 +222,48 @@ def validate_index(index: Any) -> dict:
         total_chars += len(body)
         if total_chars > MAX_INDEX_BYTES:
             raise KnowhowIndexError("index text size is invalid")
+    return _remember_validated(index)
+
+
+_validated: dict[str, Any] = {"index": None, "fingerprint": None}
+
+
+def _validation_fingerprint(index: dict) -> int:
+    """Hash of every validated field of the index (body by string hash, which Python caches).
+
+    Cheap compared with ``validate_index``; any edit to a validated field changes it."""
+    return hash((
+        index["schemaVersion"], index["indexVersion"], index["generatedAt"],
+        tuple(
+            (card["knowledgeId"], card["cardVersion"], card["sha256"], card["title"], card["status"],
+             card["usage"], card["body"], tuple(card["searchTerms"]), repr(card["sourceRefs"]),
+             repr(card["modelScope"]))
+            for card in index["cards"]
+        ),
+    ))
+
+
+def _remember_validated(index: dict) -> dict:
+    _validated.update(index=index, fingerprint=_validation_fingerprint(index))
     return index
+
+
+def _ensure_valid(index: Any) -> dict:
+    """Validate ``index`` unless this very object was already validated and is unchanged."""
+    if _validated["index"] is index and isinstance(index, dict):
+        try:
+            if _validated["fingerprint"] == _validation_fingerprint(index):
+                return index
+        except (KeyError, TypeError):
+            pass  # shape was changed: fall through to the strict check, which raises
+    return validate_index(index)
 
 
 def clear_cache() -> None:
     """Clear process-local cache; exposed for deterministic unit tests."""
     _cache.update(identity=None, expires=0.0, index=None, version_id=None, etag=None)
     _feature_cache.update(signature=None, value=None)
+    _validated.update(index=None, fingerprint=None)
 
 
 def load_index(s3_client=None, *, bucket: str | None = None, key: str | None = None,
@@ -470,7 +505,7 @@ def _rank(index: dict, query: str, model_type: str | None) -> list[tuple[float, 
 
 def rank_cards(index: dict, query: str, model_type: str | None = None) -> list[tuple[float, dict]]:
     """All cards with their score in [0, 1], best first (no threshold); for evaluation."""
-    index = validate_index(index)
+    index = _ensure_valid(index)
     if not isinstance(query, str) or len(query) > 12000:
         raise KnowhowIndexError("query is invalid")
     return _rank(index, query, model_type)
@@ -546,7 +581,7 @@ def search_index(index: dict, query: str, model_type: str | None = None) -> dict
     With a known ``model_type`` each returned card is a copy that also carries the
     response-only ``modelFit`` fields (see ``model_fit``).
     """
-    index = validate_index(index)
+    index = _ensure_valid(index)
     if not isinstance(query, str) or len(query) > 12000:
         raise KnowhowIndexError("query is invalid")
     ranked = _rank(index, query, model_type)

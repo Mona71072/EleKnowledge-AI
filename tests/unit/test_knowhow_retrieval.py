@@ -485,3 +485,65 @@ def test_model_fit_only_emits_declared_values():
     module = _module()
     for scope in ({}, {"product_lines": ["AXIEZ"]}, {"product_lines": ["escalator"]}, {"lists_model_label": ["全エレ機種"]}):
         assert module.model_fit(_scoped("KH-A", **scope), "AXIEZ")["modelFit"] in module.MODEL_FIT_VALUES
+
+
+def _count_validations(module, monkeypatch):
+    calls = []
+    original = module.validate_index
+
+    def counting(index):
+        calls.append(1)
+        return original(index)
+
+    monkeypatch.setattr(module, "validate_index", counting)
+    return calls
+
+
+def test_repeated_search_on_the_same_index_validates_only_once(monkeypatch):
+    module = _module()
+    index = _index(_card())
+    calls = _count_validations(module, monkeypatch)
+
+    module.search_index(index, "かごが走行中に振動")
+    module.search_index(index, "かごが走行中に振動")
+    module.rank_cards(index, "かごが走行中に振動")
+
+    assert len(calls) == 1
+
+
+def test_parse_index_result_is_not_validated_again_by_search(monkeypatch):
+    module = _module()
+    index = module.parse_index(json.dumps(_index(_card())))
+    calls = _count_validations(module, monkeypatch)
+
+    module.search_index(index, "かごが走行中に振動")
+
+    assert calls == []
+
+
+@pytest.mark.parametrize("change", [
+    {"status": "published"},
+    {"usage": "answer"},
+    {"cardVersion": 0},
+    {"sourceRefs": []},
+    {"body": ""},
+])
+def test_mutating_a_validated_index_is_rejected_on_next_search(change):
+    module = _module()
+    index = _index(_card())
+    module.search_index(index, "かごが走行中に振動")
+
+    index["cards"][0].update(change)
+
+    with pytest.raises(module.KnowhowIndexError):
+        module.search_index(index, "かごが走行中に振動")
+
+
+def test_never_validated_invalid_index_is_still_rejected_by_search_and_rank():
+    module = _module()
+    bad = _index(_card(status="published"))
+
+    with pytest.raises(module.KnowhowIndexError):
+        module.search_index(bad, "かごが走行中に振動")
+    with pytest.raises(module.KnowhowIndexError):
+        module.rank_cards(bad, "かごが走行中に振動")
