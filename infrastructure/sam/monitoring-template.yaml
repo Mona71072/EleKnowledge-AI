@@ -22,6 +22,15 @@ Description: >-
 # ---------------------------------------------------------------------------
 
 Parameters:
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+    AllowedValues: [ele-knowledge]
+  CostUsage:
+    Type: String
+    Default: shared
+    AllowedValues: [development, user, shared]
+
   Environment:
     Type: String
     Default: dev
@@ -93,6 +102,20 @@ Parameters:
     Default: "LimitExceededException,CodeDeliveryFailureException,TooManyRequestsException,InternalErrorException"
     Description: Cognito errorCodes (CloudTrail) that trigger the P1 e-mail error notification. Add UsernameExistsException temporarily to test the path.
 
+  AmplifyAppId:
+    Type: String
+    Default: d9ngenggxas1k
+    Description: Amplify Hosting app id (AWS/AmplifyHosting metrics). The front-end has no other alarm.
+
+  BudgetAmountUsd:
+    Type: Number
+    Default: 100
+    Description: Monthly budget (USD) for the Bedrock model line used by EleKnowledge (design 2026-09-10 dashboard v2 5.7). Review on the 1st of each month.
+  BudgetServiceName:
+    Type: String
+    Default: Claude Sonnet 5 (Amazon Bedrock Edition)
+    Description: Cost Explorer / Budgets SERVICE name of the Bedrock model line (one line per model). Verify the exact string in Cost Explorer.
+
   # --- 閾値（issue #86 P0 案。初週の実測で見直す） ---
   Api4xxThreshold:
     Type: Number
@@ -120,6 +143,12 @@ Resources:
       TopicName: !Sub eleknowledge-alerts-${Environment}
       DisplayName: !Sub EleKnowledge ${Environment} alerts
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - { Key: Project, Value: !Ref ProjectName }
         - { Key: Env, Value: !Ref Environment }
         - { Key: ManagedBy, Value: SAM }
@@ -147,6 +176,15 @@ Resources:
             Condition:
               ArnLike:
                 aws:SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/*
+          # 予算アラート（AWS Budgets）も同じ宛先へ
+          - Sid: AllowBudgets
+            Effect: Allow
+            Principal: { Service: budgets.amazonaws.com }
+            Action: sns:Publish
+            Resource: !Ref AlertTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
 
   AlertSubscriptionPrimary:
     Type: AWS::SNS::Subscription
@@ -169,8 +207,15 @@ Resources:
   RagApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-api-5xx
-      AlarmDescription: RAG API returned 5XX (Bedrock / KB / DynamoDB failure in rag Lambda)
+      AlarmDescription: !Sub "RAG API returned 5XX (Bedrock / KB / DynamoDB failure in rag Lambda) → 最初に見る場所: ランブック §2 / Logs Insights 保存クエリ EleKnowledge/${Environment}/rag-error-lines"
       Namespace: AWS/ApiGateway
       MetricName: 5XXError
       Dimensions: [{ Name: ApiName, Value: !Ref RagApiName }]
@@ -186,8 +231,15 @@ Resources:
   ChatApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-api-5xx
-      AlarmDescription: Chat API (sessions / messages / feedback) returned 5XX
+      AlarmDescription: "Chat API (sessions / messages / feedback) returned 5XX → 最初に見る場所: ランブック §2 / 保存クエリ chat-error-lines"
       Namespace: AWS/ApiGateway
       MetricName: 5XXError
       Dimensions: [{ Name: ApiName, Value: !Ref ChatApiName }]
@@ -203,8 +255,15 @@ Resources:
   AuthApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-auth-api-5xx
-      AlarmDescription: Auth API (login / signup / verify) returned 5XX
+      AlarmDescription: !Sub "Auth API (login / signup / verify) returned 5XX → 最初に見る場所: ランブック §2 / アクセスログ /aws/apigateway/auth-api-${Environment}（Cognito 障害）"
       Namespace: AWS/ApiGateway
       MetricName: 5XXError
       Dimensions: [{ Name: ApiName, Value: !Ref AuthApiName }]
@@ -220,8 +279,15 @@ Resources:
   AppApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-app-api-5xx
-      AlarmDescription: Announcements / metrics API returned 5XX
+      AlarmDescription: "Announcements / metrics API returned 5XX → 最初に見る場所: ランブック §2 / 各 Lambda のログ（announcements-*, metrics-*）"
       Namespace: AWS/ApiGateway
       MetricName: 5XXError
       Dimensions: [{ Name: ApiName, Value: !Ref AppApiName }]
@@ -237,11 +303,38 @@ Resources:
   TroubleshootingApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-troubleshooting-api-5xx
-      AlarmDescription: Troubleshooting API returned 5XX (metrics may be absent until MethodSettings are enabled)
+      AlarmDescription: "Troubleshooting API returned 5XX (metrics may be absent until MethodSettings are enabled) → 最初に見る場所: ランブック §2 / 各 Lambda のログ"
       Namespace: AWS/ApiGateway
       MetricName: 5XXError
       Dimensions: [{ Name: ApiName, Value: !Ref TroubleshootingApiName }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ------------------------------------------------------------------
+  # Amplify Hosting 5XX（画面が開かない。API 側のアラームでは検知できない盲点。設計 2026-09-10 dashboard v2 A6）
+  # ------------------------------------------------------------------
+  AmplifyHosting5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-${Environment}-P1-amplify-5xx
+      AlarmDescription: !Sub "Amplify Hosting returned 5XX (front-end not served) → 最初に見る場所: ランブック §5.1 / Amplify コンソール（App ${AmplifyAppId}）"
+      Namespace: AWS/AmplifyHosting
+      MetricName: 5xxErrors
+      Dimensions: [{ Name: App, Value: !Ref AmplifyAppId }]
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -257,8 +350,15 @@ Resources:
   RagApi4xxSpikeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-rag-api-4xx-spike
-      AlarmDescription: RAG API 4XX spike (check WAF IP allowlist vs Cognito token expiry)
+      AlarmDescription: "RAG API 4XX spike (check WAF IP allowlist vs Cognito token expiry) → 最初に見る場所: ランブック §5.1 / 保存クエリ api-4xx-breakdown（アクセスログ。errorType で WAF・認可・失効を切り分け）"
       Namespace: AWS/ApiGateway
       MetricName: 4XXError
       Dimensions: [{ Name: ApiName, Value: !Ref RagApiName }]
@@ -274,8 +374,15 @@ Resources:
   ChatApi4xxSpikeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-chat-api-4xx-spike
-      AlarmDescription: Chat API 4XX spike
+      AlarmDescription: "Chat API 4XX spike → 最初に見る場所: ランブック §5.1 / 保存クエリ api-4xx-breakdown"
       Namespace: AWS/ApiGateway
       MetricName: 4XXError
       Dimensions: [{ Name: ApiName, Value: !Ref ChatApiName }]
@@ -291,8 +398,15 @@ Resources:
   AuthApi4xxSpikeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-auth-api-4xx-spike
-      AlarmDescription: Auth API 4XX spike (login failures / blocked IPs)
+      AlarmDescription: "Auth API 4XX spike (login failures / blocked IPs) → 最初に見る場所: ランブック §5.1 / 保存クエリ api-4xx-breakdown"
       Namespace: AWS/ApiGateway
       MetricName: 4XXError
       Dimensions: [{ Name: ApiName, Value: !Ref AuthApiName }]
@@ -311,8 +425,15 @@ Resources:
   RagThrottlesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-throttles
-      AlarmDescription: rag Lambda throttled (account concurrency limit)
+      AlarmDescription: "rag Lambda throttled (account concurrency limit) → 最初に見る場所: ランブック §2 / Lambda メトリクス ConcurrentExecutions"
       Namespace: AWS/Lambda
       MetricName: Throttles
       Dimensions: [{ Name: FunctionName, Value: !Ref RagFunctionName }]
@@ -328,8 +449,15 @@ Resources:
   ChatThrottlesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-throttles
-      AlarmDescription: chat Lambda throttled
+      AlarmDescription: "chat Lambda throttled → 最初に見る場所: ランブック §2 / Lambda メトリクス ConcurrentExecutions"
       Namespace: AWS/Lambda
       MetricName: Throttles
       Dimensions: [{ Name: FunctionName, Value: !Ref ChatFunctionName }]
@@ -345,8 +473,15 @@ Resources:
   LoginThrottlesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-login-throttles
-      AlarmDescription: login Lambda throttled
+      AlarmDescription: "login Lambda throttled → 最初に見る場所: ランブック §2 / Lambda メトリクス ConcurrentExecutions"
       Namespace: AWS/Lambda
       MetricName: Throttles
       Dimensions: [{ Name: FunctionName, Value: !Ref LoginFunctionName }]
@@ -365,8 +500,15 @@ Resources:
   MetricsAggregatorErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-metrics-aggregator-errors
-      AlarmDescription: Daily/hourly KPI aggregation failed (dashboard will be stale)
+      AlarmDescription: !Sub "Daily/hourly KPI aggregation failed (dashboard will be stale) → 最初に見る場所: ランブック §5.4 / /aws/lambda/metrics-aggregator-${Environment}"
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions: [{ Name: FunctionName, Value: !Ref MetricsAggregatorFunctionName }]
@@ -382,8 +524,15 @@ Resources:
   ArchiveErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-archive-errors
-      AlarmDescription: chatlogs stream -> S3 archive failed (records are retried 3 times then dropped)
+      AlarmDescription: "chatlogs stream -> S3 archive failed (records are retried 3 times then dropped) → 最初に見る場所: ランブック §5.5（24 時間以内に対処）"
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions: [{ Name: FunctionName, Value: !Ref ArchiveFunctionName }]
@@ -399,8 +548,15 @@ Resources:
   AnnouncementsPublisherErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-announcements-publisher-errors
-      AlarmDescription: Scheduled announcement promotion failed
+      AlarmDescription: !Sub "Scheduled announcement promotion failed → 最初に見る場所: ランブック §2 / /aws/lambda/announcements-publisher-${Environment}"
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions: [{ Name: FunctionName, Value: !Ref AnnouncementsPublisherFunctionName }]
@@ -419,8 +575,15 @@ Resources:
   RagDurationP90Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-rag-duration-p90
-      AlarmDescription: rag Lambda p90 duration over 15 minutes is high (Bedrock / KB slow)
+      AlarmDescription: "rag Lambda p90 duration over 15 minutes is high (Bedrock / KB slow) → 最初に見る場所: ランブック §5.2 / 保存クエリ slow-requests、Bedrock メトリクス InvocationLatency"
       Namespace: AWS/Lambda
       MetricName: Duration
       Dimensions: [{ Name: FunctionName, Value: !Ref RagFunctionName }]
@@ -436,8 +599,15 @@ Resources:
   RagDurationMaxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-duration-max
-      AlarmDescription: A single rag invocation approached the API Gateway 29s limit (user likely saw 504)
+      AlarmDescription: "A single rag invocation approached the API Gateway 29s limit (user likely saw 504) → 最初に見る場所: ランブック §5.2 / 保存クエリ slow-requests。連続するなら §7 の代替モデルへ"
       Namespace: AWS/Lambda
       MetricName: Duration
       Dimensions: [{ Name: FunctionName, Value: !Ref RagFunctionName }]
@@ -456,8 +626,15 @@ Resources:
   MetricsScheduleFailedAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-metrics-schedule-failed
-      AlarmDescription: EventBridge could not invoke the metrics aggregator
+      AlarmDescription: "EventBridge could not invoke the metrics aggregator → 最初に見る場所: ランブック §5.4"
       Namespace: AWS/Events
       MetricName: FailedInvocations
       Dimensions: [{ Name: RuleName, Value: !Ref MetricsScheduleRuleName }]
@@ -476,7 +653,15 @@ Resources:
   ChatLogsReadThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-chatlogs-read-throttle
+      AlarmDescription: "DynamoDB throttled → 最初に見る場所: ランブック §2 / DynamoDB コンソールのメトリクス"
       Namespace: AWS/DynamoDB
       MetricName: ReadThrottleEvents
       Dimensions: [{ Name: TableName, Value: !Ref ChatLogsTableName }]
@@ -492,7 +677,15 @@ Resources:
   ChatLogsWriteThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-chatlogs-write-throttle
+      AlarmDescription: "DynamoDB throttled → 最初に見る場所: ランブック §2 / DynamoDB コンソールのメトリクス"
       Namespace: AWS/DynamoDB
       MetricName: WriteThrottleEvents
       Dimensions: [{ Name: TableName, Value: !Ref ChatLogsTableName }]
@@ -508,7 +701,15 @@ Resources:
   SessionsWriteThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-sessions-write-throttle
+      AlarmDescription: !Sub "DynamoDB throttled → 最初に見る場所: ランブック §2 / DynamoDB コンソールのメトリクス（sessions-${Environment} は未使用）"
       Namespace: AWS/DynamoDB
       MetricName: WriteThrottleEvents
       Dimensions: [{ Name: TableName, Value: !Ref SessionsTableName }]
@@ -527,8 +728,15 @@ Resources:
   CognitoSignups40Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P2-cognito-signups-40-per-day
-      AlarmDescription: Sign-ups today (UTC day) reached 40. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99.
+      AlarmDescription: "Sign-ups today (UTC day) reached 40. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99. → 最初に見る場所: ランブック §5.6（受付停止の告知を検討）"
       Namespace: AWS/Cognito
       MetricName: SignUpSuccesses
       Dimensions:
@@ -548,8 +756,15 @@ Resources:
   CognitoSignups45Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-signups-45-per-day
-      AlarmDescription: Sign-ups today (UTC day) reached 45. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99.
+      AlarmDescription: "Sign-ups today (UTC day) reached 45. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99. → 最初に見る場所: ランブック §5.6"
       Namespace: AWS/Cognito
       MetricName: SignUpSuccesses
       Dimensions:
@@ -569,8 +784,15 @@ Resources:
   CognitoSignups50Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-signups-50-per-day
-      AlarmDescription: Sign-ups today (UTC day) reached 50. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99.
+      AlarmDescription: "Sign-ups today (UTC day) reached 50. Cognito default email sending is capped at 50 messages per day per pool (confirmation codes, resends and password resets share it). Resends and resets are not counted here, so the real number may be higher. See issue #99. → 最初に見る場所: ランブック §5.6"
       Namespace: AWS/Cognito
       MetricName: SignUpSuccesses
       Dimensions:
@@ -595,6 +817,13 @@ Resources:
   CognitoEmailErrorRule:
     Type: AWS::Events::Rule
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       Name: !Sub ${ProjectName}-${Environment}-cognito-email-errors
       Description: Cognito SignUp / ResendConfirmationCode / ForgotPassword failed with a quota or delivery error (CloudTrail)
       State: ENABLED
@@ -620,8 +849,15 @@ Resources:
   CognitoEmailErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-cognito-email-errors
-      AlarmDescription: A Cognito sign-up / resend / password-reset call failed with a quota or delivery error in the last 5 minutes (details in the EventBridge message).
+      AlarmDescription: "A Cognito sign-up / resend / password-reset call failed with a quota or delivery error in the last 5 minutes (details in the EventBridge message). → 最初に見る場所: ランブック §5.6 / SNS 本文（API 名・エラーコード）"
       Namespace: AWS/Events
       MetricName: TriggeredRules
       Dimensions: [{ Name: RuleName, Value: !Ref CognitoEmailErrorRule }]
@@ -664,8 +900,15 @@ Resources:
   RagErrorLinesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-rag-error-lines
-      AlarmDescription: rag Lambda logged an error line (catches failures returned as HTTP 500)
+      AlarmDescription: "rag Lambda logged an error line (catches failures returned as HTTP 500) → 最初に見る場所: ランブック §2 / 保存クエリ rag-error-lines"
       Namespace: !Sub ${ProjectName}/Logs
       MetricName: RagErrorLines
       Statistic: Sum
@@ -680,8 +923,15 @@ Resources:
   ChatErrorLinesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       AlarmName: !Sub ${ProjectName}-${Environment}-P1-chat-error-lines
-      AlarmDescription: chat Lambda logged an error line
+      AlarmDescription: "chat Lambda logged an error line → 最初に見る場所: ランブック §2 / 保存クエリ chat-error-lines"
       Namespace: !Sub ${ProjectName}/Logs
       MetricName: ChatErrorLines
       Statistic: Sum
@@ -728,6 +978,91 @@ Resources:
         | fields @timestamp, @requestId, @duration, @maxMemoryUsed / 1024 / 1024 as memMB
         | sort @duration desc
         | limit 50
+
+  # --- アクセスログ（API Gateway、JSON 1 行/リクエスト）用。設計 2026-09-10 dashboard v2 §4.3 I6 ---
+  QueryApi4xxBreakdown:
+    Type: AWS::Logs::QueryDefinition
+    Properties:
+      Name: !Sub ${ProjectName}/${Environment}/api-4xx-breakdown
+      LogGroupNames:
+        - !Sub '/aws/apigateway/rag-api-${Environment}'
+        - !Sub '/aws/apigateway/chat-api-${Environment}'
+        - !Sub '/aws/apigateway/auth-api-${Environment}'
+      QueryString: |
+        filter status >= 400 and status < 500
+        | stats count() as n by errorType, status, resourcePath
+        | sort n desc
+
+  QueryRequestById:
+    Type: AWS::Logs::QueryDefinition
+    Properties:
+      Name: !Sub ${ProjectName}/${Environment}/request-by-id
+      LogGroupNames:
+        - !Sub '/aws/apigateway/rag-api-${Environment}'
+        - !Sub '/aws/apigateway/chat-api-${Environment}'
+        - !Sub '/aws/apigateway/auth-api-${Environment}'
+        - !Sub '/aws/lambda/${RagFunctionName}'
+      QueryString: |
+        # REPLACE_ME をアクセスログの requestId（= RAG Lambda の構造化行の requestId）に置き換える。
+        # 移行期間: デプロイ前の Lambda 行は apiRequestId のみ。RAG Lambda のロググループ保持（365 日、scripts/ops/set_log_retention.py）を過ぎたら apiRequestId を外せる。
+        fields @timestamp, @log, requestId, apiRequestId, status, statusCode, resourcePath, errorType, responseLatency, integrationLatency, latencyMs, event, stage, errorCode, exceptionClass
+        | filter requestId = "REPLACE_ME" or apiRequestId = "REPLACE_ME"
+        | sort @timestamp asc
+
+  QuerySlowRequests:
+    Type: AWS::Logs::QueryDefinition
+    Properties:
+      Name: !Sub ${ProjectName}/${Environment}/slow-requests
+      LogGroupNames:
+        - !Sub '/aws/apigateway/rag-api-${Environment}'
+      QueryString: |
+        fields @timestamp, resourcePath, status, responseLatency, integrationLatency, requestId
+        | filter responseLatency > 20000
+        | sort responseLatency desc
+        | limit 50
+
+  # ------------------------------------------------------------------
+  # 予算アラート（AWS Budgets）。Bedrock のモデル行 1 本だけ。通知は同じ SNS へ（設計 §5.7）
+  # アカウント全体の予算は置かない（他システムの Sonnet 4.6 と OpenSearch が支配的で、この 2 人が動ける情報にならない）
+  # ------------------------------------------------------------------
+  BedrockBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub ${ProjectName}-${Environment}-P2-budget-bedrock
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref BudgetAmountUsd
+          Unit: USD
+        CostFilters:
+          Service:
+            - !Ref BudgetServiceName
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertTopic
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertTopic
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertTopic
 
 Outputs:
   AlertTopicArn:

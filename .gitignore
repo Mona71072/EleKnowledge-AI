@@ -8,6 +8,7 @@ spec.md
 .aws-sam/
 infrastructure/sam/.aws-sam/
 samconfig.toml.backup
+infrastructure/sam/samconfig-*.local.toml
 
 # Dependencies
 node_modules/
@@ -47,9 +48,11 @@ yarn-error.log*
 
 # Retrieve eval outputs (scripts/eval/run_retrieve_eval.py)
 eval-results/
+.eval-real-questions/
 
 # Local metadata configuration (contains confidential information)
 docs/metadata-schema-local.md
 docs/*-local.md
 docs/*-local.json
 *-confidential.*
+/.private-knowhow/

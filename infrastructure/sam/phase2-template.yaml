@@ -4,7 +4,30 @@ Description: >
   EleKnowledge Phase 2: RAG Chat System
   Knowledge Base, RAG Lambda, Chat Management, OpenSearch Serverless
 
+Metadata:
+  # BedrockModelId / QueryRewriteModelId は種別（BedrockModelIdType 等）で ARN にも ID にもなる。
+  # system-profile のとき ID を ARN 形式の検査（W1030 / W1031）にかけると誤検知になるため、
+  # この 2 件だけ抑止する。種別と値の組み合わせは各パラメータの Description で運用担保する。
+  cfn-lint:
+    config:
+      ignore_checks:
+        - W1030
+        - W1031
+
 Parameters:
+  RagLogicVersion:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{7,40}$'
+    Description: Reviewed source Git SHA; set explicitly for each RAG deployment
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+    AllowedValues: [ele-knowledge]
+  CostUsage:
+    Type: String
+    Default: shared
+    AllowedValues: [development, user, shared]
+
   Environment:
     Type: String
     Default: dev
@@ -49,6 +72,50 @@ Parameters:
       only together with the app-side image-attachment rework).
       See docs/decisions-2026-08-26-kb-selection.md.
 
+  LawKnowledgeBaseId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[A-Z0-9]{10}$'
+    Description: Optional dev-only Managed Knowledge Base for current e-Gov laws
+
+  LawRagEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable law mode only when Environment is dev and a LawKnowledgeBaseId is configured
+
+  KnowhowEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable the admin-only development Markdown navigation feature
+
+  KnowhowIndexBucket:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: Existing private bucket containing the single Senpai navigation index object
+
+  KnowhowIndexKey:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[A-Za-z0-9._/-]{1,512}$'
+    Description: Fixed key for the Senpai navigation index; no prefix listing is granted
+
+  LawDataBucketName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: Optional existing dev law bucket for read-only full-text enrichment
+
+  LawDataBucketKmsKeyArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$'
+    Description: 顧客管理キーを使うときだけ指定。AWS 管理キー（aws/s3）なら空でよい
+
   KnowledgeBaseDataSourceBucket:
     Type: String
     Default: ragknowledgebasestackinst-datasourcebucket9fa93e04-ybbhm1efhyzb
@@ -64,11 +131,40 @@ Parameters:
   BedrockModelId:
     Type: String
     Default: jp.anthropic.claude-haiku-4-5-20251001-v1:0
+    # IAM の許可範囲はこの値から組み立てる（RagLambdaRole の InvokeModel 参照）。
+    # 推論プロファイル ID は <接頭辞>.<provider>.<model> の 3 区切りに限り、
+    # 区切り文字を含まない形だけ受け付ける。形式外の値は組み立て時の誤った ARN ではなく
+    # デプロイ時の検証エラーにする。
+    AllowedPattern: '^((global|jp|apac|us|eu|au|ca|us-gov)\.[a-z0-9-]+\.[a-z0-9:-]+|arn:aws:bedrock:[a-z0-9-]+:[0-9]{12}:application-inference-profile/[A-Za-z0-9_-]+)$'
     Description: >-
       Bedrock LLM Model ID. Must be an inference profile ID (jp.* / apac.* / global.*)
       or an application inference profile ARN (arn:aws:bedrock:...:application-inference-profile/xxx),
-      not a bare foundation model ID. Sonnet 5 / Opus 4.7+ are handled by app.py
-      (no temperature, thinking disabled). See docs/eval-2026-09-09-model-bakeoff.md.
+      not a bare foundation model ID. Request capabilities are selected by model_profile.py;
+      unknown models use a minimal request unless MODEL_PROFILE_JSON supplies capabilities.
+
+  BedrockModelIdType:
+    Type: String
+    Default: system-profile
+    AllowedValues:
+      - system-profile
+      - application-profile
+    Description: >-
+      BedrockModelId の種別。system-profile は jp. / global. / apac. などのシステム推論プロファイル ID、
+      application-profile は application inference profile ARN を渡すときに指定する。
+      テンプレートは ID と種別の組み合わせ（ARN なのに system-profile など）を防げない。
+      組み合わせが違うと IAM の許可が合わず AccessDenied になるため、運用で必ず合わせる。
+
+  BedrockRequestStyle:
+    Type: String
+    Default: auto
+    AllowedValues:
+      - auto
+      - new
+      - legacy
+    Description: >-
+      Deprecated compatibility fallback for models not recognized by model_profile.py.
+      auto uses model_profile.py defaults; new uses a minimal request; legacy sends temperature.
+      MODEL_PROFILE_JSON is recommended for explicit model capabilities.
   
   SessionTitleLlm:
     Type: String
@@ -79,15 +175,6 @@ Parameters:
     Description: >-
       Generate chat session titles with Claude (BedrockModelId) from the first question.
       Set to false to fall back to truncating the raw question (no extra Bedrock call).
-
-  BedrockRequestStyle:
-    Type: String
-    Default: auto
-    AllowedValues: [auto, new, legacy]
-    Description: >-
-      Request body style for InvokeModel. auto = detect from BedrockModelId
-      (sonnet-5 / opus-4-7+ / fable => new). Set explicitly when BedrockModelId
-      is an application inference profile ARN (model name not visible).
 
   RagSearchType:
     Type: String
@@ -104,6 +191,11 @@ Parameters:
     Default: ''
     Description: Optional JSON overrides for the Knowledge Base metadata profile
 
+  ModelProfileJson:
+    Type: String
+    Default: ''
+    Description: Optional JSON overrides for model generation capabilities
+
   RerankModelArn:
     Type: String
     Default: ''
@@ -118,7 +210,19 @@ Parameters:
   QueryRewriteModelId:
     Type: String
     Default: ''
+    # BedrockModelId と同じ形式に限る（IAM の許可範囲をこの値から組み立てるため）
+    AllowedPattern: '^$|^((global|jp|apac|us|eu|au|ca|us-gov)\.[a-z0-9-]+\.[a-z0-9:-]+|arn:aws:bedrock:[a-z0-9-]+:[0-9]{12}:application-inference-profile/[A-Za-z0-9_-]+)$'
     Description: Optional Bedrock model ID for conversation-aware query rewriting
+
+  QueryRewriteModelIdType:
+    Type: String
+    Default: system-profile
+    AllowedValues:
+      - system-profile
+      - application-profile
+    Description: >-
+      QueryRewriteModelId の種別（BedrockModelIdType と同じ意味）。QueryRewriteModelId が空なら無視される。
+      種別と値の組み合わせはテンプレートでは検証できないため、運用で必ず合わせる。
 
   GenerationThinking:
     Type: String
@@ -250,6 +354,24 @@ Parameters:
 
 Conditions:
   HasRerankModelArn: !Not [!Equals [!Ref RerankModelArn, '']]
+  LawRagDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref LawRagEnabled, 'true']
+    - !Not [!Equals [!Ref LawKnowledgeBaseId, '']]
+  LawFullTextDevEnabled: !And
+    - !Condition LawRagDevEnabled
+    - !Not [!Equals [!Ref LawDataBucketName, '']]
+  HasLawDataBucketKmsKey: !And
+    - !Condition LawFullTextDevEnabled
+    - !Not [!Equals [!Ref LawDataBucketKmsKeyArn, '']]
+  BedrockModelIdIsApplicationProfile: !Equals [!Ref BedrockModelIdType, application-profile]
+  HasQueryRewriteModelId: !Not [!Equals [!Ref QueryRewriteModelId, '']]
+  QueryRewriteModelIdIsApplicationProfile: !Equals [!Ref QueryRewriteModelIdType, application-profile]
+  KnowhowIndexDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref KnowhowEnabled, 'true']
+    - !Not [!Equals [!Ref KnowhowIndexBucket, '']]
+    - !Not [!Equals [!Ref KnowhowIndexKey, '']]
 
 Globals:
   Function:
@@ -263,6 +385,9 @@ Globals:
         ENVIRONMENT: !Ref Environment
         PROJECT_NAME: !Ref ProjectName
     Tags:
+      gyoumu012Project: !Ref CostProjectName
+      gyoumu012Component: shared
+      gyoumu012Usage: !Ref CostUsage
       Project: !Ref ProjectName
       Env: !Ref Environment
       ManagedBy: SAM
@@ -285,6 +410,9 @@ Resources:
       Value: !Ref KnowledgeBaseId
       Description: Bedrock Knowledge Base ID for EleKnowledge RAG
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         ManagedBy: SAM
@@ -296,6 +424,13 @@ Resources:
   RagLambdaRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub rag-lambda-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -317,15 +452,83 @@ Resources:
                   - bedrock:Retrieve
                 Resource:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
-              # jp.*  ARN
-              # foundation-model ARN  AccessDeniedException
+                  - !If
+                    - LawRagDevEnabled
+                    - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${LawKnowledgeBaseId}
+                    - !Ref AWS::NoValue
+              # InvokeModel（Converse も同じアクションで認可される）。使うモデルだけに絞る。
+              # 対象は BedrockModelId（と QueryRewriteModelId）。SESSION_TITLE_MODEL_ID は
+              # テンプレートで設定せず BEDROCK_MODEL_ID を使うため、ここで足りる。
+              # 種別は BedrockModelIdType / QueryRewriteModelIdType で指定する。
+              # CloudFormation の Conditions では Fn::Select / Fn::Split を使えないため、
+              # 種別は Ref の比較だけで判定し、ID の分解は Resources 側の Fn::If の中に置く。
+              # system-profile の基盤モデル ID（<provider>.<model>）は、推論プロファイル ID
+              # （<接頭辞>.<provider>.<model>）から作る。選ばれない分岐も評価され得るため、
+              # 添字が範囲外にならないよう末尾に ".." を足してから分解する（分解結果は
+              # application-profile では使わない）。
+              # 基盤モデルの region は * にする。Global は region なし ARN、geographic は
+              # 振り分け先のリージョンを使い、その先が AWS 管理で変わるため。モデル名は固定し、
+              # bedrock:InferenceProfileArn の条件で、そのプロファイル経由の呼び出しに限る。
+              # application-profile では ARN 自体と、その ARN 経由の基盤モデルだけを許可する
+              # （基盤モデル ID は ARN から取れないため条件で絞る）。
+              # 基盤モデル側も許可しないと AWS の要件を満たさず AccessDenied になる。
               - Effect: Allow
                 Action:
                   - bedrock:InvokeModel
-                Resource:
-                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
-                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*
-                  - !Sub arn:aws:bedrock:*::foundation-model/*
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - !Ref BedrockModelId
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub
+                    - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                    - FoundationModelId: !Join
+                        - '.'
+                        - - !Select [1, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                          - !Select [2, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                Condition:
+                  StringLike:
+                    bedrock:InferenceProfileArn: !If
+                      - BedrockModelIdIsApplicationProfile
+                      - !Ref BedrockModelId
+                      - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              # QueryRewriteModelId を設定したときだけ、同じ形で許可を追加する
+              - !If
+                - HasQueryRewriteModelId
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !If
+                    - QueryRewriteModelIdIsApplicationProfile
+                    - !Ref QueryRewriteModelId
+                    - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${QueryRewriteModelId}
+                - !Ref AWS::NoValue
+              - !If
+                - HasQueryRewriteModelId
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !If
+                    - QueryRewriteModelIdIsApplicationProfile
+                    - 'arn:aws:bedrock:*::foundation-model/*'
+                    - !Sub
+                      - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                      - FoundationModelId: !Join
+                          - '.'
+                          - - !Select [1, !Split ['.', !Join ['', [!Ref QueryRewriteModelId, '..']]]]
+                            - !Select [2, !Split ['.', !Join ['', [!Ref QueryRewriteModelId, '..']]]]
+                  Condition:
+                    StringLike:
+                      bedrock:InferenceProfileArn: !If
+                        - QueryRewriteModelIdIsApplicationProfile
+                        - !Ref QueryRewriteModelId
+                        - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${QueryRewriteModelId}
+                - !Ref AWS::NoValue
         - !If
           - HasRerankModelArn
           - PolicyName: RerankAccess
@@ -355,31 +558,22 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
                   - dynamodb:Query
-                  - dynamodb:Scan
                 Resource:
                   - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
-                  - !Sub 
-                    - ${TableArn}/index/*
-                    - TableArn:
-                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
         - PolicyName: S3Access
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              # documents バケットは KB データソースと違いプレフィックス規約がない
+              # （docs/deployment-guide.md はバケット直下へ sync）。引用の署名 URL も
+              # 任意キーに対して発行するため、キーでは絞らずバケット単位のままにする。
               - Effect: Allow
                 Action:
                   - s3:GetObject
-                  - s3:PutObject
-                  - s3:ListBucket
                 Resource:
-                  - !Sub 
-                    - arn:aws:s3:::${BucketName}
-                    - BucketName:
-                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
                   - !Sub
                     - arn:aws:s3:::${BucketName}/*
                     - BucketName:
@@ -392,6 +586,75 @@ Resources:
                   - s3:GetObject
                 Resource:
                   - !Sub arn:aws:s3:::${KnowledgeBaseDataSourceBucket}/${KnowledgeBaseSourcePrefix}*
+              - !If
+                - LawFullTextDevEnabled
+                - Effect: Allow
+                  Action: s3:GetObject
+                  Resource: !Sub arn:aws:s3:::${LawDataBucketName}/kb/egov/*
+                  Condition:
+                    StringEquals:
+                      aws:ResourceAccount: !Ref AWS::AccountId
+                - !Ref AWS::NoValue
+              - !If
+                - HasLawDataBucketKmsKey
+                - Effect: Allow
+                  Action: kms:Decrypt
+                  Resource: !Ref LawDataBucketKmsKeyArn
+                  Condition:
+                    StringEquals:
+                      kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+                - !Ref AWS::NoValue
+              - !If
+                - KnowhowIndexDevEnabled
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource: !Sub arn:aws:s3:::${KnowhowIndexBucket}/${KnowhowIndexKey}
+                - !Ref AWS::NoValue
+
+  ChatLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub chat-lambda-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ChatLogsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub
+                    - ${TableArn}/index/userId-timestamp-index
+                    - TableArn:
+                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "2"
 
   # ============================================================================
   # Lambda Functions - RAG
@@ -399,6 +662,10 @@ Resources:
   RagFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub rag-${Environment}
       CodeUri: ../../lambda/rag/rag-function/
       Handler: app.lambda_handler
@@ -409,12 +676,25 @@ Resources:
       Environment:
         Variables:
           KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+          RAG_LOGIC_VERSION: !Ref RagLogicVersion
+          LAW_KNOWLEDGE_BASE_ID: !Ref LawKnowledgeBaseId
+          LAW_RAG_ENABLED: !Ref LawRagEnabled
+          KNOWHOW_ENABLED: !If [KnowhowIndexDevEnabled, 'true', 'false']
+          # Keep the private location known even while disabled, so /rag/document
+          # never signs a URL for a previously configured admin index.
+          KNOWHOW_INDEX_BUCKET: !Ref KnowhowIndexBucket
+          KNOWHOW_INDEX_KEY: !Ref KnowhowIndexKey
+          ENVIRONMENT: !Ref Environment
+          ADMIN_GROUP_NAME: admin
+          LAW_DATA_BUCKET_NAME: !If [LawFullTextDevEnabled, !Ref LawDataBucketName, '']
+          LAW_DATA_BUCKET_OWNER: !If [LawFullTextDevEnabled, !Ref AWS::AccountId, '']
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_REQUEST_STYLE: !Ref BedrockRequestStyle
           # 履歴一覧の見出し生成。既定は BEDROCK_MODEL_ID と同じモデル（追加の IAM 不要）
           SESSION_TITLE_LLM: !Ref SessionTitleLlm
-          BEDROCK_REQUEST_STYLE: !Ref BedrockRequestStyle
           RAG_SEARCH_TYPE: !Ref RagSearchType
           KB_PROFILE_JSON: !Ref KbProfileJson
+          MODEL_PROFILE_JSON: !Ref ModelProfileJson
           RERANK_MODEL_ARN: !Ref RerankModelArn
           RERANK_MAX_CANDIDATES: !Ref RerankMaxCandidates
           QUERY_REWRITE_MODEL_ID: !Ref QueryRewriteModelId
@@ -424,6 +704,8 @@ Resources:
           KB_SOURCE_PREFIX: !Ref KnowledgeBaseSourcePrefix
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          # 日別集計キー metricDayShard のシャード数（集計 Lambda と一致させる。変えたらバックフィルをやり直す）
+          CHATLOGS_METRIC_SHARDS: "10"
           DOCUMENTS_BUCKET:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
           PRESIGNED_URL_EXPIRES_IN: !Ref PresignedUrlExpiresIn
@@ -448,17 +730,23 @@ Resources:
   ChatManagementFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub chat-${Environment}
       CodeUri: ../../lambda/chat/chat-management/
       Handler: app.lambda_handler
       Description: Chat session and message management
-      Role: !GetAtt RagLambdaRole.Arn
+      Role: !GetAtt ChatLambdaRole.Arn
       Timeout: !Ref ChatLambdaTimeout
       MemorySize: !Ref ChatLambdaMemory
       Environment:
         Variables:
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          # 日別集計キー metricDayShard のシャード数（集計 Lambda と一致させる。変えたらバックフィルをやり直す）
+          CHATLOGS_METRIC_SHARDS: "10"
           ENVIRONMENT: !Ref Environment
           FEEDBACK_METRIC_NAMESPACE: EleKnowledge/Feedback
           ADMIN_GROUP_NAME: admin
@@ -499,6 +787,13 @@ Resources:
             RestApiId: !Ref ChatApi
             Path: /chat/admin/failures
             Method: GET
+        # 失敗・要望の振り分け（状態・原因・メモ・参照）。設計 docs/design-2026-09-10-dashboard-v2.md §9.4
+        UpdateAdminTriage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /chat/admin/messages/{sessionId}/{messageId}/triage
+            Method: PUT
         SubmitSuggestion:
           Type: Api
           Properties:
@@ -518,6 +813,7 @@ Resources:
   RagApi:
     Type: AWS::Serverless::Api
     Properties:
+      PropagateTags: true
       Name: !Sub rag-api-${Environment}
       StageName: !Ref Environment
       Cors:
@@ -543,6 +839,11 @@ Resources:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
+      # アクセスログ（JSON 1 行/リクエスト）。requestId・時刻・resourcePath・status・latency・errorType 等を記録する。
+      # IP / userAgent / sub / 実リクエスト path / errorMessage / 本文は記録しない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
+      AccessLogSetting:
+        DestinationArn: !GetAtt RagApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
@@ -554,6 +855,9 @@ Resources:
           DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         Phase: "2"
@@ -561,6 +865,7 @@ Resources:
   ChatApi:
     Type: AWS::Serverless::Api
     Properties:
+      PropagateTags: true
       Name: !Sub chat-api-${Environment}
       StageName: !Ref Environment
       Cors:
@@ -586,6 +891,11 @@ Resources:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
+      # アクセスログ（JSON 1 行/リクエスト）。requestId・時刻・resourcePath・status・latency・errorType 等を記録する。
+      # IP / userAgent / sub / 実リクエスト path / errorMessage / 本文は記録しない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
+      AccessLogSetting:
+        DestinationArn: !GetAtt ChatApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
@@ -597,6 +907,9 @@ Resources:
           DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         Phase: "2"
@@ -607,12 +920,26 @@ Resources:
   RagApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       LogGroupName: !Sub /aws/apigateway/rag-api-${Environment}
       RetentionInDays: !Ref LogRetentionInDays
   
   ChatApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       LogGroupName: !Sub /aws/apigateway/chat-api-${Environment}
       RetentionInDays: !Ref LogRetentionInDays
 

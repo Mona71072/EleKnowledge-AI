@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Dev-only managed Knowledge Base for current e-Gov law documents
+
+Parameters:
+  LawDataBucketName:
+    Type: String
+    Description: Existing retained dev bucket containing raw/egov and kb/egov
+  LawDataBucketKmsKeyArn:
+    Type: String
+    Description: KMS key ARN used by the existing law data bucket
+
+Resources:
+  LawKnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: eleknowledge-law-kb-dev-service-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*
+      Policies:
+        - PolicyName: ReadCurrentLawDocuments
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ListLawSearchPrefix
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:${AWS::Partition}:s3:::${LawDataBucketName}
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+                  StringLike:
+                    s3:prefix:
+                      - kb/egov/
+                      - kb/egov/*
+              - Sid: ReadLawSearchDocuments
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${LawDataBucketName}/kb/egov/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+              - Sid: DecryptLawBucketObjects
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Ref LawDataBucketKmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+              - Sid: InvokeTitanTextEmbeddingsV2
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0
+
+  LawKnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: eleknowledge-law-rag-dev
+      Description: Dev PoC. Current e-Gov law documents only.
+      RoleArn: !GetAtt LawKnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: MANAGED
+        ManagedKnowledgeBaseConfiguration:
+          EmbeddingModelType: CUSTOM
+          EmbeddingModelArn: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0
+          EmbeddingModelConfiguration:
+            BedrockEmbeddingModelConfiguration:
+              Dimensions: 1024
+              EmbeddingDataType: FLOAT32
+      Tags:
+        Project: EleKnowledge
+        Env: dev
+        ManagedBy: SAM
+        DataClass: PublicLawSource
+        Purpose: LawRagPoc
+
+  CurrentLawsDataSource:
+    Type: AWS::Bedrock::DataSource
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      KnowledgeBaseId: !Ref LawKnowledgeBase
+      Name: egov-current-laws
+      Description: Current e-Gov law search documents in kb/egov only
+      DataDeletionPolicy: DELETE
+      DataSourceConfiguration:
+        Type: MANAGED_KNOWLEDGE_BASE_CONNECTOR
+        ManagedKnowledgeBaseConnectorConfiguration:
+          ConnectorParameters:
+            type: S3
+            version: '1'
+            connectionConfiguration:
+              bucketName: !Ref LawDataBucketName
+              bucketOwnerAccountId: !Ref AWS::AccountId
+            filterConfiguration:
+              inclusionPrefixes:
+                - kb/egov/
+          DeletionProtectionConfiguration:
+            DeletionProtectionStatus: ENABLED
+            DeletionProtectionThreshold: 5
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 300
+            OverlapPercentage: 20
+
+Outputs:
+  LawKnowledgeBaseId:
+    Description: Managed law Knowledge Base ID for the dev RAG Lambda
+    Value: !Ref LawKnowledgeBase
+  LawKnowledgeBaseArn:
+    Description: Managed law Knowledge Base ARN
+    Value: !GetAtt LawKnowledgeBase.KnowledgeBaseArn
+  LawDataSourceId:
+    Description: Managed S3 connector DataSource ID
+    Value: !GetAtt CurrentLawsDataSource.DataSourceId

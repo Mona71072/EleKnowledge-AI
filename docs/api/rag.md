@@ -5,7 +5,15 @@ last-verified: 2026-09-09
 related-code: lambda/rag/, frontend/src/app/chat/
 ---
 
+> **frontmatter の `status: production`:** 2026-09-10 以前から運用中の節を指す。2026-09-11 以降に追加した節は develop マージと SAM デプロイ前 — 各節の「最終検証」行を正とする。
+
 # RAG処理API
+
+## develop 法令チャットの追加仕様
+
+> 最終検証: 2026-10-09 — #155 / #156を含むdevelop `b8070f56`のコードとPRコメントを照合。AWS反映・利用者向けE2Eは未確認。
+
+法令モード（`mode=law`）、法令出典、モード別履歴の追加契約は[法令チャットAPI補足](legal-chat.md)を参照する。この追加は既存devのプレリリース向けであり、本番提供を意味しない。通常モードの既存契約は以下を参照する。
 
 > spec.md §7.2 から切り出し。Phase 2 の RAG クエリエンドポイントを記載する。
 
@@ -13,7 +21,7 @@ related-code: lambda/rag/, frontend/src/app/chat/
 
 ## POST /rag/query
 
-> 最終検証: 2026-09-22 — #84 実装（応答はフォールバック、sessionTitle は非同期が初めて書く）
+> 最終検証: 2026-10-09 — `mode` の受理値・省略/null/空文字の正規化・403・409・セッション読取失敗の 500 を app.py と照合（null・空文字の受理はハンドラのモック実行でも確認）。sessionTitle の生成モデル設定説明は 2026-10-04、検索設定の上書きと既定値は 2026-09-25 に実装設定と照合
 
 RAGクエリ実行
 
@@ -28,12 +36,16 @@ RAGクエリ実行
 }
 ```
 
-- `mode`: `normal`（標準 RAG）| `spec`（仕様確認モード）。実装 [app.py](../../lambda/rag/rag-function/app.py) 参照。
+- `mode`: `normal`（標準 RAG）| `spec`（仕様確認モード。非推奨）| `law`（法令モード）。省略・`null`・空文字（`""`）の場合は `normal` として扱う。実装 [app.py](../../lambda/rag/rag-function/app.py) 参照。
+  - 上記の受理値・正規化対象以外の値（数値・真偽値・配列・オブジェクト等を含む）は **400** `ValidationError`（`Unsupported RAG mode`）。
+  - `law` は開発環境で機能フラグと法令 KB が設定されているときだけ使える。無効のときは **403** `FeatureUnavailable`（`法令モードは利用できません`）。
+  - 既存セッション（`sessionId` 指定）のモードと `mode` が異なるときは **409** `SessionModeMismatch`。セッションはモードをまたいで再利用できない（`ragMode` を持たない旧メッセージは `normal` 扱い）。
+  - 既存セッションの確認で、セッションが存在しない・他人のものの場合は **404** `NotFound`（存在有無を漏らさないため区別しない）。DynamoDB の読取に失敗して確認できなかった場合は 404 にせず、下記「500 応答」の一般化した **500** を返す。
 - `filters.category`: フロント側の**安定キー**（`drawing` / `spec` / `tech_info` / `incident` / `qsheet` / `std` / `note` 等）。サーバー側 `CATEGORY_MAP` が実 KB の `category` メタデータ値へ変換する。安定キー・KB実値・UI表示ラベルの対応は下表参照。
 - **カテゴリ未指定時**: `category` の**許可リスト**（実カテゴリ全10種 = `CATEGORY_MAP` の値 = `ALLOWED_CATEGORY_VALUES`）を**常時適用**する。ユーザー視点では従来どおり「未指定＝全検索」だが、web-crawler（GenU ドキュメント）・quick-start（引用 presign 不能バケット）データソース由来のノイズ文書と `TEST` 文書は category が許可リスト外のため遮断される。カテゴリ指定時も許可リスト外の値は通らない。根拠: [verification-2026-08-26-kb-vqv-metadata.md](../verification-2026-08-26-kb-vqv-metadata.md)（PR #55）。
 - `filters.modelType`: UI 機種絞り込み項目（6項目）。サーバー側 `UI_MODEL_FILTERS` が対象機種へ展開し（例 `AXIEZ` → `AXIEZ` / `AXIEZ(KE-WF・KE-HF)` / `駅舎エレ`）、`model_type` に対する **`listContains`（リスト要素の完全一致）** の `orAll` で検索前に絞り込む。KB の `model_type` は list 型 / string 型が混在するが、string 型はスカラー＝単要素リスト扱いで `listContains` に一致する（2026-08-26 実機確認）。旧実装の `stringContains`（部分一致。`AXIEZ` が `AXIEZ-LINKs` にも一致していた）は廃止。機種を指定した場合でも、全機種共通文書（`model_type` が `*` / `general`）は常に検索対象に含める（**展開機種 OR `*` OR `general`**）。空文字・空配列・キー欠落は実データ 0 件のため空文字句は持たない。加えて取得後に要素完全一致の post-filter と取扱機種スコープ（`HANDLED_MODEL_TYPES`）を安全弁として適用する。根拠: [verification-2026-08-26-kb-vqv-metadata.md](../verification-2026-08-26-kb-vqv-metadata.md) §4/§5.4（PR #55）、[rag-model-filter-mapping-2026-08-26.md](../rag-model-filter-mapping-2026-08-26.md) §1/§4（PR #54）。
 - `mode: spec` のとき `category` はサーバー側 `SPEC_CATEGORIES`（`C資料` / `テクニカルインフォメーション` / `据付基準`）で上書きされる。
-- **検索方式**: Knowledge Base の `overrideSearchType` は環境変数 `RAG_SEARCH_TYPE` で制御する（既定 `HYBRID` / `SEMANTIC` に切替可、不正値は `HYBRID` にフォールバック）。HYBRID はベクトル類似に加えキーワード/全文一致を併用し、型式コード・エラーコードのような完全一致寄りの語の取りこぼしを減らす。
+- **検索方式**: Knowledge Base の `overrideSearchType` は環境変数 `RAG_SEARCH_TYPE`（既定 `HYBRID` / `SEMANTIC` に切替可、不正値は `HYBRID` にフォールバック）で指定し、任意の `KB_PROFILE_JSON.search_type` で上書きできる。再ランキングとクエリ書換えはサーバー設定による任意機能で、既定では無効。HYBRID はベクトル類似に加えキーワード/全文一致を併用し、型式コード・エラーコードのような完全一致寄りの語の取りこぼしを減らす。
 
 ### `filters.category` 対応表
 
@@ -96,15 +108,23 @@ RAGクエリ実行
 - `sessionTitle`: **セッション最初のやりとりのみ**付く履歴一覧用の見出し。応答 JSON では質問文を切り詰めたフォールバックを返す。DynamoDB の `sessionTitle` は初回の put では書かない。
   - 見出し生成は回答返却後の非同期 Lambda タスクで行う。Bedrock の接続・本文読取は、通常回答・聞き返し・該当なしの応答時間に入れない。生成後は、同一 `userId` で `sessionTitle` がまだ無い最初の user メッセージだけを更新する。
   - 初回 put にフォールバックを書いておくと、`attribute_not_exists(sessionTitle)` が外れ、LLM 見出しが保存されない。一覧は質問の先頭 50 文字のままになる。
-  - モデルは `SESSION_TITLE_MODEL_ID`（未設定時は `BEDROCK_MODEL_ID`）。Sonnet 5 系では `temperature` を送らず `thinking: {type: disabled}` を指定し、本文生成と同じ互換形式を使う。
+  - モデルは `SESSION_TITLE_MODEL_ID`（未設定時は `BEDROCK_MODEL_ID`）。生成リクエストはモデルの capability profile に従い、sampling / thinking / effort のうち対応する設定だけを送る。
   - `SESSION_TITLE_LLM=false` や非同期起動の失敗のあいだ、一覧は優先順 2（最初のユーザー質問。フォールバックと同じ切り詰め）になる。Bedrock 例外・空応答のときは、非同期タスクがフォールバック文字列を `sessionTitle` として書く。見出し生成の失敗で回答は落とさない。
   - **SECURITY:** 質問文は `<question>` タグで囲み、システムプロンプトで資料扱いを明示する。タスクは同一LambdaのIAM権限でのみ起動される。
   - 現行チャット UI はこのフィールドを直接使わず、一覧 API を再取得して表示する。
 
+### 生成モデルのリクエスト設定
+
+> 最終検証: 2026-10-01 — モデル能力プロファイル、InvokeModel / Converse 分岐、画像ブロック変換を照合
+
+本文生成・見出し生成・検索語書き換えは共通の `invoke_generation` を通し、`model_profile.py` の `api` に従って InvokeModel または Converse を選ぶ。既存の Anthropic モデルは InvokeModel の Anthropic 形式本文を維持する。Luna（`global.openai.gpt-6-luna`）は Converse を使い、Anthropic の text / base64 image ブロックを Converse の text / image bytes へ変換する。能力プロファイルが画像をサポートしないときは画像を除外し、本文を含めない構造化イベントだけを出力する。
+
+Anthropic モデルでは能力表に従い、対応しない sampling / thinking / effort 設定を本文へ含めない。Luna の reasoning effort はモデルカードに値の範囲は記載されているが、Converse で使うモデル固有フィールド名は確認できないため追加リクエストフィールドを送らず、モデル既定値を使う。能力表に `api: "invoke" | "converse"` を指定でき、`MODEL_PROFILE_JSON` でも上書きできる。未知の `api` 値はログを出して `invoke` にフォールバックする。モデル設定手順は [運用ランブック §7](../ops-runbook.md#7-生成モデルと推論プロファイル) を参照。
+
 - カテゴリ未指定時の**本命優先 2 段階 retrieve は 2026-08-26 に一時停止**（少数カテゴリが全検索でヒットしない副作用のため。mona 了承済み）。現在は未指定時も常に単一の retrieve（対象は実カテゴリ10種の許可リスト内）。後継方式の検討は [issue #61](https://github.com/yukiworkspace/EleKnowledge-AI/issues/61)。ユーザーが category を選んでいる場合はそれを尊重（従来どおり）。
 - 直前アシスタントが聞き返しのとき、追記ターンの検索クエリは**直前のユーザー質問と結合**する（保存・表示する `query` は利用者の今回入力のまま）。
 - `priorityExpanded`: 本命→全資料へ拡大したとき `true` だった診断用フィールド（チャット UI では未表示）。優先 retrieve 停止中は**常に `false`**（API 互換のためフィールドは残置）。
-- `mode`: API 上は `normal` \| `spec` を受け付ける。現行チャット UI は常に `normal`。`spec` は **非推奨**で、サーバ側で `normal` に正規化し、カテゴリ未指定時は本命（`spec`/`tech_info`/`std`）を強制する。
+- `mode`: API 上は `normal` \| `spec` \| `law` を受け付ける（詳細は上記 Request の `mode`）。通常チャット UI は `normal`、法令チャット UI は `law` を送る。`spec` は **非推奨**で、サーバ側で `normal` に正規化し、カテゴリ未指定時は本命（`spec`/`tech_info`/`std`）を強制する。`law` は `filters` を無視する。
 - `sourceUri` の形式は環境変数 `CITATION_URI_MODE`（SAM パラメータ `CitationUriMode`）で切り替える（デプロイ順を壊さないための段階移行スイッチ）。
   - `s3`（移行完了後の姿。上の例）: **`s3://` URI**。プリサイン HTTPS URL は応答にも DynamoDB にも含めない。フロントは `documentHref()` で中継ページ `/doc?uri=...` へのリンクに変換し、クリック時に `GET /rag/document` で実 URL を都度発行する。
   - `presigned`（既定・移行互換）: 従来どおり**プリサイン HTTPS URL**（TTL は `PresignedUrlExpiresIn`、既定 300 秒）。受付（`GET /rag/document` と `/doc`）だけを先に本番反映しても、デプロイ済みフロントを壊さないためのモード。受付の実機確認とフロント反映（Amplify）の完了後に `s3` へ切り替える。
@@ -115,6 +135,8 @@ RAGクエリ実行
 
 ## GET /rag/document
 
+> 最終検証: 2026-09-25 — document_open の記録条件・失敗時の継続を #111 実装と照合（未デプロイ。#111 のマージ・デプロイ後に有効）
+
 引用文書の実体を開くための**短命プリサイン URL を都度発行する**エンドポイント。チャット応答の `sourceUri`（`s3://` URI）を、開く瞬間にだけ有効な HTTPS URL に解決する。呼び出し元は中継ページ `/doc`（`frontend/src/lib/documents.ts` の `resolveDocumentUrl`）。
 
 **認証:** Cognito Authorizer 必須（未ログインは API Gateway / ハンドラで 401）。これにより引用リンクを共有されても、開けるのは登録ユーザーのみ。未ログイン時はフロントの `/doc` が `next` 付きでログイン画面へ誘導し、ログイン後に復帰する（戻り先は `safeNextPath()` で正規化・origin 検証するオープンリダイレクト対策済み。`frontend/src/lib/safe-next-path.mjs`）。
@@ -122,9 +144,11 @@ RAGクエリ実行
 **Request:**
 
 ```text
-GET /rag/document?uri=s3%3A%2F%2F<bucket>%2Fdocs%2F....pdf
+GET /rag/document?uri=s3%3A%2F%2F<bucket>%2Fdocs%2F....pdf&s=<sessionId>&m=<messageId>
 Authorization: Bearer <IdToken>
 ```
+
+- `s`（sessionId）と `m`（messageId）は任意。**どの回答の引用から開いたか**を記録するためで、フロントの `/doc?uri=…&s=&m=` が引き継ぐ。両IDがあり、所有者確認後に同一セッションの assistant 行を更新できた場合に `documentOpens` を加算し `lastOpenedAt` を記録し、CloudWatch に `document_open` の構造化行（文書名のみ）を出す（到達ファネル「資料を開いた」。設計 [design-2026-09-10-dashboard-v2.md](../design-2026-09-10-dashboard-v2.md) §4.3 I3）。記録更新に失敗しても文書 URL の発行は継続します。ID が無くても文書は開けます。
 
 **Response (200):**
 
@@ -152,3 +176,33 @@ Authorization: Bearer <IdToken>
 - それでも発行済み URL に期限後アクセスした場合（タブのリロード・ブラウザ履歴・コピーされた URL）、リクエストはブラウザ → S3 に直行しアプリは経路上に存在しないため、**S3 が素の 403 XML（`AccessDenied` / `Request has expired`）を返すのが想定動作**。アプリ側でのエラーページ表示や再発行リダイレクトは構造的に不可能
 - **復旧導線はチャットの引用リンクを再クリック**（都度発行で新しい URL が出る）
 - 既知エッジ: ブラウザ PDF ビューアはレンジリクエストで逐次読み込むため、大きい PDF を 5 分超閲覧すると未読ページの取得が失敗しうる（表示済みページは影響なし。復旧は同上）
+
+---
+
+## 500 応答の形と構造化ログ（2026-09-11）
+
+> 最終検証: 2026-10-10 — 全 RAG ログ行の共通項目（schemaVersion・requestId・route・statusCode・latencyMs・ragLogicVersion）と errorFingerprint を telemetry.py・app.py・単体テストと照合（未デプロイ。マージ・SAM デプロイ後に有効）。500 経路の挙動は 2026-10-09 に app.py と照合。アクセスログ形式は 2026-09-25 に #111 / #134 / #133 / #139 と照合
+
+`POST /rag/query` の 500 は AWS のエラーメッセージを返さず、一般化した本文と API Gateway のリクエスト ID だけを返す。
+
+既存セッションの所有者確認・モード確認・履歴取得で DynamoDB の読取に失敗した場合も、この 500 になる（`rag_error` の `stage` は `history`）。以前は「確認できなかった」ことを 404（`NotFound`）として返したり、履歴取得の失敗を空履歴として回答生成を続けたりしていたが、いずれも行わない。404 は、セッションが存在しない・他人のものと確認できたときだけ返す。
+
+```json
+{ "error": "InternalServerError", "message": "処理に失敗しました。時間をおいて再度お試しください。", "requestId": "<requestId>" }
+```
+
+CloudWatch Logs には 1 リクエスト 1 行の構造化行が出る（本文・質問文は含まない）。API Gateway のアクセスログも本契約の対象とし、`path` は含めず `resourcePath` を記録する。送信元 IP・User-Agent・利用者 ID（sub）は記録しない。
+
+全行の共通項目: `schemaVersion`（現在 `1`）, `event`, `requestId`（API Gateway のリクエスト ID。アクセスログの `requestId` と同じ値）, `route`（API Gateway の `resourcePath`。パス値は含まない）, `statusCode`（HTTP 応答が決まる前の行は `null`）, `latencyMs`（リクエスト開始からその行を出すまでの経過ミリ秒）, `ragLogicVersion`（SAMの必須パラメータ`RagLogicVersion`から環境変数`RAG_LOGIC_VERSION`へ渡す、検証済みソースのGit SHA）。旧配信や環境変数未設定時の互換フォールバックだけを`unknown`とする。
+
+> 最終検証: 2026-10-14 — `RagLogicVersion`のSAM配線・必須指定・Git SHA形式をテンプレートと単体テストで照合。AWS未反映。
+
+`errorFingerprint` は `rag_error` に付く。段階（`stage`）・例外の型（`exceptionClass`）・エラーコードを `|` で連結した文字列の SHA-256 の先頭 16 文字。鍵は使わず、例外の文面・ID・本文は入力に含めないため、同一原因なら文面が違っても同じ値になる。
+
+| event | 主な項目（共通項目に加えて） | 用途 |
+|---|---|---|
+| `rag_request` | `statusCode`, `responseType`, `pageCandidates`, `sourceDocuments`, `priorityExpanded`。`pageCandidates` / `sourceDocuments` は件数。非同期の見出し生成（内部タスク）は HTTP リクエストではないため出さない | アクセスログの `requestId` と結合（保存クエリ `request-by-id`） |
+| `rag_error` | `statusCode`（500）, `stage`（retrieve / generate / save / history / `unknown`）, `errorCode`, `exceptionClass`, `errorFingerprint` | 500 の段階と原因。同一原因の集約は `errorFingerprint` で行う |
+| `document_open` | `statusCode`（200）, `documentName` | 資料到達の追跡 |
+| `reformulation` | `statusCode` は `null`（共通項目のみ） | 直前の回答に言い換えの印（`reformulatedAt`）を付けた |
+| `law_reference_coverage` | `statusCode` は `null`。件数（選択・参照・全文・部分・省略）、参照文字数、理由別件数 | 法令の参照本文の取得範囲。本文は出さない |

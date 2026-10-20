@@ -3,12 +3,21 @@ EleKnowledge Chat Management Lambda Function
 Session and Message Management
 """
 import json
+import re
 import os
 import boto3
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
+from urllib.parse import unquote
 from botocore.exceptions import ClientError
 from decimal import Decimal
+
+# 日別集計用キー（metricDay / metricDayShard）。rag-function と同じ実装（同ディレクトリの chatlog_metric_keys.py）
+import sys as _sys  # noqa: E402
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in _sys.path:
+    _sys.path.insert(0, _HERE)
+import chatlog_metric_keys  # noqa: E402
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'ap-northeast-1'))
@@ -38,6 +47,121 @@ FAILURES_SCAN_MAX_PAGES = 25
 FAILURES_DEFAULT_LIMIT = 50
 FAILURES_HARD_LIMIT = 100
 
+# 振り分け（triage。設計 docs/design-2026-09-10-dashboard-v2.md §9.4）
+JST = timezone(timedelta(hours=9))
+TRIAGE_STATUSES = frozenset({'open', 'in_progress', 'done', 'wontfix'})
+TRIAGE_CAUSES = frozenset({'search', 'snippet', 'writing', 'clarify', 'kb_missing', 'scope', 'user', 'other'})
+TRIAGE_NOTE_MAX = 200
+TRIAGE_REF_MAX = 100
+# ヒント（§9.3）: 上位スコアが「弱い」とみなす仮の閾値。トレース実装後に実測で決める
+WEAK_SCORE_THRESHOLD = 0.45
+
+
+def _safe_error_label(error: Exception) -> str:
+    """Return exception metadata without exposing its message or traceback."""
+    label = f"exception_type={type(error).__name__}"
+    if isinstance(error, ClientError):
+        error_data = error.response.get('Error') or {}
+        code = error_data.get('Code') if isinstance(error_data, dict) else None
+        if code:
+            label += f" error_code={code}"
+    return label
+
+
+def _chat_resource(path: str) -> str:
+    """Map a request path to a route template without retaining path identifiers."""
+    route = (path or '').rstrip('/')
+    if route.endswith('/chat/sessions'):
+        return '/chat/sessions'
+    if '/chat/sessions/' in route and route.endswith('/messages'):
+        return '/chat/sessions/{sessionId}/messages'
+    if '/chat/sessions/' in route:
+        return '/chat/sessions/{sessionId}'
+    if '/chat/messages/' in route and route.endswith('/feedback'):
+        return '/chat/messages/{messageId}/feedback'
+    if '/chat/admin/messages/' in route and route.endswith('/triage'):
+        return '/chat/admin/messages/{sessionId}/{messageId}/triage'
+    if route.endswith('/chat/admin/failures'):
+        return '/chat/admin/failures'
+    if route.endswith('/chat/admin/suggestions'):
+        return '/chat/admin/suggestions'
+    if route.endswith('/chat/suggestions'):
+        return '/chat/suggestions'
+    return 'unknown'
+
+
+def jst_day_bounds(since: str = None, until: str = None) -> tuple:
+    """JST の日付（YYYY-MM-DD）を chatlogs の timestamp（UTC ISO 文字列）の境界に変換する。"""
+    def start_of(day: str) -> datetime:
+        d = date.fromisoformat(day)
+        return datetime(d.year, d.month, d.day, tzinfo=JST).astimezone(timezone.utc)
+    lo = start_of(since).strftime('%Y-%m-%dT%H:%M:%S') if since else None
+    # 終端は翌日 00:00 の秒まで。timestamp は Z 付きなので、この文字列より前が期間内に入る。
+    hi = (start_of(until) + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%S') if until else None
+    return lo, hi
+
+
+def trace_summary(item: dict):
+    """retrievalTrace（別設計。未実装のうちは無い）の要約。無ければ None。"""
+    tr = item.get('retrievalTrace') or {}
+    if not tr:
+        return None
+    cands = tr.get('candidates') or []
+    ret = tr.get('retrieve') or {}
+    gen = tr.get('generation') or {}
+    top = cands[0].get('score') if cands else None
+    return {
+        'mergedCount': int(ret.get('mergedCount') or len(cands)),
+        'selectedCount': sum(1 for c in cands if c.get('selected')),
+        'excludedByModelScope': sum(1 for c in cands if c.get('excludedBy') == 'model_scope'),
+        'topScore': float(top) if top is not None else None,
+        'inputTokens': gen.get('inputTokens'),
+        'outputTokens': gen.get('outputTokens'),
+        'latencyMs': tr.get('latencyMs'),
+    }
+
+
+def normalize_triage(item: dict) -> dict:
+    t = item.get('triage') or {}
+    return {
+        'status': t.get('status') or 'open',
+        'cause': t.get('cause'),
+        'note': t.get('note'),
+        'ref': t.get('ref'),
+        'by': t.get('by'),
+        'at': t.get('at'),
+    }
+
+
+def build_hints(item: dict, summary: dict = None, previous_was_clarify: bool = False) -> list:
+    """機械的な手がかり（判断ではない。設計 §9.3）。"""
+    hints = []
+    reason = item.get('feedbackReason')
+    rt = item.get('responseType')
+    opens = int(item.get('documentOpens') or 0)
+    filters = item.get('queryFilters') or {}
+    cats = filters.get('category')
+    cats = cats if isinstance(cats, list) else ([cats] if cats else [])
+    if summary:
+        excluded = summary.get('excludedByModelScope') or 0
+        if excluded >= 3 and reason == 'wrong_doc':
+            hints.append(f'機種スコープで {excluded} 件除外 → スコープ表を疑う')
+        top = summary.get('topScore')
+        if top is not None and top < WEAK_SCORE_THRESHOLD and (rt == 'not_found' or reason == 'wrong_doc'):
+            hints.append(f'上位スコアが弱い（{top:.2f}）→ 検索語・略語展開')
+        merged = summary.get('mergedCount') or 0
+        if len(cats) >= 2 and merged < 5:
+            hints.append(f'カテゴリ過絞り（候補 {merged} 件）')
+    if opens > 0 and reason in ('unresolved', 'bad_answer'):
+        hints.append(f'資料は開かれた（{opens} 件）→ 検索は当たり、snippet か作文')
+    elif opens > 0:
+        hints.append(f'資料は開かれた（{opens} 件）')
+    if item.get('reformulatedAt') and item.get('feedback') != 'good' and opens == 0:
+        hints.append('言い換え後に評価なし → 暗黙の失敗')
+    if previous_was_clarify:
+        hints.append('聞き返し後の結合検索を確認')
+    return hints
+
 
 def emit_feedback_metric(feedback: str) -> None:
     """Emit an Embedded Metric Format (EMF) log so CloudWatch counts feedback in
@@ -61,7 +185,7 @@ def emit_feedback_metric(feedback: str) -> None:
         }
         print(json.dumps(emf))
     except Exception as e:  # noqa: BLE001 - metrics must never break the request
-        print(f"[chat] Failed to emit feedback EMF: {e}")
+        print(f"[chat] method=internal resource=feedback_metric {_safe_error_label(e)}")
 
 
 def get_caller_id(event) -> str:
@@ -102,10 +226,35 @@ def owns_session(session_id: str, user_id: str) -> bool:
             Limit=1
         )
     except ClientError as e:
-        print(f"Error verifying session ownership: {e}")
         return False
     items = response.get('Items', [])
     return bool(items) and items[0].get('userId') == user_id
+
+
+def get_session_owner_and_mode(session_id: str, user_id: str) -> tuple:
+    """owns_session と同じ判定を 1 回の Query で行い、セッションの ragMode も返す。
+
+    戻り値は (所有者か, モード)。所有者でない・存在しない場合は (False, None)。
+    モードは先頭の user/assistant メッセージの ragMode（旧データは normal）。
+    取れなければ None。rag-function の get_session_rag_mode と同じ読み方。
+    """
+    if not session_id or not user_id:
+        return False, None
+    try:
+        response = chatlogs_table.query(
+            KeyConditionExpression='sessionId = :sid',
+            ExpressionAttributeValues={':sid': session_id},
+            Limit=10,
+        )
+    except ClientError:
+        return False, None
+    items = response.get('Items', [])
+    if not items or items[0].get('userId') != user_id:
+        return False, None
+    for item in items:
+        if item.get('role') in ('user', 'assistant'):
+            return True, item.get('ragMode') or 'normal'
+    return True, None
 
 
 # Custom JSON encoder for Decimal
@@ -153,21 +302,40 @@ def build_session_title(content) -> str:
     return text[:SESSION_TITLE_MAX_LENGTH]
 
 
-def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
+def get_sessions_by_user(user_id: str, limit: int = 50, mode: str = None) -> list:
     """Get all sessions for a user"""
     try:
-        response = chatlogs_table.query(
-            IndexName='userId-timestamp-index',
-            KeyConditionExpression='userId = :uid',
-            # Hide logically-deleted messages (deleted flag null/false only)
-            FilterExpression='attribute_not_exists(#del) OR #del = :false',
-            ExpressionAttributeNames={'#del': 'deleted'},
-            ExpressionAttributeValues={':uid': user_id, ':false': False},
-            ScanIndexForward=False,
-            Limit=limit * 10  # Get more messages to find unique sessions
-        )
-        
-        messages = response.get('Items', [])
+        messages = []
+        matching_session_ids = set()
+        exclusive_start_key = None
+        while True:
+            query = {
+                'IndexName': 'userId-timestamp-index',
+                'KeyConditionExpression': 'userId = :uid',
+                # Hide logically-deleted messages (deleted flag null/false only)
+                'FilterExpression': 'attribute_not_exists(#del) OR #del = :false',
+                'ExpressionAttributeNames': {'#del': 'deleted'},
+                'ExpressionAttributeValues': {':uid': user_id, ':false': False},
+                'ScanIndexForward': False,
+                'Limit': limit * 10,
+            }
+            if exclusive_start_key:
+                query['ExclusiveStartKey'] = exclusive_start_key
+            response = chatlogs_table.query(**query)
+            page = response.get('Items', [])
+            messages.extend(page)
+            for message in page:
+                session_id = message.get('sessionId')
+                message_mode = message.get('ragMode') or 'normal'
+                if (
+                    session_id
+                    and not str(session_id).startswith('wish-')
+                    and (mode is None or message_mode == mode)
+                ):
+                    matching_session_ids.add(session_id)
+            exclusive_start_key = response.get('LastEvaluatedKey')
+            if not exclusive_start_key or len(matching_session_ids) >= limit:
+                break
         
         # Group by sessionId and get session metadata
         sessions_dict = {}
@@ -175,6 +343,9 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
         title_rank = {}
         for msg in messages:
             session_id = msg['sessionId']
+            message_mode = msg.get('ragMode') or 'normal'
+            if mode and message_mode != mode:
+                continue
             # 改善要望（product_wish）はチャット履歴一覧に出さない
             if str(session_id).startswith('wish-'):
                 continue
@@ -187,7 +358,8 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
                     'lastMessageTime': timestamp,
                     'messageCount': 0,
                     'title': 'Untitled',
-                    'ttl': msg.get('ttl', 0)
+                    'ttl': msg.get('ttl', 0),
+                    'ragMode': message_mode,
                 }
                 sessions_dict[session_id] = session
                 title_rank[session_id] = None
@@ -230,7 +402,6 @@ def get_sessions_by_user(user_id: str, limit: int = 50) -> list:
         return sessions[:limit]
         
     except ClientError as e:
-        print(f"Error getting sessions: {e}")
         raise
 
 
@@ -285,7 +456,6 @@ def get_session_messages(session_id: str, limit: int = 100, fetch_all: bool = Fa
         return messages
 
     except ClientError as e:
-        print(f"Error getting messages: {e}")
         raise
 
 
@@ -319,7 +489,6 @@ def delete_session(session_id: str) -> int:
         return deleted_count
 
     except ClientError as e:
-        print(f"Error deleting session: {e}")
         raise
 
 
@@ -381,7 +550,6 @@ def update_message_feedback(
     except ClientError as e:
         if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
             return False
-        print(f"Error updating feedback: {e}")
         raise
 
 
@@ -403,16 +571,35 @@ def _session_user_query_before(session_id: str, assistant_ts: str, cache: dict) 
     return prev
 
 
-def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT) -> dict:
-    """admin 用: bad フィードバックと not_found を新しい順に返す。
+def _previous_assistant_was_clarify(session_id: str, assistant_ts: str, cache: dict) -> bool:
+    """この回答の直前の回答が聞き返し（clarify）だったか（セッションのキャッシュから）。"""
+    if not session_id or session_id not in cache:
+        return False
+    prev = None
+    for msg in cache[session_id]:
+        ts = msg.get('timestamp') or ''
+        if ts >= assistant_ts:
+            break
+        if msg.get('role') == 'assistant':
+            prev = msg
+    return bool(prev and prev.get('responseType') == 'clarify')
+
+
+def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT,
+                          since: str = None, until: str = None, triage: str = 'all') -> dict:
+    """admin 用: bad フィードバック・not_found（・言い換え）を新しい順に返す。
 
     chatlogs は GSI が失敗専用ではないため Scan + Filter。
     試用初期のホットウィンドウ（TTL 約60日）向け。大規模化したら Athena へ移す。
+    since / until は JST の日付（YYYY-MM-DD）。triage は open / in_progress / done / wontfix / all。
     """
     limit = max(1, min(int(limit or FAILURES_DEFAULT_LIMIT), FAILURES_HARD_LIMIT))
     kind = (kind or 'all').lower()
-    if kind not in ('all', 'bad', 'not_found'):
+    if kind not in ('all', 'bad', 'not_found', 'reformulated'):
         kind = 'all'
+    triage = (triage or 'all').lower()
+    if triage not in TRIAGE_STATUSES and triage != 'all':
+        triage = 'all'
 
     # role=assistant かつ (feedback=bad OR responseType=not_found)、未削除
     filter_parts = [
@@ -422,17 +609,50 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
     values = {
         ':assistant': 'assistant',
         ':false': False,
-        ':bad': 'bad',
-        ':not_found': 'not_found',
     }
     names = {'#role': 'role', '#del': 'deleted', '#rt': 'responseType'}
 
     if kind == 'bad':
         filter_parts.append('feedback = :bad')
+        values[':bad'] = 'bad'
     elif kind == 'not_found':
         filter_parts.append('#rt = :not_found')
+        values[':not_found'] = 'not_found'
+    elif kind == 'reformulated':
+        # 言い換え: 回答直後に次の質問が来て、👍 が無い（資料クリックの有無は項目側で判定）
+        filter_parts.append('attribute_exists(reformulatedAt) AND (attribute_not_exists(feedback) OR feedback <> :good) AND (attribute_not_exists(documentOpens) OR documentOpens = :zero)')
+        values[':good'] = 'good'
+        values[':zero'] = 0
     else:
         filter_parts.append('(feedback = :bad OR #rt = :not_found)')
+        values[':bad'] = 'bad'
+        values[':not_found'] = 'not_found'
+
+    lo, hi = jst_day_bounds(since, until)   # 不正な日付は ValueError → 呼び出し側で 400
+    if lo:
+        names['#ts'] = 'timestamp'
+        filter_parts.append('#ts >= :lo')
+        values[':lo'] = lo
+    if hi:
+        names['#ts'] = 'timestamp'
+        filter_parts.append('#ts <= :hi')
+        values[':hi'] = hi
+
+    if triage == 'open':
+        names['#tr'] = 'triage'
+        names['#st'] = 'status'
+        filter_parts.append('(attribute_not_exists(#tr) OR #tr.#st = :open)')
+        values[':open'] = 'open'
+    elif triage != 'all':
+        names['#tr'] = 'triage'
+        names['#st'] = 'status'
+        filter_parts.append('#tr.#st = :tst')
+        values[':tst'] = triage
+
+    filter_expression = ' AND '.join(filter_parts)
+    # 式で使っていない別名を渡すと DynamoDB が ValidationException を返す（kind=bad / reformulated で 500 になった）
+    used_names = set(re.findall(r'#\w+', filter_expression))
+    names = {key: value for key, value in names.items() if key in used_names}
 
     collected = []
     exclusive_start = None
@@ -441,7 +661,7 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
 
     while pages < FAILURES_SCAN_MAX_PAGES:
         kwargs = {
-            'FilterExpression': ' AND '.join(filter_parts),
+            'FilterExpression': filter_expression,
             'ExpressionAttributeNames': names,
             'ExpressionAttributeValues': values,
             'Limit': 100,
@@ -458,6 +678,8 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
 
     incomplete = bool(exclusive_start)
     collected.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
+    matched_count = len(collected)
+    truncated = matched_count > limit
     collected = collected[:limit]
 
     session_cache = {}
@@ -478,17 +700,23 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
                 if name:
                     top_docs.append(name)
 
+        opens = int(item.get('documentOpens') or 0)
+        reformulated = bool(item.get('reformulatedAt')) and item.get('feedback') != 'good' and opens == 0
         signal = []
         if item.get('feedback') == 'bad':
             signal.append('bad')
         if item.get('responseType') == 'not_found':
             signal.append('not_found')
+        if reformulated:
+            signal.append('reformulated')
+        summary = trace_summary(item)
 
         failures.append({
             'sessionId': session_id,
             'messageId': item.get('messageId'),
             'timestamp': ts,
             'signals': signal,
+            'ragMode': item.get('ragMode') or 'normal',
             'responseType': item.get('responseType'),
             'feedback': item.get('feedback'),
             'feedbackReason': item.get('feedbackReason'),
@@ -497,14 +725,24 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
             'queryFilters': item.get('queryFilters') or {},
             'topDocuments': top_docs,
             'assistantPreview': ((item.get('content') or '')[:120]),
+            'opened': opens,
+            'reformulated': reformulated,
+            'triage': normalize_triage(item),
+            'traceSummary': summary,
+            'hints': build_hints(item, summary, _previous_assistant_was_clarify(session_id, ts, session_cache)),
         })
 
     return {
         'failures': failures,
         'count': len(failures),
+        'matchedCount': matched_count,
+        'truncated': truncated,
         'scannedCount': scanned_count,
         'incomplete': incomplete,
         'kind': kind,
+        'since': since,
+        'until': until,
+        'triage': triage,
         'note': (
             'hot window (TTL〜60日)。Scan ベースのため件数増で遅くなる場合は Athena へ移行。'
             + ((' Scan 打ち切りのため一部が欠けています（Scan はハッシュ順のため'
@@ -513,15 +751,20 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
     }
 
 
-def save_product_wish(user_id: str, text: str, context_session_id: str = None) -> dict:
-    """利用者の「こうなってほしい」自由記述を chatlogs に保存（role=product_wish）。"""
+def save_product_wish(user_id: str, text: str, context_session_id: str = None,
+                      context_rag_mode: str = None) -> dict:
+    """利用者の「こうなってほしい」自由記述を chatlogs に保存（role=product_wish）。
+
+    context_rag_mode は関連セッションのモード（normal / law）。不明なら記録しない。
+    """
     text = (text or '').strip()
     if not text:
         raise ValueError('text is required')
     if len(text) > WISH_TEXT_MAX:
         raise ValueError(f'text must be at most {WISH_TEXT_MAX} characters')
 
-    now = datetime.utcnow().isoformat() + 'Z'
+    now_utc = datetime.now(timezone.utc)
+    now = now_utc.isoformat().replace('+00:00', 'Z')
     ttl = int(time.time()) + (60 * 24 * 60 * 60)
     message_id = f'wish-{int(time.time() * 1000)}'
     session_id = f'wish-{user_id}'
@@ -535,8 +778,12 @@ def save_product_wish(user_id: str, text: str, context_session_id: str = None) -
         'timestamp': now,
         'ttl': ttl,
     }
+    # 日別集計用（GSI metricDayShard-timestamp-index）。timestamp と同じ時刻から導く
+    item.update(chatlog_metric_keys.metric_day_keys(now_utc, message_id))
     if context_session_id:
         item['contextSessionId'] = context_session_id
+        if context_rag_mode in ('normal', 'law'):
+            item['contextRagMode'] = context_rag_mode
 
     chatlogs_table.put_item(Item=item)
     return {'messageId': message_id, 'timestamp': now}
@@ -578,11 +825,15 @@ def list_product_wishes(limit: int = FAILURES_DEFAULT_LIMIT) -> dict:
     wishes = []
     for item in collected:
         wishes.append({
+            'sessionId': item.get('sessionId'),
             'messageId': item.get('messageId'),
             'userId': item.get('userId'),
             'text': item.get('content') or '',
             'timestamp': item.get('timestamp'),
             'contextSessionId': item.get('contextSessionId'),
+            # 旧データ（contextRagMode 未記録）は normal 扱い
+            'ragMode': 'law' if item.get('contextRagMode') == 'law' else 'normal',
+            'triage': normalize_triage(item),
         })
 
     return {
@@ -592,6 +843,63 @@ def list_product_wishes(limit: int = FAILURES_DEFAULT_LIMIT) -> dict:
         'incomplete': incomplete,
         'note': 'hot window (TTL〜60日)。Scan ベース。',
     }
+
+
+def update_triage(session_id: str, message_id: str, body: dict, actor: str):
+    """admin 用: 失敗・要望の振り分け（status / cause / note / ref）を行に保存する。
+
+    assistant と product_wish の行だけ。存在しなければ None（→ 404）。
+    S3 アーカイブへは Stream の MODIFY として流れ、Athena で原因別の件数を後から出せる。
+    """
+    status = body.get('status')
+    if status not in TRIAGE_STATUSES:
+        raise ValueError(f"status must be one of {sorted(TRIAGE_STATUSES)}")
+    cause = body.get('cause') or None
+    if cause is not None and cause not in TRIAGE_CAUSES:
+        raise ValueError(f"cause must be one of {sorted(TRIAGE_CAUSES)}")
+    note = (body.get('note') or '').strip()
+    ref = (body.get('ref') or '').strip()
+    if len(note) > TRIAGE_NOTE_MAX:
+        raise ValueError(f"note must be <= {TRIAGE_NOTE_MAX} chars")
+    if len(ref) > TRIAGE_REF_MAX:
+        raise ValueError(f"ref must be <= {TRIAGE_REF_MAX} chars")
+
+    triage = {'status': status, 'by': actor, 'at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}
+    if cause:
+        triage['cause'] = cause
+    if note:
+        triage['note'] = note
+    if ref:
+        triage['ref'] = ref
+    try:
+        chatlogs_table.update_item(
+            Key={'sessionId': session_id, 'messageId': message_id},
+            UpdateExpression='SET #tr = :t',
+            ConditionExpression=(
+                'attribute_exists(sessionId) AND attribute_exists(messageId) '
+                'AND (#role = :assistant OR #role = :wish)'
+            ),
+            ExpressionAttributeNames={'#tr': 'triage', '#role': 'role'},
+            ExpressionAttributeValues={':t': triage, ':assistant': 'assistant', ':wish': 'product_wish'},
+        )
+    except ClientError as e:
+        if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+            return None
+        raise
+    return triage
+
+
+def _triage_path_ids(path: str, path_parameters: dict) -> tuple:
+    """/chat/admin/messages/{sessionId}/{messageId}/triage から ID を取る（pathParameters 優先）。"""
+    params = path_parameters or {}
+    if params.get('sessionId') and params.get('messageId'):
+        return unquote(params['sessionId']), unquote(params['messageId'])
+    parts = [p for p in path.rstrip('/').split('/') if p]
+    try:
+        idx = parts.index('messages')
+        return unquote(parts[idx + 1]), unquote(parts[idx + 2])
+    except (ValueError, IndexError):
+        return '', ''
 
 
 def lambda_handler(event, context):
@@ -604,7 +912,8 @@ def lambda_handler(event, context):
     - DELETE /chat/sessions/{sessionId} - Delete session
     - GET /chat/sessions/{sessionId}/messages - Get session messages
     - PUT /chat/messages/{messageId}/feedback - Update message feedback
-    - GET /chat/admin/failures - List bad / not_found (admin only)
+    - GET /chat/admin/failures - List bad / not_found / reformulated (admin only)
+    - PUT /chat/admin/messages/{sessionId}/{messageId}/triage - Triage a failure / wish (admin only)
     - POST /chat/suggestions - Submit product wish (authenticated user)
     - GET /chat/admin/suggestions - List product wishes (admin only)
     """
@@ -617,10 +926,13 @@ def lambda_handler(event, context):
         'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
     }
     
+    http_method = 'unknown'
+    resource = 'unknown'
     try:
         # Get route info
         http_method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method'))
         path = event.get('path', event.get('rawPath', ''))
+        resource = _chat_resource(path)
         path_parameters = event.get('pathParameters', {})
         query_parameters = event.get('queryStringParameters', {}) or {}
         
@@ -657,7 +969,17 @@ def lambda_handler(event, context):
         # Route: GET /chat/sessions - List user sessions
         if http_method == 'GET' and path == '/chat/sessions':
             # userId クエリパラメータは廃止。自分のセッションのみ返す。
-            sessions = get_sessions_by_user(caller_id)
+            requested_mode = query_parameters.get('mode')
+            if requested_mode not in (None, 'normal', 'law'):
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'ValidationError',
+                        'message': 'Unsupported session mode',
+                    }),
+                }
+            sessions = get_sessions_by_user(caller_id, mode=requested_mode)
             
             return {
                 'statusCode': 200,
@@ -687,6 +1009,30 @@ def lambda_handler(event, context):
                 return not_found
 
             messages = get_session_messages(session_id)
+            requested_mode = query_parameters.get('mode')
+            if requested_mode not in (None, 'normal', 'law'):
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'ValidationError',
+                        'message': 'Unsupported session mode',
+                    }),
+                }
+            session_modes = {
+                message.get('ragMode') or 'normal'
+                for message in messages
+                if message.get('role') in ('user', 'assistant')
+            }
+            if requested_mode and session_modes and session_modes != {requested_mode}:
+                return {
+                    'statusCode': 409,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'SessionModeMismatch',
+                        'message': 'このチャットモードでは既存セッションを開けません',
+                    }, ensure_ascii=False),
+                }
 
             return {
                 'statusCode': 200,
@@ -817,21 +1163,73 @@ def lambda_handler(event, context):
                 limit = int(query_parameters.get('limit') or FAILURES_DEFAULT_LIMIT)
             except (TypeError, ValueError):
                 limit = FAILURES_DEFAULT_LIMIT
-            payload = list_failure_messages(kind=kind, limit=limit)
+            try:
+                payload = list_failure_messages(
+                    kind=kind, limit=limit,
+                    since=query_parameters.get('since') or None,
+                    until=query_parameters.get('until') or None,
+                    triage=query_parameters.get('triage') or 'all',
+                )
+            except ValueError:
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({'error': 'ValidationError', 'message': 'since / until must be YYYY-MM-DD (JST)'})
+                }
             return {
                 'statusCode': 200,
                 'headers': headers,
                 'body': json.dumps(payload, cls=DecimalEncoder, ensure_ascii=False)
             }
 
+        # Route: PUT /chat/admin/messages/{sessionId}/{messageId}/triage - 振り分け（admin のみ）
+        elif http_method == 'PUT' and '/chat/admin/messages/' in path and path.rstrip('/').endswith('/triage'):
+            if not is_admin(event):
+                return {
+                    'statusCode': 403,
+                    'headers': headers,
+                    'body': json.dumps({'error': 'Forbidden', 'message': 'Admin privileges required'})
+                }
+            target_session, target_message = _triage_path_ids(path, path_parameters)
+            if not (target_session and target_message):
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({'error': 'ValidationError', 'message': 'sessionId and messageId are required'})
+                }
+            try:
+                triage = update_triage(target_session, target_message, body, caller_id)
+            except ValueError as ve:
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({'error': 'ValidationError', 'message': str(ve)})
+                }
+            if triage is None:
+                return {
+                    'statusCode': 404,
+                    'headers': headers,
+                    'body': json.dumps({'error': 'NotFound', 'message': 'Message not found'})
+                }
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': json.dumps({'sessionId': target_session, 'messageId': target_message, 'triage': triage}, ensure_ascii=False)
+            }
+
         # Route: POST /chat/suggestions - 利用者の「こうなってほしい」
         elif http_method == 'POST' and path.rstrip('/').endswith('/chat/suggestions'):
             text = (body.get('text') or body.get('content') or '').strip()
             context_session_id = body.get('sessionId') or body.get('contextSessionId')
-            if context_session_id and not owns_session(context_session_id, caller_id):
-                context_session_id = None
+            context_rag_mode = None
+            if context_session_id:
+                # 他人のセッションのモードは読まない（所有者判定と同じ Query で取得）
+                owned, context_rag_mode = get_session_owner_and_mode(context_session_id, caller_id)
+                if not owned:
+                    context_session_id = None
+                    context_rag_mode = None
             try:
-                saved = save_product_wish(caller_id, text, context_session_id)
+                saved = save_product_wish(caller_id, text, context_session_id, context_rag_mode)
             except ValueError as ve:
                 return {
                     'statusCode': 400,
@@ -883,20 +1281,19 @@ def lambda_handler(event, context):
             }
         
     except ClientError as e:
-        error_code = e.response['Error']['Code']
-        error_message = e.response['Error']['Message']
-        
+        print(f"[chat] method={http_method or 'unknown'} resource={resource} {_safe_error_label(e)}")
+
         return {
             'statusCode': 500,
             'headers': headers,
             'body': json.dumps({
-                'error': error_code,
-                'message': error_message
+                'error': 'InternalServerError',
+                'message': 'An unexpected error occurred'
             })
         }
     
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
+        print(f"[chat] method={http_method or 'unknown'} resource={resource} {_safe_error_label(e)}")
         return {
             'statusCode': 500,
             'headers': headers,

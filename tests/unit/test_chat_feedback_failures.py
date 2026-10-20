@@ -54,6 +54,105 @@ def test_is_admin_accepts_list_and_csv():
     assert not mod.is_admin(_event("GET", "/x", groups="user"))
 
 
+def test_get_sessions_filters_by_rag_mode():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [
+        {
+            "sessionId": "law-session",
+            "userId": "user-1",
+            "role": "user",
+            "ragMode": "law",
+            "timestamp": "2026-10-02T01:00:00Z",
+            "ttl": 1790900000,
+            "content": "建築基準法の質問",
+        },
+        {
+            "sessionId": "normal-session",
+            "userId": "user-1",
+            "role": "user",
+            "ragMode": "normal",
+            "timestamp": "2026-10-02T02:00:00Z",
+            "ttl": 1790900000,
+            "content": "通常質問",
+        },
+        {
+            "sessionId": "legacy-session",
+            "userId": "user-1",
+            "role": "user",
+            "timestamp": "2026-10-02T03:00:00Z",
+            "ttl": 1790900000,
+            "content": "旧形式の通常質問",
+        },
+    ]}
+
+    sessions = mod.get_sessions_by_user("user-1", mode="law")
+
+    assert [session["sessionId"] for session in sessions] == ["law-session"]
+
+
+def test_get_sessions_paginates_until_requested_mode_is_found():
+    mod, table = load_app()
+
+    def query(**kwargs):
+        if "ExclusiveStartKey" not in kwargs:
+            return {
+                "Items": [{
+                    "sessionId": "normal-session",
+                    "userId": "user-1",
+                    "role": "user",
+                    "ragMode": "normal",
+                    "timestamp": "2026-10-02T02:00:00Z",
+                    "ttl": 1790900000,
+                    "content": "通常質問",
+                }],
+                "LastEvaluatedKey": {"userId": "user-1", "timestamp": "2"},
+            }
+        return {
+            "Items": [{
+                "sessionId": "law-session",
+                "userId": "user-1",
+                "role": "user",
+                "ragMode": "law",
+                "timestamp": "2026-10-02T01:00:00Z",
+                "ttl": 1790900000,
+                "content": "法令質問",
+            }]
+        }
+
+    table.query.side_effect = query
+
+    sessions = mod.get_sessions_by_user("user-1", limit=1, mode="law")
+
+    assert [session["sessionId"] for session in sessions] == ["law-session"]
+    assert table.query.call_count == 2
+
+
+def test_get_session_messages_rejects_different_rag_mode():
+    mod, table = load_app()
+    table.query.side_effect = [
+        {"Items": [{"sessionId": "law-session", "userId": "user-1"}]},
+        {"Items": [{
+            "sessionId": "law-session",
+            "messageId": "message-1",
+            "role": "user",
+            "ragMode": "law",
+            "content": "法令質問",
+            "timestamp": "2026-10-02T01:00:00Z",
+        }]},
+    ]
+
+    response = mod.lambda_handler(_event(
+        "GET",
+        "/chat/sessions/law-session/messages",
+        qs={"mode": "normal"},
+        groups="user",
+        path_params={"sessionId": "law-session"},
+    ), None)
+
+    assert response["statusCode"] == 409
+    assert json.loads(response["body"])["error"] == "SessionModeMismatch"
+
+
 def test_feedback_bad_with_reason(monkeypatch):
     mod, table = load_app()
     table.query.return_value = {"Items": [{"userId": "user-1", "sessionId": "s1"}]}
@@ -342,3 +441,70 @@ def test_admin_cannot_delete_other_users_session():
     )
     resp = mod.lambda_handler(event, None)
     assert resp["statusCode"] == 404
+
+
+def test_suggestions_route_records_law_mode_of_owned_session():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [
+        {"userId": "user-42", "sessionId": "s-law", "role": "user", "ragMode": "law"},
+    ]}
+    event = _event(
+        "POST",
+        "/chat/suggestions",
+        body={"text": "法令の条文をもっと上に", "sessionId": "s-law"},
+        groups="user",
+        sub="user-42",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 201
+    item = table.put_item.call_args.kwargs["Item"]
+    assert item["contextSessionId"] == "s-law"
+    assert item["contextRagMode"] == "law"
+    # 所有確認とモード取得は同じ Query 1 回で済ませる
+    assert table.query.call_count == 1
+
+
+def test_suggestions_route_skips_mode_of_other_users_session():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [
+        {"userId": "other-user", "sessionId": "s-other", "role": "user", "ragMode": "law"},
+    ]}
+    event = _event(
+        "POST",
+        "/chat/suggestions",
+        body={"text": "他人のセッション", "sessionId": "s-other"},
+        groups="user",
+        sub="user-42",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 201
+    item = table.put_item.call_args.kwargs["Item"]
+    assert "contextSessionId" not in item
+    assert "contextRagMode" not in item
+
+
+def test_suggestions_route_without_session_does_not_query():
+    mod, table = load_app()
+    event = _event("POST", "/chat/suggestions", body={"text": "機種を増やして"}, groups="user", sub="user-42")
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 201
+    table.query.assert_not_called()
+    item = table.put_item.call_args.kwargs["Item"]
+    assert "contextRagMode" not in item
+
+
+def test_list_product_wishes_ragmode_law_normal_and_legacy():
+    mod, table = load_app()
+    table.scan.return_value = {
+        "Items": [
+            {"messageId": "wish-3", "userId": "u1", "content": "a", "timestamp": "2026-10-03T00:00:00",
+             "role": "product_wish", "contextSessionId": "s-law", "contextRagMode": "law"},
+            {"messageId": "wish-2", "userId": "u1", "content": "b", "timestamp": "2026-10-02T00:00:00",
+             "role": "product_wish", "contextSessionId": "s-normal", "contextRagMode": "normal"},
+            {"messageId": "wish-1", "userId": "u1", "content": "c", "timestamp": "2026-10-01T00:00:00",
+             "role": "product_wish", "contextSessionId": "s-old"},
+        ],
+        "ScannedCount": 3,
+    }
+    out = mod.list_product_wishes(limit=10)
+    assert [w["ragMode"] for w in out["wishes"]] == ["law", "normal", "normal"]

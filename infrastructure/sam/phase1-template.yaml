@@ -5,6 +5,15 @@ Description: >
   Authentication System, DynamoDB, S3, Lambda, API Gateway
 
 Parameters:
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+    AllowedValues: [ele-knowledge]
+  CostUsage:
+    Type: String
+    Default: shared
+    AllowedValues: [development, user, shared]
+
   Environment:
     Type: String
     Default: dev
@@ -136,6 +145,9 @@ Globals:
         DYNAMODB_USERS_TABLE: !Ref UsersTable
         DYNAMODB_CHATLOGS_TABLE: !Ref ChatLogsTable
     Tags:
+      gyoumu012Project: !Ref CostProjectName
+      gyoumu012Component: shared
+      gyoumu012Usage: !Ref CostUsage
       Project: !Ref ProjectName
       Env: !Ref Environment
       ManagedBy: SAM
@@ -188,6 +200,9 @@ Resources:
       EmailConfiguration:
         EmailSendingAccount: COGNITO_DEFAULT
       UserPoolTags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         ManagedBy: SAM
@@ -249,6 +264,12 @@ Resources:
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env
@@ -272,6 +293,8 @@ Resources:
           AttributeType: S
         - AttributeName: timestamp
           AttributeType: S
+        - AttributeName: metricDayShard
+          AttributeType: S
       KeySchema:
         - AttributeName: sessionId
           KeyType: HASH
@@ -286,6 +309,16 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        # 日別集計（issue #130）。metricDayShard = "<JST日付>#<shard>"。集計は全シャードを Query する。
+        # 1 回のスタック更新で追加する GSI は 1 つだけ（CloudFormation の制約）。
+        - IndexName: metricDayShard-timestamp-index
+          KeySchema:
+            - AttributeName: metricDayShard
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       TimeToLiveSpecification:
         Enabled: true
         AttributeName: ttl
@@ -294,6 +327,12 @@ Resources:
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env
@@ -333,6 +372,12 @@ Resources:
       # for every principal in this account. AWS blocks public access on all newly
       # created S3 buckets by default (since April 2023), so this is not a regression.
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env
@@ -358,6 +403,12 @@ Resources:
             Prefix: tmp/
       # PublicAccessBlockConfiguration intentionally omitted; see DocumentsBucket comment above.
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env
@@ -383,55 +434,79 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
       Policies:
-        - PolicyName: DynamoDBAccess
+        - PolicyName: SignupUserWrite
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - dynamodb:GetItem
                   - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:Query
-                  - dynamodb:Scan
                 Resource:
                   - !GetAtt UsersTable.Arn
-                  - !Sub ${UsersTable.Arn}/index/*
-                  - !GetAtt ChatLogsTable.Arn
-                  - !Sub ${ChatLogsTable.Arn}/index/*
-        - PolicyName: CognitoAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cognito-idp:AdminCreateUser
-                  - cognito-idp:AdminGetUser
-                  - cognito-idp:AdminSetUserPassword
-                  - cognito-idp:AdminUpdateUserAttributes
-                  - cognito-idp:AdminDeleteUser
-                  - cognito-idp:ListUsers
-                Resource:
-                  - !GetAtt CognitoUserPool.Arn
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
-                  - s3:ListBucket
-                Resource:
-                  - !GetAtt DocumentsBucket.Arn
-                  - !Sub ${DocumentsBucket.Arn}/*
-                  - !GetAtt UploadsBucket.Arn
-                  - !Sub ${UploadsBucket.Arn}/*
       Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "1"
+
+  LoginExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub auth-login-lambda-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LoginUserUpdate
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt UsersTable.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "1"
+
+  VerifyExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub auth-verify-lambda-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env
@@ -447,6 +522,10 @@ Resources:
   SignupFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub signup-${Environment}
       CodeUri: ../../lambda/auth/signup/
       Handler: app.lambda_handler
@@ -468,11 +547,15 @@ Resources:
   LoginFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub login-${Environment}
       CodeUri: ../../lambda/auth/login/
       Handler: app.lambda_handler
       Description: User login function
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !GetAtt LoginExecutionRole.Arn
       Environment:
         Variables:
           COGNITO_USER_POOL_ID: !Ref CognitoUserPool
@@ -489,11 +572,15 @@ Resources:
   VerifyFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub verify-${Environment}
       CodeUri: ../../lambda/auth/verify/
       Handler: app.lambda_handler
       Description: Email verification function
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !GetAtt VerifyExecutionRole.Arn
       Environment:
         Variables:
           COGNITO_USER_POOL_ID: !Ref CognitoUserPool
@@ -515,6 +602,10 @@ Resources:
   DomainGuardFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
       CodeUri: ../../lambda/cognito-domain-guard/
       Handler: domain_guard.handler
       Runtime: python3.13
@@ -540,6 +631,7 @@ Resources:
   AuthApi:
     Type: AWS::Serverless::Api
     Properties:
+      PropagateTags: true
       Name: !Sub auth-api-${Environment}
       StageName: !Ref Environment
       Auth:
@@ -559,6 +651,11 @@ Resources:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
+      # アクセスログ（JSON 1 行/リクエスト）。requestId・時刻・resourcePath・status・latency・errorType 等を記録する。
+      # IP / userAgent / sub / 実リクエスト path / errorMessage / 本文は記録しない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiGatewayLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
@@ -572,6 +669,9 @@ Resources:
           DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         ManagedBy: SAM
@@ -583,6 +683,13 @@ Resources:
   ApiGatewayLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: shared
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       LogGroupName: !Sub /aws/apigateway/auth-api-${Environment}
       RetentionInDays: 30
 

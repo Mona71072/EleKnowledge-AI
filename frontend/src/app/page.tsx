@@ -13,6 +13,7 @@ import { getAnnouncements, Announcement } from '@/lib/announcements';
 import { AnnouncementsSection } from '@/components/announcements/AnnouncementsSection';
 import { MaintenanceBanner } from '@/components/announcements/MaintenanceBanner';
 import { AdminViewToggle } from '@/components/admin/AdminViewToggle';
+import { KnowledgeChatEntry } from '@/components/knowledge/KnowledgeChatEntry';
 
 const GUIDE_COLLAPSED_KEY = 'home:guideCollapsed';
 
@@ -42,6 +43,7 @@ export default function HomePage() {
   const [infoModal, setInfoModal] = useState<InfoModalPayload | null>(null);
   const [quickQuestion, setQuickQuestion] = useState('');
   const [guideOpen, setGuideOpen] = useState(false);
+  const showLawRag = process.env.NEXT_PUBLIC_LAW_RAG_ENABLED === 'true';
 
   useEffect(() => {
     checkUser();
@@ -289,6 +291,33 @@ export default function HomePage() {
               </Card>
             </Link>
 
+            {showLawRag && (
+              <Link href="/chat?mode=law" className="group block h-full">
+                <Card variant="default" padding="md" className="h-full border-2 border-transparent transition-all duration-300 group-hover:-translate-y-1 group-hover:border-amber-200 group-hover:shadow-xl">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-md transition-all duration-300 group-hover:from-emerald-700 group-hover:to-teal-800">
+                      <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 3.75h7l4.25 4.25v12.25H7A2.25 2.25 0 014.75 18V6A2.25 2.25 0 017 3.75zM14 4v4h4M8 12h8M8 15.5h8" />
+                      </svg>
+                    </div>
+                    <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900">
+                      プレリリース
+                    </span>
+                  </div>
+                  <h3 className="mb-2 mt-1 text-xl font-semibold text-gray-900 transition-colors group-hover:text-emerald-700">法令チャット</h3>
+                  <p className="text-sm leading-relaxed text-gray-600">
+                    現行法令を検索し、根拠条文とe-Gov原文へのリンクを表示します。
+                  </p>
+                  <div className="mt-4 inline-flex items-center text-sm font-semibold text-emerald-700 group-hover:text-emerald-800">
+                    法令を調べる
+                    <svg className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                  </div>
+                </Card>
+              </Link>
+            )}
+
             {isAdmin ? (
               <Link href="/troubleshooting" className="group block h-full">
                 <Card variant="default" padding="md" className="h-full group-hover:shadow-xl transition-all duration-300 transform group-hover:-translate-y-1 border-2 border-transparent group-hover:border-purple-200">
@@ -340,6 +369,8 @@ export default function HomePage() {
                 </p>
               </Card>
             )}
+
+            <KnowledgeChatEntry isAdmin={isAdmin} enabled={process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH === 'true'} />
           </div>
         </section>
 

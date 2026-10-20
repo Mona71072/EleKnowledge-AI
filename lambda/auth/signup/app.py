@@ -3,9 +3,66 @@ EleKnowledge Signup Lambda Function
 Cognito User Pool Integration
 """
 import json
+import logging
 import os
 import boto3
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_request_body(event, required_fields, optional_fields=()):
+    """JSON オブジェクト本文と認証項目の文字列型を検証する。"""
+    raw_body = event.get('body')
+    if isinstance(raw_body, str):
+        try:
+            body = json.loads(raw_body)
+        except (json.JSONDecodeError, RecursionError):
+            logger.warning(json.dumps({
+                'event': 'auth_request_validation_failed',
+                'reason': 'invalid_json'
+            }))
+            return None
+    elif isinstance(raw_body, dict):
+        body = raw_body
+    elif raw_body is None:
+        body = {}
+    else:
+        body = None
+
+    if not isinstance(body, dict):
+        logger.warning(json.dumps({
+            'event': 'auth_request_validation_failed',
+            'reason': 'body_must_be_object'
+        }))
+        return None
+
+    invalid_required = any(
+        not isinstance(body.get(field), str) or not body.get(field)
+        for field in required_fields
+    )
+    invalid_optional = any(
+        field in body and not isinstance(body[field], str)
+        for field in optional_fields
+    )
+    if invalid_required or invalid_optional:
+        logger.warning(json.dumps({
+            'event': 'auth_request_validation_failed',
+            'reason': 'invalid_field_type_or_missing_field'
+        }))
+        return None
+    return body
+
+
+def _validation_error(headers):
+    return {
+        'statusCode': 400,
+        'headers': headers,
+        'body': json.dumps({
+            'error': 'ValidationError',
+            'message': 'Request body is invalid'
+        })
+    }
 
 # Initialize AWS clients
 cognito_client = boto3.client('cognito-idp')
@@ -41,26 +98,13 @@ def lambda_handler(event, context):
     }
     
     try:
-        # Parse request body
-        if isinstance(event.get('body'), str):
-            body = json.loads(event['body'])
-        else:
-            body = event.get('body', {})
+        body = _parse_request_body(event, ('email', 'password'), ('name',))
+        if body is None:
+            return _validation_error(headers)
         
         email = body.get('email')
         password = body.get('password')
         name = body.get('name', '')
-        
-        # Validate input
-        if not email or not password:
-            return {
-                'statusCode': 400,
-                'headers': headers,
-                'body': json.dumps({
-                    'error': 'ValidationError',
-                    'message': 'Email and password are required'
-                })
-            }
         
         # Create user in Cognito
         user_attributes = [
@@ -102,7 +146,6 @@ def lambda_handler(event, context):
         
     except ClientError as e:
         error_code = e.response['Error']['Code']
-        error_message = e.response['Error']['Message']
         
         # Handle specific Cognito errors
         if error_code == 'UsernameExistsException':
@@ -124,17 +167,24 @@ def lambda_handler(event, context):
                 })
             }
         else:
+            logger.error(json.dumps({
+                'event': 'auth_cognito_error',
+                'error_code': error_code
+            }))
             return {
                 'statusCode': 500,
                 'headers': headers,
                 'body': json.dumps({
-                    'error': error_code,
-                    'message': error_message
+                    'error': 'InternalServerError',
+                    'message': 'An unexpected error occurred'
                 })
             }
     
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
+        logger.error(json.dumps({
+            'event': 'auth_unexpected_error',
+            'error_type': type(e).__name__
+        }))
         return {
             'statusCode': 500,
             'headers': headers,

@@ -14,6 +14,9 @@ import { ChatMessageFeedback } from '@/components/chat/ChatMessageFeedback';
 import { ProductWishModal } from '@/components/chat/ProductWishModal';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { documentHref, documentHrefWithPage } from '@/lib/documents';
+import { getAnnouncements, Announcement } from '@/lib/announcements';
+import { NoticeBanner } from '@/components/announcements/NoticeBanner';
+import { resolveInitialChatMode } from '@/lib/chat-session-link.mjs';
 import {
   BadFeedbackReasonId,
   FEEDBACK_COMMENT_MAX,
@@ -48,6 +51,15 @@ interface Message {
     hasImage?: boolean;  // 該当チャンクが図面などの画像だった場合 true
     pageNumber?: number;
     relevance: number;
+    lawCitation?: {
+      lawId: string;
+      lawTitle: string;
+      lawNumber: string;
+      effectiveDate: string;
+      provisionType: string;
+      provisionReference?: string;
+      sourceUrl: string;
+    };
   }>;
   feedback?: 'good' | 'bad' | null;
   /** 新規: wrong_doc | unresolved | bad_answer | other。wrong_page は旧データ表示用 */
@@ -67,7 +79,10 @@ interface Session {
   lastMessageTime: string;
   messageCount: number;
   daysUntilDeletion: number;
+  ragMode?: ChatMode;
 }
+
+type ChatMode = 'normal' | 'law';
 
 export default function ChatPage() {
   const router = useRouter();
@@ -75,6 +90,7 @@ export default function ChatPage() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [ragMode, setRagMode] = useState<ChatMode>('normal');
   const [currentSession, setCurrentSession] = useState<string | null>(null);
   // admin が失敗一覧から他ユーザーのセッションを開いたとき true（閲覧のみ・送信不可）
   const [readOnlySession, setReadOnlySession] = useState(false);
@@ -105,6 +121,23 @@ export default function ChatPage() {
   const [wishSubmitting, setWishSubmitting] = useState(false);
   const [wishSent, setWishSent] = useState(false);
   const [wishError, setWishError] = useState<string | null>(null);
+  const isLawMode = ragMode === 'law';
+  // 表示中の告知（障害中・復旧・メンテナンスなど、チャット画面の帯に出すもの）
+  const [notices, setNotices] = useState<Announcement[]>([]);
+
+  useEffect(() => {
+    getAnnouncements(10)
+      .then((res) => {
+        const seen = new Set<string>();
+        const merged = [...(res.activeMaintenance ?? []), ...res.announcements].filter((a) => {
+          if (seen.has(a.announcementId)) return false;
+          seen.add(a.announcementId);
+          return true;
+        });
+        setNotices(merged);
+      })
+      .catch(() => setNotices([]));
+  }, []);
 
   // value は Knowledge Base の実 category 値に対応する安定キー
   // 並び: 本命（C / TI / 据付基準）を先に、その他は後。
@@ -136,10 +169,18 @@ const SUGGESTED_QUESTIONS = [
   'エラーコードの原因と対処を手順で教えて',
 ];
 
+const LAW_SUGGESTED_QUESTIONS = [
+  '昇降機の設置に関係する現行法令を教えて',
+  '建築基準法で昇降機の定期検査について定めている条文は？',
+  '工事で確認が必要な消防法令の根拠を教えて',
+];
+
 const getUniqueDocs = (docs: Message['sourceDocuments'] = []) => {
     const seen = new Set<string>();
     return docs.filter((doc) => {
-      const key = doc.sourceUri || doc.documentName || '';
+      const key = doc.lawCitation
+        ? `${doc.lawCitation.lawId}:${doc.lawCitation.provisionReference || doc.lawCitation.provisionType}`
+        : doc.sourceUri || doc.documentName || '';
       if (!key) return true;
       if (seen.has(key)) return false;
       seen.add(key);
@@ -258,6 +299,9 @@ const normalizeTableMarkdown = (text: string): string => {
   // 初期化：ユーザー情報取得とセッション読み込み
   useEffect(() => {
     const initializeChat = async () => {
+      const initialMode: ChatMode = resolveInitialChatMode(window.location.search);
+      setRagMode(initialMode);
+
       // 開発モード: 認証をスキップする場合
       const skipAuth = process.env.NEXT_PUBLIC_SKIP_AUTH === 'true';
       const canBypassAuth = skipAuth && process.env.NODE_ENV !== 'production';
@@ -282,7 +326,7 @@ const normalizeTableMarkdown = (text: string): string => {
         setUserId(subId);
 
         // セッション一覧を取得
-        await fetchSessions();
+        await fetchSessions(initialMode);
       } catch (err) {
         console.error('Initialize error:', err);
         router.push('/login');
@@ -296,6 +340,8 @@ const normalizeTableMarkdown = (text: string): string => {
   useEffect(() => {
     if (!userId) return;
     const params = new URLSearchParams(window.location.search);
+    const initialMode: ChatMode = resolveInitialChatMode(window.location.search);
+    setRagMode(initialMode);
     const q = params.get('q');
     const sessionId = params.get('session');
     let dirty = false;
@@ -306,14 +352,19 @@ const normalizeTableMarkdown = (text: string): string => {
     }
     if (sessionId) {
       dirty = true;
-      fetchSessionMessages(sessionId).catch((err) => {
+      // setRagMode は次の描画まで反映されないため、取得モードは明示的に渡す（既定の ragMode は古い）
+      fetchSessionMessages(sessionId, initialMode).catch((err) => {
         console.error('Failed to open session from URL:', err);
         setError('指定されたセッションを開けませんでした');
       });
     }
     if (dirty) {
       // URL からクエリを除去してリロード時の再適用を防ぐ
-      window.history.replaceState({}, '', window.location.pathname);
+      window.history.replaceState(
+        {},
+        '',
+        initialMode === 'law' ? `${window.location.pathname}?mode=law` : window.location.pathname,
+      );
     }
   }, [userId]);
 
@@ -387,13 +438,14 @@ const normalizeTableMarkdown = (text: string): string => {
     setShowScrollButton(false);
   };
 
-  const fetchSessions = async () => {
+  const fetchSessions = async (mode: ChatMode = ragMode) => {
     try {
       setIsLoadingSessions(true);
       const token = await getAuthToken();
       
       // userId はサーバー側で ID トークンのクレームから決まるため送らない
       const response = await axios.get(`${CHAT_API_URL}/chat/sessions`, {
+        params: { mode },
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -414,10 +466,11 @@ const normalizeTableMarkdown = (text: string): string => {
     }
   };
 
-  const fetchSessionMessages = async (sessionId: string) => {
+  const fetchSessionMessages = async (sessionId: string, mode: ChatMode = ragMode) => {
     try {
       const token = await getAuthToken();
       const response = await axios.get(`${CHAT_API_URL}/chat/sessions/${sessionId}/messages`, {
+        params: { mode },
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -471,18 +524,16 @@ const normalizeTableMarkdown = (text: string): string => {
 
     try {
       const token = await getAuthToken();
-      const effectiveFilters = {
+      const effectiveFilters = isLawMode ? {} : {
         category: selectedCategories.length > 0 ? selectedCategories : undefined,
-        modelType: selectedModel || undefined
+        modelType: selectedModel || undefined,
       };
 
       const payload = {
         sessionId: currentSession,
         userId: userId,
         query: input,
-        // モード選択UIは廃止。資料カテゴリを複数選択できるため spec モードは不要。
-        // サーバー互換のため normal を固定送信する。
-        mode: 'normal',
+        mode: ragMode,
         filters: effectiveFilters
       };
       
@@ -522,8 +573,8 @@ const normalizeTableMarkdown = (text: string): string => {
       // 新規セッションの場合はセッション一覧を更新
       if (!currentSession && response.data.sessionId) {
         setCurrentSession(response.data.sessionId);
-        await fetchSessions();
-        await fetchSessionMessages(response.data.sessionId);
+        await fetchSessions(ragMode);
+        await fetchSessionMessages(response.data.sessionId, ragMode);
       }
     } catch (err: any) {
       // err.config は headers.Authorization（ID トークン）を含むためログに出さない
@@ -718,6 +769,8 @@ const normalizeTableMarkdown = (text: string): string => {
 
   return (
     <div className="h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col overflow-hidden">
+      {/* 障害中・メンテナンスなどの帯（critical は閉じられない） */}
+      <NoticeBanner announcements={notices} />
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-2 flex justify-between items-center flex-shrink-0 shadow-sm backdrop-blur-sm bg-white/95">
         <div className="flex items-center gap-2.5">
@@ -739,11 +792,18 @@ const normalizeTableMarkdown = (text: string): string => {
             </div>
             <div>
               <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">EleKnowledge</h1>
-              <span className="hidden sm:inline-block text-[10px] text-gray-500 mt-0 leading-tight">RAGチャット</span>
+              <span className="hidden sm:inline-block text-[10px] text-gray-500 mt-0 leading-tight">
+                {isLawMode ? '法令チャット' : 'RAGチャット'}
+              </span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {isLawMode && (
+            <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900">
+              プレリリース
+            </span>
+          )}
           <button
             type="button"
             onClick={openWishModal}
@@ -908,13 +968,15 @@ const normalizeTableMarkdown = (text: string): string => {
                     </div>
                   </div>
                   <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2 leading-tight">
-                    何をお調べしますか？
+                    {isLawMode ? 'どの法令をお調べしますか？' : '何をお調べしますか？'}
                   </h2>
                   <p className="text-gray-500 text-sm sm:text-base mb-6 leading-relaxed">
-                    技術資料を検索し、参考資料（根拠）つきで回答します
+                    {isLawMode
+                      ? '現行法令を検索し、根拠条文とe-Gov原文へのリンクを表示します。'
+                      : '技術資料を検索し、参考資料（根拠）つきで回答します'}
                   </p>
                   <div className="space-y-2 text-left">
-                    {SUGGESTED_QUESTIONS.map((q) => (
+                    {(isLawMode ? LAW_SUGGESTED_QUESTIONS : SUGGESTED_QUESTIONS).map((q) => (
                       <button
                         key={q}
                         type="button"
@@ -931,11 +993,17 @@ const normalizeTableMarkdown = (text: string): string => {
                       </button>
                     ))}
                   </div>
-                  <p className="mt-5 text-xs text-gray-400 leading-relaxed">
-                    下の「絞り込み」から資料タイプ・機種を指定すると精度が上がります。
-                    <br />
-                    回答の下で「解けた / 解けない」を押すと改善に活かせます（理由・補足は任意）。
-                  </p>
+                  {isLawMode ? (
+                    <p className="mt-5 text-xs leading-relaxed text-gray-500">
+                      条例・告示・通知や過去時点の適用は、この検索対象に含まれません。
+                    </p>
+                  ) : (
+                    <p className="mt-5 text-xs text-gray-400 leading-relaxed">
+                      下の「絞り込み」から資料タイプ・機種を指定すると精度が上がります。
+                      <br />
+                      回答の下で「解けた / 解けない」を押すと改善に活かせます（理由・補足は任意）。
+                    </p>
+                  )}
                 </div>
               </div>
             ) : (
@@ -991,7 +1059,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                   {message.pageCandidates.map((c, idx) => (
                                     <li key={`${c.sourceUri}-${idx}`} className="text-sm">
                                       <a
-                                        href={documentHrefWithPage(c.sourceUri, c.pageNumber)}
+                                        href={documentHrefWithPage(c.sourceUri, c.pageNumber, { sessionId: currentSession, messageId: message.id })}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="font-medium text-blue-700 hover:underline"
@@ -1074,6 +1142,21 @@ const normalizeTableMarkdown = (text: string): string => {
                         )}
                       </div>
 
+                      {isLawMode && message.role === 'assistant' && (
+                        <p className="mt-2 text-xs leading-relaxed text-gray-500">
+                          法令情報の出典は{' '}
+                          <a
+                            href="https://laws.e-gov.go.jp/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            e-Gov法令検索
+                          </a>
+                          です。e-Gov XMLをもとにEle-Knowledgeが検索・回答用に加工しています。法的判断の前にリンク先の原文をご確認ください。
+                        </p>
+                      )}
+
                       {/* Citations */}
                       {message.role === 'assistant' && message.sourceDocuments && message.sourceDocuments.length > 0 && 
                        (!streamingMessageId || streamingMessageId !== message.id || (streamingMessages[message.id] || '').length >= message.content.length) && (() => {
@@ -1095,7 +1178,7 @@ const normalizeTableMarkdown = (text: string): string => {
                               {primaryDocs.map((doc, idx) => (
                                 <a
                                   key={`${doc.sourceUri || doc.documentName}-${idx}`}
-                                  href={documentHref(doc.sourceUri)}
+                                  href={doc.lawCitation?.sourceUrl || documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id })}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"
@@ -1104,8 +1187,13 @@ const normalizeTableMarkdown = (text: string): string => {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                   </svg>
                                   <span className="truncate flex-1">
-                                    {doc.title ? `${doc.title}【${doc.documentName}】` : `【${doc.documentName}】`}
+                                    {doc.lawCitation
+                                      ? `${doc.lawCitation.lawTitle}【${doc.lawCitation.lawNumber} ${doc.lawCitation.provisionReference || ''}】`
+                                      : doc.title ? `${doc.title}【${doc.documentName}】` : `【${doc.documentName}】`}
                                   </span>
+                                  {doc.lawCitation && (
+                                    <span className="shrink-0 text-[11px] text-gray-500">施行 {doc.lawCitation.effectiveDate}</span>
+                                  )}
                                   <span className="text-gray-500 text-xs bg-gray-100 px-2 py-0.5 rounded-full">{(doc.relevance * 100).toFixed(0)}%</span>
                                 </a>
                               ))}
@@ -1127,7 +1215,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                       {extraDocs.map((doc, idx) => (
                                         <a
                                           key={`${doc.sourceUri || doc.documentName}-extra-${idx}`}
-                                          href={documentHref(doc.sourceUri)}
+                                          href={doc.lawCitation?.sourceUrl || documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id })}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"
@@ -1136,8 +1224,13 @@ const normalizeTableMarkdown = (text: string): string => {
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                           </svg>
                                           <span className="truncate flex-1">
-                                            {doc.title ? `${doc.title}【${doc.documentName}】` : `【${doc.documentName}】`}
+                                            {doc.lawCitation
+                                              ? `${doc.lawCitation.lawTitle}【${doc.lawCitation.lawNumber} ${doc.lawCitation.provisionReference || ''}】`
+                                              : doc.title ? `${doc.title}【${doc.documentName}】` : `【${doc.documentName}】`}
                                           </span>
+                                          {doc.lawCitation && (
+                                            <span className="shrink-0 text-[11px] text-gray-500">施行 {doc.lawCitation.effectiveDate}</span>
+                                          )}
                                           <span className="text-gray-500 text-xs bg-gray-100 px-2 py-0.5 rounded-full">{(doc.relevance * 100).toFixed(0)}%</span>
                                         </a>
                                       ))}
@@ -1250,6 +1343,7 @@ const normalizeTableMarkdown = (text: string): string => {
           <div className="border-t border-gray-200 bg-white/95 backdrop-blur-sm sticky bottom-0 z-10 flex-shrink-0 shadow-lg">
             <div className="p-3 sm:p-4">
               {/* Filter bar: collapsible, active filters summarized when closed */}
+              {!isLawMode && (
               <div className="mb-2.5">
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -1389,6 +1483,12 @@ const normalizeTableMarkdown = (text: string): string => {
                   </div>
                 )}
               </div>
+              )}
+              {isLawMode && (
+                <div className="mb-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-relaxed text-emerald-950">
+                  収録中の現行法令を対象にしたプレリリース版です。条例・告示・通知、過去時点の適用は別途確認してください。
+                </div>
+              )}
               {readOnlySession && (
                 <div className="mb-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                   管理者として他ユーザーのセッションを閲覧しています（読み取り専用・メッセージ送信はできません）
@@ -1414,7 +1514,9 @@ const normalizeTableMarkdown = (text: string): string => {
                     }}
                     placeholder={readOnlySession
                       ? '読み取り専用セッションのため送信できません'
-                      : '質問を入力してください... (Shift+Enterで改行、Enterで送信)'}
+                      : isLawMode
+                        ? '調べたい法令・条文・工事条件を入力してください'
+                        : '質問を入力してください... (Shift+Enterで改行、Enterで送信)'}
                     disabled={loading || readOnlySession}
                     rows={1}
                     className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 text-sm transition-all placeholder:text-gray-500 placeholder:opacity-100 shadow-sm hover:border-gray-400 bg-white text-gray-900 resize-none min-h-[42px] max-h-[200px] overflow-y-auto"

@@ -33,7 +33,7 @@ Claude Code / Codex / GitHub の PR 機能も同じ。正本は `AGENTS.md` の�
 - 「一式」「など」で範囲をぼかす（何が核か書け）
 - マージ担当を書かず、Approve 後に誰もボタンを押さない状態を作る
 - 「mona の Approve」だけ書いて、何を Yes/No するか書かない
-- 自分宛てにメンションする（itai の PR に `@yukiworkspace` だけ、など）
+- 自分宛てにメンションする（itai の PR に `@yuki-mebs` だけ、など）
 - 進行中の相手 PR 本文を、テンプレ是正のために書き直す
 
 ## PR 数と巨大差分

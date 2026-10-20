@@ -89,7 +89,7 @@ PR-1〜5（PR #52回答 / IaC是正 / listContains化 / ノイズ遮断 / カタ
 
 **リリース状況**
 - フロント：Amplify が `develop` ブランチ連動。**PR #26 を develop にマージした時点で自動ビルド・反映**される。
-- バックエンド（`rag-dev` Lambda, stack `EleKnowledge-dev-phase2`, acct `730972069979`, ap-northeast-1）：`lambda update-function-code` で**コード反映済**（2026-07-27, profile `datautl-bple-mebs`）。CodeSha256 `rBX4mlLxUG45msPO8DrKM6LvNs6xjASqD3XKUC93iOU=` → `zKryouXl9y2T6FWxzKnqQ+LkE9zdLLaI702cAgB/FJk=`、LastUpdateStatus=Successful。**CFnドリフト注意**：SAM管理関数へのコード直接更新のため次回 full `sam deploy` で整合を取ること。
+- バックエンド（`rag-dev` Lambda, stack `EleKnowledge-dev-phase2`, acct `<DEV_ACCOUNT_ID>`, ap-northeast-1）：`lambda update-function-code` で**コード反映済**（2026-07-27, profile `datautl-bple-mebs`）。CodeSha256 `rBX4mlLxUG45msPO8DrKM6LvNs6xjASqD3XKUC93iOU=` → `zKryouXl9y2T6FWxzKnqQ+LkE9zdLLaI702cAgB/FJk=`、LastUpdateStatus=Successful。**CFnドリフト注意**：SAM管理関数へのコード直接更新のため次回 full `sam deploy` で整合を取ること。
 - **注意（→ 2026-08-26 確定済み）**：ドキュメントは KB を `DF9XUCSPDM` と記載するが、稼働中の `rag-dev` は `KNOWLEDGE_BASE_ID=VQV81CNYU4` を参照（同一データソース S3 バケットを共有）。full `sam deploy` する場合は `KnowledgeBaseId=VQV81CNYU4` を渡さないと KB を付け替えてしまう（runbook の例 `DF9XUCSPDM` は古い）。→ 実測確定と運用決定は `docs/verification-2026-08-26-kb-vqv-metadata.md` を参照。
 
 ---

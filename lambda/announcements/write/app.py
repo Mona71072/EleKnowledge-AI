@@ -1,6 +1,8 @@
 """
 EleKnowledge Announcements - Write (admin only)
 
+GET    /admin/announcements          paginated listing
+GET    /admin/announcements/active   all currently visible announcements
 POST   /admin/announcements          create
 PUT    /admin/announcements/{id}      update
 DELETE /admin/announcements/{id}      delete
@@ -12,6 +14,8 @@ Markdown without raw-HTML, so this is a second layer).
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import re
@@ -20,6 +24,7 @@ import time
 from typing import Optional
 
 import boto3
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from timeutil import normalize_utc_iso, now_utc_iso
@@ -36,6 +41,15 @@ VALID_STATUS = {'draft', 'scheduled', 'published'}
 
 TITLE_MAX = 120
 BODY_MAX = 20000
+
+# 管理一覧のページング（issue #94 R9）。全件 Scan をやめ、status-publishAt-index を状態ごとに Query して併合する
+ADMIN_LIST_STATUSES = ('draft', 'scheduled', 'published')
+ADMIN_LIST_INDEX = 'status-publishAt-index'
+ADMIN_LIST_DEFAULT_LIMIT = 50
+ADMIN_LIST_MAX_LIMIT = 100
+# 「いま表示中」（公開中かつ未終了）は件数で切らず、Query の全ページを読む（issue #94 R9 の追補）
+ACTIVE_LIST_ROUTE = '/admin/announcements/active'
+ACTIVE_LIST_PAGE_SIZE = 100
 
 CORS_HEADERS = {
     'Content-Type': 'application/json',
@@ -176,6 +190,8 @@ def create(body: dict, actor: str) -> dict:
         'status': status,
         'publishAt': publish_at,
         'pinned': bool(body.get('pinned', False)),
+        # チャット画面の帯にも出す（既定: critical なら真。設計 2026-09-10 dashboard v2 §10.4）
+        'showInChat': bool(body.get('showInChat', body.get('severity') == 'critical')),
         'createdBy': actor,
         'createdAt': now,
         'updatedAt': now,
@@ -211,6 +227,8 @@ def update(announcement_id: str, body: dict, actor: str) -> dict:
             merged['body'] = sanitize_markdown(body['body'])
         if 'pinned' in body:
             merged['pinned'] = bool(body['pinned'])
+        if 'showInChat' in body:
+            merged['showInChat'] = bool(body['showInChat'])
         if 'publishAt' in body:
             merged['publishAt'] = _norm_ts(body['publishAt']) or merged.get('publishAt')
         # 空文字は「属性を消す」扱い（None を書くと DynamoDB に NULL 属性が残る。issue #94 R7）
@@ -270,18 +288,154 @@ def delete(announcement_id: str) -> dict:
     return _response(200, {'message': 'deleted', 'announcementId': announcement_id})
 
 
-def list_all() -> dict:
-    """Admin listing across every status (draft/scheduled/published)."""
-    items = []
-    kwargs = {}
-    while True:
-        resp = table.scan(**kwargs)
-        items.extend(resp.get('Items', []))
-        lek = resp.get('LastEvaluatedKey')
-        if not lek:
-            break
-        kwargs['ExclusiveStartKey'] = lek
-    items.sort(key=lambda x: x.get('publishAt', x.get('createdAt', '')), reverse=True)
+def _parse_list_limit(raw) -> int:
+    """limit は 1〜ADMIN_LIST_MAX_LIMIT の整数。省略時は既定値。"""
+    if raw is None:
+        return ADMIN_LIST_DEFAULT_LIMIT
+    if not isinstance(raw, str) or not re.fullmatch(r'[0-9]{1,3}', raw):
+        raise ValueError('limit must be an integer between 1 and %d' % ADMIN_LIST_MAX_LIMIT)
+    value = int(raw)
+    if not 1 <= value <= ADMIN_LIST_MAX_LIMIT:
+        raise ValueError('limit must be an integer between 1 and %d' % ADMIN_LIST_MAX_LIMIT)
+    return value
+
+
+def _encode_cursor(cursor: dict) -> str:
+    raw = json.dumps(cursor, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    return base64.urlsafe_b64encode(raw).decode('ascii').rstrip('=')
+
+
+def _decode_cursor(token: str) -> dict:
+    """nextToken を検証して {'p': {status: GSI キー}, 'd': [終了した状態]} を返す。壊れた値は ValueError。"""
+    if not isinstance(token, str) or not token or len(token) > 4096:
+        raise ValueError('nextToken is invalid')
+    try:
+        raw = base64.urlsafe_b64decode(token + '=' * (-len(token) % 4))
+        cursor = json.loads(raw.decode('utf-8'))
+    except (binascii.Error, UnicodeError, json.JSONDecodeError, ValueError) as e:
+        raise ValueError('nextToken is invalid') from e
+    if not isinstance(cursor, dict) or set(cursor) - {'p', 'd'}:
+        raise ValueError('nextToken is invalid')
+    positions = cursor.get('p', {})
+    done = cursor.get('d', [])
+    if not isinstance(positions, dict) or not isinstance(done, list):
+        raise ValueError('nextToken is invalid')
+    for status, key in positions.items():
+        if status not in ADMIN_LIST_STATUSES or not isinstance(key, dict):
+            raise ValueError('nextToken is invalid')
+        if set(key) != {'status', 'publishAt', 'announcementId'} or key['status'] != status:
+            raise ValueError('nextToken is invalid')
+        if not all(isinstance(key[k], str) and key[k] for k in ('publishAt', 'announcementId')):
+            raise ValueError('nextToken is invalid')
+    if not all(isinstance(s, str) and s in ADMIN_LIST_STATUSES for s in done):
+        raise ValueError('nextToken is invalid')
+    return {'p': positions, 'd': sorted(set(done))}
+
+
+def _gsi_key(item: dict) -> dict:
+    return {k: item[k] for k in ('status', 'publishAt', 'announcementId')}
+
+
+def list_all(query: Optional[dict] = None) -> dict:
+    """Admin listing across every status (draft/scheduled/published), newest publishAt first.
+
+    状態ごとに status-publishAt-index を降順に Query し、先頭 limit 件を併合する。
+    次ページは状態ごとに「最後に返した項目」の GSI キーを nextToken（base64url の JSON）に入れて返す。
+    """
+    query = query or {}
+    try:
+        limit = _parse_list_limit(query.get('limit'))
+        cursor = _decode_cursor(query['nextToken']) if query.get('nextToken') is not None else {'p': {}, 'd': []}
+    except ValueError as e:
+        return _response(400, {'error': 'ValidationError', 'message': str(e)})
+
+    done = set(cursor['d'])
+    fetched = {}  # status -> (items in DynamoDB order, LastEvaluatedKey があるか)
+    for status in ADMIN_LIST_STATUSES:
+        if status in done:
+            continue
+        kwargs = {
+            'IndexName': ADMIN_LIST_INDEX,
+            'KeyConditionExpression': Key('status').eq(status),
+            'ScanIndexForward': False,
+            'Limit': limit,
+        }
+        if status in cursor['p']:
+            kwargs['ExclusiveStartKey'] = cursor['p'][status]
+        resp = table.query(**kwargs)
+        fetched[status] = (resp.get('Items', []), bool(resp.get('LastEvaluatedKey')))
+
+    # 併合は安定ソート。各状態の内部順（DynamoDB の順）が崩れないので、選んだ件数はその状態の先頭からの接頭辞になる
+    candidates = [(status, item) for status in fetched for item in fetched[status][0]]
+    candidates.sort(key=lambda pair: pair[1].get('publishAt') or '', reverse=True)
+    chosen = candidates[:limit]
+
+    taken = {status: 0 for status in fetched}
+    for status, _ in chosen:
+        taken[status] += 1
+
+    positions = dict(cursor['p'])
+    next_done = set(done)
+    for status, (items, has_more) in fetched.items():
+        k = taken[status]
+        if k:
+            positions[status] = _gsi_key(items[k - 1])
+        if not has_more and k == len(items):
+            next_done.add(status)
+
+    response = {'announcements': [item for _, item in chosen]}
+    if len(next_done) < len(ADMIN_LIST_STATUSES):
+        response['nextToken'] = _encode_cursor({
+            'p': {s: positions[s] for s in ADMIN_LIST_STATUSES if s in positions and s not in next_done},
+            'd': sorted(next_done),
+        })
+    else:
+        response['nextToken'] = None
+    return _response(200, response)
+
+
+def _is_ended(item: dict, now_iso: str) -> bool:
+    try:
+        end = normalize_utc_iso(item.get('endAt'))
+    except (TypeError, ValueError):
+        return False  # 壊れた endAt は終了扱いにしない（画面で見えるように残す）
+    return end is not None and end < now_iso
+
+
+def _is_started(item: dict, now_iso: str) -> bool:
+    try:
+        pub = normalize_utc_iso(item.get('publishAt'))
+    except (TypeError, ValueError):
+        return False
+    return pub is not None and pub <= now_iso
+
+
+def list_active(now_iso: Optional[str] = None) -> dict:
+    """いま表示中（status が published / scheduled で、公開日時を過ぎ、表示終了していない）を全件返す。
+
+    公開一覧 API と同じ条件（isVisibleNow）。status-publishAt-index を状態ごとに Query し、
+    LastEvaluatedKey が無くなるまで読む。件数では切らないので「戻し忘れ」の警告が 51 件目以降も出る。
+    """
+    now = normalize_utc_iso(now_iso or _now_iso())
+    found = {}
+    for status in ('published', 'scheduled'):
+        kwargs = {
+            'IndexName': ADMIN_LIST_INDEX,
+            'KeyConditionExpression': Key('status').eq(status) & Key('publishAt').lte(now),
+            'ScanIndexForward': False,
+            'Limit': ACTIVE_LIST_PAGE_SIZE,
+        }
+        while True:
+            resp = table.query(**kwargs)
+            for item in resp.get('Items', []):
+                # GSI の文字列比較と正規化後の比較がずれる旧形式の行は、ここで正しく判定し直す
+                if _is_started(item, now) and not _is_ended(item, now):
+                    found[item['announcementId']] = item
+            lek = resp.get('LastEvaluatedKey')
+            if not lek:
+                break
+            kwargs['ExclusiveStartKey'] = lek
+    items = sorted(found.values(), key=lambda it: it.get('publishAt') or '', reverse=True)
     return _response(200, {'announcements': items})
 
 
@@ -304,7 +458,9 @@ def lambda_handler(event, context):
         actor = get_actor(event)
 
         if method == 'GET':
-            return list_all()
+            if event.get('resource') == ACTIVE_LIST_ROUTE or (event.get('path') or '').endswith(ACTIVE_LIST_ROUTE):
+                return list_active()
+            return list_all(event.get('queryStringParameters') or {})
         if method == 'POST':
             return create(body, actor)
         if method == 'PUT':

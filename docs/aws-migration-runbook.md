@@ -49,7 +49,7 @@ sam build --template-file infrastructure/sam/phase3-template.yaml --build-dir .a
 
 `--resolve-s3` cannot work in this account. It creates the `aws-sam-cli-managed-default` stack, whose
 `SamCliSourceBucket` sets a public-access block, and the organization SCP
-(`arn:aws:organizations::841162687537:policy/o-jjrd939pt4/service...`) **explicitly denies
+(`arn:aws:organizations::<ORG_MANAGEMENT_ACCOUNT_ID>:policy/o-jjrd939pt4/service...`。`<ORG_MANAGEMENT_ACCOUNT_ID>` は実際の値を各自のローカル設定・AWS コンソールで確認する) **explicitly denies
 `s3:PutBucketPublicAccessBlock` for every principal**, including this SSO role. The stack fails with:
 
 ```
@@ -66,7 +66,8 @@ call `PutBucketPublicAccessBlock`, and since April 2023 S3 blocks public access 
 default anyway, so the bucket is still private.
 
 ```powershell
-$ArtifactsBucket = "eleknowledge-sam-artifacts-$Env-730972069979-$Region"
+# <DEV_ACCOUNT_ID> は実際の値を各自のローカル設定・AWS コンソールで確認して置き換える
+$ArtifactsBucket = "eleknowledge-sam-artifacts-$Env-<DEV_ACCOUNT_ID>-$Region"
 aws s3 mb "s3://$ArtifactsBucket" --region $Region --profile $Profile
 
 # If aws-sam-cli-managed-default is stuck in ROLLBACK_COMPLETE, delete it so SAM stops retrying it:
@@ -110,6 +111,8 @@ Required outputs for later steps:
 
 ## 3. Deploy Phase 2
 
+> 最終検証: 2026-10-14 — phase2 のデプロイ例に RagLogicVersion を追加
+
 Creates the RAG/chat Lambda functions, `rag-api-dev`, `chat-api-dev`, and `/eleknowledge/dev/knowledge-base-id`.
 
 This stack **no longer creates an OpenSearch Serverless collection or a Knowledge Base service role** — Phase 2 reuses the existing Knowledge Base (see section 4). `KnowledgeBaseId` has a default value in `phase2-template.yaml` and is constrained by `AllowedPattern`; the old `KnowledgeBaseId=pending` two-pass flow is gone, because deploying with `pending` silently produced a `rag-dev` that returned zero results for every query. The template default is **not** authoritative for the running environment — always confirm the deployed value as described below.
@@ -143,7 +146,8 @@ sam deploy `
   --profile $Profile `
   --s3-bucket $ArtifactsBucket `
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM `
-  --parameter-overrides "Environment=$Env" "ProjectName=$Project" "KnowledgeBaseId=$KbId"
+  --parameter-overrides "Environment=$Env" "ProjectName=$Project" "KnowledgeBaseId=$KbId" `
+  "RagLogicVersion=$(git rev-parse --short HEAD)"
 ```
 
 > **If `$Project-$Env-phase2` is already deployed with the old template**, split the change into two
@@ -371,3 +375,9 @@ Do not recreate these unless a later dependency review explicitly requires them:
 - `troubleshooting-small*`
 - individual POC Lambda functions
 - Control Tower, Config, CloudTrail, and VPC baseline resources
+
+## 10. Existing dev: law-chat pre-release
+
+> 最終検証: 2026-10-09 — PR #155 / #156、developコード、Amplify job 64、RAG有効化設定と実配信画面を照合。develop公開反映・カードからの法令画面遷移を確認。
+
+既存devへ法令チャットを反映する場合、空環境の再構築を行わず[法令プレリリース手順](legal-chat-prerelease.md)を使用する。`NEXT_PUBLIC_LAW_RAG_ENABLED`はdevelopブランチのカード表示条件、`LawRagEnabled` / `LawKnowledgeBaseId`はPhase 2のサーバー設定であり、それぞれ読み戻して確認する。Lambda / SAMはitaiが既存パラメータと他テーマの反映を保持した変更セットで実施する。文書更新やPRマージだけでAWS反映完了とは扱わず、追加Syncや旧stack / bucketの削除・importをこの手順に含めない。

@@ -25,7 +25,7 @@ alwaysApply: true
    - base: `develop`
    - head: 現在の作業ブランチ
    - mona 側のデプロイ PR は `mona`、または feature ブランチを統合済みの `mona`
-4. PR 本文の先頭で **デプロイ担当者 `@yukiworkspace`（itai）をメンション**する
+4. PR 本文の先頭で **デプロイ担当者 `@yuki-mebs`（itai）をメンション**する
 
 `mona` への push だけでは **AWS バックエンド（Lambda / API Gateway）は反映されない**。フロント（Amplify）だけが `develop` マージ後に自動反映される。バックエンド変更がある PR では、itai 向けに SAM デプロイ手順を必ず書く。
 
@@ -41,7 +41,7 @@ alwaysApply: true
 PR 本文テンプレ（先頭）:
 
 ```markdown
-@yukiworkspace cc: デプロイ依頼
+@yuki-mebs cc: デプロイ依頼
 
 ## この PR でやること（一文）
 （例: phase2 に失敗一覧 API を入れて、admin から bad/not_found を拾えるようにする）
@@ -127,7 +127,7 @@ Approve（内容OK）と、ボタンを押してよいかは別。PR 本文に *
 ## 禁止・注意
 
 - `develop` / `main` へ直接 push しない（デプロイ PR 経由）
-- PR 本文で **相手を呼ぶ**（mona→itai なら `@yukiworkspace`。itai→mona なら mona 向け。自分宛てメンションは不要）
+- PR 本文で **相手を呼ぶ**（mona→itai なら `@yuki-mebs`。itai→mona なら mona 向け。自分宛てメンションは不要）
 - 「push したからデプロイ完了」と誤解しない — Lambda / API Gateway は itai の `sam deploy` 待ち
 - AWS コンソールで Lambda を直接編集しない（CloudFormation ドリフトの原因）
 - マージ可の条件を書かず、合意後もどちらも押さない状態を作らない

@@ -29,7 +29,7 @@
       }
     ],
     "Principal": [
-      "arn:aws:iam::423623870147:role/EleKnowledge-AI-development-kb-role"
+      "arn:aws:iam::<ACCOUNT_ID>:role/EleKnowledge-AI-development-kb-role"
     ]
   }
 ]

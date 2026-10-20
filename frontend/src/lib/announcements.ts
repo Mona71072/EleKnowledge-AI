@@ -17,6 +17,8 @@ export interface Announcement {
   startAt?: string;
   endAt?: string;
   pinned?: boolean;
+  /** チャット画面の帯にも出す（既定: critical は true。設計 2026-09-10 dashboard v2 §10.4） */
+  showInChat?: boolean;
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -39,6 +41,7 @@ export interface AnnouncementInput {
   startAt?: string;
   endAt?: string;
   pinned?: boolean;
+  showInChat?: boolean;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -71,9 +74,20 @@ export function getAnnouncements(limit = 10): Promise<AnnouncementsResponse> {
   return request<AnnouncementsResponse>(`/announcements?limit=${limit}`);
 }
 
-/** Admin: list every announcement across all statuses. */
-export function listAllAnnouncements(): Promise<{ announcements: Announcement[] }> {
-  return request<{ announcements: Announcement[] }>(`/admin/announcements`);
+/** Admin: いま表示中の全件（公開中かつ未終了）。件数で切らない。「いま表示中」欄の戻し忘れ警告に使う。 */
+export function listActiveAnnouncements(): Promise<{ announcements: Announcement[] }> {
+  return request<{ announcements: Announcement[] }>(`/admin/announcements/active`);
+}
+
+/** Admin: one page of announcements across all statuses (newest publishAt first). nextToken は次ページ、null なら末尾。 */
+export function listAllAnnouncements(
+  options: { limit?: number; nextToken?: string | null } = {},
+): Promise<{ announcements: Announcement[]; nextToken: string | null }> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.nextToken) params.set('nextToken', options.nextToken);
+  const qs = params.toString();
+  return request<{ announcements: Announcement[]; nextToken: string | null }>(`/admin/announcements${qs ? `?${qs}` : ''}`);
 }
 
 /** Admin: create. */
@@ -90,6 +104,11 @@ export function updateAnnouncement(id: string, input: Partial<AnnouncementInput>
     method: 'PUT',
     body: JSON.stringify(input),
   });
+}
+
+/** Admin: 表示終了（削除ではなく endAt を今にする。履歴が残る） */
+export function endAnnouncementNow(id: string) {
+  return updateAnnouncement(id, { endAt: new Date().toISOString() });
 }
 
 /** Admin: delete. */
@@ -166,4 +185,19 @@ export function isMaintenanceActive(a: Announcement, now: Date = new Date()): bo
   if (a.type !== 'maintenance' || !a.startAt || !a.endAt) return false;
   const t = now.getTime();
   return new Date(a.startAt).getTime() <= t && t <= new Date(a.endAt).getTime();
+}
+
+/** 公開中かつ未終了（表示中）。予約は publishAt 到来で表示中扱い。 */
+export function isVisibleNow(a: Announcement, now: Date = new Date()): boolean {
+  if (a.status === 'draft') return false;
+  const t = now.getTime();
+  if (!a.publishAt || new Date(a.publishAt).getTime() > t) return false;
+  if (a.endAt && new Date(a.endAt).getTime() < t) return false;
+  return true;
+}
+
+/** チャット画面の帯に出すもの: showInChat の告知（メンテナンスは期間中だけ別扱い）。 */
+export function isNoticeActiveInChat(a: Announcement, now: Date = new Date()): boolean {
+  if (a.type === 'maintenance') return false;
+  return a.showInChat === true && isVisibleNow(a, now);
 }

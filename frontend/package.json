@@ -7,7 +7,16 @@
     "build": "next build",
     "build:turbopack": "next build --turbopack",
     "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "test:knowledge": "node --test --experimental-test-coverage --test-coverage-include=src/lib/knowledge-workbench.mjs --test-coverage-lines=80 --test-coverage-branches=80 tests/knowledge-workbench.test.mjs",
+    "test:research": "node --test --experimental-test-coverage --test-coverage-include=src/lib/knowledge-research.mjs --test-coverage-lines=80 --test-coverage-branches=80 tests/knowledge-research.test.mjs tests/knowledge-research-http.test.mjs",
+    "test:comparison": "node --test --experimental-test-coverage --test-coverage-include=src/lib/knowledge-comparison.mjs --test-coverage-lines=80 --test-coverage-branches=80 tests/knowledge-comparison.test.mjs",
+    "test:senpai": "node --test --experimental-test-coverage --test-coverage-include=src/lib/knowledge-senpai-chat.mjs --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 tests/knowledge-senpai-chat.test.mjs",
     "audit:production": "node scripts/check-production-audit.mjs",
+    "audit:all": "node scripts/check-all-audit.mjs",
+    "test:lint-dependencies": "node --test tests/dependencies/*.test.mjs",
     "test:announcements": "node --test tests/announcement-publish.test.mjs",
     "test:safe-next-path": "node --test tests/safe-next-path.test.mjs"
   },
@@ -16,18 +25,26 @@
     "aws-amplify": "^6.15.7",
     "axios": "^1.13.2",
     "clsx": "^2.1.1",
-    "next": "^15.5.24",
-    "react": "19.1.0",
-    "react-dom": "19.1.0",
+    "next": "^16.3.8",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^3.4.0"
+    "tailwind-merge": "^3.4.0",
+    "yaml": "^2.9.1"
+  },
+  "overrides": {
+    "@next/eslint-plugin-next": {
+      "fast-glob": "npm:glob@13.0.6"
+    }
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.8",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
