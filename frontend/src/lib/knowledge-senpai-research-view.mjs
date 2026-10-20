@@ -60,34 +60,44 @@ export function stepRowLabel(row) {
   return row.labelJa;
 }
 
-const SECTION_KINDS = Object.freeze({ 結論の候補: 'conclusion', '食い違い・不足': 'caution', 次に確認すること: 'todo' });
+// 統一回答の見出し。新形式（結論 / 根拠と手順 / 確認が必要な点）と、保存済みの旧形式を同じ3つの役割に対応づける。
+const LEAD_HEADINGS = new Set(['結論', '結論の候補']);
+const EVIDENCE_HEADINGS = new Set(['根拠と手順', '技術資料から', '法令から', 'ノウハウ（未承認・参考）']);
+const NOTE_HEADINGS = new Set(['確認が必要な点', '食い違い・不足', '次に確認すること']);
 
 /**
- * 統一回答を見出し（## ...）ごとに分ける。結論・食い違い・次に確認することの見出しが
- * 1つも無ければ null を返し、呼び出し側は本文をそのまま表示する。
+ * 統一回答を「結論（先頭の文）」「根拠と手順」「確認が必要な点」の3つに分ける。
+ * 旧形式の「技術資料から / 法令から / ノウハウ」は見出しを出さずに「根拠と手順」へまとめ、
+ * 「食い違い・不足」「次に確認すること」は「確認が必要な点」へまとめる。
+ * 知っている見出しが1つも無ければ null を返し、呼び出し側は本文をそのまま表示する。
  *
  * @param {string | undefined} markdown
- * @returns {{kind: 'conclusion'|'caution'|'todo'|'normal', heading?: string, body: string}[] | null}
+ * @returns {{lead: string, evidence: string, notes: string} | null}
  */
-export function splitAnswerSections(markdown) {
+export function structureAnswer(markdown) {
   if (typeof markdown !== 'string' || !markdown.trim()) return null;
-  const sections = [];
-  let current = { kind: 'normal', lines: [] };
+  const parts = { lead: [], evidence: [], notes: [] };
+  let known = false;
+  let target = 'lead';
+  let current = [];
   const flush = () => {
-    const body = current.lines.join('\n').trim();
-    if (current.heading !== undefined || body) sections.push({ kind: current.kind, ...(current.heading !== undefined ? { heading: current.heading } : {}), body });
+    const body = current.join('\n').trim();
+    if (body) parts[target].push(body);
+    current = [];
   };
   for (const line of markdown.split('\n')) {
     const heading = line.match(/^##\s+(.+?)\s*$/u);
-    if (heading) {
-      flush();
-      current = { kind: SECTION_KINDS[heading[1]] ?? 'normal', heading: heading[1], lines: [] };
-    } else {
-      current.lines.push(line);
-    }
+    if (!heading) { current.push(line); continue; }
+    flush();
+    const title = heading[1];
+    if (LEAD_HEADINGS.has(title)) { known = true; target = 'lead'; }
+    else if (EVIDENCE_HEADINGS.has(title)) { known = true; target = 'evidence'; }
+    else if (NOTE_HEADINGS.has(title)) { known = true; target = 'notes'; }
+    else { target = 'evidence'; current.push(line); } // 知らない見出しは根拠の中に見出しごと残す
   }
   flush();
-  return sections.some((section) => section.kind !== 'normal') ? sections : null;
+  if (!known) return null;
+  return { lead: parts.lead.join('\n\n'), evidence: parts.evidence.join('\n\n'), notes: parts.notes.join('\n\n') };
 }
 
 const codepoints = (value) => Array.from(String(value ?? '').trim());

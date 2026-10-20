@@ -43,7 +43,7 @@ test('model fit notice is shared with the Senpai chat wording', () => {
 
 import {
   EXAMPLE_QUESTIONS, buildCopyText, clarifyAsksModel, composeClarifyQuestion, copyText, modelMismatch,
-  splitAnswerSections, stepRowLabel,
+  structureAnswer, stepRowLabel,
 } from '../src/lib/knowledge-senpai-research-view.mjs';
 
 test('finished steps use past-tense labels; running keeps the server label', () => {
@@ -62,16 +62,27 @@ test('finished steps use past-tense labels; running keeps the server label', () 
   assert.equal(stepRowLabel(row('mystery', 'done', '何かを実行中')), '何かを実行中');
 });
 
-test('splitAnswerSections recognises the known headings and falls back to null without them', () => {
-  const md = '前置き\n\n## 結論の候補\n調整です [T1]\n\n## 技術資料から\n手順\n\n## 食い違い・不足\n- 階数不明\n\n## 次に確認すること\n- 音のタイミング\n';
-  const sections = splitAnswerSections(md);
-  assert.deepEqual(sections.map((section) => section.kind), ['normal', 'conclusion', 'normal', 'caution', 'todo']);
-  assert.equal(sections[0].heading, undefined);
-  assert.equal(sections[1].heading, '結論の候補');
-  assert.equal(sections[1].body, '調整です [T1]');
-  assert.equal(splitAnswerSections('ただの文章です\n## 別の見出し\n本文'), null);
-  assert.equal(splitAnswerSections(''), null);
-  assert.equal(splitAnswerSections(undefined), null);
+test('structureAnswer maps the new headings to lead, evidence and notes', () => {
+  const md = '## 結論\nドアの調整です [T1]\n\n## 根拠と手順\n- 手順を確認 [T1]\n- 基準を確認 [L1]\n\n## 確認が必要な点\n- 階数が不明です\n';
+  assert.deepEqual(structureAnswer(md), { lead: 'ドアの調整です [T1]', evidence: '- 手順を確認 [T1]\n- 基準を確認 [L1]', notes: '- 階数が不明です' });
+  assert.deepEqual(structureAnswer('## 結論\nだけです'), { lead: 'だけです', evidence: '', notes: '' });
+});
+
+test('structureAnswer keeps stored answers in the old format readable', () => {
+  const md = '## 結論の候補\n調整です [T1]\n\n## 技術資料から\n手順 [T1]\n\n## 法令から\n基準 [L1]\n\n## ノウハウ（未承認・参考）\n勘所 [K1]\n\n## 食い違い・不足\n- 階数不明\n\n## 次に確認すること\n- 音のタイミング\n';
+  const out = structureAnswer(md);
+  assert.equal(out.lead, '調整です [T1]');
+  assert.equal(out.evidence, '手順 [T1]\n\n基準 [L1]\n\n勘所 [K1]');
+  assert.equal(out.notes, '- 階数不明\n\n- 音のタイミング');
+  assert.equal(/技術資料から|法令から|食い違い/u.test(JSON.stringify(out)), false, 'no per-source headings are carried over');
+});
+
+test('structureAnswer keeps unknown headings inside the evidence and falls back to null without known ones', () => {
+  assert.equal(structureAnswer('前置き\n\n## 結論\nA\n\n## 補足の話\nB').evidence, '## 補足の話\nB');
+  assert.equal(structureAnswer('前置き\n\n## 結論\nA').lead, '前置き\n\nA');
+  assert.equal(structureAnswer('ただの文章です\n## 別の見出し\n本文'), null);
+  assert.equal(structureAnswer(''), null);
+  assert.equal(structureAnswer(undefined), null);
 });
 
 test('a clarify reply is composed with the original question within 2000 characters', () => {

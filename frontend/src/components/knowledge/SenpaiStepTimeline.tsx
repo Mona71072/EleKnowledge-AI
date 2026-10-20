@@ -90,7 +90,6 @@ export function SenpaiStepTimeline({ research }: {
       <summary className="flex min-h-10 cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden">
         <span className="underline-offset-2 hover:text-gray-900 hover:underline">
           {elapsed !== undefined && `${formatElapsed(elapsed)}・`}{rows.length}手順で調査
-          {research.status !== 'completed' && <span className="ml-2">詳細</span>}
         </span>
       </summary>
       <StepList rows={rows} active={false} />

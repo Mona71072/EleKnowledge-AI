@@ -34,7 +34,7 @@ export const SENPAI_RESEARCH_ERROR_MESSAGES = Object.freeze({
   QuestionUnavailable: 'この質問は調査できませんでした。内容を変えてお試しください',
   Internal: '調査中にエラーが発生しました。時間をおいてお試しください',
 });
-export const SENPAI_RESEARCH_CANCELLED_MESSAGE = '中止しました（サーバー側の処理は続く場合があります）';
+export const SENPAI_RESEARCH_CANCELLED_MESSAGE = '中止しました';
 
 const MESSAGE_CANCELLED = '調査の確認を中止しました';
 const MESSAGE_TIMEOUT = '調査の通信が時間内に完了しませんでした。時間をおいてお試しください';

@@ -1,6 +1,6 @@
 'use client';
 
-import type { SenpaiResearchDebug, SenpaiResearchStep } from '@/lib/knowledge-senpai-research.mjs';
+import type { SenpaiResearchDebug, SenpaiResearchResult, SenpaiResearchStep } from '@/lib/knowledge-senpai-research.mjs';
 
 const tableHead = 'border border-gray-200 bg-white px-2 py-1 text-left font-medium';
 const tableCell = 'border border-gray-200 px-2 py-1 align-top break-words';
@@ -10,10 +10,12 @@ function json(value: unknown) {
 }
 
 /** 開発者表示。整理結果・検索語・道具ごとの結果・予算・生の段階イベントを、畳める中立のパネルに並べる。 */
-export function SenpaiDevPanel({ debug, steps, unverifiedRefs }: {
+export function SenpaiDevPanel({ debug, steps, unverifiedRefs, knowhow }: {
   debug?: SenpaiResearchDebug;
   steps: readonly SenpaiResearchStep[];
   unverifiedRefs?: readonly string[];
+  /** 一般表示では出さないノウハウの詳細（ID・版・使わなかった候補・説明）。 */
+  knowhow?: SenpaiResearchResult['sources']['knowhow'];
 }) {
   const budget = debug?.budget;
   return (
@@ -65,6 +67,22 @@ export function SenpaiDevPanel({ debug, steps, unverifiedRefs }: {
                 <dt className="text-gray-500">モデル呼び出し</dt><dd>{budget.modelCallsUsed ?? '–'} / {budget.modelCallsMax ?? '–'} 回</dd>
                 <dt className="text-gray-500">経過時間</dt><dd>{budget.elapsedMs ?? '–'} / {budget.elapsedMaxMs ?? '–'} ms</dd>
               </dl>
+            </div>
+          )}
+          {knowhow && (
+            <div>
+              <h5 className="font-sans font-medium">ノウハウ（探索の手掛かり。技術的な根拠や承認を示しません）</h5>
+              {knowhow.used.length === 0 ? <p className="mt-1 font-sans">ノウハウは参照していません</p> : (
+                <ul className="mt-1 space-y-0.5">
+                  {knowhow.used.map((card) => <li key={card.ref} className="break-words">[{card.ref}] {card.title} v{card.cardVersion}・{card.status === 'draft' ? '未承認（下書き）' : '承認済みカード・参照用のみ'}・{card.knowledgeId}</li>)}
+                </ul>
+              )}
+              {knowhow.candidates.length > 0 && (
+                <>
+                  <p className="mt-2 font-sans text-gray-500">候補として渡したが使わなかったノウハウ</p>
+                  <ul className="mt-1 space-y-0.5">{knowhow.candidates.map((card) => <li key={`${card.knowledgeId}-${card.cardVersion}`} className="break-words">{card.title}（{card.knowledgeId} v{card.cardVersion}）</li>)}</ul>
+                </>
+              )}
             </div>
           )}
           {unverifiedRefs && unverifiedRefs.length > 0 && <p>照合で外した参照: {unverifiedRefs.join('、')}</p>}

@@ -4,8 +4,8 @@ export function formatElapsed(ms: number): string;
 
 import type { SenpaiResearchResult, SenpaiResearchStepStatus, SenpaiResearchStepName } from './knowledge-senpai-research.mjs';
 export function stepRowLabel(row: { step: SenpaiResearchStepName | string; status: SenpaiResearchStepStatus; labelJa: string }): string;
-export type SenpaiAnswerSection = { kind: 'conclusion' | 'caution' | 'todo' | 'normal'; heading?: string; body: string };
-export function splitAnswerSections(markdown: string | undefined): SenpaiAnswerSection[] | null;
+export type SenpaiStructuredAnswer = { lead: string; evidence: string; notes: string };
+export function structureAnswer(markdown: string | undefined): SenpaiStructuredAnswer | null;
 export const CLARIFY_ORIGINAL_RESERVE: number;
 export function clarifySupplementLimit(original: string): number;
 export function clarifyOriginalTruncated(original: string, supplement: string): boolean;

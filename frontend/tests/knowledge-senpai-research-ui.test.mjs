@@ -127,37 +127,35 @@ test('answer text never produces raw HTML, images or outside links', () => {
   assert.match(page, /（画像: 画像）/);
 });
 
-test('sources are grouped: technical documents, laws, and knowhow (unapproved, reference only)', () => {
+test('sources are grouped with tiny labels; the title itself is the link and the knowhow shows only used cards', () => {
   const page = view(completed());
-  assert.match(page, /技術資料（1）/);
-  assert.equal(page.match(/>開く</g).length, 2);
-  assert.match(page, /aria-label="保守手順書：資料を開く"/);
-  assert.match(page, /aria-label="建築基準法：e-Govで開く"/);
-  assert.match(page, new RegExp(`href="/doc\\?uri=${encodeURIComponent('s3://kb-bucket/docs/manual.pdf').replace(/[%.]/g, '\\$&')}#page=12"`));
-  assert.match(page, /保守手順書/);
+  assert.doesNotMatch(page, /（\d+）/, 'no per-group counts');
+  assert.doesNotMatch(page, />開く</, 'no separate 開く link');
+  assert.match(page, /<h5[^>]*>技術資料<\/h5>/);
+  assert.match(page, /<h5[^>]*>法令<\/h5>/);
+  assert.match(page, /<a href="\/doc\?uri=[^"]*#page=12"[^>]*aria-label="保守手順書：資料を開く"[^>]*>保守手順書<\/a>/);
+  assert.match(page, /<a href="https:\/\/laws\.e-gov\.go\.jp\/law\/325AC0000000201"[^>]*aria-label="建築基準法：e-Govで開く"[^>]*>建築基準法<\/a>/);
+  assert.match(page, /rel="noopener noreferrer"/);
   assert.match(page, /12ページ/);
-  assert.match(page, /法令（1）/);
-  assert.match(page, /href="https:\/\/laws\.e-gov\.go\.jp\/law\/325AC0000000201"/);
-  assert.match(page, /建築基準法/);
-  assert.match(page, /第三十四条・施行日 2025-04-01/);
-  assert.match(page, /ノウハウ（未承認・参考）/);
-  assert.match(page, /回答で使ったノウハウ/);
-  assert.match(page, /調整の勘所/);
-  assert.match(page, /未承認（下書き）/);
-  assert.match(page, /候補として渡したが使わなかったノウハウ/);
-  assert.match(page, /使わなかったカード/);
-  assert.doesNotMatch(page, /ノウハウは参照していません/);
+  assert.match(page, /第三十四条<\/span>・<span class="whitespace-nowrap">施行日 2025-04-01/);
+  assert.match(page, /<li id="senpai-turn-1-ref-K1"[^>]*>[\s\S]*?ノ1[\s\S]*?調整の勘所[\s\S]*?<span[^>]*>未承認<\/span>/);
+  assert.equal(page.match(/未承認/g).length, 1, 'one tiny tag per used card');
+  assert.doesNotMatch(page, /KH-1001|v2|候補として渡した|使わなかったカード|探索の手掛かり|参照用のみ|ノウハウは参照していません|ノウハウ 2件/);
+  assert.match(page, /before:-inset-y-2/, 'rows get the 40px hit area from ::before, not min-height');
+  assert.doesNotMatch(page, /<li id="senpai-turn-1-ref-[^"]*" class="[^"]*min-h-/);
 });
 
-test('without used knowhow the answer says so and still lists unused candidates', () => {
-  const page = view(completed({}, { sources: { tech: [], law: [], knowhow: { used: [], candidates: [{ knowledgeId: 'KH-9', cardVersion: 1, title: '候補だけ' }] } }, answerMarkdown: '本文のみ' }));
-  assert.match(page, /ノウハウは参照していません/);
-  assert.match(page, /候補だけ/);
-  assert.doesNotMatch(page, /技術資料（/);
-  assert.doesNotMatch(page, /法令（/);
-  const none = view(completed({}, { sources: { tech: [], law: [], knowhow: { used: [], candidates: [] } }, answerMarkdown: '本文のみ' }));
-  assert.match(none, /ノウハウは参照していません/);
-  assert.doesNotMatch(none, /候補として渡したが使わなかったノウハウ/);
+test('without used knowhow the general view shows nothing about it, and the developer view keeps the detail', () => {
+  const sources = { tech: [], law: [], knowhow: { used: [], candidates: [{ knowledgeId: 'KH-9', cardVersion: 1, title: '候補だけ' }] } };
+  const page = view(completed({}, { sources, answerMarkdown: '本文のみ' }));
+  assert.doesNotMatch(page, /ノウハウ|候補だけ|<section aria-label="出典"/);
+  const dev = view(completed({}, { sources, answerMarkdown: '本文のみ' }), { developerView: true });
+  assert.match(dev, /ノウハウは参照していません/);
+  assert.match(dev, /候補として渡したが使わなかったノウハウ/);
+  assert.match(dev, /候補だけ（KH-9 v1）/);
+  const withUsed = view(completed(), { developerView: true });
+  assert.match(withUsed, /\[K1\] 調整の勘所 v2・未承認（下書き）・KH-1001/);
+  assert.match(withUsed, /探索の手掛かり/);
 });
 
 test('unsafe source locations are not linked', () => {
@@ -172,7 +170,7 @@ test('unsafe source locations are not linked', () => {
   assert.doesNotMatch(page, /href="https?:\/\/evil/);
   assert.match(page, /怪しい資料/);
   assert.match(page, /怪しい法令/);
-  assert.equal(page.match(/（安全なリンクを確認できません）/g).length, 2);
+  assert.equal(page.match(/（リンクを確認できません）/g).length, 2);
 });
 
 test('the model fit notice shows only for used cards of another product', () => {
@@ -213,10 +211,11 @@ test('a budget stop is disclosed', () => {
 test('failed and cancelled turns keep the steps and show a clear message', () => {
   const failed = view({ status: 'failed', steps: [step(1, { status: 'failed' })], error: { code: 'Timeout', message: '調査が時間内に終わりませんでした。' }, startedAt: NOW - 5000, endedAt: NOW });
   assert.match(failed, /role="alert"[^>]*>調査が時間内に終わりませんでした。/);
-  assert.match(failed, /<details(?![^>]*\bopen\b)[^>]*>[\s\S]*?1手順で調査[\s\S]*?詳細/);
+  assert.match(failed, /<details(?![^>]*\bopen\b)[^>]*>[\s\S]*?1手順で調査/);
+  assert.doesNotMatch(failed, /1手順で調査[\s\S]*?詳細/, 'the meta line is one muted line');
   assert.match(failed, /role="alert"/);
   const cancelled = view({ status: 'cancelled', steps: [step(1, { status: 'running', endedAt: null })], startedAt: NOW - 5000, endedAt: NOW });
-  assert.match(cancelled, /中止しました（サーバー側の処理は続く場合があります）/);
+  assert.match(cancelled, />中止しました</);
   assert.match(cancelled, /1手順で調査/);
   const noMessage = view({ status: 'failed', steps: [] });
   assert.match(noMessage, /調査に失敗しました/);
@@ -252,7 +251,7 @@ test('developer view shows debug, tools table, budget and raw steps; the general
   assert.match(dev, /21500 \/ 60000 ms/);
   assert.match(dev, /生の段階イベント（3）/);
   assert.match(dev, /照合で外した参照: T9/);
-  assert.match(dev, /結論の候補/);
+  assert.match(dev, /ドアの調整/);
 });
 
 test('developer view explains when no debug information exists', () => {
@@ -352,7 +351,7 @@ test('with the flag on, a research turn shows one unified answer instead of the 
   t.after(() => { delete globalThis.window; });
   const page = chatPage({ snapshot: { ...base, turns: [researchTurn(completed(), { modelType: 'AXIEZ' })] } });
   const out = html(page.render());
-  assert.match(out, /結論の候補/);
+  assert.match(out, /ドアの調整/);
   assert.match(out, /3手順で調査/);
   assert.match(out, /機種: AXIEZ/);
   assert.doesNotMatch(out, /aria-label="技術KBからの回答"|aria-label="法令KBからの回答"/);
@@ -440,7 +439,7 @@ test('with the flag off a restored research turn is still readable but cannot be
   t.after(() => { delete globalThis.window; });
   const page = chatPage({ flag: 'false', snapshot: { ...base, turns: [researchTurn({ status: 'completed', steps: [], result: result() })] } });
   const out = html(page.render());
-  assert.match(out, /結論の候補/);
+  assert.match(out, /ドアの調整/);
   assert.doesNotMatch(out, /開発者表示/);
   assert.match(out, /調査機能が無効の環境では、調査ジョブの相談に続けて質問できません/);
   assert.equal(findAny(page.render(), (node) => node.type === 'textarea').props.disabled, true);
@@ -486,7 +485,8 @@ test('clarify shows the questions once, even when the markdown repeats them', ()
   const page = view(research, { query: 'q', onResend() {} });
   assert.equal(page.match(/機種は何ですか/g).length, 1);
   assert.equal(page.match(/異音はいつ出ますか/g).length, 1);
-  assert.match(page, /元の質問に補足して調べ直します/);
+  assert.match(page, /下の入力欄に答えを書いてください/);
+  assert.doesNotMatch(page, /調べ直します/);
   const noQuestions = view(completed({}, { kind: 'clarify', sources: NO_SOURCES, clarifyQuestions: [], answerMarkdown: '本文だけの聞き返し' }));
   assert.match(noQuestions, /本文だけの聞き返し/);
 });
@@ -506,31 +506,39 @@ test('model chips appear only for a model question and ask again with the origin
   assert.equal(buttonByText(answerTree(research, {}), 'AXIEZ'), null);
 });
 
-test('the knowhow box is hidden for clarify and not_found unless a card was used', () => {
+test('used knowhow is listed for any kind, and unused candidates never appear in the general view', () => {
   const candidatesOnly = { tech: [], law: [], knowhow: { used: [], candidates: [{ knowledgeId: 'KH-1', cardVersion: 1, title: '候補' }] } };
-  for (const kind of ['clarify', 'not_found']) {
-    assert.doesNotMatch(view(completed({}, { kind, answerMarkdown: '', sources: candidatesOnly })), /ノウハウ（未承認・参考）/, kind);
+  for (const kind of ['clarify', 'not_found', 'answer']) {
+    assert.doesNotMatch(view(completed({}, { kind, answerMarkdown: '本文', clarifyQuestions: ['q'], sources: candidatesOnly })), /ノウハウ|候補/, kind);
   }
   const used = { tech: [], law: [], knowhow: { used: [{ ref: 'K1', knowledgeId: 'KH-1', cardVersion: 1, title: '使った', status: 'draft' }], candidates: [] } };
-  assert.match(view(completed({}, { kind: 'clarify', answerMarkdown: '', clarifyQuestions: ['q'], sources: used })), /ノウハウ（未承認・参考）/);
-  assert.match(view(completed({}, { kind: 'answer', answerMarkdown: '本文', sources: NO_SOURCES })), /ノウハウは参照していません/);
+  assert.match(view(completed({}, { kind: 'clarify', answerMarkdown: '', clarifyQuestions: ['q'], sources: used })), /使った[\s\S]*未承認/);
+  assert.doesNotMatch(view(completed({}, { kind: 'answer', answerMarkdown: '本文', sources: NO_SOURCES })), /ノウハウは参照していません/);
 });
 
-test('the answer leads with the conclusion and gathers the notes in one subtle block', () => {
+test('the answer leads with the conclusion, lists the grounds, and gathers the notes in one subtle block', () => {
   const page = view(completed({}, {
-    answerMarkdown: '## 結論の候補\n調整です [T1]\n\n## 技術資料から\n手順です\n\n## 食い違い・不足\n- 階数が不明\n\n## 次に確認すること\n- 音のタイミング',
+    answerMarkdown: '## 結論\n調整です [T1]\n\n## 根拠と手順\n- 手順です [T1]\n- 基準です [L1]\n\n## 確認が必要な点\n- 階数が不明',
   }));
-  assert.match(page, /aria-label="結論の候補"[^>]*><div class="[^"]*font-medium/);
-  assert.doesNotMatch(page, /<h5[^>]*>結論の候補<\/h5>/);
-  assert.match(page, /<h5 class="mb-1 text-sm font-semibold text-gray-900">技術資料から<\/h5>/);
+  assert.match(page, /<div class="[^"]*text-\[17px\][^"]*font-medium[^"]*">[\s\S]*調整です/);
+  assert.doesNotMatch(page, /<h[1-6][^>]*>(結論|根拠と手順)</, 'no lead or evidence headings are shown');
+  assert.match(page, /<aside[^>]*><h5 class="[^"]*text-xs font-medium text-gray-500[^"]*">確認が必要な点<\/h5>/, 'the gray block has the tiny label');
+  assert.match(page, /<ul[^>]*>[\s\S]*手順です[\s\S]*基準です/);
   assert.equal(page.match(/<aside/g).length, 1);
-  assert.match(page, /<aside aria-label="補足" class="[^"]*bg-gray-50[\s\S]*食い違い・不足[\s\S]*次に確認すること[\s\S]*<\/aside>/);
+  assert.match(page, /<aside aria-label="確認が必要な点" class="[^"]*bg-gray-50[\s\S]*階数が不明[\s\S]*<\/aside>/);
   assert.doesNotMatch(page, /☐|border-indigo|bg-amber/);
-  assert.match(page, /階数が不明/);
+
+  const old = view(completed({}, {
+    answerMarkdown: '## 結論の候補\n調整です [T1]\n\n## 技術資料から\n手順です\n\n## 法令から\n基準です [L1]\n\n## 食い違い・不足\n- 階数が不明\n\n## 次に確認すること\n- 音のタイミング',
+  }));
+  assert.match(old, /text-\[17px\][\s\S]*調整です/);
+  assert.doesNotMatch(old, /技術資料から|法令から|食い違い・不足|次に確認すること|結論の候補/);
+  assert.equal(old.match(/<aside/g).length, 1);
+  assert.match(old, /<aside[\s\S]*階数が不明[\s\S]*音のタイミング[\s\S]*<\/aside>/);
 
   const plain = view(completed({}, { answerMarkdown: '見出しのない回答です [T1]' }));
   assert.match(plain, /見出しのない回答です/);
-  assert.doesNotMatch(plain, /<aside/);
+  assert.doesNotMatch(plain, /<aside|text-\[17px\]/);
 });
 
 test('inline refs are coloured chips with the source title, and unverified refs stay plain text', () => {
@@ -547,8 +555,7 @@ test('source rows carry a tinted number pill and keep the knowhow cards split', 
   assert.match(page, /id="senpai-turn-1-ref-T1"[^>]*>[\s\S]*?bg-blue-50[^>]*>技1</);
   assert.match(page, /id="senpai-turn-1-ref-L1"[^>]*>[\s\S]*?bg-emerald-50[^>]*>法1</);
   assert.match(page, /id="senpai-turn-1-ref-K1"[^>]*>[\s\S]*?bg-violet-50[^>]*>ノ1</);
-  assert.match(page, /<h4[^>]*>出典<\/h4>/);
-  assert.match(page, /ノウハウ 2件（未承認・参考）/);
+  assert.doesNotMatch(page, /<h4[^>]*>出典<\/h4>/);
 });
 
 test('a model mismatch banner offers to ask again with the understood model', () => {
@@ -656,7 +663,7 @@ test('a supplement is shown in the bubble with a quiet note instead of the compo
 test('field reports are offered on a finished research answer only, and only with their flag', (t) => {
   t.after(() => { delete globalThis.window; });
   const render = (turn, reportFlag = 'true') => withEnv('NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS', reportFlag, () => html(chatPage({ snapshot: { ...base, turns: [turn] } }).render()));
-  assert.match(render(researchTurn(completed())), /aria-label="結果を残す"/);
+  assert.match(render(researchTurn(completed())), /<button[^>]*>[\s\S]*?<\/svg>結果を残す<\/button>/);
   assert.doesNotMatch(render(researchTurn(completed()), 'false'), /結果を残す/);
   assert.doesNotMatch(render(researchTurn(completed({}, { kind: 'clarify', clarifyQuestions: ['q'], answerMarkdown: '' }))), /結果を残す/);
   assert.doesNotMatch(render(researchTurn({ status: 'failed', steps: [] })), /結果を残す/);
@@ -700,7 +707,7 @@ test('a run of ref pills and the punctuation right after it never wrap apart', (
 test('small links and buttons keep their look but get a larger invisible hit area', () => {
   const page = view(completed());
   assert.match(page, /<a href="#senpai-turn-1-ref-T1"[^>]*class="[^"]*relative[^"]*before:-inset-y-2/);
-  assert.match(page, /aria-label="保守手順書：資料を開く"[^>]*class="[^"]*before:-inset-y-2\.5/);
+  assert.match(page, /<a href="\/doc[^>]*class="[^"]*relative[^"]*before:-inset-y-2/, 'the source title link keeps a 40px hit area');
   const failed = view({ status: 'failed', steps: [] }, { query: 'q', onResend() {} });
   assert.match(failed, /class="[^"]*before:-inset-y-2\.5[^"]*">もう一度試す</);
   const running = view({ status: 'running', startedAt: NOW, steps: [] });
@@ -821,4 +828,46 @@ test('warnings from a failed lane are shown as small amber lines above the answe
   assert.ok(warned.indexOf('法令の検索に失敗したため') < warned.indexOf('ドアの調整'), 'above the answer body');
   assert.doesNotMatch(view(completed()), /検索に失敗したため/);
   assert.doesNotMatch(view(completed({}, { warnings: [] })), /text-amber-700">/);
+});
+
+test('the model mismatch is one muted line with a tiny amber dot and an inline text button', () => {
+  const research = completed({}, { understanding: { modelType: 'NEXCUBE' } });
+  const page = view(research, { selectedModel: 'AXIEZ', query: 'q', onResend() {} });
+  const note = page.match(/<p role="note" class="[^"]*text-gray-600[^"]*">[\s\S]*?<\/p>/)[0];
+  assert.match(note, /bg-amber-500/);
+  assert.match(note, /質問では NEXCUBE と読めますが、選択中の機種は AXIEZ です。/);
+  assert.match(note, /<button[^>]*>NEXCUBEで聞き直す<\/button>/);
+  assert.doesNotMatch(note, /text-amber-700|text-sm/);
+});
+
+test('the action bar is copy, retry, then a small 結果を残す text button', () => {
+  const actions = createElement('button', { type: 'button' }, '結果を残す');
+  const page = view(completed(), { query: 'q', onResend() {}, actions });
+  const bar = page.slice(page.indexOf('aria-label="回答の操作"'));
+  assert.ok(bar.indexOf('aria-label="回答をコピー"') < bar.indexOf('aria-label="もう一度調べる"'));
+  assert.ok(bar.indexOf('aria-label="もう一度調べる"') < bar.indexOf('結果を残す'));
+});
+
+test('source rows share one compact height and meta tokens never break mid-token', () => {
+  const page = view(completed());
+  const rows = [...page.matchAll(/<li id="senpai-turn-1-ref-[TLK]\d+" class="([^"]*)"/g)].map((match) => match[1]);
+  assert.equal(rows.length, 3);
+  assert.equal(new Set(rows).size, 1, 'tech, law and knowhow rows use the same classes');
+  assert.match(page, /<span class="whitespace-nowrap">12ページ<\/span>/);
+  assert.match(page, /<span class="whitespace-nowrap">第三十四条<\/span>・<span class="whitespace-nowrap">施行日 2025-04-01<\/span>/);
+  const long = view(completed({}, { sources: { ...NO_SOURCES, tech: [{ ref: 'T1', title: '手順書', documentName: 'とても長い資料名のファイル.pdf', pageNumber: 3, sourceUri: 's3://kb-bucket/docs/manual.pdf' }] }, answerMarkdown: '本文 [T1]' }));
+  assert.match(long, /<span class="whitespace-nowrap">3ページ<\/span>・<span class="break-words">とても長い資料名のファイル\.pdf<\/span>/);
+});
+
+test('the inline （ノウハウ・未承認） phrase is small and muted, in either width of parentheses, and not removed', () => {
+  const page = view(completed({}, { answerMarkdown: '## 結論\n同様の事例があります（ノウハウ・未承認）[K1]。\n\n## 根拠と手順\n- 別の事例(ノウハウ・未承認)です\n- 普通の（括弧）です', sources: { ...NO_SOURCES, knowhow: { used: [{ ref: 'K1', knowledgeId: 'KH-1', cardVersion: 1, title: '勘所', status: 'draft' }], candidates: [] } } }));
+  assert.equal(page.match(/<span class="whitespace-nowrap text-xs font-normal text-gray-500">[（(]ノウハウ・未承認[）)]<\/span>/g).length, 2);
+  assert.match(page, /<span class="whitespace-nowrap text-xs font-normal text-gray-500">（ノウハウ・未承認）<\/span>/);
+  assert.match(page, /<span class="whitespace-nowrap text-xs font-normal text-gray-500">\(ノウハウ・未承認\)<\/span>/);
+  assert.match(page, /普通の（括弧）です/);
+});
+
+test('the mismatch notice keeps the dot and the text in one inline row', () => {
+  const page = view(completed({}, { understanding: { modelType: 'NEXCUBE' } }), { selectedModel: 'AXIEZ', query: 'q', onResend() {} });
+  assert.match(page, /<p role="note" class="flex items-start gap-1\.5[^"]*"><span aria-hidden="true" class="mt-2[^"]*bg-amber-500"><\/span><span class="min-w-0">質問では[\s\S]*<button[^>]*>NEXCUBEで聞き直す<\/button><\/span><\/p>/);
 });

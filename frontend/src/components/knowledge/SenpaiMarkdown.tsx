@@ -48,10 +48,19 @@ export function keepRefRunsTogether(children: ReactNode): ReactNode[] {
     out.push(<span key={`refs-${out.length}`} className="whitespace-nowrap">{run}</span>);
     index -= 1;
   }
-  return out;
+  return mutePhrases(out);
 }
 
-export type SenpaiMarkdownVariant = 'default' | 'plain';
+// 「（ノウハウ・未承認）」は回答のあちこちに出るので、小さく控えめに出す（消さない）。括弧は半角・全角のどちらも。
+const MUTED_PHRASE = /([（(]ノウハウ・未承認[）)])/u;
+
+function mutePhrases(nodes: ReactNode[]): ReactNode[] {
+  return nodes.flatMap<ReactNode>((node, nodeIndex) => (typeof node !== 'string' || !MUTED_PHRASE.test(node) ? [node] : node.split(MUTED_PHRASE).map((part, index) => (
+    index % 2 === 1 ? <span key={`muted-${nodeIndex}-${index}`} className="whitespace-nowrap text-xs font-normal text-gray-500">{part}</span> : part
+  )).filter((part) => part !== '')));
+}
+
+export type SenpaiMarkdownVariant = 'default' | 'plain' | 'lead';
 
 function makeComponents(refTitles: Readonly<Record<string, string>>, knownRefs: ReadonlySet<string>, anchorPrefix: string): Components {
   return {
@@ -91,12 +100,12 @@ export function SenpaiMarkdown({ markdown, knownRefs, anchorPrefix, refTitles = 
   knownRefs: ReadonlySet<string>;
   anchorPrefix: string;
   refTitles?: Readonly<Record<string, string>>;
-  /** `plain` は小さめの文字で、補足ブロック（食い違い・次に確認すること）用。 */
+  /** `plain` は小さめの文字で、補足ブロック（確認が必要な点）用。`lead` は結論（先頭の文）用で、少し大きく中くらいの太さ。 */
   variant?: SenpaiMarkdownVariant;
   className?: string;
 }) {
   return (
-    <div className={`min-w-0 break-words [overflow-wrap:anywhere] ${variant === 'plain' ? 'text-sm leading-6 text-gray-700' : 'text-[15px] leading-7 text-gray-900'} ${className}`}>
+    <div className={`min-w-0 break-words [overflow-wrap:anywhere] ${variant === 'plain' ? 'text-sm leading-6 text-gray-700' : variant === 'lead' ? 'text-[17px] font-medium leading-8 text-gray-900' : 'text-[15px] leading-7 text-gray-900'} ${className}`}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(refTitles, knownRefs, anchorPrefix)}>
         {linkResearchRefs(markdown, knownRefs, anchorPrefix)}
       </ReactMarkdown>

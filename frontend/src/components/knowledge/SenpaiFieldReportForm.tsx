@@ -83,8 +83,8 @@ export function SenpaiFieldReportForm({ conversationId, turn, sent, onSent }: {
 
   if (!open) {
     return (
-      <button type="button" ref={triggerRef} aria-label="結果を残す" title="結果を残す" onClick={() => { setDraft(createFieldReportDraft(turn)); setOpen(true); }} className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
-        <NoteIcon />
+      <button type="button" ref={triggerRef} onClick={() => { setDraft(createFieldReportDraft(turn)); setOpen(true); }} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+        <NoteIcon />結果を残す
       </button>
     );
   }

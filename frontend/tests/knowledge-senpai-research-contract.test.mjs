@@ -104,17 +104,18 @@ test('answer sample parses and renders the unified answer with grouped sources',
   // 技術資料は実在しうるバケット名の s3 URI なので、既存の文書ルートへリンクする。
   assert.match(page, new RegExp(`href="/doc\\?uri=${encodeURIComponent('s3://kb-docs-bucket/docs/TI-1.pdf').replace(/[%.]/g, '\\$&')}#page=3"`));
   assert.doesNotMatch(page, /TI-1\.pdf · 3ページ（安全なリンクを確認できません）/);
-  assert.match(page, /回答で使ったノウハウ/);
   assert.match(page, /ドア開閉時の異音/);
   assert.match(page, /戸の擦り音（別機種）/);
-  assert.match(page, /候補として渡したが使わなかったノウハウ/);
-  assert.match(page, /ドア全般の点検メモ/);
-  assert.match(page, /<details open=""[^>]*aria-label="ノウハウ（未承認・参考）"/);
+  // 使わなかった候補・ID・版・長い説明は一般表示に出さない。
+  assert.doesNotMatch(page, /候補として渡したが使わなかったノウハウ|ドア全般の点検メモ|探索の手掛かり/);
+  assert.doesNotMatch(page, /<h[1-6][^>]*>(結論|根拠と手順)</);
   assert.equal(page.match(/でも当てはまるかは要確認です/g).length, 1);
   assert.doesNotMatch(page, /ref-T9/);
   const dev = render({ status: 'completed', steps: done.steps, result: done.result, debug: done.debug }, { developerView: true });
   assert.match(dev, /照合で外した参照: T9/);
   assert.match(dev, /tech_search/);
+  assert.match(dev, /候補として渡したが使わなかったノウハウ[\s\S]*ドア全般の点検メモ/);
+  assert.match(dev, /KH-/);
 });
 
 test('clarify, not_found and failed samples render their own states', async () => {
@@ -138,7 +139,6 @@ test('clarify, not_found and failed samples render their own states', async () =
   const failedPage = render({ status: 'failed', steps: failed.steps, error: failed.error });
   assert.match(failedPage, /role="alert"/);
   assert.match(failedPage, /<details(?![^>]*\bopen\b)/);
-  assert.match(failedPage, /詳細/);
   assert.equal(buildTimelineRows(failed.steps).at(-1).status, 'failed');
 });
 
@@ -158,7 +158,7 @@ test('history detail restores the saved answer into the controller and renders i
   const restored = chat.getSnapshot().turns[0];
   const page = render(restored.research, { selectedModel: restored.modelType });
   assert.doesNotMatch(page, /調べた手順/);
-  assert.match(page, /結論の候補/);
+  assert.match(page, /text-\[17px\]/);
   assert.match(page, /でも当てはまるかは要確認です/);
   assert.match(page, /href="#senpai-turn-1-ref-K2"/);
   assert.doesNotMatch(page, /ref-T9/);

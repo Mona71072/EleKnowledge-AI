@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import type { SenpaiResearchState } from '@/lib/knowledge-senpai-chat.mjs';
 import {
@@ -14,7 +14,7 @@ import {
   clarifyAsksModel,
   modelMismatch,
   researchRefAnchor,
-  splitAnswerSections,
+  structureAnswer,
 } from '@/lib/knowledge-senpai-research-view.mjs';
 import { modelFitNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
 import { RetryIcon } from './SenpaiIcons';
@@ -35,73 +35,79 @@ function RefPill({ refId }: { refId: string }) {
   return <span className={`inline-block shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium leading-4 ${REF_TONES[refId[0]].split(' hover:')[0]}`}>{`${REF_PREFIX[refId[0]]}${refId.slice(1)}`}</span>;
 }
 
-function SourceRow({ id, refId, title, meta, linkLabel, href, children }: {
-  id: string; refId: string; title: string; meta?: string; linkLabel?: string; href?: string; children?: ReactNode;
+/** 出典・ノウハウ1件の行: 番号の札 + 題名（題名そのものがリンク）+ 控えめな補足。 */
+/** 補足の1語（ページ・日付・条文）。途中で折り返さない。資料名のように長いものだけ `wrap` で折り返しを許す。 */
+type MetaToken = string | { text: string; wrap: true };
+
+function MetaLine({ tokens }: { tokens: readonly MetaToken[] }) {
+  if (tokens.length === 0) return null;
+  return (
+    <span className="ml-2 text-xs text-gray-500">
+      {tokens.map((token, index) => {
+        const wrap = typeof token !== 'string';
+        return <Fragment key={index}>{index > 0 && '・'}<span className={wrap ? 'break-words' : 'whitespace-nowrap'}>{wrap ? token.text : token}</span></Fragment>;
+      })}
+    </span>
+  );
+}
+
+// 行の高さはどのグループも同じ（詰めた行）。押せる範囲は ::before で上下に広げて 40px 以上にする。
+function SourceRow({ id, refId, title, meta = [], linkLabel, href, children }: {
+  id: string; refId: string; title: string; meta?: readonly MetaToken[]; linkLabel?: string; href?: string; children?: ReactNode;
 }) {
   return (
-    <li id={id} className="scroll-mt-4 flex min-w-0 items-baseline gap-2 py-1 text-sm">
+    <li id={id} className="scroll-mt-4 flex min-w-0 items-baseline gap-2 py-0.5 text-sm leading-6">
       <RefPill refId={refId} />
       <span className="min-w-0 flex-1">
-        <span className="break-words text-gray-900">{title}</span>
-        {meta && <span className="ml-2 break-words text-xs text-gray-500">{meta}</span>}
+        {linkLabel && href
+          ? <a href={href} target="_blank" rel="noopener noreferrer" aria-label={`${title}：${linkLabel}`} className="relative break-words text-gray-900 underline-offset-2 before:absolute before:-inset-x-1 before:-inset-y-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">{title}</a>
+          : <span className="break-words text-gray-900">{title}</span>}
+        <MetaLine tokens={meta} />
+        {linkLabel && !href && <span className="ml-2 text-xs text-gray-500">（リンクを確認できません）</span>}
         {children}
       </span>
-      {linkLabel && (href
-        ? <a href={href} target="_blank" rel="noopener noreferrer" aria-label={`${title}：${linkLabel}`} title={linkLabel} className={`${textButton} shrink-0 no-underline hover:underline`}>開く</a>
-        : <span className="shrink-0 text-xs text-gray-500">（安全なリンクを確認できません）</span>)}
     </li>
   );
 }
 
-function KnowhowDisclosure({ result, prefix, selectedModel }: { result: SenpaiResearchResult; prefix: string; selectedModel?: string }) {
-  const { used, candidates } = result.sources.knowhow;
-  // 聞き返し・見つからなかった回答では、使ったノウハウが無ければ出さない。
-  if (result.kind !== 'answer' && used.length === 0) return null;
-  if (used.length === 0 && candidates.length === 0) return <p className="text-xs text-gray-500">ノウハウは参照していません</p>;
-  const notices = used.map((card) => modelFitNotice(card, selectedModel));
+/** 回答で使ったノウハウだけを「ノ1 題名 未承認」で出す。使っていなければ何も出さない（詳細は開発者表示）。 */
+function KnowhowUsed({ result, prefix, selectedModel }: { result: SenpaiResearchResult; prefix: string; selectedModel?: string }) {
+  const { used } = result.sources.knowhow;
+  if (used.length === 0) return null;
   return (
-    <details open={notices.some(Boolean)} aria-label="ノウハウ（未承認・参考）" className="text-sm">
-      <summary className="cursor-pointer text-xs font-medium text-gray-600 hover:text-gray-900">ノウハウ {used.length + candidates.length}件（未承認・参考）</summary>
-      <div className="mt-1">
-        <p className="text-xs text-gray-500">探索の手掛かりで、技術的な根拠や承認を示しません。</p>
-        <h5 className={groupLabel}>回答で使ったノウハウ</h5>
-        {used.length === 0 ? <p className="py-1 text-xs text-gray-500">ノウハウは参照していません</p> : (
-          <ul>
-            {used.map((card, index) => (
-              <SourceRow key={card.ref} id={researchRefAnchor(prefix, card.ref)} refId={card.ref} title={card.title}
-                meta={`v${card.cardVersion}・${card.status === 'draft' ? '未承認（下書き）' : '承認済みカード・参照用のみ'}・${card.knowledgeId}`}>
-                {notices[index] && <span role="note" className="mt-0.5 block text-xs text-amber-700">{notices[index]}</span>}
-              </SourceRow>
-            ))}
-          </ul>
-        )}
-        {candidates.length > 0 && (
-          <>
-            <h5 className={groupLabel}>候補として渡したが使わなかったノウハウ</h5>
-            <ul className="text-xs text-gray-500">
-              {candidates.map((card) => <li key={`${card.knowledgeId}-${card.cardVersion}`} className="break-words py-0.5">{card.title}（{card.knowledgeId} v{card.cardVersion}）</li>)}
-            </ul>
-          </>
-        )}
-      </div>
-    </details>
+    <section aria-label="ノウハウ">
+      <h5 className={groupLabel}>ノウハウ</h5>
+      <ul>
+        {used.map((card) => {
+          const notice = modelFitNotice(card, selectedModel);
+          return (
+            <SourceRow key={card.ref} id={researchRefAnchor(prefix, card.ref)} refId={card.ref} title={card.title}>
+              {card.status === 'draft' && <span className="ml-2 rounded bg-gray-100 px-1 text-[10px] text-gray-600">未承認</span>}
+              {notice && <span role="note" className="block text-xs text-gray-500">{notice}</span>}
+            </SourceRow>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
 function Sources({ result, prefix, selectedModel }: { result: SenpaiResearchResult; prefix: string; selectedModel?: string }) {
   const { tech, law } = result.sources;
-  const knowhow = <KnowhowDisclosure result={result} prefix={prefix} selectedModel={selectedModel} />;
+  if (tech.length === 0 && law.length === 0 && result.sources.knowhow.used.length === 0) return null;
   return (
     <section aria-label="出典" className="space-y-1 border-t border-gray-100 pt-3">
-      {(tech.length > 0 || law.length > 0) && <h4 className="text-sm font-semibold text-gray-900">出典</h4>}
       {tech.length > 0 && (
         <section aria-label="技術資料の出典">
-          <h5 className={groupLabel}>技術資料（{tech.length}）</h5>
+          <h5 className={groupLabel}>技術資料</h5>
           <ul>
             {tech.map((source) => (
               <SourceRow key={source.ref} id={researchRefAnchor(prefix, source.ref)} refId={source.ref}
                 title={source.title || source.documentName || '技術資料'}
-                meta={[source.pageNumber ? `${source.pageNumber}ページ` : '', source.documentName && source.documentName !== source.title ? source.documentName : ''].filter(Boolean).join('・') || undefined}
+                meta={[
+                  ...(source.pageNumber ? [`${source.pageNumber}ページ`] : []),
+                  ...(source.documentName && source.documentName !== source.title ? [{ text: source.documentName, wrap: true as const }] : []),
+                ]}
                 linkLabel="資料を開く" href={techSourceHref(source)} />
             ))}
           </ul>
@@ -109,17 +115,17 @@ function Sources({ result, prefix, selectedModel }: { result: SenpaiResearchResu
       )}
       {law.length > 0 && (
         <section aria-label="法令の出典">
-          <h5 className={groupLabel}>法令（{law.length}）</h5>
+          <h5 className={groupLabel}>法令</h5>
           <ul>
             {law.map((source) => (
               <SourceRow key={source.ref} id={researchRefAnchor(prefix, source.ref)} refId={source.ref} title={source.lawTitle}
-                meta={[source.provision, source.effectiveDate ? `施行日 ${source.effectiveDate}` : ''].filter(Boolean).join('・') || undefined}
+                meta={[...(source.provision ? [source.provision] : []), ...(source.effectiveDate ? [`施行日 ${source.effectiveDate}`] : [])]}
                 linkLabel="e-Govで開く" href={lawSourceHref(source)} />
             ))}
           </ul>
         </section>
       )}
-      <div className="pt-2">{knowhow}</div>
+      <KnowhowUsed result={result} prefix={prefix} selectedModel={selectedModel} />
     </section>
   );
 }
@@ -140,31 +146,18 @@ function refTitles(result: SenpaiResearchResult) {
   ]);
 }
 
-/** 結論を冒頭の文に、補足（食い違い・次に確認すること）を1つの控えめなブロックに、残りを見出しつきの文章にする。 */
+/** 結論を先頭の文に、根拠と手順を箇条書きに、確認が必要な点を1つの控えめなブロックにする。見出しは出さない。 */
 function AnswerText({ result, prefix }: { result: SenpaiResearchResult; prefix: string }) {
   const refs = knownRefs(result);
   const titles = refTitles(result);
-  const sections = splitAnswerSections(result.answerMarkdown);
-  if (!sections) return <SenpaiMarkdown markdown={result.answerMarkdown} knownRefs={refs} anchorPrefix={prefix} refTitles={titles} />;
-  const notes = sections.filter((section) => section.kind === 'caution' || section.kind === 'todo');
+  const parts = structureAnswer(result.answerMarkdown);
+  const markdown = (body: string, variant?: 'plain' | 'lead') => <SenpaiMarkdown markdown={body} knownRefs={refs} anchorPrefix={prefix} refTitles={titles} variant={variant} />;
+  if (!parts) return markdown(result.answerMarkdown);
   return (
-    <div>
-      {sections.filter((section) => section.kind !== 'caution' && section.kind !== 'todo').map((section, index) => (
-        <section key={index} aria-label={section.heading} className={index === 0 ? '' : 'mt-5'}>
-          {section.kind === 'normal' && section.heading && <h5 className="mb-1 text-sm font-semibold text-gray-900">{section.heading}</h5>}
-          {section.body && <SenpaiMarkdown markdown={section.body} knownRefs={refs} anchorPrefix={prefix} refTitles={titles} className={section.kind === 'conclusion' ? 'font-medium' : ''} />}
-        </section>
-      ))}
-      {notes.length > 0 && (
-        <aside aria-label="補足" className="mt-5 space-y-3 rounded-xl bg-gray-50 px-4 py-3">
-          {notes.map((section) => (
-            <section key={section.heading} aria-label={section.heading}>
-              <h5 className="text-xs font-semibold text-gray-600">{section.heading}</h5>
-              {section.body && <SenpaiMarkdown markdown={section.body} knownRefs={refs} anchorPrefix={prefix} refTitles={titles} variant="plain" />}
-            </section>
-          ))}
-        </aside>
-      )}
+    <div className="space-y-4">
+      {parts.lead && markdown(parts.lead, 'lead')}
+      {parts.evidence && markdown(parts.evidence)}
+      {parts.notes && <aside aria-label="確認が必要な点" className="rounded-xl bg-gray-50 px-4 py-3"><h5 className={groupLabel}>確認が必要な点</h5>{markdown(parts.notes, 'plain')}</aside>}
     </div>
   );
 }
@@ -178,7 +171,7 @@ function ClarifyBlock({ result, prefix, query, onResend }: { result: SenpaiResea
         ? <ul className="mt-1 list-disc space-y-0.5 pl-5 marker:text-gray-400">{result.clarifyQuestions.map((question, index) => <li key={`${index}-${question}`}>{question}</li>)}</ul>
         : result.answerMarkdown.trim() && <AnswerText result={result} prefix={prefix} />}
       {/* 最新の相談だけが続きを受け付ける（onResend が渡るのは最新の相談だけ）。古い聞き返しには出さない。 */}
-      {onResend && <p className="mt-2 text-sm text-gray-500">下の入力欄に答えを書いて送ると、元の質問に補足して調べ直します。</p>}
+      {onResend && <p className="mt-2 text-sm text-gray-500">下の入力欄に答えを書いてください。</p>}
       {onResend && query && clarifyAsksModel(result) && (
         <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="機種を選んで聞き直す">
           {ALL_MODEL_TYPES.map((model) => (
@@ -199,9 +192,12 @@ function ResultBody({ result, prefix, selectedModel, query, onResend, actions }:
   return (
     <div className="space-y-4">
       {mismatch && (
-        <p role="note" className="text-sm text-amber-700">
-          質問では {mismatch.detected} と読めますが、選択中の機種は {mismatch.selected} です。
-          {onResend && query && <button type="button" onClick={() => onResend({ query, modelType: mismatch.detected })} className={`ml-2 ${textButton}`}>{mismatch.detected}で聞き直す</button>}
+        <p role="note" className="flex items-start gap-1.5 text-xs leading-6 text-gray-600">
+          <span aria-hidden="true" className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+          <span className="min-w-0">
+            質問では {mismatch.detected} と読めますが、選択中の機種は {mismatch.selected} です。
+            {onResend && query && <button type="button" onClick={() => onResend({ query, modelType: mismatch.detected })} className={`ml-1 ${textButton}`}>{mismatch.detected}で聞き直す</button>}
+          </span>
         </p>
       )}
       {(result.warnings ?? []).map((warning, index) => <p key={`${index}-${warning}`} role="note" className="text-xs text-amber-700">{warning}</p>)}
@@ -215,10 +211,10 @@ function ResultBody({ result, prefix, selectedModel, query, onResend, actions }:
       {result.kind === 'answer' && (
         <div role="group" aria-label="回答の操作" className="-mx-1 flex flex-wrap items-center gap-1">
           <SenpaiCopyButton getText={() => buildCopyText(result)} />
-          {actions}
           {onResend && query && (
             <button type="button" aria-label="もう一度調べる" title="もう一度調べる" onClick={() => onResend({ query, ...(selectedModel ? { modelType: selectedModel } : {}) })} className={iconButton}><RetryIcon /></button>
           )}
+          {actions}
         </div>
       )}
     </div>
@@ -229,7 +225,7 @@ function ResultBody({ result, prefix, selectedModel, query, onResend, actions }:
  * 調査ジョブの1回分の表示。進捗の1行 → 1つの統一回答 → 出典。
  * `developerView` のときだけ、debug と生の段階イベントを足す。
  * `onResend` は最新の相談にだけ渡す（聞き直し・もう一度試す）。中止は入力欄の停止ボタンだけ。
- * `actions` は操作列（コピーなど）の横に並べる追加のボタン（結果を残す）。
+ * `actions` は操作列（コピー・もう一度調べる）の後ろに並べる追加のボタン（結果を残す）。
  */
 export function SenpaiResearchAnswer({ research, anchorPrefix, selectedModel, developerView, query, onResend, actions }: {
   research: SenpaiResearchState;
@@ -255,7 +251,7 @@ export function SenpaiResearchAnswer({ research, anchorPrefix, selectedModel, de
       {research.status === 'completed' && research.result && (
         <ResultBody result={research.result} prefix={anchorPrefix} selectedModel={selectedModel} query={query} onResend={onResend} actions={actions} />
       )}
-      {developerView && <SenpaiDevPanel debug={research.debug} steps={research.steps} unverifiedRefs={research.result?.unverifiedRefs} />}
+      {developerView && <SenpaiDevPanel debug={research.debug} steps={research.steps} unverifiedRefs={research.result?.unverifiedRefs} knowhow={research.result?.sources.knowhow} />}
     </div>
   );
 }

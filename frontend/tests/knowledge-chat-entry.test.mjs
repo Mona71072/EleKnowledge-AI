@@ -743,7 +743,7 @@ test('the field report form starts closed, copies nothing, and shows a sent repo
   };
   const conversationId = '10000000-0000-4000-8000-000000000001';
   const closed = renderToStaticMarkup(createElement(SenpaiFieldReportForm, { conversationId, turn, onSent() {} }));
-  assert.match(closed, /<button[^>]*aria-label="結果を残す"/);
+  assert.match(closed, /<button[^>]*>[\s\S]*?<\/svg>結果を残す<\/button>/);
   assert.doesNotMatch(closed, /相談本文ZZZ|textarea/);
   const sent = renderToStaticMarkup(createElement(SenpaiFieldReportForm, {
     conversationId, turn, onSent() {},
