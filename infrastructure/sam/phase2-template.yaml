@@ -910,7 +910,7 @@ Resources:
       MemorySize: 512
       Environment:
         Variables:
-          SENPAI_SYNTHESIS_ENABLED: !If [SenpaiSynthesisDevEnabled, 'true', 'false']
+          SENPAI_SYNTHESIS_ENABLED: 'true'
           ENVIRONMENT: !Ref Environment
           ADMIN_GROUP_NAME: admin
           BEDROCK_MODEL_ID: !Ref BedrockModelId

@@ -553,6 +553,33 @@ def test_lost_conditional_put_race_returns_winner_row(env):
     assert _body(response)["content"] == "先に保存されたまとめ"
 
 
+@pytest.mark.parametrize("hidden", [{"ttl": 1}, {"deleted": True}])
+def test_race_with_hidden_winner_row_is_never_revealed(env, hidden):
+    synth, table = env
+    _put_all(table, _user_rows() + [_technical(), _law()])
+    real_put = table.put_item
+    winner = {
+        "sessionId": f"senpai-synthesis-{TURN_ID}", "messageId": f"senpai-synthesis-{TURN_ID}",
+        "userId": USER_ID, "role": "assistant", "ragMode": "senpai_synthesis",
+        "content": "非表示になったまとめ", "timestamp": "2026-10-20T02:00:00Z",
+        "ttl": int(time.time()) + 3600,
+        "senpaiConversationId": CONVERSATION_ID, "senpaiTurnId": TURN_ID,
+        "synthesisInputs": {"normal": True, "law": True, "knowhowCount": 0},
+    }
+    winner.update(hidden)
+
+    def racing_put(**kwargs):
+        if kwargs["Item"]["ragMode"] == "senpai_synthesis":
+            real_put(Item=winner)
+        return real_put(**kwargs)
+
+    synth.chatlogs_table = MagicMock(wraps=table)
+    synth.chatlogs_table.put_item.side_effect = racing_put
+    response = synth.lambda_handler(_event(), None)
+    assert response["statusCode"] == 409
+    assert "非表示になったまとめ" not in response["body"]
+
+
 def test_query_uses_bounded_user_gsi_and_never_scans(env):
     synth, table = env
     spy = MagicMock(wraps=table)
@@ -677,7 +704,8 @@ def test_sam_function_route_env_and_timeouts():
     assert event["RestApiId"] == "RagApi"
     assert "Auth" not in event  # default Cognito authorizer applies
     env = function["Environment"]["Variables"]
-    assert "SenpaiSynthesisDevEnabled" in str(env["SENPAI_SYNTHESIS_ENABLED"])
+    # The function exists only when SenpaiSynthesisDevEnabled holds, so the flag is a constant.
+    assert env["SENPAI_SYNTHESIS_ENABLED"] == "true"
     assert env["BEDROCK_MODEL_ID"] == "BedrockModelId"
     assert env["ADMIN_GROUP_NAME"] == "admin"
     assert int(env["BEDROCK_READ_TIMEOUT"]) < 29

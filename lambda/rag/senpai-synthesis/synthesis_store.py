@@ -122,6 +122,20 @@ def put_if_absent(table, item: dict) -> bool:
         raise
 
 
+def is_visible_saved_row(row, user_id: str, conversation_id: str, turn_id: str) -> bool:
+    """SECURITY: a re-read after a conflict is shown only when it is this user's live row of this turn."""
+    if not isinstance(row, dict):
+        return False
+    return (
+        row.get("userId") == user_id
+        and row.get("senpaiConversationId") == conversation_id
+        and row.get("senpaiTurnId") == turn_id
+        and row.get("ragMode") == SYNTHESIS_MODE
+        and row.get("messageId") == synthesis_message_id(turn_id)
+        and _live(row, int(time.time()))
+    )
+
+
 def get_row(table, turn_id: str):
     key = synthesis_message_id(turn_id)
     return table.get_item(Key={"sessionId": key, "messageId": key}, ConsistentRead=True).get("Item")

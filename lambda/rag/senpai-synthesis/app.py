@@ -123,10 +123,10 @@ def _save_or_load(user_id: str, conversation_id: str, turn_id: str, content: str
     if synthesis_store.put_if_absent(chatlogs_table, item):
         return _respond(200, _public_payload(item))
     existing = synthesis_store.get_row(chatlogs_table, turn_id)
-    if existing is None or existing.get("userId") != user_id:
-        # SECURITY: the deterministic key collided with another owner's row; reveal nothing.
+    if not synthesis_store.is_visible_saved_row(existing, user_id, conversation_id, turn_id):
+        # SECURITY: another owner's row, or a deleted/expired row, is never shown again.
         _log("save", "conflict")
-        return _error(409, "SynthesisConflict", "この相談のまとめを保存できませんでした")
+        return _error(409, "SynthesisConflict", "この相談のまとめは保存されていないため表示できません")
     return _respond(200, _public_payload(existing))
 
 
