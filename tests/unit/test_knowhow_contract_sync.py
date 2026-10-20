@@ -191,3 +191,9 @@ def test_fixture_search_terms_have_no_duplicates(index):
         assert len(card["searchTerms"]) == len(set(card["searchTerms"])), card["knowledgeId"]
     dup = next(card for card in index["cards"] if card["knowledgeId"] == "KH-SYN-DUPTERMS")
     assert dup["searchTerms"].count("qxdupterm") == 1
+
+
+def test_model_fit_values_and_products_match_between_lambda_and_frontend():
+    lambda_module = _retrieval()
+    assert set(lambda_module.MODEL_FIT_VALUES) == _js_set(FRONTEND_LIB, "KNOWHOW_MODEL_FITS")
+    assert set(lambda_module.MODEL_ALIASES) == _js_set(FRONTEND_LIB, "KNOWHOW_MODEL_PRODUCTS")

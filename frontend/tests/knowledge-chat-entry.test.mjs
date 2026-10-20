@@ -711,3 +711,50 @@ test('the field report form starts closed, copies nothing, and shows a sent repo
   assert.doesNotMatch(sent, /<button/);
   assert.equal(renderToStaticMarkup(createElement(SenpaiFieldReportForm, { turn, onSent() {} })), '');
 });
+
+function fitAnswer(fit, scope = { product_lines: ['AXIEZ-LINKs'] }) {
+  return {
+    ...baseAnswer('normal'),
+    knowhow: {
+      status: 'matched', indexVersion: `sha256:${'a'.repeat(64)}`, searchTerms: [],
+      matches: [{
+        knowledgeId: 'KH-FIT', cardVersion: 1, sha256: 'b'.repeat(64), title: 'カード', status: 'draft',
+        usage: 'navigation_only', body: '本文', searchTerms: [],
+        sourceRefs: [{ ref_type: 'lists_item', list_item_id: 'L-1' }],
+        modelScope: scope, ...fit,
+      }],
+    },
+  };
+}
+
+test('notes on the card when its recognized product differs from the selected model', () => {
+  const answer = fitAnswer({ modelFit: 'other_product', modelFitProducts: ['AXIEZ-LINKs'] });
+  const page = html(synthesisChat({ modelType: 'AXIEZ', normal: lane('success', { answer }) }).render);
+  assert.match(page, /AXIEZ-LINKs（VFGLF・巻上機上部）の事例です。選択中の AXIEZ（VFGLB・巻上機下部）でも当てはまるかは要確認です。/);
+
+  const reverse = fitAnswer({ modelFit: 'other_product', modelFitProducts: ['AXIEZ'] });
+  assert.match(html(synthesisChat({ modelType: 'AXIEZ-LINKs', normal: lane('success', { answer: reverse }) }).render),
+    /AXIEZ（VFGLB・巻上機下部）の事例です。選択中の AXIEZ-LINKs（VFGLF・巻上機上部）でも当てはまるかは要確認です。/);
+
+  const plain = fitAnswer({ modelFit: 'other_product', modelFitProducts: ['NEXCUBE', 'AXIEZ'] });
+  assert.match(html(synthesisChat({ modelType: 'メルシティ', normal: lane('success', { answer: plain }) }).render),
+    /NEXCUBE、AXIEZ（VFGLB・巻上機下部）の事例です。選択中の メルシティでも当てはまるかは要確認です。/);
+
+  const generic = fitAnswer({ modelFit: 'other_product', modelFitProducts: [] });
+  assert.match(html(synthesisChat({ modelType: 'エスカレーター', normal: lane('success', { answer: generic }) }).render),
+    /別の機種区分の事例です。選択中の エスカレーターでも当てはまるかは要確認です。/);
+});
+
+test('shows no fit notice for matching, general, unknown, legacy or unselected cards', () => {
+  const cases = [
+    [{ modelFit: 'matched' }, 'AXIEZ'],
+    [{ modelFit: 'general' }, 'AXIEZ'],
+    [{ modelFit: 'unknown' }, 'AXIEZ'],
+    [{}, 'AXIEZ'],
+    [{ modelFit: 'other_product', modelFitProducts: ['AXIEZ-LINKs'] }, undefined],
+  ];
+  for (const [fit, modelType] of cases) {
+    const page = html(synthesisChat({ ...(modelType ? { modelType } : {}), normal: lane('success', { answer: fitAnswer(fit) }) }).render);
+    assert.doesNotMatch(page, /でも当てはまるかは要確認です/, JSON.stringify(fit));
+  }
+});

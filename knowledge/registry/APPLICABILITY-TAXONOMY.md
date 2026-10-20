@@ -68,6 +68,18 @@ Lists `Model=VFGLF` だけでは MRL/MR は決まらない — **Lists 機種ラ
 
 **AXIEZ-LINKs:** 機種略称一覧の行には無いが、draft 前缀 `ELV_AXIEZ-LINKS_*`・Lists の「LINKs」表記・`model_type: AXIEZ-LINKs` が棚規則。制御方式ラベルは Lists/Vault 上 **VFGLF** であることが多い。
 
+### AXIEZ と AXIEZ-LINKs は別製品（巻上機の位置）
+
+> 最終検証: 2026-10-20 — 利用者（業務担当）の説明。図面・仕様書での照合は未実施。
+
+| 製品 | 制御方式 | 巻上機の位置 |
+| --- | --- | --- |
+| AXIEZ | VFGLB | 下部 |
+| AXIEZ-LINKs | VFGLF | 上部 |
+
+AXIEZ と AXIEZ-LINKs は、制御方式だけでなく**据付・機械（巻上機の位置）も大きく異なる**。そのため先輩の検索では別製品として扱う。両方に当てはまるカードは、`product_lines` に**両方の製品名を書く**か、確認のうえ**全エレ機種**にする。片方だけを書いたカードは、もう一方を選んだ利用者に「別製品の事例」と注意が付く（`docs/features/development/knowledge-markdown-retrieval.md` の「先輩の検索ルールと機種フィルタ」）。
+
+
 ---
 
 ## 2. Vault カテゴリ（draft `category` / `source_path`）— エレ

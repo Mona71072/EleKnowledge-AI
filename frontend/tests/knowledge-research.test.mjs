@@ -669,3 +669,48 @@ test('rejects malformed model filters before authentication or fetch', async () 
   }
   assert.equal(calls, 0);
 });
+
+async function queryWithKnowhow(knowhow) {
+  return queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '合成された検索', includeKnowhow: true,
+    modelType: 'AXIEZ', fetchImpl: fetchOk(normalPayloadWithKnowhow(knowhow)),
+  });
+}
+
+test('accepts the optional response-only model fit fields and keeps older payloads valid', async () => {
+  const old = await queryWithKnowhow(knowhowPayload());
+  assert.equal('modelFit' in old.knowhow.matches[0], false);
+  for (const modelFit of ['matched', 'general', 'unknown']) {
+    const knowhow = knowhowPayload();
+    knowhow.matches[0].modelFit = modelFit;
+    assert.equal((await queryWithKnowhow(knowhow)).knowhow.matches[0].modelFit, modelFit);
+  }
+  const other = knowhowPayload();
+  other.matches[0].modelFit = 'other_product';
+  other.matches[0].modelFitProducts = ['AXIEZ-LINKs'];
+  const clean = (await queryWithKnowhow(other)).knowhow.matches[0];
+  assert.equal(clean.modelFit, 'other_product');
+  assert.deepEqual(clean.modelFitProducts, ['AXIEZ-LINKs']);
+  other.matches[0].modelFitProducts = [];
+  assert.deepEqual((await queryWithKnowhow(other)).knowhow.matches[0].modelFitProducts, []);
+});
+
+test('rejects malformed model fit fields instead of rendering them', async () => {
+  const cases = [
+    { modelFit: 'conflicting' },
+    { modelFit: '' },
+    { modelFit: 1 },
+    { modelFit: null },
+    { modelFitProducts: ['AXIEZ-LINKs'] },
+    { modelFit: 'matched', modelFitProducts: ['AXIEZ-LINKs'] },
+    { modelFit: 'other_product', modelFitProducts: 'AXIEZ-LINKs' },
+    { modelFit: 'other_product', modelFitProducts: ['VFGLF'] },
+    { modelFit: 'other_product', modelFitProducts: ['AXIEZ', 'AXIEZ'] },
+    { modelFit: 'other_product', modelFitProducts: ['AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター', 'AXIEZ'] },
+  ];
+  for (const extra of cases) {
+    const knowhow = knowhowPayload();
+    Object.assign(knowhow.matches[0], extra);
+    await assert.rejects(queryWithKnowhow(knowhow), (error) => error.code === 'invalid_response', JSON.stringify(extra));
+  }
+});

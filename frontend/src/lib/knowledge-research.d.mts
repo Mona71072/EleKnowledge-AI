@@ -40,6 +40,8 @@ export type ResearchCitationSource = {
 export type ResearchSource = ResearchCitationSource;
 export type ResearchPageCandidate = ResearchCitationSource & { lowConfidence?: boolean };
 
+export type ResearchKnowhowModelFit = 'matched' | 'general' | 'other_product' | 'unknown';
+
 export type ResearchKnowhowMatch = {
   knowledgeId: string;
   cardVersion: number;
@@ -51,6 +53,10 @@ export type ResearchKnowhowMatch = {
   searchTerms: string[];
   sourceRefs: Array<Record<string, string>>;
   modelScope: Record<string, string | string[]>;
+  /** Response-only fit to the selected model; absent without a model filter or in older stored answers. */
+  modelFit?: ResearchKnowhowModelFit;
+  /** UI model keys the card is scoped to; present only with `modelFit: 'other_product'`. */
+  modelFitProducts?: string[];
 };
 
 export type ResearchKnowhow = {

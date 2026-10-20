@@ -130,7 +130,26 @@ function scopeValue(key: string, value: string | string[]) {
   return (Array.isArray(value) ? value.join('、') : value) || '未記載';
 }
 
-function KnowhowReferences({ answer }: { answer: import('@/lib/knowledge-research.mjs').ResearchAnswer }) {
+// 2026-10-20 業務担当の説明: AXIEZ と AXIEZ-LINKs は制御方式・据付・機械が大きく異なる別製品。
+// ここに無い機種は製品名だけを表示し、推測した仕様を出さない。
+const MODEL_FACTS: Record<string, string> = {
+  AXIEZ: 'VFGLB・巻上機下部',
+  'AXIEZ-LINKs': 'VFGLF・巻上機上部',
+};
+
+function modelWithFacts(model: string) {
+  return MODEL_FACTS[model] ? `${model}（${MODEL_FACTS[model]}）` : model;
+}
+
+/** 選択機種と別製品だけを対象とする未確認カードに出す注意。一致・全機種・不明は何も出さない。 */
+function modelFitNotice(match: { modelFit?: string; modelFitProducts?: string[] }, selectedModel?: string) {
+  if (!selectedModel || match.modelFit !== 'other_product') return null;
+  const products = match.modelFitProducts ?? [];
+  const subject = products.length > 0 ? products.map(modelWithFacts).join('、') : '別の機種区分';
+  return `${subject}の事例です。選択中の ${modelWithFacts(selectedModel)}でも当てはまるかは要確認です。`;
+}
+
+function KnowhowReferences({ answer, selectedModel }: { answer: import('@/lib/knowledge-research.mjs').ResearchAnswer; selectedModel?: string }) {
   const knowhow = answer.knowhow;
   if (!knowhow) return null;
   if (knowhow.status === 'not_found') {
@@ -149,6 +168,7 @@ function KnowhowReferences({ answer }: { answer: import('@/lib/knowledge-researc
               <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-950">{match.status === 'draft' ? '未承認（下書き）' : '承認済みカード・参照用のみ'}</span>
               <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-700">参照用のみ</span>
             </div>
+            {modelFitNotice(match, selectedModel) && <p role="note" className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 font-semibold text-amber-950">{modelFitNotice(match, selectedModel)}</p>}
             <details className="mt-2 rounded border border-gray-200 p-2">
               <summary className="cursor-pointer font-semibold text-violet-900">適用条件・出典と本文を確認</summary>
               <dl className="mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 break-words text-gray-700">
@@ -173,7 +193,7 @@ function KnowhowReferences({ answer }: { answer: import('@/lib/knowledge-researc
   );
 }
 
-function LaneReply({ lane, mode }: { lane: SenpaiChatLane; mode: KnowledgeResearchMode }) {
+function LaneReply({ lane, mode, selectedModel }: { lane: SenpaiChatLane; mode: KnowledgeResearchMode; selectedModel?: string }) {
   const name = mode === 'law' ? '法令KB' : '技術KB';
   if (lane.status === 'loading') return <p role="status" className="text-sm text-gray-600">{name}を検索しています…</p>;
   if (lane.status === 'error') return <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{lane.message || `${name}への問い合わせに失敗しました。設定・通信状態を確認してください。`}</p>;
@@ -196,7 +216,7 @@ function LaneReply({ lane, mode }: { lane: SenpaiChatLane; mode: KnowledgeResear
       ) : (
         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">{answer.content || '回答本文がありません。'}</p>
       )}
-      {mode === 'normal' && <KnowhowReferences answer={answer} />}
+      {mode === 'normal' && <KnowhowReferences answer={answer} selectedModel={selectedModel} />}
       {sources.length > 0 && (
         <div className="border-t border-gray-200 pt-2">
           <h5 className="mb-1 text-xs font-semibold text-gray-600">{mode === 'law' ? '法令の出典' : '技術資料の出典'}</h5>
@@ -304,7 +324,7 @@ function ChatTurnView({ turn, running, onSynthesize, conversationId, report, onR
         <div className="grid gap-4 md:grid-cols-2">
           <section aria-label="技術KBからの回答" className="min-w-0 space-y-2 rounded-xl bg-blue-50/70 p-3">
             <h4 className="text-xs font-bold uppercase tracking-wide text-blue-900">技術KB</h4>
-            <LaneReply lane={turn.normal} mode="normal" />
+            <LaneReply lane={turn.normal} mode="normal" selectedModel={turn.modelType} />
           </section>
           <section aria-label="法令KBからの回答" className="min-w-0 space-y-2 rounded-xl bg-emerald-50/70 p-3">
             <h4 className="text-xs font-bold uppercase tracking-wide text-emerald-900">法令KB</h4>

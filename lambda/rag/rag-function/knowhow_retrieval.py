@@ -66,6 +66,8 @@ MODEL_ALIASES = {
     "メルワイド": frozenset({"メルワイド"}),
     "エスカレーター": frozenset({"エスカレーター", "escalator"}),
 }
+# SYNC: must equal KNOWHOW_MODEL_FITS in knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
+MODEL_FIT_VALUES = frozenset({"matched", "general", "other_product", "unknown"})
 ESCALATOR_KEY = "エスカレーター"
 GENERIC_ELEVATOR_LABEL = "全エレ機種"
 GENERIC_ESCALATOR_LABEL = "全エス機種"
@@ -361,12 +363,40 @@ def _conflicts_with_model(card: dict, model_type: str) -> bool:
     return kinds == {"conflicting"}
 
 
+def _recognized_product_keys(card: dict) -> list[str]:
+    labels = {normalize_model_label(value) for value in _scope_values(card, MODEL_CLASSIFY_KEYS)}
+    return [key for key, aliases in MODEL_ALIASES.items() if labels & aliases]
+
+
+def model_fit(card: dict, model_type: str) -> dict:
+    """Response-only fit of a card to the selected UI model (never an index field).
+
+    ``modelFit`` is ``matched`` / ``general`` (generic label) / ``other_product``
+    (recognized scope names only other products) / ``unknown`` (no recognized product).
+    ``modelFitProducts`` lists the recognized UI product keys, for ``other_product`` only.
+    Unlike the exclusion filter this ignores ``scope_status``: it explains, not filters.
+    """
+    kinds = {
+        _classify_model_value(value, model_type)
+        for value in _scope_values(card, MODEL_CLASSIFY_KEYS)
+    } - {"unknown"}
+    if "matched" in kinds:
+        return {"modelFit": "matched"}
+    if "general" in kinds:
+        return {"modelFit": "general"}
+    if kinds == {"conflicting"}:
+        return {"modelFit": "other_product", "modelFitProducts": _recognized_product_keys(card)}
+    return {"modelFit": "unknown"}
+
+
 def search_index(index: dict, query: str, model_type: str | None = None) -> dict:
     """Return up to three whole relevant cards under one combined body-size budget.
 
     ``model_type`` (a UI model key) drops only person-verified cards
     (``scope_status == "verified"``) whose recognized product scope names only other
     products; unverified cards, unknown keys and unrecognized codes never filter.
+    With a known ``model_type`` each returned card is a copy that also carries the
+    response-only ``modelFit`` fields (see ``model_fit``).
     """
     index = validate_index(index)
     if not isinstance(query, str) or len(query) > 12000:
@@ -388,7 +418,7 @@ def search_index(index: dict, query: str, model_type: str | None = None) -> dict
             break
         if total_body_chars + len(card["body"]) > MAX_RESPONSE_BODY_CHARS:
             continue
-        matches.append(card)
+        matches.append({**card, **model_fit(card, model_type)} if model_type in MODEL_ALIASES else card)
         total_body_chars += len(card["body"])
     return {
         "status": "matched" if matches else "not_found",

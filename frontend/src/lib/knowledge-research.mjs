@@ -21,6 +21,10 @@ const KNOWHOW_SCOPE_FIELDS = new Set([
   'observed_on', 'product_lines', 'scope_note', 'conditions',
   'scope_status', 'scope_verified_by', 'scope_verified_at',
 ]);
+// SYNC: must equal MODEL_FIT_VALUES in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
+const KNOWHOW_MODEL_FITS = new Set(['matched', 'general', 'other_product', 'unknown']);
+// SYNC: must equal the MODEL_ALIASES keys in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
+const KNOWHOW_MODEL_PRODUCTS = new Set(['AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター']);
 const RESPONSE_FIELDS = [
   'documentName',
   'title',
@@ -239,6 +243,20 @@ function cleanModelScope(value) {
   return clean;
 }
 
+/** Response-only fit to the selected model; both fields are optional so stored older answers still restore. */
+function cleanModelFit(match) {
+  const hasFit = Object.hasOwn(match, 'modelFit');
+  const hasProducts = Object.hasOwn(match, 'modelFitProducts');
+  if (!hasFit && !hasProducts) return {};
+  if (!hasFit || !KNOWHOW_MODEL_FITS.has(match.modelFit)) return null;
+  if (!hasProducts) return { modelFit: match.modelFit };
+  const products = match.modelFitProducts;
+  if (match.modelFit !== 'other_product' || !Array.isArray(products)
+    || products.length > KNOWHOW_MODEL_PRODUCTS.size || new Set(products).size !== products.length
+    || !products.every((product) => KNOWHOW_MODEL_PRODUCTS.has(product))) return null;
+  return { modelFit: match.modelFit, modelFitProducts: [...products] };
+}
+
 function cleanKnowhowMatch(match) {
   if (!isPlainObject(match)
     || typeof match.knowledgeId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(match.knowledgeId)
@@ -253,6 +271,8 @@ function cleanKnowhowMatch(match) {
     || !match.sourceRefs.every((sourceRef) => cleanKnowhowSourceRef(sourceRef) !== null)) return null;
   const modelScope = cleanModelScope(match.modelScope);
   if (!modelScope) return null;
+  const modelFit = cleanModelFit(match);
+  if (!modelFit) return null;
   let serialized;
   try {
     serialized = JSON.stringify(match);
@@ -271,6 +291,7 @@ function cleanKnowhowMatch(match) {
     searchTerms: [...match.searchTerms],
     sourceRefs: match.sourceRefs.map(cleanKnowhowSourceRef),
     modelScope,
+    ...modelFit,
   };
 }
 

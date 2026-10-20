@@ -325,3 +325,26 @@ def test_knowhow_model_vocabulary_covers_every_ui_model_filter(rag_app):
     for key, targets in rag_app.UI_MODEL_FILTERS.items():
         for target in targets:
             assert retrieval.normalize_model_label(target) in retrieval.MODEL_ALIASES[key]
+
+
+def _matches(response):
+    return {m["knowledgeId"]: m for m in json.loads(response["body"])["knowhow"]["matches"]}
+
+
+def test_model_fit_is_returned_only_when_a_model_filter_is_selected(rag_app, monkeypatch):
+    _configure_successful_pipeline(rag_app, monkeypatch)
+    monkeypatch.setattr(
+        rag_app, "load_index", lambda **_kwargs: _two_product_index({"product_lines": ["escalator"]})
+    )
+    request = {"query": "かごの走行中振動", "includeKnowhow": True}
+
+    plain = _matches(rag_app.handle_rag_request(_event(request), None, 0))
+    assert all("modelFit" not in card and "modelFitProducts" not in card for card in plain.values())
+
+    filtered = _matches(rag_app.handle_rag_request(
+        _event({**request, "filters": {"modelType": "AXIEZ"}}), None, 0
+    ))
+    assert filtered["KH-SYN-ESC"]["modelFit"] == "other_product"
+    assert filtered["KH-SYN-ESC"]["modelFitProducts"] == ["エスカレーター"]
+    assert filtered["KH-SYN-001"]["modelFit"] in {"matched", "general", "unknown"}
+    assert "modelFitProducts" not in filtered["KH-SYN-001"]

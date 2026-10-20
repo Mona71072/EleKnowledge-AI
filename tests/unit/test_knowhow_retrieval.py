@@ -427,3 +427,61 @@ def test_index_accepts_complete_scope_verification():
     module = _module()
 
     module.validate_index(_index(_verified("KH-A", product_lines=["AXIEZ"])))
+
+
+def _fit(result, knowledge_id):
+    card = next(card for card in result["matches"] if card["knowledgeId"] == knowledge_id)
+    return card.get("modelFit"), card.get("modelFitProducts")
+
+
+@pytest.mark.parametrize("make", [_scoped, _verified], ids=["unverified", "verified"])
+@pytest.mark.parametrize("scope, selected, expected, products", [
+    ({"product_lines": ["AXIEZ"]}, "AXIEZ", "matched", None),
+    ({"product_lines": ["AXIEZ", "AXIEZ-LINKs"]}, "AXIEZ-LINKs", "matched", None),
+    ({"lists_model_label": ["全エレ機種"]}, "AXIEZ", "general", None),
+    ({"model_abbreviations": ["VFGLF"]}, "AXIEZ", "unknown", None),
+    ({}, "AXIEZ", "unknown", None),
+    ({"product_lines": ["AXIEZ-LINKs"], "model_abbreviations": ["VFGLF"]}, "AXIEZ", "other_product", ["AXIEZ-LINKs"]),
+    ({"product_lines": ["AXIEZ", "NEXCUBE"]}, "AXIEZ-LINKs", "other_product", ["AXIEZ", "NEXCUBE"]),
+    ({"product_lines": ["escalator"]}, "AXIEZ", "other_product", ["エスカレーター"]),
+    ({"lists_model_label": ["全エレ機種"]}, "エスカレーター", "other_product", []),
+])
+def test_search_reports_how_each_card_fits_the_selected_model(make, scope, selected, expected, products):
+    module = _module()
+    result = module.search_index(_index(make("KH-A", **scope)), QUERY, model_type=selected)
+
+    if make is _verified and expected == "other_product":
+        assert result["matches"] == []
+        return
+    fit, fit_products = _fit(result, "KH-A")
+    assert fit == expected
+    assert fit_products == products
+
+
+@pytest.mark.parametrize("model_type", [None, "", "UNKNOWN-X"])
+def test_model_fit_is_absent_without_a_known_model_filter(model_type):
+    module = _module()
+    index = _index(_scoped("KH-A", product_lines=["escalator"]))
+
+    result = module.search_index(index, QUERY, model_type=model_type)
+
+    assert "modelFit" not in result["matches"][0]
+    assert "modelFitProducts" not in result["matches"][0]
+
+
+def test_model_fit_does_not_mutate_the_cached_index_or_break_revalidation():
+    module = _module()
+    index = _index(_scoped("KH-A", product_lines=["escalator"]))
+
+    first = module.search_index(index, QUERY, model_type="AXIEZ")
+    assert first["matches"][0]["modelFit"] == "other_product"
+    assert "modelFit" not in index["cards"][0]
+    unfiltered = module.search_index(index, QUERY)
+    assert "modelFit" not in unfiltered["matches"][0]
+    module.validate_index(index)
+
+
+def test_model_fit_only_emits_declared_values():
+    module = _module()
+    for scope in ({}, {"product_lines": ["AXIEZ"]}, {"product_lines": ["escalator"]}, {"lists_model_label": ["全エレ機種"]}):
+        assert module.model_fit(_scoped("KH-A", **scope), "AXIEZ")["modelFit"] in module.MODEL_FIT_VALUES
