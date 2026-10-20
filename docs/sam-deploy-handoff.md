@@ -375,3 +375,144 @@ AWS公式の確認先:
 - [create-change-set](https://docs.aws.amazon.com/cli/latest/reference/cloudformation/create-change-set.html): UsePreviousValueとTemplateURLの指定。
 - [変更セットの実行](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-changesets-execute.html): 確認した変更セットの適用。
 - [ロールバックの再開](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-continueupdaterollback.html): UPDATE_ROLLBACK_FAILED時の復旧。
+
+## 14. itaiがdevで実施した操作を順に追う
+
+> 最終検証: 2026-10-20 — 10/14〜15の実行スクリプト、保存済み変更セット・読み戻し結果と照合。以下の再実行用コマンドは構文確認のみで、今回AWSへは実行していない。
+
+### 14.1 成功した作業と、今回の再実行例の区別
+
+実際にはWindowsの専用worktreeで対象版を固定し、AWS CLI / SAM CLIとPython（boto3）を組み合わせた。現状保存・変更セット作成・適用直前の条件照合・読み戻しは作業用Pythonで行い、`sam package`で既存の非公開成果物バケットへコードを送った。共有していない個人用スクリプトをmonaが持っている前提にはしない。以下は**その判断順を、3〜7章のPowerShellで追うための操作手順**であり、当時のコマンド文字列をそのまま再実行するものではない。
+
+| 実施例 | 作業場所・入力 | 実際の変更と結果 |
+|---|---|---|
+| 10/14 法令全文補完（#177） | #177 `f80aee27`と当時のdevelop `20871803`を保持した専用チェックアウトのルート。`phase2-template.yaml`、既存`EleKnowledge-dev-phase2` | 既存パラメーターを保持し、既存法令データバケットの接続値を設定。API / Lambda / IAMのModify 5件、置換なしで適用。UPDATE_COMPLETE後、直接Lambda試験200・参照10件（全文6 / 部分4）。認証済みHTTP・ブラウザE2Eは未実施 |
+| 10/15 アーカイブ復旧（#169） | マージ済み#169相当の専用チェックアウトのルート。`chat-archive-template.yaml`、`eleknowledge-chat-archive-dev` | 既存パラメーターとStreamを保持。失敗先をSQSからS3へ変更。空の旧キュー等を削除し、UPDATE_COMPLETE。S3 / IAM / EventBridge / SNS設定を読み戻した。失敗通知の実配信試験は未実施 |
+| 10/15 お知らせAPI先行反映（#182） | #182と当時のdevelop `53c621f8`を保持した専用チェックアウトのルート。`announcements-monitoring-template.yaml`、`announcements-monitoring-dev` | 稼働中Originalを基準にwrite Lambda / ロールだけを更新。API・permissionも更新し、テーブルと集計コードは保持。UPDATE_COMPLETE後、未認証HTTP401、合成claimsによる直接Lambda試験403 / 200 / 400とページングを確認。認証済みHTTP・ブラウザE2Eは未実施 |
+
+10/14の#177反映はGitHubマージ前の承認済みdev試行である。マージ済み・本番反映済みとは読み替えない。[#177の記録](https://github.com/yukiworkspace/EleKnowledge-AI/pull/177)、[#169の復旧記録](https://github.com/yukiworkspace/EleKnowledge-AI/pull/169)、[#182の先行反映記録](https://github.com/yukiworkspace/EleKnowledge-AI/pull/182)を実施範囲の根拠にする。これらの成功は、現在のPRを同じ変更一覧で適用できる保証ではない。
+
+### 14.2 まず反映する1スタックとソースを固定する
+
+RAG変更ならPhase 1からやり直さず、既存`EleKnowledge-dev-phase2`を選ぶ。アーカイブやお知らせ変更なら上表の対応スタックだけを選ぶ。承認対象コミットを専用チェックアウトへ用意し、その**リポジトリルート**を作業ディレクトリにする。`infrastructure/sam/`や別のworktreeをカレントにしたまま実行しない。
+
+1. 3.1のツール確認と`git status` / `git rev-parse HEAD`で、対象ソースと未コミット差分なしを確認する。
+2. 3.2の変数を今回の反映対象へ設定する。共通の選択はリージョン`ap-northeast-1`、既存スタックの更新、既存の非公開成果物バケット。**プロファイルはitaiの名前をコピーせず、自分が利用を許可された反映先アカウントのもの**を選ぶ。
+3. `sts get-caller-identity`のAccountとArnをローカルで照合する。違う主体ならここで止める。
+4. 成果物バケットは反映先で既に使用中のSAM用を選ぶ。アプリの資料バケットや法令データバケットへ置き換えない。所有者付き`head-bucket`で確認する。分からなければitaiとローカルで照合し、名前を推測しない。
+
+次のメモを**各自の未追跡ローカル設定**へ記入してから進む。個人名・プロファイル名・実アカウントID・バケット名をこの共有文書へ転記しない（AGENTS.md「共有ルールと個人設定の境界」）。
+
+| ローカルで確定する項目 | 照合先 |
+|---|---|
+| ソースの絶対パス、Git SHA、PR番号 | 専用チェックアウトとPRの検証済みhead |
+| 自分のAWSプロファイル、期待するAccount・ロール | 利用を許可された認証設定とSTS結果 |
+| 既存成果物バケット | 当該環境のSAMローカル設定・既存成果物の配置。所有者確認も行う |
+| スタック、テンプレート、変更パラメーター | PRの適用範囲、上表、今回の現状保存 |
+
+### 14.3 現状を保存し、保持する値を決める
+
+4章を実行して`before.json`と`original.json`を保存する。当時の作業ではこれに加え、`list-stack-resources`と対象Lambdaの設定を保存していた。以下を4章の直後に実行する。
+
+```powershell
+$resourceJson = aws cloudformation list-stack-resources --stack-name $StackName --profile $DeployProfile --region $DeployRegion --output json
+if ($LASTEXITCODE -ne 0) { throw '実体ID取得失敗' }
+[IO.File]::WriteAllText("$EvidenceDir/resources-before.json", ($resourceJson -join "`n"), $Utf8NoBom)
+$ResourceIds = @{}
+($resourceJson | ConvertFrom-Json).StackResourceSummaries | ForEach-Object {
+    $ResourceIds[$_.LogicalResourceId] = $_.PhysicalResourceId
+}
+# Phase 2の例。他スタックなら今回更新するLambdaの論理IDへ置き換える。
+foreach ($logicalId in @('RagFunction', 'ChatManagementFunction')) {
+    if (-not $ResourceIds.ContainsKey($logicalId)) { throw "対象Lambdaがない: $logicalId" }
+    $configJson = aws lambda get-function-configuration --function-name $ResourceIds[$logicalId] --profile $DeployProfile --region $DeployRegion --output json
+    if ($LASTEXITCODE -ne 0) { throw "Lambda設定保存失敗: $logicalId" }
+    [IO.File]::WriteAllText("$EvidenceDir/$logicalId-before.json", ($configJson -join "`n"), $Utf8NoBom)
+}
+```
+
+保持するのはスタックParametersだけではない。実Lambdaのモデル、KB、法令フラグ、CodeSha256、ロールも対象ソースと照合する。#177では既存法令データソースの所有者と`kb/egov/`を確かめ、接続値だけ追加し、KB新設・同期は行わなかった。#182では全体適用すると集計移行を混ぜるため、Originalからwrite Lambda / ロールのPropertiesだけを差し替える候補にした。**差が説明できなければ5章へ進まず、8章で限定反映を準備する。**
+
+### 14.4 build / packageから変更セット作成まで
+
+1. 5章を順に実行する。通常更新の再実行例は`sam validate --lint` → `sam build --no-cached` → **build配下のtemplateを**`sam package` → packaged templateを既存S3へ配置、の順。限定反映では8章で準備した候補と対応するビルド成果物を使い、稼働中S3 CodeUriを保持する。
+2. `resolve_s3`混入を避け、最小設定と`--no-resolve-s3`を使う。10/15のアーカイブpackageでもこの指定が必要だった。ローカルの設定だけを変えてSCPを回避したり、バケットを作り直したりしない。
+3. 6.1で`$PlannedOverrides`を決め、既存の他項目をすべて`UsePreviousValue`にする。**今回のPhase 2コード更新では`RagLogicVersion=$DeployCommit`を明示する。** 10/14の既存値保持を、そのまま版ラベルも保持する指示として使わない。既存機能フラグやモデルをテンプレートのDefaultへ戻さない。
+4. 既存のCloudFormationサービスロールがある場合は、6.1の`$request`作成後・JSON保存前に次を加える。当時の作成スクリプトもRoleARNがある場合に引き継いでいる。
+
+```powershell
+if ($BeforeStack.RoleARN) { $request['RoleARN'] = $BeforeStack.RoleARN }
+```
+
+5. 6.1の`create-change-set`と作成待機・`describe-change-set`を実行する。当時はpackage後のテンプレートが51,200 bytes未満であることを確認して`TemplateBody`で送った。5〜6章の`TemplateURL`方式は大きいテンプレートにも対応するための再実行例である。両方を同時に指定しない。
+
+### 14.5 実行してよいと判断した条件
+
+当時は`CREATE_COMPLETE / AVAILABLE`だけでは進めず、全リソースのActionとReplacementを予定一覧へ照合し、実行直前のParametersが保存時から不変であることを再確認した。
+
+| 実例 | 許容した差分・直前条件 |
+|---|---|
+| #177 | `ChatApi` / `ChatManagementFunction` / `RagApi` / `RagFunction` / `RagLambdaRole`のModify 5件だけ。全Replacement=False、Add / Removeなし。Environment=dev、法令モード有効、保存時からパラメーター不変 |
+| #169 | ArchiveBucket / Role / Function / Stream mapping / Glue表のModify、EventBridgeルールAdd、旧キューとアラームRemove。旧キューの可視・処理中・遅延がすべて0。Stream ARN一致。Glue表のConditionalは列追加だけ・名前と保存先維持を個別確認した例外で、一般的な実行許可ではない |
+| #182 | write Lambda / IAM / AppApi / StageのModify（置換なし）、GET用permission Add、SAM生成API DeploymentのAdd / Removeだけ。metrics TTL=DISABLED、利用するGSI=ACTIVE、対象外4関数のCodeSha256を保存 |
+
+現在のPRでは現在の予定一覧を作り直す。上表を許可リストとして流用しない。追加・置換・削除、IAM拡大、TTL変更、無関係なLambda更新が出たら止める。#169のような削除を含む変更は具体的な変更セットへの承認を確認してから実行した。
+
+7章の実行直前に、次の比較も行う。**NoEcho値はマスクされたままなので、この比較だけでその値の不変までは証明できない。** 他の更新が入った場合や不明点がある場合は作り直す。
+
+```powershell
+$latestJson = aws cloudformation describe-stacks --stack-name $StackName --profile $DeployProfile --region $DeployRegion --output json
+if ($LASTEXITCODE -ne 0) { throw '実行直前のスタック確認失敗' }
+$LatestStack = ($latestJson | ConvertFrom-Json).Stacks[0]
+if ($LatestStack.StackId -ne $BeforeStack.StackId -or $LatestStack.StackStatus -ne $BeforeStack.StackStatus -or
+    $LatestStack.LastUpdatedTime -ne $BeforeStack.LastUpdatedTime) { throw '保存後にスタック状態が変わった' }
+$beforeParameters = $BeforeStack.Parameters | Sort-Object ParameterKey | ConvertTo-Json -Depth 10 -Compress
+$latestParameters = $LatestStack.Parameters | Sort-Object ParameterKey | ConvertTo-Json -Depth 10 -Compress
+if ($beforeParameters -ne $latestParameters) { throw '保存後にパラメーターが変わった' }
+```
+
+### 14.6 同じ変更セットを実行し、UPDATE_COMPLETEの後も読む
+
+7章の`execute-change-set` → `wait stack-update-complete` → `describe-stacks`を実行する。失敗したら14.7へ進み、別の`sam deploy`を重ねない。次の読取りはPhase 2の例で、14.3の`$ResourceIds`を使う。
+
+```powershell
+foreach ($logicalId in @('RagFunction', 'ChatManagementFunction')) {
+    $afterJson = aws lambda get-function-configuration --function-name $ResourceIds[$logicalId] --profile $DeployProfile --region $DeployRegion --output json
+    if ($LASTEXITCODE -ne 0) { throw "Lambda読み戻し失敗: $logicalId" }
+    [IO.File]::WriteAllText("$EvidenceDir/$logicalId-after.json", ($afterJson -join "`n"), $Utf8NoBom)
+    $after = $afterJson | ConvertFrom-Json
+    if ($after.State -ne 'Active' -or $after.LastUpdateStatus -ne 'Successful') { throw "Lambda更新未完了: $logicalId" }
+    if ($logicalId -eq 'RagFunction' -and $after.Environment.Variables.RAG_LOGIC_VERSION -ne $DeployCommit) {
+        throw 'RAGの反映版が対象ソースと一致しない'
+    }
+    # before/afterをローカルで照合。更新対象は期待したコード版、対象外はCodeSha256不変を確認する。
+}
+```
+
+さらに`list-stack-resources`を再取得し、置換しない予定のテーブル・S3・API等の実体IDが一致すること、変更したパラメーター以外が維持されていることを確認する。#169ではmapping Enabled / LastProcessingResult OK、S3失敗先、versioning / AES256 / EventBridge、IAMのResourceAccount条件とListBucket、SNS対象と発行許可、Glue列を確認した。#182では対象外4関数のコードSHA、テーブル / API実体ID、metrics無効 / announcements有効のTTLを読み戻した。
+
+その後の確認は、次の3つを別々に記録する。当時の合成claims試験だけで「ログインからのE2E成功」と書かない。
+
+1. **直接Lambda試験**: 許可された合成データで所有者・admin境界、200 / 400 / 403、RAG参照やページングを確認。既存会話を操作しない。
+2. **HTTP試験**: 実APIで未認証拒否を確認。認証済みHTTPは許可されたテストアカウントで別途実施する。JWT・質問回答本文を共有ログへ出さない。
+3. **ブラウザE2E**: Cognitoログイン → 画面 → 対象API → 応答を別途確認する。未実施なら未実施と残す。Amplifyの対象コミットとBUILD / DEPLOY / VERIFY成功も、バックエンド試験と別に記録する。
+
+### 14.7 止まったときに次に見るコマンド
+
+| 止まった場所 | 次に確認する操作 | 再実行せず止める条件 |
+|---|---|---|
+| 認証・所有者確認 | `aws sts get-caller-identity`、所有者指定の`aws s3api head-bucket`（3.2のprofile / regionを付ける） | アカウント違い、未許可ロール、所有者不一致、SCPの明示Deny。権限を広げて押し通さない |
+| build / package | 失敗したSAMコマンドのエラー、Runtimeと`python --version`、built templateのCodeUri、`sam package --help` | 依存未解決、別worktreeの成果物、S3自動作成要求。ソースtemplateの直接deployへ切り替えない |
+| 変更セット作成 | 6.1の`describe-change-set`のStatus / StatusReason | 変更なしなら適用不要。権限・参照エラーは解消まで停止。失敗を全部「変更なし」と扱わない |
+| 差分確認 | `describe-change-set --include-property-values`と保存済みOriginal・Parameters | 予定外のAdd / Remove / Replacement、未承認IAM・TTL・コード差分、保存後の別更新 |
+| execute後のwait | 下記のスタック状態・イベント読取り | UPDATE_ROLLBACK中は待機。UPDATE_ROLLBACK_COMPLETEは失敗として記録。UPDATE_ROLLBACK_FAILEDは11章へ。スタック削除で復旧しない |
+| UPDATE_COMPLETE後 | Lambda設定読取り、API / permission / authorizer、必要なDynamoDB GSI / TTLとIAMを対象ごとに確認 | 版不一致、AccessDenied、404、機能フラグの戻り。認可やWAFを外して回避しない |
+
+```powershell
+aws cloudformation describe-stacks --stack-name $StackName --profile $DeployProfile --region $DeployRegion --query 'Stacks[0].StackStatus'
+if ($LASTEXITCODE -ne 0) { throw 'スタック状態取得失敗' }
+aws cloudformation describe-stack-events --stack-name $StackName --profile $DeployProfile --region $DeployRegion --query 'StackEvents[0:25].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' --output table
+if ($LASTEXITCODE -ne 0) { throw 'イベント取得失敗' }
+```
+
+イベントの理由にも実リソース値が含まれることがあるため、確認はローカルで行う。12章の完了記録には、成功・ロールバック・未確認試験・次の担当を区別して残す。
