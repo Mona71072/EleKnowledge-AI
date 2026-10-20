@@ -22,6 +22,7 @@ function loadTsx(path, mocks) {
     if (Object.hasOwn(mocks, name)) return mocks[name];
     if (name === './SenpaiConversationSidebar') return loadTsx('../src/components/knowledge/SenpaiConversationSidebar.tsx', {});
     if (name === '@/data/kbModelTypes') return loadTsx('../src/data/kbModelTypes.ts', {});
+    if (name === '@/lib/knowledge-senpai-synthesis.mjs') return { requestSenpaiSynthesis: async () => ({}) };
     if (name === '@/hooks/useSenpaiHistory') return { useSenpaiHistory: () => ({ entries: [], loading: false, error: '', complete: true, opening: false, openError: '', openConversation: async () => {}, resetSelection() {}, refresh() {} }) };
     return require(name);
   };
@@ -501,4 +502,144 @@ test('history sidebar selects the requested consultation, escapes titles, and di
   assert.match(failed, /履歴の取得失敗/);
   assert.match(failed, /履歴を再取得/);
   assert.doesNotMatch(failed, /履歴はまだありません/);
+});
+
+
+function findAnyElement(root, predicate) {
+  if (!root || typeof root !== 'object') return null;
+  if (Array.isArray(root)) {
+    for (const item of root) { const found = findAnyElement(item, predicate); if (found) return found; }
+    return null;
+  }
+  if (root.props && predicate(root)) return root;
+  const children = root.props?.children;
+  for (const child of Array.isArray(children) ? children : [children]) {
+    const found = findAnyElement(child, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
+const TURN_UUID = '20000000-0000-4000-8000-000000000001';
+const baseAnswer = (mode) => ({
+  mode, query: '質問', content: `${mode}回答`, responseType: 'pages', sessionId: `${mode}-s`, messageId: `${mode}-m`,
+  receivedAt: '2026-10-20T00:00:00Z', sourceDocuments: [], pageCandidates: [], clarifyQuestions: [],
+});
+
+function synthesisChat(turnOverrides = {}, { running = false } = {}) {
+  const calls = [];
+  const turn = {
+    id: 1, senpaiTurnId: TURN_UUID, query: '質問',
+    normal: lane('success', { answer: baseAnswer('normal') }),
+    law: lane('success', { answer: baseAnswer('law') }),
+    ...turnOverrides,
+  };
+  const snapshot = { conversationId: '10000000-0000-4000-8000-000000000001', running, turns: [turn] };
+  const render = loadInteractiveChat({
+    initialSnapshot: snapshot,
+    createController: (initial) => ({
+      getSnapshot: () => initial, send: async () => {}, cancel() {}, reset() {}, dispose() {},
+      synthesize: async (id) => { calls.push(id); },
+    }),
+  });
+  render();
+  return { render, calls };
+}
+
+const html = (render) => renderToStaticMarkup(render());
+
+test('offers a manual synthesis button only when both lanes settled and one succeeded', () => {
+  assert.match(html(synthesisChat().render), /工技先輩のまとめを作る/);
+  assert.match(html(synthesisChat({ law: lane('error', { message: 'x' }) }).render), /工技先輩のまとめを作る/);
+  assert.doesNotMatch(html(synthesisChat({}, { running: true }).render), /工技先輩のまとめを作る/);
+  assert.doesNotMatch(html(synthesisChat({ law: lane('loading') }).render), /工技先輩のまとめを作る/);
+  assert.doesNotMatch(html(synthesisChat({ normal: lane('error'), law: lane('cancelled') }).render), /工技先輩のまとめを作る/);
+  assert.doesNotMatch(html(synthesisChat({ senpaiTurnId: undefined }).render), /工技先輩のまとめを作る/);
+});
+
+test('the synthesis button asks the controller to synthesize that turn', () => {
+  const { render, calls } = synthesisChat();
+  const element = findAnyElement(render(), (node) => typeof node.props.onSynthesize === 'function');
+  assert.ok(element);
+  element.props.onSynthesize(1);
+  assert.deepEqual(calls, [1]);
+});
+
+test('renders loading, error with retry, and a saved synthesis above the lane columns', () => {
+  const loading = html(synthesisChat({ synthesis: { status: 'loading' } }).render);
+  assert.match(loading, /まとめを作成しています/);
+  assert.doesNotMatch(loading, /工技先輩のまとめを作る/);
+
+  const failed = html(synthesisChat({ synthesis: { status: 'error', message: '時間内に完了しませんでした' } }).render);
+  assert.match(failed, /時間内に完了しませんでした/);
+  assert.match(failed, /工技先輩のまとめを作る/);
+
+  const done = html(synthesisChat({ synthesis: {
+    status: 'success', content: '<b>候補</b>です\n改行', messageId: `senpai-synthesis-${TURN_UUID}`,
+    inputs: { normal: true, law: false, knowhowCount: 2 },
+  } }).render);
+  assert.match(done, /工技先輩のまとめ（試作・開発中）/);
+  assert.match(done, /下の2つの回答を組み合わせただけ/);
+  assert.match(done, /出典で確認/);
+  assert.match(done, /&lt;b&gt;候補&lt;\/b&gt;です/);
+  assert.doesNotMatch(done, /<b>候補/);
+  assert.doesNotMatch(done, /工技先輩のまとめを作る/);
+  assert.match(done, /法令KBの回答は使っていません/);
+  assert.ok(done.indexOf('工技先輩のまとめ（試作・開発中）') < done.indexOf('技術KBからの回答'));
+});
+
+test('wires the synthesis source to the RAG API with the id token', async () => {
+  const React = require('react');
+  let synthesisSource;
+  const requests = [];
+  const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
+    react: { ...React, useEffect(effect) { effect(); }, useState(initial) { return [initial, () => {}]; }, useRef(initial) { return { current: initial }; } },
+    'next/link': Link,
+    '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
+    '@/lib/chat-session-link.mjs': { buildChatSessionHref: () => '/chat' },
+    '@/lib/knowledge-senpai-chat.mjs': {
+      createSenpaiChat: (options) => {
+        synthesisSource = options.synthesisSource;
+        return { getSnapshot: () => ({ turns: [], running: false }), send: async () => {}, cancel() {}, reset() {}, dispose() {} };
+      },
+    },
+    '@/lib/knowledge-senpai-synthesis.mjs': { requestSenpaiSynthesis: async (options) => { requests.push(options); return {}; } },
+    '@/lib/knowledge-research.mjs': { queryKnowledgeSource: async () => ({}), researchSourceHref: () => null },
+  }).KnowledgeSenpaiChat;
+  Chat();
+  const signal = new AbortController().signal;
+  await synthesisSource({ senpaiConversationId: 'c', senpaiTurnId: 't', signal });
+  assert.equal(requests[0].senpaiConversationId, 'c');
+  assert.equal(requests[0].senpaiTurnId, 't');
+  assert.equal(requests[0].signal, signal);
+  assert.equal(await requests[0].getToken(), 'test-token');
+});
+
+test('labels the new scope-verification keys and never renders an undefined label', () => {
+  const answer = {
+    ...baseAnswer('normal'),
+    knowhow: {
+      status: 'matched', indexVersion: `sha256:${'a'.repeat(64)}`, searchTerms: [],
+      matches: [{
+        knowledgeId: 'KH-1', cardVersion: 1, sha256: 'b'.repeat(64), title: 'カード', status: 'draft',
+        usage: 'navigation_only', body: '本文', searchTerms: [],
+        sourceRefs: [{ ref_type: 'x', brand_new_ref: 'R1' }],
+        modelScope: {
+          scope_status: 'verified', scope_verified_by: '山田', scope_verified_at: '2026-10-19', future_scope_key: ['A', 'B'],
+        },
+      }],
+    },
+  };
+  const verified = html(synthesisChat({ normal: lane('success', { answer }) }).render);
+  assert.match(verified, /適用範囲の確認/);
+  assert.match(verified, /担当者確認済み/);
+  assert.match(verified, /確認者/);
+  assert.match(verified, /確認日/);
+  assert.match(verified, /future_scope_key/);
+  assert.match(verified, /brand_new_ref/);
+  assert.doesNotMatch(verified, /undefined/);
+
+  const unverified = structuredClone(answer);
+  unverified.knowhow.matches[0].modelScope = { scope_status: 'pending' };
+  assert.match(html(synthesisChat({ normal: lane('success', { answer: unverified }) }).render), /未確認/);
 });

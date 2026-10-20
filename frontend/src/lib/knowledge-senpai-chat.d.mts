@@ -1,10 +1,20 @@
 import type { KnowledgeResearchMode, ResearchAnswer } from './knowledge-research.mjs';
+import type { SenpaiSynthesisInputs, SenpaiSynthesisResult } from './knowledge-senpai-synthesis.mjs';
 
 export type SenpaiLaneStatus = 'loading' | 'success' | 'error' | 'cancelled' | 'paused';
 
 export type SenpaiChatLane = {
   status: SenpaiLaneStatus;
   answer?: ResearchAnswer;
+  message?: string;
+};
+
+export type SenpaiSynthesisState = {
+  status: 'loading' | 'success' | 'error';
+  /** Present on success: the saved synthesis text (also restored from history). */
+  content?: string;
+  messageId?: string;
+  inputs?: SenpaiSynthesisInputs;
   message?: string;
 };
 
@@ -16,6 +26,8 @@ export type SenpaiChatTurn = {
   query: string;
   normal: SenpaiChatLane;
   law: SenpaiChatLane;
+  /** Absent until the user asks for the combined summary (or when restoring an older history). */
+  synthesis?: SenpaiSynthesisState;
 };
 
 export type SenpaiChatSnapshot = {
@@ -36,9 +48,20 @@ export type SenpaiChatQuerySource = (request: {
   signal: AbortSignal;
 }) => Promise<ResearchAnswer>;
 
+export type SenpaiChatSynthesisSource = (request: {
+  senpaiConversationId: string;
+  senpaiTurnId: string;
+  signal: AbortSignal;
+}) => Promise<SenpaiSynthesisResult>;
+
 export type SenpaiChatController = {
   getSnapshot(): SenpaiChatSnapshot;
   send(query: string, options?: { modelType?: string }): Promise<void>;
+  /**
+   * Build the combined summary of a turn. Allowed only when no search is running, both lanes
+   * have settled and at least one succeeded; otherwise rejects with a validation error.
+   */
+  synthesize(turnId: number): Promise<void>;
   cancel(): void;
   reset(): void;
   /** Replace current state from a validated server history response. */
@@ -48,6 +71,8 @@ export type SenpaiChatController = {
 
 export function createSenpaiChat(options: {
   querySource: SenpaiChatQuerySource;
+  /** Required for `synthesize`; omit to disable the summary. */
+  synthesisSource?: SenpaiChatSynthesisSource;
   onChange?: (snapshot: SenpaiChatSnapshot) => void;
   /** Injectable UUID generator for deterministic tests. */
   createId?: () => string;

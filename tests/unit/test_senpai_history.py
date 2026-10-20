@@ -737,3 +737,111 @@ def test_moto_writer_to_grouped_handlers_preserves_saved_senpai_payload(rag_app)
     assert normal_answer["knowhow"]["matches"][0]["cardVersion"] == 7
     assert normal_answer["knowhow"]["matches"][0]["body"] == "保存時点の本文"
 
+
+
+def _synthesis_row(turn_id="22222222-2222-4222-8222-222222222222", **extra):
+    return {
+        **_tagged_message(
+            f"senpai-synthesis-{turn_id}", role="assistant", content="まとめ本文",
+            timestamp="2026-10-20T01:05:00Z",
+        ),
+        "messageId": f"senpai-synthesis-{turn_id}",
+        "ragMode": "senpai_synthesis",
+        "senpaiTurnId": turn_id,
+        "synthesisInputs": {"normal": True, "law": False, "knowhowCount": 0},
+        **extra,
+    }
+
+
+def test_synthesis_row_never_appears_in_ordinary_session_list():
+    mod, table = _load_chat_app()
+    regular = _tagged_message("regular-1")
+    regular.pop("senpaiConversationId")
+    regular.pop("senpaiTurnId")
+    table.query.return_value = {"Items": [_synthesis_row(), regular]}
+
+    response = mod.lambda_handler(_chat_event("/chat/sessions"), None)
+
+    assert response["statusCode"] == 200
+    sessions = json.loads(response["body"])["sessions"]
+    assert [row["sessionId"] for row in sessions] == ["regular-1"]
+
+
+def test_non_admin_cannot_read_synthesis_session_through_generic_detail_route():
+    mod, table = _load_chat_app()
+    turn_id = "22222222-2222-4222-8222-222222222222"
+    table.query.return_value = {"Items": [_synthesis_row()]}
+
+    response = mod.lambda_handler(
+        _chat_event(
+            f"/chat/sessions/senpai-synthesis-{turn_id}/messages",
+            sub="owner-1", groups="users",
+            path_params={"sessionId": f"senpai-synthesis-{turn_id}"},
+        ), None
+    )
+
+    assert response["statusCode"] == 404
+
+
+def test_senpai_detail_returns_synthesis_row_with_its_turn():
+    mod, table = _load_chat_app()
+    table.query.return_value = {"Items": [
+        _tagged_message(role="user", content="質問"),
+        _tagged_message(role="assistant", content="技術回答", timestamp="2026-10-20T01:01:00Z"),
+        _synthesis_row(),
+    ]}
+
+    response = mod.lambda_handler(
+        _chat_event(
+            "/chat/sessions/11111111-1111-4111-8111-111111111111/messages",
+            qs={"context": "senpai"},
+            path_params={"sessionId": "11111111-1111-4111-8111-111111111111"},
+        ), None
+    )
+
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert body["complete"] is True
+    synthesis = [row for row in body["messages"] if row["ragMode"] == "senpai_synthesis"]
+    assert len(synthesis) == 1
+    assert synthesis[0]["content"] == "まとめ本文"
+    assert synthesis[0]["messageId"] == "senpai-synthesis-22222222-2222-4222-8222-222222222222"
+    assert synthesis[0]["synthesisInputs"] == {"normal": True, "law": False, "knowhowCount": 0}
+    assert len(body["messages"]) == 3
+
+
+def test_senpai_detail_drops_synthesis_row_without_its_turn_and_marks_incomplete():
+    mod, table = _load_chat_app()
+    lonely_turn = "55555555-5555-4555-8555-555555555555"
+    table.query.return_value = {"Items": [
+        _tagged_message(role="user", content="質問"),
+        _synthesis_row(turn_id=lonely_turn),
+    ]}
+
+    response = mod.lambda_handler(
+        _chat_event(
+            "/chat/sessions/11111111-1111-4111-8111-111111111111/messages",
+            qs={"context": "senpai"},
+            path_params={"sessionId": "11111111-1111-4111-8111-111111111111"},
+        ), None
+    )
+
+    body = json.loads(response["body"])
+    assert body["complete"] is False
+    assert [row["ragMode"] for row in body["messages"]] == ["normal"]
+
+
+def test_senpai_list_counts_turns_not_synthesis_rows():
+    mod, table = _load_chat_app()
+    table.query.return_value = {"Items": [
+        _tagged_message(role="user", content="最初の質問"),
+        _synthesis_row(),
+    ]}
+
+    response = mod.lambda_handler(
+        _chat_event("/chat/sessions", qs={"context": "senpai"}), None
+    )
+
+    sessions = json.loads(response["body"])["sessions"]
+    assert sessions[0]["messageCount"] == 1
+    assert sessions[0]["title"] == "最初の質問"

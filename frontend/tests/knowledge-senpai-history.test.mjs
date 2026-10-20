@@ -222,3 +222,64 @@ test('ignores a model filter that only appears on the law lane', async () => {
   const result = await readWithNormalAssistant({});
   assert.equal('modelType' in result.turns[0], false);
 });
+
+function synthesisRow(overrides = {}) {
+  return {
+    sessionId: `senpai-synthesis-${turnId}`, messageId: `senpai-synthesis-${turnId}`, userId: 'synthetic-user',
+    role: 'assistant', ragMode: 'senpai_synthesis', content: '保存されたまとめ本文',
+    timestamp: '2026-10-20T01:05:00.000Z', ttl: 1792458000,
+    senpaiConversationId: conversationId, senpaiTurnId: turnId,
+    synthesisInputs: { normal: true, law: true, knowhowCount: 1 },
+    ...overrides,
+  };
+}
+
+async function readWith(messages) {
+  return readSenpaiConversation({
+    baseUrl: BASE, getToken: async () => TOKEN, conversationId,
+    fetchImpl: historyFetch({ context: 'senpai', conversationId, complete: true, readOnly: false, messages }),
+  });
+}
+
+const laneRows = () => [row('user', 'normal'), row('assistant', 'normal'), row('user', 'law'), row('assistant', 'law')];
+
+test('attaches a saved synthesis row to its turn without turning it into a lane', async () => {
+  const result = await readWith([...laneRows(), synthesisRow()]);
+  assert.equal(result.turns.length, 1);
+  assert.deepEqual(result.turns[0].synthesis, {
+    status: 'success', content: '保存されたまとめ本文', messageId: `senpai-synthesis-${turnId}`,
+    inputs: { normal: true, law: true, knowhowCount: 1 },
+  });
+  assert.equal(result.turns[0].normal.status, 'success');
+  assert.equal(result.turns[0].law.status, 'success');
+});
+
+test('older histories without a synthesis row have no synthesis field', async () => {
+  const result = await readWith(laneRows());
+  assert.equal('synthesis' in result.turns[0], false);
+});
+
+test('omits malformed synthesis inputs but keeps the saved text', async () => {
+  const result = await readWith([...laneRows(), synthesisRow({ synthesisInputs: { normal: 'x' } })]);
+  assert.equal(result.turns[0].synthesis.content, '保存されたまとめ本文');
+  assert.equal('inputs' in result.turns[0].synthesis, false);
+});
+
+test('rejects synthesis rows that do not belong to the turn or are malformed', async () => {
+  const bad = [
+    synthesisRow({ messageId: 'senpai-synthesis-other' }),
+    synthesisRow({ role: 'user' }),
+    synthesisRow({ content: '  ' }),
+    synthesisRow({ content: 'x'.repeat(32_001) }),
+    synthesisRow({ timestamp: 'later' }),
+    synthesisRow({ userId: 'someone-else' }),
+  ];
+  for (const synthesis of bad) {
+    await assert.rejects(readWith([...laneRows(), synthesis]), (error) => error.code === 'invalid_response');
+  }
+  await assert.rejects(readWith([...laneRows(), synthesisRow(), synthesisRow({ messageId: `senpai-synthesis-${turnId}` })]), (error) => error.code === 'invalid_response');
+});
+
+test('a synthesis row cannot create a turn on its own', async () => {
+  await assert.rejects(readWith([synthesisRow()]), (error) => error.code === 'invalid_response');
+});

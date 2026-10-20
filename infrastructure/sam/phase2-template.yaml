@@ -92,6 +92,14 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: Enable the admin-only development Markdown navigation feature
 
+  SenpaiSynthesisEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Enable the admin-only prototype "工技先輩のまとめ" (POST /rag/senpai/synthesis).
+      Effective only when Environment is dev. Each call invokes BedrockModelId once.
+
   KnowhowIndexBucket:
     Type: String
     Default: ''
@@ -372,6 +380,9 @@ Conditions:
     - !Equals [!Ref KnowhowEnabled, 'true']
     - !Not [!Equals [!Ref KnowhowIndexBucket, '']]
     - !Not [!Equals [!Ref KnowhowIndexKey, '']]
+  SenpaiSynthesisDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref SenpaiSynthesisEnabled, 'true']
 
 Globals:
   Function:
@@ -727,6 +738,114 @@ Resources:
             Path: /rag/document
             Method: GET
 
+  # ============================================================================
+  # Lambda Functions - Senpai synthesis (dev-only prototype, off by default)
+  # ============================================================================
+  SenpaiSynthesisLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # BedrockModelId だけを呼べる（RagLambdaRole と同じ ARN の組み立て）。KB 検索権限は持たない。
+        - PolicyName: BedrockInvokeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - !Ref BedrockModelId
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub
+                    - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                    - FoundationModelId: !Join
+                        - '.'
+                        - - !Select [1, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                          - !Select [2, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                Condition:
+                  StringLike:
+                    bedrock:InferenceProfileArn: !If
+                      - BedrockModelIdIsApplicationProfile
+                      - !Ref BedrockModelId
+                      - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+        # 自分の相談の読み取り（ユーザー GSI の Query。Scan は許可しない）と、まとめ 1 行の条件付き保存だけ。
+        - PolicyName: ChatLogsSynthesisAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource:
+                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub
+                    - ${TableArn}/index/userId-timestamp-index
+                    - TableArn:
+                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "2"
+
+  SenpaiSynthesisFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+      FunctionName: !Sub senpai-synthesis-${Environment}
+      CodeUri: ../../lambda/rag/senpai-synthesis/
+      Handler: app.lambda_handler
+      Description: Dev-only prototype that combines the saved technical and law answers of one Senpai turn
+      Role: !GetAtt SenpaiSynthesisLambdaRole.Arn
+      # API Gateway の統合タイムアウト（29 秒）より短い Bedrock 読み取り待ち + 保存の余裕。
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          SENPAI_SYNTHESIS_ENABLED: !If [SenpaiSynthesisDevEnabled, 'true', 'false']
+          ENVIRONMENT: !Ref Environment
+          ADMIN_GROUP_NAME: admin
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_READ_TIMEOUT: '22'
+          SENPAI_SYNTHESIS_MAX_TOKENS: '2048'
+          CHATLOGS_TABLE:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+      Events:
+        SynthesisApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/senpai/synthesis
+            Method: POST
+
   ChatManagementFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -964,6 +1083,10 @@ Outputs:
     Export:
       Name: !Sub ${ProjectName}-${Environment}-RagFunctionArn
   
+  SenpaiSynthesisFunctionArn:
+    Description: Senpai synthesis (dev-only prototype) Lambda Function ARN
+    Value: !GetAtt SenpaiSynthesisFunction.Arn
+
   ChatManagementFunctionArn:
     Description: Chat Management Lambda Function ARN
     Value: !GetAtt ChatManagementFunction.Arn

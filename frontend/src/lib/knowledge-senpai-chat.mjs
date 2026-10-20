@@ -5,6 +5,7 @@ const MAX_QUERY_LENGTH = 2_000;
 const MAX_RESTORED_TURNS = 500;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const LANE_STATUSES = new Set(['success', 'error', 'cancelled', 'paused']);
+const MAX_SYNTHESIS_LENGTH = 32_000;
 
 function chatError(message) {
   return new KnowledgeResearchError('validation', message);
@@ -27,6 +28,19 @@ export function normalizeSavedModelType(value) {
   return value;
 }
 
+function normalizeSavedSynthesis(value) {
+  if (!value || value.status !== 'success' || typeof value.content !== 'string'
+    || !value.content.trim() || value.content.length > MAX_SYNTHESIS_LENGTH
+    || typeof value.messageId !== 'string' || !value.messageId.trim() || value.messageId.length > 128) return undefined;
+  const inputs = value.inputs;
+  const validInputs = inputs && typeof inputs.normal === 'boolean' && typeof inputs.law === 'boolean'
+    && Number.isSafeInteger(inputs.knowhowCount) && inputs.knowhowCount >= 0;
+  return {
+    status: 'success', content: value.content, messageId: value.messageId,
+    ...(validInputs ? { inputs: { normal: inputs.normal, law: inputs.law, knowhowCount: inputs.knowhowCount } } : {}),
+  };
+}
+
 function cloneTurn(turn) {
   return Object.freeze({
     id: turn.id,
@@ -35,6 +49,7 @@ function cloneTurn(turn) {
     query: turn.query,
     normal: Object.freeze({ ...turn.normal, ...(turn.normal.answer ? { answer: freezeCopy(turn.normal.answer) } : {}) }),
     law: Object.freeze({ ...turn.law, ...(turn.law.answer ? { answer: freezeCopy(turn.law.answer) } : {}) }),
+    ...(turn.synthesis ? { synthesis: freezeCopy(turn.synthesis) } : {}),
   });
 }
 
@@ -99,6 +114,7 @@ function validateRestore(input) {
       law: turn.law.status === 'success'
         ? { status: 'success', answer: turn.law.answer }
         : { status: 'paused', message: turn.law.message || '保存された回答がないため、この検索先の続きは休止しています' },
+      ...(normalizeSavedSynthesis(turn.synthesis) ? { synthesis: normalizeSavedSynthesis(turn.synthesis) } : {}),
     };
   });
   if (sessions.normal && sessions.normal === sessions.law) {
@@ -119,7 +135,7 @@ function validateRestore(input) {
 }
 
 /** Manage isolated technical/law sessions and restore server-backed Senpai history. */
-export function createSenpaiChat({ querySource, onChange = () => {}, createId = defaultCreateId }) {
+export function createSenpaiChat({ querySource, synthesisSource, onChange = () => {}, createId = defaultCreateId }) {
   if (typeof querySource !== 'function') throw chatError('検索サービスの設定を確認してください');
   if (typeof createId !== 'function') throw chatError('相談履歴の識別情報を作成できませんでした');
 
@@ -133,6 +149,7 @@ export function createSenpaiChat({ querySource, onChange = () => {}, createId = 
   let disposed = false;
   let generation = 0;
   let nextTurnId = 1;
+  const synthesisRuns = new Map();
 
   function getSnapshot() {
     return Object.freeze({
@@ -244,6 +261,62 @@ export function createSenpaiChat({ querySource, onChange = () => {}, createId = 
     }
   }
 
+  function abortSyntheses() {
+    for (const controller of synthesisRuns.values()) controller.abort();
+    synthesisRuns.clear();
+  }
+
+  function setSynthesis(turnId, synthesis) {
+    turns = turns.map((turn) => turn.id === turnId ? { ...turn, synthesis } : turn);
+    notify();
+  }
+
+  function synthesisTarget(turnId) {
+    const turn = turns.find((item) => item.id === turnId);
+    const lanes = turn ? [turn.normal, turn.law] : [];
+    const settled = lanes.length > 0 && lanes.every((lane) => lane.status !== 'loading');
+    if (typeof synthesisSource !== 'function' || running || !conversationId || !turn?.senpaiTurnId
+      || !settled || !lanes.some((lane) => lane.status === 'success')) {
+      throw chatError('回答が揃ってから、まとめを作成してください');
+    }
+    return turn;
+  }
+
+  async function synthesize(turnId) {
+    if (disposed) return;
+    const turn = synthesisTarget(turnId);
+    if (turn.synthesis?.status === 'loading' || turn.synthesis?.status === 'success') return;
+    const request = new AbortController();
+    const senpaiConversationId = conversationId;
+    synthesisRuns.set(turn.id, request);
+    setSynthesis(turn.id, { status: 'loading' });
+    // reset, restore and dispose clear synthesisRuns, so a missing entry means the result is stale.
+    const stale = () => disposed || synthesisRuns.get(turn.id) !== request;
+    try {
+      const result = await synthesisSource({
+        senpaiConversationId, senpaiTurnId: turn.senpaiTurnId, signal: request.signal,
+      });
+      if (stale()) return;
+      if (!result || result.senpaiConversationId !== senpaiConversationId
+        || result.senpaiTurnId !== turn.senpaiTurnId || typeof result.content !== 'string' || !result.content.trim()
+        || typeof result.messageId !== 'string') {
+        setSynthesis(turn.id, { status: 'error', message: 'まとめの内容を確認できませんでした。もう一度お試しください' });
+        return;
+      }
+      setSynthesis(turn.id, {
+        status: 'success', content: result.content, messageId: result.messageId,
+        ...(result.inputs ? { inputs: result.inputs } : {}),
+      });
+    } catch (error) {
+      if (stale()) return;
+      const message = error instanceof KnowledgeResearchError
+        ? error.message : 'まとめを作成できませんでした。時間をおいて再度お試しください';
+      setSynthesis(turn.id, { status: 'error', message });
+    } finally {
+      if (synthesisRuns.get(turn.id) === request) synthesisRuns.delete(turn.id);
+    }
+  }
+
   function cancel() {
     if (!active || !running) return;
     const run = active;
@@ -266,6 +339,7 @@ export function createSenpaiChat({ querySource, onChange = () => {}, createId = 
   }
 
   function reset() {
+    abortSyntheses();
     if (active) active.controller.abort();
     active = null;
     generation += 1;
@@ -281,6 +355,7 @@ export function createSenpaiChat({ querySource, onChange = () => {}, createId = 
 
   function restore(snapshot) {
     const prepared = validateRestore(snapshot);
+    abortSyntheses();
     if (active) active.controller.abort();
     active = null;
     generation += 1;
@@ -296,6 +371,7 @@ export function createSenpaiChat({ querySource, onChange = () => {}, createId = 
 
   function dispose() {
     if (disposed) return;
+    abortSyntheses();
     if (active) active.controller.abort();
     active = null;
     generation += 1;
@@ -303,5 +379,5 @@ export function createSenpaiChat({ querySource, onChange = () => {}, createId = 
     disposed = true;
   }
 
-  return Object.freeze({ getSnapshot, send, cancel, reset, restore, dispose });
+  return Object.freeze({ getSnapshot, send, synthesize, cancel, reset, restore, dispose });
 }

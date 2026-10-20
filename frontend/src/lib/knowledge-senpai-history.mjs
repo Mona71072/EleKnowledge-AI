@@ -7,6 +7,8 @@ const MAX_SESSIONS = 200;
 const MAX_MESSAGES = 1_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MODES = ['normal', 'law'];
+const SYNTHESIS_MODE = 'senpai_synthesis';
+const MAX_SYNTHESIS_LENGTH = 32_000;
 
 function fail(code, message) {
   throw new KnowledgeResearchError(code, message);
@@ -49,6 +51,27 @@ function validateMessage(row, conversationId) {
     || !Number.isSafeInteger(row.ttl) || row.ttl < 0) {
     fail('invalid_response', '相談履歴の発言を安全に読み込めませんでした');
   }
+}
+
+function validateSynthesisRow(row, conversationId) {
+  if (!row || typeof row !== 'object' || row.senpaiConversationId !== conversationId
+    || !UUID.test(row.senpaiTurnId) || row.role !== 'assistant'
+    || row.messageId !== `senpai-synthesis-${row.senpaiTurnId}`
+    || typeof row.userId !== 'string' || !row.userId.trim() || row.userId.length > 256
+    || typeof row.content !== 'string' || !row.content.trim() || row.content.length > MAX_SYNTHESIS_LENGTH
+    || !validIso(row.timestamp)) {
+    fail('invalid_response', '相談履歴のまとめを安全に読み込めませんでした');
+  }
+}
+
+function savedSynthesis(row) {
+  const inputs = row.synthesisInputs;
+  const validInputs = inputs && typeof inputs.normal === 'boolean' && typeof inputs.law === 'boolean'
+    && Number.isSafeInteger(inputs.knowhowCount) && inputs.knowhowCount >= 0;
+  return {
+    status: 'success', content: row.content, messageId: row.messageId,
+    ...(validInputs ? { inputs: { normal: inputs.normal, law: inputs.law, knowhowCount: inputs.knowhowCount } } : {}),
+  };
 }
 
 async function requestJson({ baseUrl, getToken, fetchImpl, signal, timeoutMs, path }) {
@@ -129,7 +152,8 @@ export async function readSenpaiConversation({ baseUrl, getToken, fetchImpl = fe
     || !Array.isArray(data.messages) || data.messages.length > MAX_MESSAGES) {
     fail('invalid_response', '相談履歴の詳細を安全に読み込めませんでした');
   }
-  data.messages.forEach((row) => validateMessage(row, conversationId));
+  data.messages.forEach((row) => (row?.ragMode === SYNTHESIS_MODE
+    ? validateSynthesisRow(row, conversationId) : validateMessage(row, conversationId)));
   if (new Set(data.messages.map((row) => row.userId)).size > 1) {
     fail('invalid_response', '相談履歴に複数の利用者の発言が含まれています');
   }
@@ -139,6 +163,13 @@ export async function readSenpaiConversation({ baseUrl, getToken, fetchImpl = fe
   for (const row of data.messages) {
     if (messageIds.has(row.messageId)) fail('invalid_response', '相談履歴に重複した発言があります');
     messageIds.add(row.messageId);
+    if (row.ragMode === SYNTHESIS_MODE) {
+      const owner = groups.get(row.senpaiTurnId) || { senpaiTurnId: row.senpaiTurnId, byMode: { normal: {}, law: {} }, firstTime: row.timestamp };
+      if (owner.synthesis) fail('invalid_response', '相談履歴のまとめが重複しています');
+      owner.synthesis = row;
+      groups.set(row.senpaiTurnId, owner);
+      continue;
+    }
     const group = groups.get(row.senpaiTurnId) || { senpaiTurnId: row.senpaiTurnId, byMode: { normal: {}, law: {} }, firstTime: row.timestamp };
     if (row.timestamp < group.firstTime) group.firstTime = row.timestamp;
     const lane = group.byMode[row.ragMode];
@@ -161,7 +192,10 @@ export async function readSenpaiConversation({ baseUrl, getToken, fetchImpl = fe
     seenQueries.add(`${group.senpaiTurnId}\0${query}`);
     // The model filter is only ever sent with (and saved on) the technical lane.
     const modelType = normalizeSavedModelType(group.byMode.normal.assistant?.modelType);
-    const turn = { id: index + 1, senpaiTurnId: group.senpaiTurnId, ...(modelType ? { modelType } : {}), query };
+    const turn = {
+      id: index + 1, senpaiTurnId: group.senpaiTurnId, ...(modelType ? { modelType } : {}), query,
+      ...(group.synthesis ? { synthesis: savedSynthesis(group.synthesis) } : {}),
+    };
     for (const mode of MODES) {
       const user = group.byMode[mode].user;
       const assistant = group.byMode[mode].assistant;

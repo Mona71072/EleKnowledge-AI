@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useSenpaiHistory } from '@/hooks/useSenpaiHistory';
 import { SenpaiConversationSidebar } from './SenpaiConversationSidebar';
 import { getIdToken } from '@/lib/auth-helpers';
-import { createSenpaiChat, type SenpaiChatController, type SenpaiChatLane, type SenpaiChatSnapshot } from '@/lib/knowledge-senpai-chat.mjs';
+import { createSenpaiChat, type SenpaiChatController, type SenpaiChatLane, type SenpaiChatSnapshot, type SenpaiChatTurn } from '@/lib/knowledge-senpai-chat.mjs';
+import { requestSenpaiSynthesis } from '@/lib/knowledge-senpai-synthesis.mjs';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
 import {
@@ -39,6 +40,13 @@ function useController(
         ...(mode === 'normal' ? { includeKnowhow: true } : {}),
         signal,
       }),
+      synthesisSource: ({ senpaiConversationId, senpaiTurnId, signal }) => requestSenpaiSynthesis({
+        baseUrl: process.env.NEXT_PUBLIC_RAG_API_URL || '',
+        getToken: getIdToken,
+        senpaiConversationId,
+        senpaiTurnId,
+        signal,
+      }),
       onChange: (nextSnapshot) => {
         if (mounted) setSnapshot(nextSnapshot);
       },
@@ -65,12 +73,27 @@ const scopeLabels: Record<string, string> = {
   excludes: '適用除外', guide_systems: 'ガイド方式', lists_model_label: '元記録の機種', machine_room: '機械室',
   may_apply_to: '適用可能性（未確認）', model_abbreviations: '機種略称', observed_on: '確認された対象',
   product_lines: '製品系列', scope_note: '対象範囲の補足',
+  scope_status: '適用範囲の確認', scope_verified_by: '確認者', scope_verified_at: '確認日',
 };
 const refLabels: Record<string, string> = {
   list_item_id: 'Lists項目', onenote_id: 'OneNoteページ', source_id: '出典ID', document_number: '資料番号',
   kb_filename: 'KB資料名', kb_verify_status: 'KB確認状況', page_role: 'ページの役割', law_id: '法令ID',
   law_title: '法令名', locator: '参照箇所',
 };
+
+// Unknown keys fall back to the raw key so a label never renders as "undefined".
+function scopeLabel(key: string) {
+  return scopeLabels[key] ?? key;
+}
+
+function refLabel(key: string) {
+  return refLabels[key] ?? key;
+}
+
+function scopeValue(key: string, value: string | string[]) {
+  if (key === 'scope_status') return value === 'verified' ? '担当者確認済み' : '未確認';
+  return (Array.isArray(value) ? value.join('、') : value) || '未記載';
+}
 
 function KnowhowReferences({ answer }: { answer: import('@/lib/knowledge-research.mjs').ResearchAnswer }) {
   const knowhow = answer.knowhow;
@@ -97,12 +120,12 @@ function KnowhowReferences({ answer }: { answer: import('@/lib/knowledge-researc
                 <dt className="text-gray-500">ノウハウID</dt><dd>{match.knowledgeId}</dd>
                 <dt className="text-gray-500">本文の識別値</dt><dd className="break-all font-mono">{match.sha256}</dd>
                 {Object.entries(match.modelScope).map(([key, value]) => (
-                  <div key={key} className="contents"><dt className="text-gray-500">{scopeLabels[key]}</dt><dd>{(Array.isArray(value) ? value.join('、') : value) || '未記載'}</dd></div>
+                  <div key={key} className="contents"><dt className="text-gray-500">{scopeLabel(key)}</dt><dd>{scopeValue(key, value)}</dd></div>
                 ))}
               </dl>
               <ul className="mt-2 space-y-2 border-t border-gray-200 pt-2">
                 {match.sourceRefs.map((ref, index) => <li key={index} className="break-words">
-                  {Object.entries(ref).filter(([key]) => key !== 'ref_type').map(([key, value]) => <p key={key}>{refLabels[key]}: {value}</p>)}
+                  {Object.entries(ref).filter(([key]) => key !== 'ref_type').map(([key, value]) => <p key={key}>{refLabel(key)}: {value}</p>)}
                 </li>)}
               </ul>
               <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-gray-800">{match.body}</pre>
@@ -182,7 +205,50 @@ function LaneReply({ lane, mode }: { lane: SenpaiChatLane; mode: KnowledgeResear
   );
 }
 
-function ChatTurnView({ turn }: { turn: SenpaiChatSnapshot['turns'][number] }) {
+function canSynthesize(turn: SenpaiChatTurn, running: boolean) {
+  const lanes = [turn.normal, turn.law];
+  return !running && Boolean(turn.senpaiTurnId)
+    && lanes.every((lane) => lane.status !== 'loading')
+    && lanes.some((lane) => lane.status === 'success')
+    && turn.synthesis?.status !== 'loading' && turn.synthesis?.status !== 'success';
+}
+
+function SynthesisSection({ turn, running, onSynthesize }: {
+  turn: SenpaiChatTurn;
+  running: boolean;
+  onSynthesize: (turnId: number) => void;
+}) {
+  const synthesis = turn.synthesis;
+  const button = canSynthesize(turn, running) && (
+    <button type="button" onClick={() => onSynthesize(turn.id)} className="rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-50 focus:outline-none focus:ring-2 focus:ring-violet-400">工技先輩のまとめを作る</button>
+  );
+  if (!synthesis) return button ? <div className="mb-3">{button}</div> : null;
+  if (synthesis.status === 'loading') return <p role="status" className="mb-3 rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900">まとめを作成しています…</p>;
+  if (synthesis.status === 'error') {
+    return (
+      <div className="mb-3 space-y-2">
+        <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{synthesis.message || 'まとめを作成できませんでした。時間をおいて再度お試しください。'}</p>
+        {button}
+      </div>
+    );
+  }
+  const inputs = synthesis.inputs;
+  return (
+    <section aria-label="工技先輩のまとめ" className="mb-3 rounded-xl border-2 border-violet-300 bg-violet-50 p-4">
+      <h4 className="text-sm font-bold text-violet-950">工技先輩のまとめ（試作・開発中）</h4>
+      <p className="mt-1 text-xs leading-5 text-violet-900">下の2つの回答を組み合わせただけの文章です。内容は必ず各回答の出典で確認してください。ノウハウは未承認の参考情報で、根拠にはなりません。</p>
+      <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-gray-900">{synthesis.content}</p>
+      {inputs && (
+        <p className="mt-3 text-xs text-violet-900">
+          {!inputs.normal && '技術KBの回答は使っていません。'}{!inputs.law && '法令KBの回答は使っていません。'}
+          {inputs.knowhowCount > 0 && `ノウハウ候補${inputs.knowhowCount}件を参考として含めています。`}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ChatTurnView({ turn, running, onSynthesize }: { turn: SenpaiChatTurn; running: boolean; onSynthesize: (turnId: number) => void }) {
   return (
     <article className="space-y-4 border-b border-gray-200 pb-5 last:border-0" aria-label={`相談 ${turn.id}`}>
       <div className="ml-auto max-w-3xl rounded-2xl rounded-br-sm bg-violet-700 px-4 py-3 text-sm leading-6 text-white shadow-sm">
@@ -192,6 +258,7 @@ function ChatTurnView({ turn }: { turn: SenpaiChatSnapshot['turns'][number] }) {
       </div>
       <div className="max-w-4xl rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-4 shadow-sm">
         <h3 className="mb-3 text-sm font-semibold text-gray-900">工技先輩の回答</h3>
+        <SynthesisSection turn={turn} running={running} onSynthesize={onSynthesize} />
         <div className="grid gap-4 md:grid-cols-2">
           <section aria-label="技術KBからの回答" className="min-w-0 space-y-2 rounded-xl bg-blue-50/70 p-3">
             <h4 className="text-xs font-bold uppercase tracking-wide text-blue-900">技術KB</h4>
@@ -277,6 +344,11 @@ export function KnowledgeSenpaiChat() {
     void history.openConversation(conversationId);
   }
 
+  function requestSynthesis(turnId: number) {
+    // The controller keeps the failure on the turn's synthesis lane; nothing else to show here.
+    controllerRef.current?.synthesize(turnId).catch(() => {});
+  }
+
   function cancelSearch() {
     requestIdRef.current += 1;
     controllerRef.current?.cancel();
@@ -312,7 +384,7 @@ export function KnowledgeSenpaiChat() {
             <p className="mt-2 text-xs leading-5 text-gray-600">ローカルファイルは送信されません。ノウハウMarkdownは参考情報として表示し、Markdownの編集やOneNoteへの追記は行いません。</p>
             <p className="mt-3 text-xs leading-5 text-gray-600">相談履歴は60日間保存されます。ページを再読み込みした後も、左側の履歴から相談を開き直せます。</p>
           </div>
-        ) : snapshot.turns.map((turn) => <ChatTurnView key={turn.id} turn={turn} />)}
+        ) : snapshot.turns.map((turn) => <ChatTurnView key={turn.id} turn={turn} running={snapshot.running} onSynthesize={requestSynthesis} />)}
         {continuationPaused && <p role="status" className="mx-auto max-w-2xl rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">{snapshot.complete === false ? '相談履歴の一部を確認できないため、表示のみ利用できます。' : '両方の検索が失敗または中止されたため、この相談では続けて質問できません。'}内容を確認し、「新しい相談」から再開してください。</p>}
       </div>
 

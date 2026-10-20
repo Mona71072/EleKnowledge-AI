@@ -379,3 +379,179 @@ test('restore drops an invalid modelType and still restores old history without 
   assert.equal('modelType' in chat.getSnapshot().turns[0], false);
   chat.dispose();
 });
+
+function synthesisResult(request, overrides = {}) {
+  return {
+    senpaiConversationId: request.senpaiConversationId,
+    senpaiTurnId: request.senpaiTurnId,
+    messageId: `senpai-synthesis-${request.senpaiTurnId}`,
+    content: 'まとめ本文',
+    inputs: { normal: true, law: true, knowhowCount: 0 },
+    timestamp: '2026-10-20T01:00:00Z',
+    ...overrides,
+  };
+}
+
+function chatWithSynthesis(synthesisSource, query = async (request) => answer(request.mode, `${request.mode}-session`, request.query)) {
+  return createSenpaiChat({ querySource: query, synthesisSource });
+}
+
+test('synthesize moves the turn synthesis lane from loading to success using only identifiers', async () => {
+  const pending = deferred();
+  const calls = [];
+  const chat = chatWithSynthesis((request) => { calls.push(request); return pending.promise; });
+  await chat.send('質問');
+  const { conversationId, turns } = chat.getSnapshot();
+  assert.equal(turns[0].synthesis, undefined);
+
+  const running = chat.synthesize(turns[0].id);
+  assert.equal(chat.getSnapshot().turns[0].synthesis.status, 'loading');
+  pending.resolve(synthesisResult({ senpaiConversationId: conversationId, senpaiTurnId: turns[0].senpaiTurnId }));
+  await running;
+
+  assert.deepEqual(Object.keys(calls[0]).sort(), ['senpaiConversationId', 'senpaiTurnId', 'signal']);
+  assert.equal(calls[0].senpaiConversationId, conversationId);
+  assert.equal(calls[0].senpaiTurnId, turns[0].senpaiTurnId);
+  const synthesis = chat.getSnapshot().turns[0].synthesis;
+  assert.equal(synthesis.status, 'success');
+  assert.equal(synthesis.content, 'まとめ本文');
+  assert.equal(synthesis.messageId, `senpai-synthesis-${turns[0].senpaiTurnId}`);
+  assert.equal(Object.isFrozen(chat.getSnapshot().turns[0].synthesis), true);
+  chat.dispose();
+});
+
+test('synthesize is refused while running, while a lane loads, with no successful lane, or for unknown turns', async () => {
+  const pending = deferred();
+  let sourceCalls = 0;
+  const failing = chatWithSynthesis(() => { sourceCalls += 1; return Promise.resolve(); }, async () => { throw new Error('down'); });
+  await failing.send('質問');
+  await assert.rejects(failing.synthesize(failing.getSnapshot().turns[0].id), (error) => error.code === 'validation');
+  await assert.rejects(failing.synthesize(999), (error) => error.code === 'validation');
+
+  const slow = chatWithSynthesis(() => { sourceCalls += 1; return Promise.resolve(); }, () => pending.promise);
+  const sending = slow.send('質問');
+  await assert.rejects(slow.synthesize(slow.getSnapshot().turns[0].id), (error) => error.code === 'validation');
+  pending.reject(new Error('x'));
+  await sending;
+
+  const noSource = createSenpaiChat({ querySource: async (request) => answer(request.mode, `${request.mode}-s`, request.query) });
+  await noSource.send('質問');
+  await assert.rejects(noSource.synthesize(noSource.getSnapshot().turns[0].id), (error) => error.code === 'validation');
+  assert.equal(sourceCalls, 0);
+  for (const chat of [failing, slow, noSource]) chat.dispose();
+});
+
+test('synthesize works with one successful lane and does not repeat after success', async () => {
+  let calls = 0;
+  const chat = chatWithSynthesis(async (request) => { calls += 1; return synthesisResult(request, { inputs: { normal: true, law: false, knowhowCount: 1 } }); }, async (request) => {
+    if (request.mode === 'law') throw new Error('law down');
+    return answer('normal', 'normal-session', request.query);
+  });
+  await chat.send('質問');
+  const id = chat.getSnapshot().turns[0].id;
+  await chat.synthesize(id);
+  await chat.synthesize(id);
+  assert.equal(calls, 1);
+  assert.deepEqual(chat.getSnapshot().turns[0].synthesis.inputs, { normal: true, law: false, knowhowCount: 1 });
+  chat.dispose();
+});
+
+test('synthesis errors are shown safely and can be retried; mismatching results are rejected', async () => {
+  let attempt = 0;
+  const chat = chatWithSynthesis(async (request) => {
+    attempt += 1;
+    if (attempt === 1) throw new Error('secret stack');
+    if (attempt === 2) return synthesisResult(request, { senpaiTurnId: '30000000-0000-4000-8000-000000000001' });
+    if (attempt === 3) throw Object.assign(new Error('x'), { code: 'timeout', message: '時間内に完了しませんでした', name: 'KnowledgeResearchError' });
+    return synthesisResult(request);
+  });
+  await chat.send('質問');
+  const id = chat.getSnapshot().turns[0].id;
+  await chat.synthesize(id);
+  let state = chat.getSnapshot().turns[0].synthesis;
+  assert.equal(state.status, 'error');
+  assert.doesNotMatch(state.message, /secret/u);
+  await chat.synthesize(id);
+  assert.equal(chat.getSnapshot().turns[0].synthesis.status, 'error');
+  await chat.synthesize(id);
+  assert.equal(chat.getSnapshot().turns[0].synthesis.status, 'error');
+  await chat.synthesize(id);
+  state = chat.getSnapshot().turns[0].synthesis;
+  assert.equal(state.status, 'success');
+  chat.dispose();
+});
+
+test('a reset or restore discards an in-flight synthesis result', async () => {
+  const pending = deferred();
+  let aborted = false;
+  const chat = chatWithSynthesis((request) => {
+    request.signal.addEventListener('abort', () => { aborted = true; });
+    return pending.promise;
+  });
+  await chat.send('質問');
+  const turn = chat.getSnapshot().turns[0];
+  const request = { senpaiConversationId: chat.getSnapshot().conversationId, senpaiTurnId: turn.senpaiTurnId };
+  const running = chat.synthesize(turn.id);
+  chat.reset();
+  pending.resolve(synthesisResult(request));
+  await running;
+  assert.equal(aborted, true);
+  assert.deepEqual(chat.getSnapshot().turns, []);
+  chat.dispose();
+});
+
+test('restore keeps a saved synthesis, ignores malformed ones, and accepts older histories', async () => {
+  const conversationId = '10000000-0000-4000-8000-000000000001';
+  const mk = (suffix, synthesis) => {
+    const turnId = `20000000-0000-4000-8000-00000000000${suffix}`;
+    return {
+      id: Number(suffix), senpaiTurnId: turnId, query: `質問${suffix}`,
+      normal: { status: 'success', answer: { ...answer('normal', 'normal-restored', `質問${suffix}`), senpaiConversationId: conversationId, senpaiTurnId: turnId } },
+      law: { status: 'success', answer: { ...answer('law', 'law-restored', `質問${suffix}`), senpaiConversationId: conversationId, senpaiTurnId: turnId } },
+      ...(synthesis ? { synthesis } : {}),
+    };
+  };
+  const chat = chatWithSynthesis(async (request) => synthesisResult(request));
+  chat.restore({
+    conversationId, complete: true,
+    turns: [
+      mk('1', { status: 'success', content: '保存されたまとめ', messageId: 'senpai-synthesis-x', inputs: { normal: true, law: true, knowhowCount: 2 } }),
+      mk('2', { status: 'success', content: '   ', messageId: 'senpai-synthesis-y' }),
+      mk('3', { status: 'error', message: 'x' }),
+      mk('4'),
+    ],
+  });
+  const turns = chat.getSnapshot().turns;
+  assert.deepEqual({ ...turns[0].synthesis }, {
+    status: 'success', content: '保存されたまとめ', messageId: 'senpai-synthesis-x',
+    inputs: { normal: true, law: true, knowhowCount: 2 },
+  });
+  assert.equal(turns[1].synthesis, undefined);
+  assert.equal(turns[2].synthesis, undefined);
+  assert.equal(turns[3].synthesis, undefined);
+  await chat.synthesize(turns[3].id);
+  assert.equal(chat.getSnapshot().turns[3].synthesis.status, 'success');
+  chat.dispose();
+});
+
+test('cancelling a later search does not discard an in-flight synthesis of an earlier turn', async () => {
+  const pendingSynthesis = deferred();
+  let queries = 0;
+  const chat = chatWithSynthesis(() => pendingSynthesis.promise, (request) => {
+    queries += 1;
+    if (queries <= 2) return Promise.resolve(answer(request.mode, `${request.mode}-session`, request.query));
+    return new Promise((_resolve, reject) => {
+      request.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { code: 'cancelled' })), { once: true });
+    });
+  });
+  await chat.send('最初');
+  const first = chat.getSnapshot().turns[0];
+  const running = chat.synthesize(first.id);
+  const sending = chat.send('次の質問');
+  chat.cancel();
+  await sending;
+  pendingSynthesis.resolve(synthesisResult({ senpaiConversationId: chat.getSnapshot().conversationId, senpaiTurnId: first.senpaiTurnId }));
+  await running;
+  assert.equal(chat.getSnapshot().turns[0].synthesis.status, 'success');
+  chat.dispose();
+});

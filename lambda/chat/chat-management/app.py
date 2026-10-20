@@ -540,11 +540,36 @@ def get_senpai_sessions_by_user(user_id: str) -> tuple[list, bool]:
     return sessions, complete
 
 
+# The "工技先輩のまとめ" row is saved by the synthesis Lambda; it has no user row of its own.
+SENPAI_SYNTHESIS_MODE = 'senpai_synthesis'
+
+
+def _attach_synthesis_rows(grouped: dict, synthesis_rows: list) -> bool:
+    """Ride each synthesis row along with a lane group of its own turn.
+
+    Returns False when a row has no sibling lane group (its turn was trimmed or
+    never saved), so the caller can mark the history as incomplete.
+    """
+    attached_all = True
+    for row in synthesis_rows:
+        turn_id = row['senpaiTurnId']
+        host = next(
+            (grouped[key] for key in (('normal', turn_id), ('law', turn_id)) if key in grouped),
+            None,
+        )
+        if host is None:
+            attached_all = False
+            continue
+        host.append(row)
+    return attached_all
+
+
 def get_senpai_messages_by_user(user_id: str, conversation_id: str) -> tuple[list, bool]:
     """Return newest whole turns within bounded row and serialized-body limits."""
     items, complete = _query_user_history(user_id)
     now = int(time.time())
     grouped = {}
+    synthesis_rows = []
     for item in items:
         if item.get('userId') != user_id or item.get('senpaiConversationId') != conversation_id:
             continue
@@ -554,8 +579,13 @@ def get_senpai_messages_by_user(user_id: str, conversation_id: str) -> tuple[lis
         if item.get('role') not in ('user', 'assistant'):
             complete = False
             continue
+        if item.get('ragMode') == SENPAI_SYNTHESIS_MODE:
+            synthesis_rows.append(item)
+            continue
         group_key = (item.get('ragMode') or 'normal', item['senpaiTurnId'])
         grouped.setdefault(group_key, []).append(item)
+
+    complete = _attach_synthesis_rows(grouped, synthesis_rows) and complete
 
     turn_groups = []
     for key, rows in grouped.items():
