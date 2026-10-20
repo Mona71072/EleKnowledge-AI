@@ -14,9 +14,11 @@ related-code: scripts/ops/apply_cost_allocation_tags.py, tests/unit/test_cost_al
 
 ## 変更するコードの契約
 
+> 最終検証: 2026-10-19 — SAMからEnvタグを出力しない設定と、Environmentパラメータ・3つのgyoumu012コストキーの維持を照合。AWS未適用。
+
 > 最終検証: 2026-10-15 — PR #189の所有確認指摘と適用前preflightの受入条件を照合。AWS再適用は対象外。
 
-- SAMのタグ対応リソースとFunction Globalsへ3キーを追加する。既存の `Project` / `Env`、環境変数・認証認可・関数コードは維持する。
+- SAMのタグ対応リソースとFunction Globalsへ3キーを追加する。既存の `Project`、環境変数・認証認可・関数コードは維持し、旧 `Env` リソースタグ・スタックタグはSAMから付与しない。SAMの `Environment` パラメータは維持する。
 - `CostProjectName` は `ele-knowledge`、`CostUsage` は `development` / `user` / `shared`。既定のUsageはトラブルシューティングが `development`、その他の現行スタックが `shared`。専用リソースのComponentを明記し、共用API・認証・履歴を共通分類にする。
 - SAM APIの `PropagateTags: true` によって生成ステージへタグを渡す。共有samconfigと `.example.toml` も3キーを渡す。個人の `.local.toml`・実アカウントID・実バケット名は追加しない。
 - 運用スクリプトは計画生成、`--apply`、`--verify` を分離する。STSのアカウント一致と既存タグ・所有根拠を確認し、既存の分類と競合したら停止する。S3等で他のタグを削除せず、部分失敗と再読取結果を保存する。

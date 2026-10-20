@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>問合せ対応フロー | Ele-Knowledge</title>
+  <style>
+    :root {
+      --paper: #f3f6f4;
+      --white: #ffffff;
+      --ink: #182b2c;
+      --muted: #536768;
+      --line: #d6e0dc;
+      --red: #cf3d35;
+      --red-pale: #fff0ed;
+      --teal: #117b77;
+      --teal-pale: #e8f5f2;
+      --green: #368257;
+      --green-pale: #edf6ee;
+      --gold: #996100;
+      --gold-pale: #fff5dc;
+      --shadow: 0 12px 32px rgb(24 43 44 / 7%);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgb(17 123 119 / 3%) 1px, transparent 1px),
+        linear-gradient(rgb(17 123 119 / 3%) 1px, transparent 1px),
+        var(--paper);
+      background-size: 28px 28px;
+      font-family: "Yu Gothic UI", "Meiryo", sans-serif;
+      line-height: 1.6;
+    }
+
+    .page {
+      width: min(1520px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 34px 0 28px;
+    }
+
+    .topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .topline strong {
+      color: var(--red);
+      font-size: 15px;
+      letter-spacing: .04em;
+    }
+
+    h1 {
+      max-width: 980px;
+      margin: 27px 0 8px;
+      font-size: clamp(30px, 3.2vw, 48px);
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .intro {
+      max-width: 960px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .takeaway {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      margin: 26px 0 24px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .takeaway > div {
+      min-height: 106px;
+      padding: 17px 20px;
+      background: var(--white);
+    }
+
+    .takeaway b {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 15px;
+    }
+
+    .takeaway p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .takeaway .now b { color: var(--teal); }
+    .takeaway .future b { color: var(--green); }
+
+    .section-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 22px 0 12px;
+    }
+
+    .section-heading h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    .section-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .flows {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: stretch;
+      gap: 16px;
+    }
+
+    .flow {
+      --accent: var(--red);
+      --tint: var(--red-pale);
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      padding: 19px;
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--accent);
+      border-radius: 7px;
+      background: var(--white);
+      box-shadow: var(--shadow);
+    }
+
+    .flow.ele { --accent: var(--teal); --tint: var(--teal-pale); }
+    .flow.future { --accent: var(--green); --tint: var(--green-pale); }
+
+    .flow-head {
+      min-height: 112px;
+      padding-bottom: 13px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .flow-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .status {
+      padding: 3px 8px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .flow h3 {
+      margin: 0 0 5px;
+      font-size: 21px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    .flow-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .steps {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      margin: 15px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 10px;
+      padding: 0 0 16px;
+    }
+
+    .step:not(:last-child)::after {
+      position: absolute;
+      top: 31px;
+      bottom: 2px;
+      left: 16px;
+      width: 2px;
+      background: var(--line);
+      content: "";
+    }
+
+    .number {
+      z-index: 1;
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid color-mix(in srgb, var(--accent) 28%, white);
+      border-radius: 50%;
+      background: var(--tint);
+      color: var(--accent);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .step-copy { min-width: 0; padding-top: 1px; }
+
+    .step-copy b {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .step-copy p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .actors {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 6px;
+    }
+
+    .actor {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 1px 7px;
+      border-radius: 3px;
+      background: #edf1f0;
+      color: #384d4d;
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .actor.ai { background: var(--tint); color: var(--accent); }
+    .actor.check { background: var(--gold-pale); color: var(--gold); }
+
+    .flow-note {
+      margin-top: auto;
+      padding: 11px 12px;
+      border-left: 3px solid var(--accent);
+      background: var(--tint);
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .flow-note strong { display: block; margin-bottom: 2px; }
+
+    .guardrail {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: start;
+      gap: 12px;
+      margin-top: 19px;
+      padding: 15px 18px;
+      border: 1px solid #e5c989;
+      border-radius: 6px;
+      background: #fff9e9;
+    }
+
+    .guardrail strong {
+      color: var(--gold);
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .guardrail p {
+      margin: 0;
+      color: #554722;
+      font-size: 13px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+    .legend i {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      background: var(--red);
+    }
+
+    .legend .teal { background: var(--teal); }
+    .legend .green { background: var(--green); }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      margin-top: 18px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    @media (max-width: 1050px) {
+      .flows { grid-template-columns: 1fr; }
+      .flow-head { min-height: auto; }
+      .steps { display: flex; }
+    }
+
+    @media (max-width: 650px) {
+      .page { width: min(100% - 28px, 560px); padding-top: 18px; }
+      .topline { align-items: flex-start; flex-direction: column; gap: 4px; }
+      .takeaway { grid-template-columns: 1fr; }
+      .takeaway > div { min-height: 0; }
+      .section-heading { align-items: flex-start; flex-direction: column; }
+      .flow { padding: 15px; }
+      .guardrail { grid-template-columns: 1fr; gap: 4px; }
+      footer { flex-direction: column; gap: 6px; }
+    }
+
+    @media print {
+      @page { size: A3 landscape; margin: 10mm; }
+      body { background: white; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .page { width: 100%; padding: 0; }
+      h1 { font-size: 28pt; }
+      .intro { font-size: 11pt; }
+      .takeaway { margin: 12px 0; box-shadow: none; }
+      .takeaway > div { min-height: 75px; padding: 10px 14px; }
+      .flows { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+      .flow { padding: 12px; box-shadow: none; break-inside: avoid; }
+      .flow-head { min-height: 90px; }
+      .flow h3 { font-size: 16pt; }
+      .step { padding-bottom: 9px; }
+      .step-copy b { font-size: 10pt; }
+      .step-copy p { font-size: 8.5pt; }
+      .flow-note { font-size: 8.5pt; }
+      .guardrail { margin-top: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="topline">
+      <strong>ELE-KNOWLEDGE / 業務フロー整理</strong>
+      <span>対象シナリオ：問合せを受けて、根拠を確認し回答する</span>
+    </div>
+
+    <h1>問合せ対応は、どこが変わる？</h1>
+    <p class="intro">現状の手作業、Ele-Knowledgeの現行RAG機能、将来の連携構想を並べて比較します。色の違いは仕組みの成熟度を示します。</p>
+
+    <section class="takeaway" aria-label="要点">
+      <div>
+        <b>現状</b>
+        <p>資料・法令・現場情報・先輩の知見を、人が別々に探して回答をまとめる。</p>
+      </div>
+      <div class="now">
+        <b>現行機能で変わるところ</b>
+        <p>登録済み資料の検索と出典候補の提示を支援。法令・現場確認・ファイル作成は引き続き人が行う。</p>
+      </div>
+      <div class="future">
+        <b>将来構想で目指すところ</b>
+        <p>許可された情報源を連携し、根拠・不足情報・回答案をまとめる。実現時期や範囲は未確定。</p>
+      </div>
+    </section>
+
+    <div class="section-heading">
+      <h2>問合せ対応の流れ</h2>
+      <p>各ステップのラベルで、担当する人・システムを表示</p>
+    </div>
+
+    <section class="flows" aria-label="問合せ対応フロー比較">
+      <article class="flow current">
+        <header class="flow-head">
+          <div class="flow-label"><span>01 / TODAY</span><span class="status">現状</span></div>
+          <h3>人が各所を調べて回答</h3>
+          <p>各業務システムを個別に開き、情報収集から回答ファイル作成まで行う。</p>
+        </header>
+        <ol class="steps">
+          <li class="step">
+            <span class="number">1</span>
+            <div class="step-copy"><b>問合せを受け、内容を整理</b><p>対象機種、現場状況、確認したい点を聞き取る。</p><div class="actors"><span class="actor">担当者</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">2</span>
+            <div class="step-copy"><b>対象資料を各システムで検索</b><p>必要に応じて現場情報を各システムから取得し、確認・入力する。</p><div class="actors"><span class="actor">担当者</span><span class="actor">個別システム</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">3</span>
+            <div class="step-copy"><b>法令・規則を別途検索</b><p>法令情報源を開き、適用条文や条件を確認する。</p><div class="actors"><span class="actor">担当者</span><span class="actor">法令情報源</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">4</span>
+            <div class="step-copy"><b>実務上の扱いを先輩に確認</b><p>類似事例や、現場での具体的な対応方法を相談する。</p><div class="actors"><span class="actor">担当者</span><span class="actor">先輩・有識者</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">5</span>
+            <div class="step-copy"><b>情報を照合して回答を組み立てる</b><p>資料・法令・現場条件・助言を人が突き合わせる。</p><div class="actors"><span class="actor">担当者</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">6</span>
+            <div class="step-copy"><b>回答ファイルを作成し、返信</b><p>必要なファイルの作成・保存・送付も人が行う。</p><div class="actors"><span class="actor">担当者</span></div></div>
+          </li>
+        </ol>
+        <div class="flow-note"><strong>現状の負荷</strong>検索先の切り替え、情報の照合、確認依頼、回答作成が担当者に集中。</div>
+      </article>
+
+      <article class="flow ele">
+        <header class="flow-head">
+          <div class="flow-label"><span>02 / AVAILABLE NOW</span><span class="status">現行機能</span></div>
+          <h3>登録資料の検索をAIが支援</h3>
+          <p>通常のRAGチャットで、登録済み資料を検索して回答・出典候補を表示する。</p>
+        </header>
+        <ol class="steps">
+          <li class="step">
+            <span class="number">1</span>
+            <div class="step-copy"><b>問合せ内容をチャットに入力</b><p>担当者が質問や分かっている条件を入力する。</p><div class="actors"><span class="actor">担当者</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">2</span>
+            <div class="step-copy"><b>登録済み資料を検索</b><p>Ele-Knowledgeのナレッジに登録された範囲から関連箇所を探す。</p><div class="actors"><span class="actor ai">Ele-Knowledge</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">3</span>
+            <div class="step-copy"><b>回答と出典候補を受け取る</b><p>関連資料への到達と確認を助ける。全社の各システムを自動巡回する機能ではない。</p><div class="actors"><span class="actor ai">AIの検索・回答</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">4</span>
+            <div class="step-copy"><b>原資料を開き、内容を確認</b><p>対象機種・版・条件が問合せに合っているか担当者が照合する。</p><div class="actors"><span class="actor">担当者</span><span class="actor check">人が確認</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">5</span>
+            <div class="step-copy"><b>法令・現場情報・実務知を別途確認</b><p>法令検索、現場システムでの取得・入力、先輩への相談は従来どおり人が行う。</p><div class="actors"><span class="actor">担当者</span><span class="actor">各システム／有識者</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">6</span>
+            <div class="step-copy"><b>回答ファイルを作成し、返信</b><p>資料・法令・現場条件をまとめ、最終回答とファイルを人が作る。</p><div class="actors"><span class="actor">担当者</span></div></div>
+          </li>
+        </ol>
+        <div class="flow-note"><strong>変わるところ</strong>登録済み資料を探す入口を短縮。法令検索・現場情報・実務判断・成果物作成は自動化しない。</div>
+      </article>
+
+      <article class="flow future">
+        <header class="flow-head">
+          <div class="flow-label"><span>03 / CONCEPT</span><span class="status">将来構想・未確定</span></div>
+          <h3>必要な根拠を横断して回答案</h3>
+          <p>データ連携・知識整備・権限設計ができた場合の検討イメージ。</p>
+        </header>
+        <ol class="steps">
+          <li class="step">
+            <span class="number">1</span>
+            <div class="step-copy"><b>問合せと現場条件を入力</b><p>不足条件があれば、追加情報を担当者に確認する。</p><div class="actors"><span class="actor">担当者</span><span class="actor ai">AIが不足項目を整理する案</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">2</span>
+            <div class="step-copy"><b>許可された情報源を横断検索</b><p>正規資料、法令情報、承認済み事例・ノウハウ、連携可能な現場データを検索する構想。</p><div class="actors"><span class="actor ai">連携エージェント案</span><span class="actor check">接続・権限は未確定</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">3</span>
+            <div class="step-copy"><b>根拠・違い・不足情報を整理</b><p>資料間の差や未確認事項を示し、根拠とともに回答案を作る。</p><div class="actors"><span class="actor ai">AIが整理する案</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">4</span>
+            <div class="step-copy"><b>担当者が原資料・現場条件を確認</b><p>必要に応じ所管・法令担当・先輩へ照会し、判断と承認を行う。</p><div class="actors"><span class="actor">担当者・有識者</span><span class="actor check">人が判断・承認</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">5</span>
+            <div class="step-copy"><b>回答・ファイルの下書きを支援</b><p>承認前の案を作る構想。確定・保存・送信は人が確認して行う。</p><div class="actors"><span class="actor ai">作成支援案</span><span class="actor">担当者が確定</span></div></div>
+          </li>
+          <li class="step">
+            <span class="number">6</span>
+            <div class="step-copy"><b>確認済みの知見を適切に蓄積</b><p>所管・承認・更新ルールを整え、再利用できる知識にする構想。</p><div class="actors"><span class="actor">所管者が確認</span><span class="actor ai">仕組みは今後検討</span></div></div>
+          </li>
+        </ol>
+        <div class="flow-note"><strong>目指す姿</strong>検索・整理を支援しても、根拠の妥当性と業務上の最終判断は人が担う。</div>
+      </article>
+    </section>
+
+    <aside class="guardrail">
+      <strong>共通の前提</strong>
+      <p>AIの回答だけで作業可否や法令適合を確定しません。原資料・現場条件・適用法令を確認し、必要な所管や有識者へ照会したうえで、人が最終判断します。将来構想の機能・接続先・開始時期は未決定です。</p>
+    </aside>
+
+    <div class="legend" aria-label="色の凡例">
+      <span><i></i>現状の人中心フロー</span>
+      <span><i class="teal"></i>現在利用できる資料検索支援</span>
+      <span><i class="green"></i>将来の検討構想</span>
+      <span><span class="actor check">人が確認</span>判断・承認が必要</span>
+    </div>
+
+    <footer>
+      <span>作成日：2026-10-02</span>
+      <span>将来像は概要資料・製品ロードマップに基づく検討案。現行の機能提供範囲と混同しないこと。</span>
+    </footer>
+  </main>
+</body>
+</html>
