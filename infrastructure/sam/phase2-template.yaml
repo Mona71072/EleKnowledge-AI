@@ -680,8 +680,11 @@ Resources:
           LAW_KNOWLEDGE_BASE_ID: !Ref LawKnowledgeBaseId
           LAW_RAG_ENABLED: !Ref LawRagEnabled
           KNOWHOW_ENABLED: !If [KnowhowIndexDevEnabled, 'true', 'false']
-          KNOWHOW_INDEX_BUCKET: !If [KnowhowIndexDevEnabled, !Ref KnowhowIndexBucket, '']
-          KNOWHOW_INDEX_KEY: !If [KnowhowIndexDevEnabled, !Ref KnowhowIndexKey, '']
+          # Keep the private location known even while disabled, so /rag/document
+          # never signs a URL for a previously configured admin index.
+          KNOWHOW_INDEX_BUCKET: !Ref KnowhowIndexBucket
+          KNOWHOW_INDEX_KEY: !Ref KnowhowIndexKey
+          ENVIRONMENT: !Ref Environment
           ADMIN_GROUP_NAME: admin
           LAW_DATA_BUCKET_NAME: !If [LawFullTextDevEnabled, !Ref LawDataBucketName, '']
           LAW_DATA_BUCKET_OWNER: !If [LawFullTextDevEnabled, !Ref AWS::AccountId, '']

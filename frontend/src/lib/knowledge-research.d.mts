@@ -50,7 +50,7 @@ export type ResearchKnowhowMatch = {
   body: string;
   searchTerms: string[];
   sourceRefs: Array<Record<string, string>>;
-  modelScope: Record<string, unknown>;
+  modelScope: Record<string, string | string[]>;
 };
 
 export type ResearchKnowhow = {

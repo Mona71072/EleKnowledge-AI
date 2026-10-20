@@ -54,6 +54,18 @@ function sourceTitle(source: ResearchCitationSource, mode: KnowledgeResearchMode
     : source.title || source.documentName || '技術資料';
 }
 
+const scopeLabels: Record<string, string> = {
+  conditions: '対象条件', control_methods: '制御方式', door_families: 'ドアの種類', door_types: 'ドア型式',
+  excludes: '適用除外', guide_systems: 'ガイド方式', lists_model_label: '元記録の機種', machine_room: '機械室',
+  may_apply_to: '適用可能性（未確認）', model_abbreviations: '機種略称', observed_on: '確認された対象',
+  product_lines: '製品系列', scope_note: '対象範囲の補足',
+};
+const refLabels: Record<string, string> = {
+  list_item_id: 'Lists項目', onenote_id: 'OneNoteページ', source_id: '出典ID', document_number: '資料番号',
+  kb_filename: 'KB資料名', kb_verify_status: 'KB確認状況', page_role: 'ページの役割', law_id: '法令ID',
+  law_title: '法令名', locator: '参照箇所',
+};
+
 function KnowhowReferences({ answer }: { answer: import('@/lib/knowledge-research.mjs').ResearchAnswer }) {
   const knowhow = answer.knowhow;
   if (!knowhow) return null;
@@ -63,25 +75,30 @@ function KnowhowReferences({ answer }: { answer: import('@/lib/knowledge-researc
   return (
     <section aria-label="参照したノウハウMarkdown" className="rounded-lg border border-violet-200 bg-violet-50/70 p-3">
       <h5 className="text-xs font-semibold text-violet-950">参照したノウハウMarkdown</h5>
-      <p className="mt-1 text-xs leading-5 text-violet-950">サーバーで検索が許可されたノウハウMarkdownの関連部分をAIへの参考情報として利用しました。ローカルファイルは送信されません。これは未承認の探索候補で、技術的な根拠や承認を示しません。</p>
+      <p className="mt-1 text-xs leading-5 text-violet-950">サーバーで検索が許可されたノウハウMarkdownから、関連する候補を見つけました。これは探索の手掛かりで、技術的な根拠や承認を示しません。</p>
       <ul className="mt-2 space-y-3">
         {knowhow.matches.map((match) => (
           <li key={`${match.knowledgeId}-${match.cardVersion}`} className="rounded-md border border-violet-100 bg-white p-3 text-xs text-gray-800">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold">{match.title}</span>
+              <span>v{match.cardVersion}</span>
               <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-950">{match.status === 'draft' ? '未承認（下書き）' : '承認済みカード・参照用のみ'}</span>
               <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-700">参照用のみ</span>
             </div>
-            <dl className="mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 break-words text-gray-700">
-              <dt className="text-gray-500">ノウハウID</dt><dd>{match.knowledgeId}</dd>
-              <dt className="text-gray-500">カード版</dt><dd>v{match.cardVersion}</dd>
-              <dt className="text-gray-500">本文SHA-256</dt><dd className="font-mono">{match.sha256}</dd>
-              <dt className="text-gray-500">検索語</dt><dd>{match.searchTerms.join('、') || 'なし'}</dd>
-              <dt className="text-gray-500">適用条件・除外</dt><dd><pre className="whitespace-pre-wrap break-words font-sans">{JSON.stringify(match.modelScope, null, 2)}</pre></dd>
-              <dt className="text-gray-500">元情報</dt><dd><pre className="whitespace-pre-wrap break-words font-sans">{JSON.stringify(match.sourceRefs, null, 2)}</pre></dd>
-            </dl>
             <details className="mt-2 rounded border border-gray-200 p-2">
-              <summary className="cursor-pointer font-semibold text-violet-900">関連本文を確認</summary>
+              <summary className="cursor-pointer font-semibold text-violet-900">適用条件・出典と本文を確認</summary>
+              <dl className="mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 break-words text-gray-700">
+                <dt className="text-gray-500">ノウハウID</dt><dd>{match.knowledgeId}</dd>
+                <dt className="text-gray-500">本文の識別値</dt><dd className="break-all font-mono">{match.sha256}</dd>
+                {Object.entries(match.modelScope).map(([key, value]) => (
+                  <div key={key} className="contents"><dt className="text-gray-500">{scopeLabels[key]}</dt><dd>{(Array.isArray(value) ? value.join('、') : value) || '未記載'}</dd></div>
+                ))}
+              </dl>
+              <ul className="mt-2 space-y-2 border-t border-gray-200 pt-2">
+                {match.sourceRefs.map((ref, index) => <li key={index} className="break-words">
+                  {Object.entries(ref).filter(([key]) => key !== 'ref_type').map(([key, value]) => <p key={key}>{refLabels[key]}: {value}</p>)}
+                </li>)}
+              </ul>
               <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-gray-800">{match.body}</pre>
             </details>
           </li>
@@ -105,7 +122,6 @@ function LaneReply({ lane, mode }: { lane: SenpaiChatLane; mode: KnowledgeResear
   const candidates = answer.pageCandidates || [];
   return (
     <div className="space-y-3">
-      {mode === 'normal' && <KnowhowReferences answer={answer} />}
       {answer.responseType === 'not_found' ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">このKBでは該当情報を確認できませんでした。</p>
       ) : answer.responseType === 'clarify' ? (
@@ -116,6 +132,7 @@ function LaneReply({ lane, mode }: { lane: SenpaiChatLane; mode: KnowledgeResear
       ) : (
         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">{answer.content || '回答本文がありません。'}</p>
       )}
+      {mode === 'normal' && <KnowhowReferences answer={answer} />}
       {sources.length > 0 && (
         <div className="border-t border-gray-200 pt-2">
           <h5 className="mb-1 text-xs font-semibold text-gray-600">{mode === 'law' ? '法令の出典' : '技術資料の出典'}</h5>

@@ -1998,6 +1998,9 @@ def is_allowed_document_uri(doc_uri: str) -> bool:
     bucket, key = parsed.netloc, parsed.path.lstrip('/')
     if not bucket or not key:
         return False
+    # SECURITY: the admin-only Markdown index is never a downloadable KB citation.
+    if bucket == KNOWHOW_INDEX_BUCKET and key == KNOWHOW_INDEX_KEY:
+        return False
     # '..' を含むキーは正規化で prefix 検証を迂回され得るため拒否する
     if '..' in key.split('/'):
         return False
@@ -2441,13 +2444,19 @@ def handle_rag_request(event, context, started_at):
 
         knowhow_payload = None
         knowhow_hints = []
+        knowhow_search_query = None
         if include_knowhow:
             try:
+                if KNOWHOW_INDEX_BUCKET and KNOWHOW_INDEX_BUCKET in (DOCUMENTS_BUCKET, KB_SOURCE_BUCKET):
+                    raise KnowhowIndexError('index requires a separate private bucket')
                 knowhow_index = load_index(
                     bucket=KNOWHOW_INDEX_BUCKET, key=KNOWHOW_INDEX_KEY
                 )
-                knowhow_query = compose_search_query(query, chat_history)
-                knowhow_result = search_index(knowhow_index, knowhow_query)
+                knowhow_search_query = maybe_rewrite_search_query(
+                    compose_search_query(query, chat_history), chat_history,
+                    request_deadline=request_deadline,
+                )
+                knowhow_result = search_index(knowhow_index, knowhow_search_query)
                 knowhow_hints = derive_kb_hints(knowhow_result['matches'])
                 knowhow_payload = {
                     'status': knowhow_result['status'],
@@ -2456,7 +2465,7 @@ def handle_rag_request(event, context, started_at):
                         {key: value for key, value in card.items() if key != '_score'}
                         for card in knowhow_result['matches']
                     ],
-                    'searchTerms': knowhow_hints,
+                    'searchTerms': [],
                 }
             except KnowhowIndexError:
                 return {
@@ -2528,13 +2537,20 @@ def handle_rag_request(event, context, started_at):
             # Normal: 正規化 + 本命優先 retrieve +（必要なら）略語展開
             # WHY 本命優先: docs/decisions-2026-07-29-rag-nuance.md §3
             # 聞き返し後は追記を直前質問と結合（design §4）
-            search_query = compose_search_query(query, chat_history)
-            search_query = maybe_rewrite_search_query(
-                search_query, chat_history, request_deadline=request_deadline
-            )
-            if knowhow_hints:
-                hint_text = ' '.join(knowhow_hints)
-                search_query = f'{search_query} {hint_text}'[:RAG_QUERY_MAX_LENGTH]
+            search_query = knowhow_search_query
+            if search_query is None:
+                search_query = maybe_rewrite_search_query(
+                    compose_search_query(query, chat_history), chat_history,
+                    request_deadline=request_deadline,
+                )
+            used_hints = []
+            for hint in knowhow_hints:
+                # Preserve every condition/negation in the original composed query.
+                if len(search_query) + len(hint) + 1 <= RAG_QUERY_MAX_LENGTH:
+                    search_query = f'{search_query} {hint}'
+                    used_hints.append(hint)
+            if knowhow_payload is not None:
+                knowhow_payload = {**knowhow_payload, 'searchTerms': used_hints}
             original_query = search_query
             normalized_query = normalize_query_text(original_query)
             expanded_query = expand_query_abbreviations(normalized_query)

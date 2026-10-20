@@ -176,7 +176,7 @@ def test_all_three_response_paths_return_markdown_retrieval_metadata(rag_app, mo
         assert body["responseType"] == expected
         assert body["knowhow"]["status"] == "matched"
         assert body["knowhow"]["matches"][0]["knowledgeId"] == "KH-SYN-001"
-        assert body["knowhow"]["searchTerms"] == ["C-6-R56.1", "TI-1335.pdf"]
+        assert body["knowhow"]["searchTerms"] == ([] if clarify else ["C-6-R56.1", "TI-1335.pdf"])
         monkeypatch.undo()
 
 

@@ -228,7 +228,7 @@ function cleanModelScope(value) {
   const clean = {};
   for (const [key, item] of Object.entries(value)) {
     const values = Array.isArray(item) ? item : [item];
-    if (values.length < 1 || values.length > 20 || !values.every((text) => typeof text === 'string'
+    if (values.length > 20 || !values.every((text) => typeof text === 'string'
       && text.trim() && Array.from(text).length <= 200 && !/[\u0000-\u001f\u007f]/u.test(text)
       && !/(?:https?:\/\/|s3:\/\/|javascript:|file:\/\/|\\|(?:^|\/)\.\.(?:\/|$))/iu.test(text))) return null;
     clean[key] = Array.isArray(item) ? [...item] : item;

@@ -87,7 +87,7 @@ def _safe_text(value: Any, limit: int, *, allow_empty: bool = False) -> bool:
 
 
 def _validate_source_refs(source_refs: Any) -> None:
-    if not isinstance(source_refs, list) or len(source_refs) > 30:
+    if not isinstance(source_refs, list) or not 1 <= len(source_refs) <= 30:
         raise KnowhowIndexError("sourceRefs is invalid")
     for ref in source_refs:
         if not isinstance(ref, dict) or set(ref) - SOURCE_REF_KEYS:
@@ -205,6 +205,8 @@ def load_index(s3_client=None, *, bucket: str | None = None, key: str | None = N
         if not raw or len(raw) > MAX_INDEX_BYTES:
             raise KnowhowIndexError("index size is invalid")
         index = parse_index(raw)
+        if not index["cards"]:
+            raise KnowhowIndexError("index has no selected cards")
         _cache.update(
             identity=identity,
             expires=current + CACHE_TTL_SECONDS,
@@ -276,7 +278,7 @@ def _score_card(card: dict, query_grams: set[str], query_words: set[str]) -> flo
 def search_index(index: dict, query: str) -> dict:
     """Return up to three whole relevant cards under one combined body-size budget."""
     index = validate_index(index)
-    if not isinstance(query, str) or len(query) > 4000:
+    if not isinstance(query, str) or len(query) > 12000:
         raise KnowhowIndexError("query is invalid")
     query_grams, query_words = _query_features(query)
     if not query_grams and not query_words:
@@ -313,6 +315,10 @@ def derive_kb_hints(matches: list[dict], *, max_hints: int = 8) -> list[str]:
                 value = ref.get(key, "").strip()
                 if (not value or len(value) > 100 or "/" in value or "\\" in value
                         or re.search(r"(?i)(https?://|s3://|\.\.)", value)):
+                    continue
+                pattern = (r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}" if key == "document_number"
+                           else r"[\w .()（）-]+\.pdf")
+                if not re.fullmatch(pattern, value, flags=re.IGNORECASE):
                     continue
                 normalized = _normalize(value)
                 if normalized not in seen:
