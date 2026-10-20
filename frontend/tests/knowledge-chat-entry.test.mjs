@@ -192,6 +192,88 @@ test('chat page starts as an empty conversation with a message composer and rese
   assert.doesNotMatch(html, /Markdownファイルを選択|照合まとめ/);
 });
 
+test('Senpai chat opts normal searches into the server Markdown index and leaves law searches unchanged', async () => {
+  const React = require('react');
+  let querySource;
+  const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
+    react: {
+      ...React,
+      useEffect(effect) { effect(); },
+      useState(initial) { return [initial, () => {}]; },
+      useRef(initial) { return { current: initial }; },
+    },
+    'next/link': Link,
+    '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
+    '@/lib/chat-session-link.mjs': { buildChatSessionHref: () => '/chat' },
+    '@/lib/knowledge-senpai-chat.mjs': {
+      createSenpaiChat: (options) => {
+        querySource = options.querySource;
+        return { getSnapshot: () => ({ turns: [], running: false }), send: async () => {}, cancel() {}, reset() {}, dispose() {} };
+      },
+    },
+    '@/lib/knowledge-research.mjs': { queryKnowledgeSource: async (options) => options, researchSourceHref: () => null },
+  }).KnowledgeSenpaiChat;
+  Chat();
+  const normal = await querySource({ mode: 'normal', query: '質問', signal: new AbortController().signal });
+  const law = await querySource({ mode: 'law', query: '質問', signal: new AbortController().signal });
+
+  assert.equal(normal.includeKnowhow, true);
+  assert.equal(law.includeKnowhow, undefined);
+});
+
+test('renders returned Markdown as escaped collapsed text with status, identity, scope, and source references', () => {
+  const answer = {
+    mode: 'normal', query: '設置条件', content: '技術KB回答', responseType: 'pages', sessionId: 'session-tech',
+    messageId: 'm1', receivedAt: '2026-10-20T00:00:00Z', sourceDocuments: [], pageCandidates: [], clarifyQuestions: [],
+    knowhow: {
+      status: 'matched', indexVersion: 'a'.repeat(64), searchTerms: ['設置条件'],
+      matches: [{
+        knowledgeId: 'KH-<img src=x>', cardVersion: 3, sha256: 'b'.repeat(64), title: '仮設材の固定',
+        status: 'draft', usage: 'navigation_only', body: '<img src=x onerror=alert(1)>本文',
+        searchTerms: ['仮設材'], sourceRefs: [{ type: 'Lists', id: 'L-1', title: '不具合一覧' }],
+        modelScope: { models: ['M1'], excludes: ['M1R'] },
+      }],
+    },
+  };
+  const initialSnapshot = { running: false, turns: [{ id: 1, query: '設置条件', normal: lane('success', { answer }), law: lane('paused') }] };
+  const render = loadInteractiveChat({
+    initialSnapshot,
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+  });
+  render();
+  const html = renderToStaticMarkup(render());
+
+  assert.match(html, /参照したノウハウMarkdown/);
+  assert.match(html, /KH-&lt;img src=x&gt;/);
+  assert.match(html, /仮設材の固定/);
+  assert.match(html, /未承認/);
+  assert.match(html, /参照用のみ/);
+  assert.match(html, /除外/);
+  assert.match(html, /不具合一覧/);
+  assert.match(html, /<details/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;本文/);
+  assert.doesNotMatch(html, /<img\b|href="javascript:/);
+  assert.match(html, /承認済み資料ではありません/);
+});
+
+test('explains that Markdown retrieval is server-authorized and does not upload a local vault or edit files', () => {
+  const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
+    'next/link': Link,
+    '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
+    '@/lib/chat-session-link.mjs': { buildChatSessionHref: () => '/chat' },
+    '@/lib/knowledge-senpai-chat.mjs': {
+      createSenpaiChat: () => ({ getSnapshot: () => ({ turns: [], running: false }), send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+    },
+    '@/lib/knowledge-research.mjs': { queryKnowledgeSource: async () => ({}), researchSourceHref: () => null },
+  }).KnowledgeSenpaiChat;
+  const html = renderToStaticMarkup(createElement(Chat));
+
+  assert.match(html, /サーバーで検索が許可されたノウハウMarkdown/);
+  assert.match(html, /関連部分をAIへの参考情報として利用/);
+  assert.match(html, /ローカルファイルは送信されません/);
+  assert.match(html, /Markdownの編集やOneNoteへの追記は行いません/);
+});
+
 test('pending first reply does not say both searches failed or ask to start over', () => {
   const initialSnapshot = {
     running: true,

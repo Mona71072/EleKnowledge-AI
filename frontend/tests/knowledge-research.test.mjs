@@ -69,6 +69,27 @@ function lawPayload(overrides = {}) {
   });
 }
 
+function knowhowPayload(overrides = {}) {
+  return {
+    status: 'matched',
+    indexVersion: 'a'.repeat(64),
+    matches: [{
+      knowledgeId: 'KH-1001',
+      cardVersion: 2,
+      sha256: 'b'.repeat(64),
+      title: '制御盤交換時の確認',
+      status: 'draft',
+      usage: 'navigation_only',
+      body: '停電範囲と復電手順を確認する。',
+      searchTerms: ['制御盤', '交換'],
+      sourceRefs: [{ type: 'lists', id: 'LIST-88' }],
+      modelScope: { models: ['A1'], excludes: ['A1R'] },
+    }],
+    searchTerms: ['制御盤', '交換'],
+    ...overrides,
+  };
+}
+
 function fetchOk(payload, onRequest = () => {}) {
   return async (url, init) => {
     onRequest(url, init);
@@ -104,6 +125,86 @@ test('posts only the explicit query, mode, and empty filters with the Cognito ID
   assert.equal(Number.isNaN(Date.parse(answer.receivedAt)), false);
   assert.equal(answer.responseTimestamp, undefined);
   assert.equal(answer.sourceDocuments[0].sourceUri, 's3://technical-kb/docs/install.pdf');
+});
+
+test('preserves ordinary request bodies and opts into server-indexed Markdown only when explicitly requested', async () => {
+  const bodies = [];
+  await queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '既存検索',
+    fetchImpl: fetchOk(normalPayload(), (_url, init) => bodies.push(JSON.parse(init.body))),
+  });
+  const answer = await queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '先輩相談', includeKnowhow: true,
+    fetchImpl: fetchOk(normalPayload({ knowhow: knowhowPayload() }), (_url, init) => bodies.push(JSON.parse(init.body))),
+  });
+
+  assert.deepEqual(bodies[0], { query: '既存検索', mode: 'normal', filters: {} });
+  assert.deepEqual(bodies[1], { query: '先輩相談', mode: 'normal', filters: {}, includeKnowhow: true });
+  assert.equal(answer.knowhow.indexVersion, 'a'.repeat(64));
+  assert.equal(answer.knowhow.matches[0].knowledgeId, 'KH-1001');
+  assert.equal(answer.knowhow.matches[0].cardVersion, 2);
+  assert.equal(answer.knowhow.matches[0].status, 'draft');
+  assert.equal(answer.knowhow.matches[0].usage, 'navigation_only');
+  assert.deepEqual(answer.knowhow.searchTerms, ['制御盤', '交換']);
+});
+
+test('rejects invalid knowhow opt-in and never sends the flag to law mode before authentication or fetch', async () => {
+  let calls = 0;
+  const common = {
+    baseUrl: BASE, getToken: async () => { calls += 1; return TOKEN; },
+    fetchImpl: async () => { calls += 1; return response(normalPayload()); },
+    query: 'question',
+  };
+  for (const includeKnowhow of [false, 'true', 1, null]) {
+    await assert.rejects(queryKnowledgeSource({ ...common, mode: 'normal', includeKnowhow }), (error) => error.code === 'validation');
+  }
+  await assert.rejects(queryKnowledgeSource({ ...common, mode: 'law', includeKnowhow: true }), (error) => error.code === 'validation');
+  assert.equal(calls, 0);
+});
+
+test('requires a well-formed Markdown index response when opted in and keeps not-found distinct', async () => {
+  const invalidPayloads = [
+    normalPayload(),
+    normalPayload({ knowhow: null }),
+    normalPayload({ knowhow: knowhowPayload({ indexVersion: 'bad' }) }),
+    normalPayload({ knowhow: knowhowPayload({ matches: Array.from({ length: 4 }, (_, index) => ({ ...knowhowPayload().matches[0], knowledgeId: `KH-${index}` })) }) }),
+    normalPayload({ knowhow: knowhowPayload({ matches: [{ ...knowhowPayload().matches[0], sha256: 'x'.repeat(64) }] }) }),
+    normalPayload({ knowhow: knowhowPayload({ matches: [{ ...knowhowPayload().matches[0], body: 'x'.repeat(16_001) }] }) }),
+    normalPayload({ knowhow: knowhowPayload({ matches: [{ ...knowhowPayload().matches[0], status: 'published' }] }) }),
+    normalPayload({ knowhow: knowhowPayload({ matches: [{ ...knowhowPayload().matches[0], usage: 'answer_authority' }] }) }),
+    normalPayload({ knowhow: knowhowPayload({ matches: [knowhowPayload().matches[0], knowhowPayload().matches[0]] }) }),
+    normalPayload({ knowhow: knowhowPayload({ status: 'not_found' }) }),
+    normalPayload({ knowhow: knowhowPayload({ matches: [] }) }),
+  ];
+  for (const payload of invalidPayloads) {
+    await assert.rejects(queryKnowledgeSource({
+      baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: 'question', includeKnowhow: true,
+      fetchImpl: fetchOk(payload),
+    }), (error) => error.code === 'invalid_response');
+  }
+
+  const valid = await queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: 'question', includeKnowhow: true,
+    fetchImpl: fetchOk(normalPayload({ knowhow: knowhowPayload({ status: 'not_found', matches: [] }) })),
+  });
+  assert.deepEqual(valid.knowhow.matches, []);
+  assert.equal(valid.knowhow.status, 'not_found');
+});
+
+test('does not accept unsolicited privileged Markdown payloads and reports an unconfigured index clearly', async () => {
+  await assert.rejects(queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: 'ordinary query',
+    fetchImpl: fetchOk(normalPayload({ knowhow: knowhowPayload() })),
+  }), (error) => error.code === 'invalid_response');
+
+  await assert.rejects(queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: 'question', includeKnowhow: true,
+    fetchImpl: async () => response({ message: 'private internal details' }, 503),
+  }), (error) => {
+    assert.equal(error.code, 'unavailable');
+    assert.equal(error.message, 'ノウハウMarkdownの検索準備ができていません。管理者が取込設定を確認してください。');
+    return true;
+  });
 });
 
 test('continues only the requested mode session and rejects invalid or mismatched session identifiers', async () => {
