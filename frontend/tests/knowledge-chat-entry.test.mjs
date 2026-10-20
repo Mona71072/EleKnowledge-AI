@@ -23,6 +23,65 @@ function loadTsx(path, mocks) {
 }
 
 const Link = ({ children, href, ...props }) => createElement('a', { href, ...props }, children);
+
+function findElement(root, predicate) {
+  if (!root || typeof root !== 'object') return null;
+  if (typeof root.type === 'string' && predicate(root)) return root;
+  const children = root.props?.children;
+  const list = Array.isArray(children) ? children : [children];
+  for (const child of list) {
+    const found = findElement(child, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
+function loadInteractiveChat({ initialSnapshot, createController }) {
+  const React = require('react');
+  const slots = [];
+  let hookIndex = 0;
+  let effectStarted = false;
+  const mockReact = {
+    ...React,
+    useState(initial) {
+      const index = hookIndex++;
+      if (!(index in slots)) slots[index] = initial;
+      return [slots[index], (value) => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }];
+    },
+    useRef(initial) {
+      const index = hookIndex++;
+      if (!(index in slots)) slots[index] = { current: initial };
+      return slots[index];
+    },
+    useEffect(effect) {
+      hookIndex += 1;
+      if (!effectStarted) {
+        effectStarted = true;
+        effect();
+      }
+    },
+  };
+  const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
+    react: mockReact,
+    'next/link': Link,
+    '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
+    '@/lib/chat-session-link.mjs': { buildChatSessionHref: (sessionId, mode) => `/chat?session=${encodeURIComponent(sessionId)}${mode === 'law' ? '&mode=law' : ''}` },
+    '@/lib/knowledge-senpai-chat.mjs': { createSenpaiChat: ({ onChange }) => createController(initialSnapshot, onChange) },
+    '@/lib/knowledge-research.mjs': {
+      queryKnowledgeSource: async () => ({}),
+      researchSourceHref: (source, mode) => mode === 'law' ? source.lawCitation?.sourceUrl : '/doc?uri=encoded',
+    },
+  }).KnowledgeSenpaiChat;
+  return () => {
+    hookIndex = 0;
+    return Chat();
+  };
+}
+
+function lane(status, extra = {}) {
+  return { status, ...extra };
+}
+
 const entry = () => loadTsx('../src/components/knowledge/KnowledgeChatEntry.tsx', {
   'next/link': Link,
   '@/components/ui/Card': { Card: ({ children, className }) => createElement('div', { className }, children) },
@@ -131,4 +190,110 @@ test('chat page starts as an empty conversation with a message composer and rese
   assert.match(html, /技術KB/);
   assert.match(html, /法令KB/);
   assert.doesNotMatch(html, /Markdownファイルを選択|照合まとめ/);
+});
+
+test('pending first reply does not say both searches failed or ask to start over', () => {
+  const initialSnapshot = {
+    running: true,
+    turns: [{ id: 1, query: '最初の質問', normal: lane('loading'), law: lane('loading') }],
+  };
+  const render = loadInteractiveChat({
+    initialSnapshot,
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+  });
+  render();
+  const html = renderToStaticMarkup(render());
+
+  assert.match(html, /技術KBを検索しています/);
+  assert.match(html, /法令KBを検索しています/);
+  assert.doesNotMatch(html, /両方の検索が失敗または中止/);
+});
+
+test('late completion from an old相談 does not erase a newer draft', async () => {
+  const initialSnapshot = { turns: [], running: false };
+  let finishSend;
+  const render = loadInteractiveChat({
+    initialSnapshot,
+    createController: (snapshot, onChange) => ({
+      getSnapshot: () => snapshot,
+      send: (query) => {
+        onChange({ turns: [{ id: 1, query, normal: lane('loading'), law: lane('loading') }], running: true });
+        return new Promise((resolve) => { finishSend = resolve; });
+      },
+      cancel() {},
+      reset() { onChange({ turns: [], running: false }); },
+      dispose() {},
+    }),
+  });
+
+  const root = render();
+  const input = findElement(root, (element) => element.type === 'textarea' && element.props['aria-label'] === '質問を入力');
+  input.props.onChange({ target: { value: '古い相談の質問' } });
+  let view = render();
+  const form = findElement(view, (element) => element.type === 'form' && element.props.onSubmit);
+  const sending = form.props.onSubmit({ preventDefault() {} });
+  view = render();
+  const reset = findElement(view, (element) => element.type === 'button' && element.props.children === '新しい相談');
+  reset.props.onClick();
+  view = render();
+  const newInput = findElement(view, (element) => element.type === 'textarea' && element.props['aria-label'] === '質問を入力');
+  newInput.props.onChange({ target: { value: '新しい相談の下書き' } });
+  finishSend();
+  await sending;
+  view = render();
+
+  assert.equal(findElement(view, (element) => element.type === 'textarea' && element.props['aria-label'] === '質問を入力').props.value, '新しい相談の下書き');
+});
+
+test('safe lane errors are shown and a healthy lane answer remains visible', () => {
+  const initialSnapshot = {
+    running: false,
+    turns: [{ id: 1, query: '故障時の確認手順', normal: lane('success', { answer: { mode: 'normal', query: '故障時の確認手順', content: '技術側で確認できた回答', responseType: 'pages', sessionId: 'session-tech', messageId: 'm1', receivedAt: '2026-10-20T00:00:00Z', sourceDocuments: [], pageCandidates: [], clarifyQuestions: [] } }), law: lane('error', { message: '法令KBを利用できません。接続設定・APIの有効化・権限を確認してください。' }) }],
+  };
+  const render = loadInteractiveChat({
+    initialSnapshot,
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+  });
+  render();
+  const html = renderToStaticMarkup(render());
+
+  assert.match(html, /技術側で確認できた回答/);
+  assert.match(html, /法令KBを利用できません。接続設定・APIの有効化・権限を確認してください。/);
+});
+
+test('chat explains separate history retention and that its combined transcript is local to this page', () => {
+  const initialSnapshot = { turns: [], running: false };
+  const render = loadInteractiveChat({
+    initialSnapshot,
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+  });
+  render();
+  const html = renderToStaticMarkup(render());
+
+  assert.match(html, /60日/);
+  assert.match(html, /再読み込み/);
+});
+
+test('law source displays the returned law number, provision reference, and effective date', () => {
+  const lawSource = {
+    lawCitation: {
+      lawId: 'SYNTHLAW0001', lawTitle: 'サンプル法', lawNumber: '令和八年法律第一号',
+      provisionType: 'Article', provisionReference: '第十二条', effectiveDate: '2026-04-01',
+      sourceUrl: 'https://elaws.e-gov.go.jp/document?lawid=SYNTHLAW0001',
+    },
+  };
+  const initialSnapshot = {
+    running: false,
+    turns: [{ id: 1, query: '根拠法令は？', normal: lane('paused'), law: lane('success', { answer: { mode: 'law', query: '根拠法令は？', content: '法令回答', responseType: 'pages', sessionId: 'session-law', messageId: 'm2', receivedAt: '2026-10-20T00:00:00Z', sourceDocuments: [lawSource], pageCandidates: [], clarifyQuestions: [] } }) }],
+  };
+  const render = loadInteractiveChat({
+    initialSnapshot,
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+  });
+  render();
+  const html = renderToStaticMarkup(render());
+
+  assert.match(html, /令和八年法律第一号/);
+  assert.match(html, /第十二条/);
+  assert.match(html, /2026-04-01/);
 });
