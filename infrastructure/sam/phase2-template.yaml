@@ -754,6 +754,7 @@ Resources:
   # ============================================================================
   SenpaiSynthesisLambdaRole:
     Type: AWS::IAM::Role
+    Condition: SenpaiSynthesisDevEnabled
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -826,6 +827,7 @@ Resources:
 
   SenpaiSynthesisFunction:
     Type: AWS::Serverless::Function
+    Condition: SenpaiSynthesisDevEnabled
     Properties:
       Tags:
         gyoumu012Project: !Ref CostProjectName
@@ -1248,6 +1250,7 @@ Outputs:
     Value: !GetAtt SenpaiFieldReportFunction.Arn
 
   SenpaiSynthesisFunctionArn:
+    Condition: SenpaiSynthesisDevEnabled
     Description: Senpai synthesis (dev-only prototype) Lambda Function ARN
     Value: !GetAtt SenpaiSynthesisFunction.Arn
 

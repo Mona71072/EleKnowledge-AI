@@ -176,6 +176,16 @@ OneNoteの自動書込はこの試行に含めない。
 - Amplifyの`mona`ブランチは既存で自動ビルド有効、Job 32が`e54f3fafb4ad`で成功していた。配信ホームのクライアント資産に先輩チャットの表示文言が含まれることを確認した。`amplify.yml`の`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH=true`はビルド時設定なので、環境変数の変更後は必ず新しいビルドを行う。
 - Lambdaを直接呼び出した簡易試験は、合成したadmin claimと検索語`エラー`で`200` / `knowhow.status=not_found`だった。これは該当カードが見つからなかった結果で、API Gateway/Cognito認証や画面操作の成功を示さない。応答にsession/message IDがあったため、テスト用ユーザーのChatLogsが作成された可能性もある。**この直呼び結果を受入済みと記録せず、同じ合成ユーザーで再試験しない。** 管理者ログインから実カードの症状語で検索し、ノウハウ候補表示、通常チャット、法令チャット、非管理者の非表示・拒否を確認する工程が残る。
 
+#### 反映記録の照合と、次回反映で変わること
+
+> 最終検証: 2026-10-20 — 上の反映記録を、反映SHA `e54f3fa` と現在の `mona` のコード・SAMテンプレート・カード差分で照合し、テンプレートを cfn-lint で検査。AWS上の実状態（スタック・Lambda環境変数・S3・Amplify）は、この照合端末にAWS CLIがないため未照合。
+
+- **devに入っているのは `e54f3fa` まで。** それ以降の `mona`（検索で除外条件を加点しない修正と機種フィルタ、取込の許容拡大と282補修、機種欄の確認状態と確認キュー、まとめ試作、結果を残す、CIの検査）はdev未反映。devの先輩チャットは、`excludes` などの語で候補が上がる不具合が残る版で動いている。
+- **SAMの差分は追加だけ。** 新パラメータ`SenpaiSynthesisEnabled`・`SenpaiFieldReportsEnabled`（既定`false`）も、手順6のとおり明示して引き継ぐ。両機能のLambda・IAMロール・`senpai-field-reports-<env>`テーブル・API経路は、`Environment=dev`かつ有効化したときだけ作られる。既定のままなら関数・ロール・テーブルのAddは出ない想定。有効化するとAddとRagApiのデプロイ更新が出る。どちらの場合も変更セットで`Replacement`が0件であることを確認する。
+- **画面が先に変わる。** Amplifyの`mona`はpushで自動ビルドされる。まとめ・結果を残すのボタンは`NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS`・`NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS`が`"true"`のときだけ出る（`amplify.yml`未設定なら非表示）。SAMで有効化した後に`amplify.yml`へ追加して再ビルドする。機種選択は旧Lambdaでも技術KB検索の絞り込みとして効くが、ノウハウ候補は絞られない。
+- **索引の取込一覧は作り直す。** 反映時に除外した78枚のうち77枚は、カード本文を変えずに取込ツールの変更で`check`を通るようになった。282は内容を変えて版2にした（反映時の索引には入っていない）。追加する場合は`check`と`card-versions.jsonl`で版・ハッシュを確認し、新しい取込一覧で担当者がクラウド処理許可（`cloudApproved`）を改めて確認する。取込ツールが通すことは、索引に入れてよいという許可ではない。
+- **直呼び試験の記録。** 合成ユーザーで作られた可能性のあるChatLogsはTTL（60日）で消える。早く消す必要がある場合は、対象ユーザーを確認したうえで別途行う。
+
 #### Windowsでの実行時に注意すること
 
 - SAM CLIが同梱Pythonを見つけられるよう、SAM runtimeを`PATH`の先頭に加えてからbuild/packageする。package/buildが動作中なら二重起動せず、プロセス終了と出力を確認してから次へ進む。

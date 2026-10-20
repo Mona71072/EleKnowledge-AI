@@ -79,7 +79,8 @@ dev の先輩チャット（管理者限定）で、同じ質問に対する技�
 
 `infrastructure/sam/phase2-template.yaml`
 
-- パラメーター `SenpaiSynthesisEnabled`（既定 `false`）。dev で試すときだけ `true` にする。`Environment` が dev 以外なら、`true` にしても関数側で無効になる。
+- パラメーター `SenpaiSynthesisEnabled`（既定 `false`）。dev で試すときだけ `true` にする。関数・IAMロール・`POST /rag/senpai/synthesis` は `Environment=dev` かつ `true` のときだけ作成する（2026-10-20 に条件付き作成へ変更。本番に Bedrock・ChatLogs 権限を持つロールと経路を作らない）。
+- 画面のボタンは `NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS=true` のときだけ表示する（既定オフ）。Amplify の `mona` は push で自動ビルドされ画面だけ先に変わるため、SAM で有効化してから `amplify.yml` に追加して再ビルドする。保存済みのまとめは設定に関係なく表示する。
 - 新規リソース: `SenpaiSynthesisLambdaRole`、`SenpaiSynthesisFunction`（`POST /rag/senpai/synthesis`、`RagApi` の Cognito 認可）。
 - IAM は最小限: `BedrockModelId` への `bedrock:InvokeModel`（RAG と同じ ARN の組み立て）、ChatLogs への `GetItem` / `PutItem`、ユーザー GSI への `Query`。KB 検索や Scan の権限は持たない。
 - 既存の `BedrockModelId` / `BedrockModelIdType` をそのまま使う。モデルの能力差は、`rag-function/model_profile.py` の主な項目を `synthesis_model.py` に最小限で写している（`MODEL_PROFILE_JSON` による上書きは未対応。未知のモデルは最小リクエスト）。

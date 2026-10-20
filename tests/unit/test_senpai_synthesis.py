@@ -658,6 +658,14 @@ def test_sam_exposes_off_by_default_flag_effective_only_in_dev():
     ]} or "dev" in str(condition) and "SenpaiSynthesisEnabled" in str(condition)
 
 
+def test_sam_creates_synthesis_resources_only_when_enabled_in_dev():
+    # SECURITY: prod must not get the route or a role with Bedrock/ChatLogs access.
+    template = _sam()
+    for name in ("SenpaiSynthesisFunction", "SenpaiSynthesisLambdaRole"):
+        assert template["Resources"][name].get("Condition") == "SenpaiSynthesisDevEnabled"
+    assert template["Outputs"]["SenpaiSynthesisFunctionArn"].get("Condition") == "SenpaiSynthesisDevEnabled"
+
+
 def test_sam_function_route_env_and_timeouts():
     template = _sam()
     function = template["Resources"]["SenpaiSynthesisFunction"]["Properties"]

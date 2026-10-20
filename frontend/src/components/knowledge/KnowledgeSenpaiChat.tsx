@@ -21,6 +21,8 @@ import {
 const EMPTY_SNAPSHOT: SenpaiChatSnapshot = { turns: [], running: false };
 // 「結果を残す」は SAM の SenpaiFieldReportsEnabled と合わせて有効化する（既定オフ）。
 const FIELD_REPORTS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS === 'true';
+// 「工技先輩のまとめ」は SAM の SenpaiSynthesisEnabled と合わせて有効化する（既定オフ）。保存済みのまとめは常に表示する。
+const SYNTHESIS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS === 'true';
 const inputClass = 'w-full resize-y rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm leading-6 text-gray-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200';
 
 function useController(
@@ -240,7 +242,7 @@ function LaneReply({ lane, mode }: { lane: SenpaiChatLane; mode: KnowledgeResear
 
 function canSynthesize(turn: SenpaiChatTurn, running: boolean) {
   const lanes = [turn.normal, turn.law];
-  return !running && Boolean(turn.senpaiTurnId)
+  return SYNTHESIS_ENABLED && !running && Boolean(turn.senpaiTurnId)
     && lanes.every((lane) => lane.status !== 'loading')
     && lanes.some((lane) => lane.status === 'success')
     && turn.synthesis?.status !== 'loading' && turn.synthesis?.status !== 'success';

@@ -528,7 +528,7 @@ const baseAnswer = (mode) => ({
   receivedAt: '2026-10-20T00:00:00Z', sourceDocuments: [], pageCandidates: [], clarifyQuestions: [],
 });
 
-function synthesisChat(turnOverrides = {}, { running = false } = {}) {
+function synthesisChat(turnOverrides = {}, { running = false, synthesisFlag = 'true' } = {}) {
   const calls = [];
   const turn = {
     id: 1, senpaiTurnId: TURN_UUID, query: '質問',
@@ -537,16 +537,34 @@ function synthesisChat(turnOverrides = {}, { running = false } = {}) {
     ...turnOverrides,
   };
   const snapshot = { conversationId: '10000000-0000-4000-8000-000000000001', running, turns: [turn] };
-  const render = loadInteractiveChat({
+  const render = withSynthesisFlag(synthesisFlag, () => loadInteractiveChat({
     initialSnapshot: snapshot,
     createController: (initial) => ({
       getSnapshot: () => initial, send: async () => {}, cancel() {}, reset() {}, dispose() {},
       synthesize: async (id) => { calls.push(id); },
     }),
-  });
+  }));
   render();
   return { render, calls };
 }
+
+function withSynthesisFlag(value, fn) {
+  const previous = process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS;
+  if (value == null) delete process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS;
+  else process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS = value;
+  try { return fn(); } finally {
+    if (previous === undefined) delete process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS;
+    else process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS = previous;
+  }
+}
+
+test('the synthesis button is hidden unless the development flag is on, but a saved synthesis still shows', () => {
+  for (const synthesisFlag of [null, 'false']) {
+    assert.doesNotMatch(html(synthesisChat({}, { synthesisFlag }).render), /工技先輩のまとめを作る/);
+    const saved = html(synthesisChat({ synthesis: { status: 'success', content: '保存済みのまとめ', messageId: `senpai-synthesis-${TURN_UUID}` } }, { synthesisFlag }).render);
+    assert.match(saved, /保存済みのまとめ/);
+  }
+});
 
 const html = (render) => renderToStaticMarkup(render());
 
