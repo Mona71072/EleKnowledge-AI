@@ -149,4 +149,4 @@ def test_no_log_line_in_the_whole_flow_contains_question_queries_or_answer(flow,
     for secret in ("固有質問ZZZQ", "整理語ZZZQRY", "ドアの調整を確認", "ドア調整の本文", "別の資料の本文"):
         assert secret not in output, secret
     records = [json.loads(line) for line in output.splitlines() if line.startswith("{")]
-    assert any(r.get("event") == "senpai_research" and r.get("stage") == "job" for r in records)
+    assert any(r.get("event") == "senpai_research" and r.get("stage") == "job_finished" for r in records)

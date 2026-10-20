@@ -3,10 +3,11 @@
 app.py は編集せず import して再利用する（import 時に boto3 クライアントを作る副作用があるため、
 最初に使うときまで読み込まない）。ここで KB の生の結果を、出典に使える最小の根拠データへ変換する。
 """
-import os
+import math
 
+import senpai_research_config as config
 import senpai_research_errors as errors
-from senpai_research_errors import KnowhowUnavailable  # noqa: F401 (re-export)
+from senpai_research_errors import KnowhowUnavailable, TimeBudgetExceeded  # noqa: F401 (re-export)
 
 CHUNK_TEXT_MAX_CHARS = 1200
 KNOWHOW_MAX_CARDS = 3
@@ -19,9 +20,24 @@ def set_app(module) -> None:
     _state['app'] = module
 
 
+def _limit_knowledge_base_waits(app) -> None:
+    """KB 検索の待ちを短くする（app.py の既定は読み取り 60 秒・再試行 5 回で、ジョブの予算を超える）。
+
+    このワーカー Lambda は調査ジョブ専用なので、app.py のモジュール変数を差し替えても RAG 本体には影響しない。
+    """
+    import boto3  # noqa: PLC0415
+    from botocore.config import Config  # noqa: PLC0415
+    app.bedrock_agent = boto3.client(
+        'bedrock-agent-runtime', region_name=app.AWS_REGION,
+        config=Config(read_timeout=config.kb_read_timeout_seconds(), connect_timeout=3,
+                      retries={'total_max_attempts': 2, 'mode': 'standard'}),
+    )
+
+
 def get_app():
     if _state['app'] is None:
         import app  # noqa: PLC0415 - 副作用が大きいので遅延 import
+        _limit_knowledge_base_waits(app)
         _state['app'] = app
     return _state['app']
 
@@ -62,8 +78,45 @@ def _retrieval(hits: int, selected: list, evidence: list) -> dict:
             'topScores': [float(r.get('score') or 0.0) for r in selected[:3]]}
 
 
+RETRY_MIN_TIMEOUT_S = 20  # この長さ以上の余裕があるときだけ、読み取り待ちを半分にして 1 回再試行する
+
+
 class RagDeps:
-    """runner が使う部品の本番実装。"""
+    """runner が使う部品の本番実装。bind_budget() で予算を結ぶと、待ち時間が残り予算に収まる。"""
+
+    def __init__(self):
+        self._budget = None
+        self._clients = {}
+
+    def bind_budget(self, budget) -> None:
+        self._budget = budget
+
+    def _bedrock_client(self, app, timeout_s: float, attempts: int):
+        import boto3  # noqa: PLC0415
+        from botocore.config import Config  # noqa: PLC0415
+        key = (math.ceil(timeout_s), attempts)
+        if key not in self._clients:
+            self._clients[key] = boto3.client(
+                'bedrock-runtime', region_name=app.AWS_REGION,
+                config=Config(read_timeout=key[0], connect_timeout=3,
+                              retries={'total_max_attempts': attempts, 'mode': 'standard'}),
+            )
+        return self._clients[key]
+
+    def _model_client(self, app, purpose: str):
+        """残り予算に収まる待ち時間のクライアント。予算を結んでいなければ app.py の既定。"""
+        if self._budget is None:
+            return app.bedrock_runtime
+        total = self._budget.call_timeout_s(final=purpose == 'synthesize')
+        if total is None:
+            raise TimeBudgetExceeded(purpose)
+        total = min(total, config.model_read_timeout_seconds())
+        attempts = 2 if total >= RETRY_MIN_TIMEOUT_S else 1
+        return self._bedrock_client(app, total / attempts, attempts)
+
+    def _require_time_for_search(self) -> None:
+        if self._budget is not None and not self._budget.search_allowed():
+            raise TimeBudgetExceeded('search')
 
     @property
     def law_available(self) -> bool:
@@ -80,10 +133,11 @@ class RagDeps:
 
     def call_model(self, purpose: str, system_prompt: str, user_text: str, max_tokens: int) -> str:
         app = get_app()
-        small = os.environ.get('SENPAI_UNDERSTAND_MODEL_ID', '').strip() or app.BEDROCK_MODEL_ID
+        small = config.understand_model_id() or app.BEDROCK_MODEL_ID
         model_id = small if purpose in SMALL_MODEL_PURPOSES else app.BEDROCK_MODEL_ID
+        client = self._model_client(app, purpose)
         text, _usage, _stop = app.invoke_generation(
-            app.bedrock_runtime, model_id, system_prompt,
+            client, model_id, system_prompt,
             [{'role': 'user', 'content': user_text}],
             max_tokens=max_tokens, apply_generation_settings=purpose == 'synthesize',
             ensure_ascii=False, call_name=purpose,
@@ -112,6 +166,7 @@ class RagDeps:
         }
 
     def _retrieve_tech(self, app, query: str, filters: dict) -> list:
+        self._require_time_for_search()
         response = app.retrieve_for_normal_query(query, filters, number_of_results=30)
         return response.get('retrievalResults', []) or []
 
@@ -131,6 +186,7 @@ class RagDeps:
 
     def search_law(self, query: str, claim_search=None) -> dict:
         app = get_app()
+        self._require_time_for_search()
         normalized = app.normalize_query_text(query) or query
         results = app.query_law_knowledge_base(normalized).get('retrievalResults', []) or []
         selected = app.select_retrieval_results(results, mode='law', rank_key=app.RERANK_RANK_KEY)

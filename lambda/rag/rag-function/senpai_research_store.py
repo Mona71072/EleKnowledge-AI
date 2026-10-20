@@ -36,10 +36,13 @@ def _is_condition_failure(error: ClientError) -> bool:
 
 
 def build_job_item(job_id: str, user_id: str, request: dict, *, now: float,
-                   ttl_seconds: int) -> dict:
-    """新しいジョブ行。userId は呼び出し側が JWT から渡す。"""
+                   ttl_seconds: int, daily_day: str = None) -> dict:
+    """新しいジョブ行。userId は呼び出し側が JWT から渡す。
+
+    daily_day は日次枠を取った日（JST の日付）。失敗時に「取った日」の枠へ返すために持つ。
+    """
     created = datetime.fromtimestamp(now, timezone.utc).isoformat().replace('+00:00', 'Z')
-    return {
+    item = {
         'pk': f'JOB#{job_id}',
         'jobId': job_id,
         'userId': user_id,
@@ -55,6 +58,9 @@ def build_job_item(job_id: str, user_id: str, request: dict, *, now: float,
         'expiresAt': int(now) + ttl_seconds,
         'ttl': int(now) + JOB_RETENTION_SECONDS,
     }
+    if daily_day:
+        item['dailyDay'] = daily_day
+    return item
 
 
 class JobStore:
@@ -117,14 +123,17 @@ class JobStore:
 
     # ------------------------------------------------------------ 日次上限
 
-    def _daily_key(self, user_id: str) -> str:
-        day = datetime.fromtimestamp(self._clock(), JST).date().isoformat()
-        return f'DAILY#{user_id}#{day}'
+    def daily_day(self) -> str:
+        """日次枠の日付（JST）。"""
+        return datetime.fromtimestamp(self._clock(), JST).date().isoformat()
 
-    def take_daily_slot(self, user_id: str, limit: int) -> bool:
+    def _daily_key(self, user_id: str, day: str = None) -> str:
+        return f'DAILY#{user_id}#{day or self.daily_day()}'
+
+    def take_daily_slot(self, user_id: str, limit: int, day: str = None) -> bool:
         try:
             self._table.update_item(
-                Key={'pk': self._daily_key(user_id)},
+                Key={'pk': self._daily_key(user_id, day)},
                 UpdateExpression='ADD cnt :one SET #ttl = :ttl',
                 ConditionExpression='attribute_not_exists(cnt) OR cnt < :limit',
                 ExpressionAttributeNames={'#ttl': 'ttl'},
@@ -139,10 +148,10 @@ class JobStore:
                 return False
             raise
 
-    def return_daily_slot(self, user_id: str) -> None:
+    def return_daily_slot(self, user_id: str, day: str = None) -> None:
         try:
             self._table.update_item(
-                Key={'pk': self._daily_key(user_id)},
+                Key={'pk': self._daily_key(user_id, day)},
                 UpdateExpression='ADD cnt :minus',
                 ConditionExpression='cnt > :zero',
                 ExpressionAttributeValues={':minus': -1, ':zero': 0},
@@ -150,6 +159,14 @@ class JobStore:
         except ClientError as error:
             if not _is_condition_failure(error):
                 raise
+
+    def refund_slot(self, job: dict) -> None:
+        """システム起因で失敗したジョブの日次枠を、枠を取った日へ返す。
+
+        fail_job / expire_job が True を返した（＝そのジョブを failed にできた）ときだけ呼ぶ。
+        その更新は 1 ジョブにつき 1 回しか成功しないので、返却も 1 回になる。
+        """
+        self.return_daily_slot(job['userId'], job.get('dailyDay'))
 
     # ------------------------------------------------------------ ジョブ
 
@@ -183,9 +200,14 @@ class JobStore:
     def start_job(self, job_id: str) -> bool:
         return self._update_if(
             job_id, 'SET #status = :running, startedAt = :now',
-            '#status = :queued',
+            '#status = :queued AND expiresAt > :now',
             values={':running': 'running', ':queued': 'queued', ':now': int(self._clock())},
         )
+
+    def next_seq(self, job_id: str) -> int:
+        """保存先が次に受け付ける seq（記録側が番号を取り直すために使う）。"""
+        job = self.get_job(job_id) or {}
+        return int(job.get('nextSeq') or 1)
 
     def append_step(self, job_id: str, event: dict) -> bool:
         """イベントを末尾に足す。seq が次の番号と一致するときだけ（追記専用・単調増加）。"""
@@ -198,7 +220,7 @@ class JobStore:
     def complete_job(self, job_id: str, result: dict, debug: dict) -> bool:
         return self._update_if(
             job_id, 'SET #status = :done, #result = :result, debug = :debug, finishedAt = :now',
-            '#status = :running', names={'#result': 'result'},
+            '#status = :running AND expiresAt > :now', names={'#result': 'result'},
             values={':done': 'completed', ':running': 'running', ':result': result,
                     ':debug': debug, ':now': int(self._clock())},
         )

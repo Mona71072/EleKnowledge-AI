@@ -5,6 +5,9 @@ import senpai_research_citations as citations
 import senpai_research_text as text_util
 
 
+LANE_LABELS = {'tech': '技術資料', 'law': '法令'}
+
+
 class RunContext:
     def __init__(self, job: dict, deps, recorder, budget):
         self.job = job
@@ -19,6 +22,8 @@ class RunContext:
         self.cards = []
         self.hints = []
         self.notes = []
+        self.warnings = []
+        self._failed_lanes = set()
         self.queries = {'tech': [], 'law': [], 'knowhow': ''}
         self.law_planned = False
         self._lock = threading.Lock()
@@ -53,6 +58,16 @@ class RunContext:
                     self._seen_docs[kind].add(item['docKey'])
                     new_docs.add(item['docKey'])
         return len(new_docs), new_items
+
+    def lane_failed(self, tool: str) -> None:
+        """検索が全滅した道具を、まとめ（notes）と結果（warnings）に 1 回だけ伝える。"""
+        label = LANE_LABELS[tool]
+        with self._lock:
+            if tool in self._failed_lanes:
+                return
+            self._failed_lanes.add(tool)
+            self.notes.append(f'{label}の検索に失敗したため、{label}は確認できていません。')
+            self.warnings.append(f'{label}の検索に失敗したため、{label}の根拠は含まれていません。')
 
     def has_evidence(self) -> bool:
         with self._lock:
@@ -96,7 +111,11 @@ class RunContext:
                 self.queries[tool].append(query)
 
     def debug(self) -> dict:
-        """管理者向けの診断。質問や回答の本文は含めない（検索語・件数・時間のみ）。"""
+        """管理者向けの診断（検索語・件数・時間・整理結果）。回答の本文は含めない。
+
+        検索語には利用者の質問そのもの（元の文での検索）と、モデルが整理した言い換えが入る。
+        管理者にだけ返し、ジョブ行の TTL（7 日）で消える。CloudWatch には出さない。
+        """
         with self._lock:
             tools = [dict(entry) for entry in self._tools]
         return {

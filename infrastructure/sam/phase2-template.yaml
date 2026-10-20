@@ -145,8 +145,11 @@ Parameters:
     MinValue: 5000
     MaxValue: 110000
     Description: >-
-      Soft time budget per research job in milliseconds. After it, the worker answers with what it has
-      (stopReason=budget). The worker Lambda timeout is fixed at 120 seconds.
+      Soft time budget per research job in milliseconds. After it, the worker starts no new search or judgement
+      and answers with what it has (stopReason=budget). Every search and model call is also limited to the
+      remaining budget (plus 20 seconds reserved for the answer) and to the Lambda remaining time minus a
+      10 second margin; when too little time is left the worker returns a list of the sources found instead
+      of calling the model. The worker Lambda timeout is fixed at 120 seconds.
 
   SenpaiUnderstandModelId:
     Type: String
@@ -1176,8 +1179,8 @@ Resources:
           SENPAI_RESEARCH_TABLE: !Ref SenpaiResearchJobsTable
           SENPAI_RESEARCH_WORKER_NAME: !Ref SenpaiResearchWorkerFunction
           SENPAI_RESEARCH_DAILY_LIMIT: !Ref SenpaiResearchDailyLimit
-          # 進行中ジョブ・ロックの有効秒数。ワーカーの Timeout（120 秒）より少し長い。
-          SENPAI_RESEARCH_JOB_TTL_SECONDS: '150'
+          # 進行中ジョブ・ロックの有効秒数（リース）。非同期起動の最大待ち（120 秒）+ ワーカーの Timeout（120 秒）以上。
+          SENPAI_RESEARCH_JOB_TTL_SECONDS: '300'
       Events:
         ResearchCreate:
           Type: Api
@@ -1359,7 +1362,8 @@ Resources:
       Handler: senpai_research_worker.lambda_handler
       Description: Dev-only 先輩チャットの調査ジョブのワーカー（受付から非同期起動のみ。再試行しない）
       Role: !GetAtt SenpaiResearchWorkerLambdaRole.Arn
-      # ジョブ全体の予算は 60 秒（SenpaiResearchJobBudgetMs）。まとめの生成が長引いても収まる余裕を見て 120 秒。
+      # ジョブ全体の予算は 60 秒（SenpaiResearchJobBudgetMs）+ まとめ用 20 秒。待ち時間は残り予算と
+      # Lambda の残り時間から決め、超えそうなら呼ばずに資料の一覧で返す。余裕を見て 120 秒。
       Timeout: 120
       MemorySize: !Ref RagLambdaMemory
       # 非同期起動のみ。再試行すると同じ質問で重複して検索・生成するため 0 にする。
@@ -1399,6 +1403,9 @@ Resources:
           # Bedrock の読み取り待ち。ジョブ全体の予算（60 秒）の中で、まとめの生成が通る長さ。
           BEDROCK_READ_TIMEOUT: '40'
           BEDROCK_MAX_ATTEMPTS: '2'
+          # 調査ジョブ専用の待ち時間（残り予算でさらに短くなる）。KB 検索 1 回の読み取り待ち（秒）と、モデル 1 呼び出しの上限（秒）。
+          SENPAI_RESEARCH_KB_READ_TIMEOUT: '12'
+          SENPAI_RESEARCH_MODEL_READ_TIMEOUT: '40'
           # --- 調査ジョブの設定 ---
           SENPAI_RESEARCH_TABLE: !Ref SenpaiResearchJobsTable
           SENPAI_UNDERSTAND_MODEL_ID: !Ref SenpaiUnderstandModelId

@@ -171,3 +171,18 @@ def test_rag_function_and_other_roles_are_untouched(template):
     assert not any(key.startswith("SENPAI_RESEARCH") for key in rag_env)
     assert not any(key.startswith("SENPAI_RESEARCH") for key in
                    _function(template, "ChatManagementFunction")["Environment"]["Variables"])
+
+
+# ---------------------------------------------------------------- 堅牢化（監査 F1 / F2）
+
+def test_job_lease_covers_async_event_age_plus_worker_timeout(template):
+    api_env = _function(template, "SenpaiResearchApiFunction")["Environment"]["Variables"]
+    worker = _function(template, "SenpaiResearchWorkerFunction")
+    needed = int(worker["EventInvokeConfig"]["MaximumEventAgeInSeconds"]) + int(worker["Timeout"])
+    assert int(api_env["SENPAI_RESEARCH_JOB_TTL_SECONDS"]) >= needed
+
+
+def test_worker_waits_are_bounded_below_the_job_budget(template):
+    env = _function(template, "SenpaiResearchWorkerFunction")["Environment"]["Variables"]
+    assert 3 <= int(env["SENPAI_RESEARCH_KB_READ_TIMEOUT"]) <= 30
+    assert 5 <= int(env["SENPAI_RESEARCH_MODEL_READ_TIMEOUT"]) <= 60

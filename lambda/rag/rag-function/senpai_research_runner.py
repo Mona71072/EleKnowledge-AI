@@ -12,12 +12,13 @@ import senpai_research_synthesize as synthesize
 import senpai_research_text as text_util
 import senpai_research_understand as understand
 from senpai_research_context import RunContext
-from senpai_research_errors import KnowhowUnavailable, ResearchFailure  # noqa: F401 (re-export)
+from senpai_research_errors import KnowhowUnavailable, ResearchFailure, TimeBudgetExceeded  # noqa: F401 (re-export)
 
 MAX_EXTRA_SEARCHES = 2
 MODEL_MAX_TOKENS = {'understand': 700, 'sufficiency': 500, 'synthesize': 3000}
 TIMEOUT_ERROR_CODES = frozenset({'ModelTimeoutException', 'RequestTimeout', 'RequestTimeoutException'})
 RAG_QUERY_MAX_LENGTH = 2000
+MIN_SYNTH_MS = 8000  # これより残りが少ないときは、まとめを呼ばずに資料の一覧で返す
 
 TIMEOUT_MESSAGE = 'まとめの作成が時間内に完了しませんでした。もう一度お試しください。'
 INTERNAL_MESSAGE = '回答を作成できませんでした。時間をおいて再度お試しください。'
@@ -268,7 +269,7 @@ def _sufficiency_loop(ctx: RunContext) -> tuple:
 
 def _result(ctx: RunContext, *, kind: str, markdown: str, public_sources: dict,
             stop_reason: str, clarify_questions=(), unverified=()) -> dict:
-    return {
+    result = {
         'kind': kind,
         'answerMarkdown': markdown,
         'clarifyQuestions': list(clarify_questions),
@@ -277,6 +278,9 @@ def _result(ctx: RunContext, *, kind: str, markdown: str, public_sources: dict,
         'unverifiedRefs': list(unverified),
         'stopReason': stop_reason,
     }
+    if ctx.warnings:  # 任意項目: 検索に失敗した道具があるときだけ
+        result['warnings'] = list(ctx.warnings)
+    return result
 
 
 def _outcome(ctx: RunContext, result: dict) -> dict:
@@ -309,7 +313,8 @@ def _failure_from(error: Exception) -> ResearchFailure:
     return ResearchFailure('Internal', INTERNAL_MESSAGE)
 
 
-def _generate_answer(ctx: RunContext, sources: dict, stop_reason: str) -> str:
+def _generate_answer(ctx: RunContext, sources: dict, stop_reason: str):
+    """まとめの本文。残り時間が足りずモデルを呼べないときは None（資料の一覧で返す）。"""
     notes = list(ctx.notes) + ([BUDGET_NOTE] if stop_reason == 'budget' else [])
     handle = ctx.recorder.begin('synthesize')
     if not ctx.budget.try_model_call():
@@ -320,6 +325,10 @@ def _generate_answer(ctx: RunContext, sources: dict, stop_reason: str) -> str:
             'synthesize', synthesize.SYSTEM_PROMPT,
             synthesize.build_user_text(ctx.question, {'modelType': ctx.model_type}, sources, notes),
             MODEL_MAX_TOKENS['synthesize'])
+    except TimeBudgetExceeded:
+        run_log.log('synthesize', 'no_time')
+        ctx.recorder.end(handle, 'failed', detail='時間が足りず、まとめを作れませんでした')
+        return None
     except Exception as error:  # noqa: BLE001 - 利用者には一般化した失敗として返す
         run_log.log('synthesize', 'error', error)
         ctx.recorder.end(handle, 'failed', detail='回答をまとめられませんでした')
@@ -336,17 +345,41 @@ def _verify_answer(ctx: RunContext, text: str, sources: dict) -> dict:
     handle = ctx.recorder.begin('verify')
     verified = citations.verify_refs(text, sources)
     removed = len(verified['unverifiedRefs'])
-    ctx.recorder.end(handle, 'done', detail=(
-        f'実在しない参照 {removed} 件を除去' if removed else f'{len(verified["cited"])}件の参照を確認'))
+    if removed:
+        detail = f'実在しない参照 {removed} 件を除去'
+    elif verified['cited']:
+        detail = f'{len(verified["cited"])}件の参照を確認'
+    else:
+        detail = '根拠の参照を確認できませんでした'
+    ctx.recorder.end(handle, 'done', detail=detail)
     return verified
+
+
+def _no_citation_outcome(ctx: RunContext, sources: dict, stop_reason: str, unverified: list) -> dict:
+    """検証できた参照が 1 つもない回答は出さない（根拠なしの断定を画面に出さない）。"""
+    result = _result(
+        ctx, kind='not_found', markdown=synthesize.no_citation_markdown(),
+        public_sources=citations.public_sources(sources, cited=set()),
+        stop_reason=stop_reason, unverified=unverified)
+    return _outcome(ctx, result)
 
 
 def _answer_outcome(ctx: RunContext, stop_reason: str) -> dict:
     sources = ctx.sources()
     if not (sources['tech'] or sources['law'] or sources['knowhow']):
         return _not_found_outcome(ctx, stop_reason)
-    text = _generate_answer(ctx, sources, stop_reason)
+    text = None
+    if ctx.budget.remaining_ms() >= MIN_SYNTH_MS:
+        text = _generate_answer(ctx, sources, stop_reason)
+    else:
+        ctx.recorder.skip('synthesize', '時間が足りないため省略')
+    if text is None:
+        # 時間切れ: 見つかった資料の一覧（参照つき）を返す。推測は書かない。
+        text, stop_reason = synthesize.source_list_markdown(sources), 'budget'
+    text = citations.strip_links(text)
     verified = _verify_answer(ctx, text, sources)
+    if not verified['cited']:
+        return _no_citation_outcome(ctx, sources, stop_reason, verified['unverifiedRefs'])
     result = _result(
         ctx, kind='answer', markdown=verified['text'].strip(),
         public_sources=citations.public_sources(sources, cited=verified['cited']),

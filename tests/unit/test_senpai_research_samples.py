@@ -106,8 +106,8 @@ class Lab:
             store=self.store, chatlogs_table=self.chatlogs, limits=worker.config.load_limits())
         now_iso, monotonic = self._fixed_time()
         recorder_cls, budget_cls = worker.recorder_module.StepRecorder, worker.budget_module.Budget
-        mp.setattr(worker.recorder_module, "StepRecorder", lambda append: recorder_cls(append, now_iso=now_iso))
-        mp.setattr(worker.budget_module, "Budget", lambda limits: budget_cls(limits, clock=monotonic))
+        mp.setattr(worker.recorder_module, "StepRecorder", lambda append, resync=None: recorder_cls(append, now_iso=now_iso, resync=resync))
+        mp.setattr(worker.budget_module, "Budget", lambda limits, **kw: budget_cls(limits, clock=monotonic, **kw))
         mp.setattr(worker.runner.search, "run_parallel", lambda tasks: [task() for task in tasks])
         build_rows = worker.chatlog.build_rows
         mp.setattr(worker.chatlog, "build_rows", lambda job, result: build_rows(

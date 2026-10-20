@@ -188,7 +188,7 @@ def test_logs_contain_stage_metrics_but_never_question_queries_or_answer(world, 
     for secret in ("固有質問ZZZQ", SECRET_QUERY, SECRET_ANSWER, "ドア", "異音", "LINKs"):
         assert secret not in output, secret
     records = [json.loads(line) for line in output.splitlines() if line.startswith("{")]
-    summary = [r for r in records if r.get("event") == "senpai_research" and r.get("stage") == "job"]
+    summary = [r for r in records if r.get("event") == "senpai_research" and r.get("stage") == "job_finished"]
     assert summary and summary[-1]["status"] == "completed"
     assert summary[-1]["stopReason"] == "sufficient" and summary[-1]["kind"] == "answer"
     assert "elapsedMs" in summary[-1] and "modelCalls" in summary[-1] and "searches" in summary[-1]
@@ -219,6 +219,6 @@ def test_lambda_handler_runs_the_job_it_is_given(world, monkeypatch):
     seen = []
     monkeypatch.setattr(worker, "build_runtime", lambda: runtime)
     monkeypatch.setattr(worker, "build_deps", lambda: "deps")
-    monkeypatch.setattr(worker, "process_job", lambda job_id, rt, deps: seen.append((job_id, rt, deps)))
+    monkeypatch.setattr(worker, "process_job", lambda job_id, rt, deps, **kw: seen.append((job_id, rt, deps)))
     worker.lambda_handler({"jobId": JOB_ID}, None)
     assert seen == [(JOB_ID, runtime, "deps")]

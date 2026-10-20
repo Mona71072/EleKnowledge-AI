@@ -17,8 +17,22 @@ def _safe(value):
     return None
 
 
+# 1 回の Lambda 実行で扱うジョブは 1 件。ジョブ ID（UUID）は識別子であり、本文ではないのでログに出してよい。
+_job = {'id': None}
+
+
+def set_job(job_id) -> None:
+    _job['id'] = job_id if _safe(job_id) is not None else None
+
+
+def clear_job() -> None:
+    _job['id'] = None
+
+
 def log(stage: str, status: str, error: Exception = None, **fields) -> None:
     record = {'event': 'senpai_research', 'stage': stage, 'status': status}
+    if _job['id']:
+        record['jobId'] = _job['id']
     if error is not None:
         record['errorClass'] = type(error).__name__
     for key, value in fields.items():

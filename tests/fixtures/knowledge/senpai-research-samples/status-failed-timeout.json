@@ -3,7 +3,7 @@
     "debug": {
       "budget": {
         "elapsedMaxMs": 60000,
-        "elapsedMs": 300,
+        "elapsedMs": 350,
         "modelCallsMax": 4,
         "modelCallsUsed": 3,
         "searchesMax": 6,

@@ -409,7 +409,7 @@ def test_time_budget_skips_sufficiency_and_synthesizes_what_it_has(runner):
     clock_box = {}
 
     def slow_tech(query, model):
-        clock_box["clock"].advance(45)  # 検索で45秒かかった
+        clock_box["clock"].advance(30)  # 技術の2検索で計60秒（予算を使い切るが、まとめ用の20秒は残る）
         return _retrieval(_tech("TI-1.pdf", 3))
 
     deps = FakeDeps(tech=slow_tech)

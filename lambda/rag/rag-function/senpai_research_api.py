@@ -31,9 +31,11 @@ def now() -> float:
     return time.time()
 
 
-def _log(stage: str, status: str, error: Exception = None) -> None:
-    # SECURITY: 段階名と例外クラスだけ。質問・回答・識別子・トークンは出さない。
+def _log(stage: str, status: str, error: Exception = None, job_id: str = None) -> None:
+    # SECURITY: 段階名・例外クラス・jobId（UUID。本文ではない）だけ。質問・回答・userId・トークンは出さない。
     record = {'event': 'senpai_research_api', 'stage': stage, 'status': status}
+    if job_id:
+        record['jobId'] = job_id
     if error is not None:
         record['errorClass'] = type(error).__name__
     print(json.dumps(record, separators=(',', ':')))
@@ -41,7 +43,7 @@ def _log(stage: str, status: str, error: Exception = None) -> None:
 
 def get_store() -> store.JobStore:
     if 'store' not in _cache:
-        table = boto3.resource('dynamodb').Table(config.table_name() or 'unset')
+        table = boto3.resource('dynamodb').Table(config.table_name())
         _cache['store'] = store.JobStore(table)
     return _cache['store']
 
@@ -103,13 +105,30 @@ def _accepted(job_id: str, status: str) -> dict:
 
 
 def _undo_reservation(job_store, user_id: str, request: dict, *, lock_job_id: str = None,
-                      slot: bool = False) -> None:
-    """途中で断った要求が、ロック・日次枠・二重送信登録を残さないようにする。"""
-    if slot:
-        job_store.return_daily_slot(user_id)
+                      slot_day: str = None) -> None:
+    """途中で断った要求が、ロック・日次枠・二重送信登録を残さないようにする。
+
+    slot_day は日次枠を取った日。指定したときだけ、その日の枠を返す。
+    """
+    if slot_day:
+        job_store.return_daily_slot(user_id, slot_day)
     if lock_job_id:
         job_store.release_lock(user_id, lock_job_id)
     job_store.release_request(user_id, request['clientRequestId'])
+
+
+def _claim_or_replay(job_store, user_id: str, request: dict, job_id: str):
+    """二重送信の登録。登録済みで job 行も在れば (既存 jobId, 状態)、無ければ登録し直して None を返す。"""
+    for _attempt in range(2):
+        existing_id, created = job_store.claim_request(user_id, request['clientRequestId'], job_id)
+        if created:
+            return None
+        existing = job_store.get_job(existing_id)
+        if existing is not None:
+            return existing_id, existing['status']
+        # 登録だけが残り、ジョブ行が無い（前回の受付が途中で落ちた）。登録を外して作り直す。
+        job_store.release_request(user_id, request['clientRequestId'])
+    raise RuntimeError('request replay raced twice')
 
 
 def _create(event: dict, user_id: str) -> dict:
@@ -118,27 +137,32 @@ def _create(event: dict, user_id: str) -> dict:
         return http.error(400, 'ValidationError', INVALID_REQUEST_MESSAGE)
     job_store = get_store()
     job_id = str(uuid.uuid4())
-    existing_id, created = job_store.claim_request(user_id, request['clientRequestId'], job_id)
-    if not created:
-        existing = job_store.get_job(existing_id)
-        return _accepted(existing_id, existing['status'] if existing else 'queued')
+    replay = _claim_or_replay(job_store, user_id, request, job_id)
+    if replay is not None:
+        return _accepted(*replay)
     if not job_store.acquire_lock(user_id, job_id, config.job_ttl_seconds()):
         _undo_reservation(job_store, user_id, request)
         return http.error(409, 'JobInProgress', '前の調査が実行中です。完了してからお試しください')
-    if not job_store.take_daily_slot(user_id, config.daily_limit()):
+    day = job_store.daily_day()
+    if not job_store.take_daily_slot(user_id, config.daily_limit(), day):
         _undo_reservation(job_store, user_id, request, lock_job_id=job_id)
         return http.error(429, 'DailyLimitExceeded', '本日の調査回数の上限に達しました')
-    job_store.create_job(store.build_job_item(
-        job_id, user_id, request, now=now(), ttl_seconds=config.job_ttl_seconds()
-    ))
+    try:
+        job_store.create_job(store.build_job_item(
+            job_id, user_id, request, now=now(), ttl_seconds=config.job_ttl_seconds(), daily_day=day
+        ))
+    except Exception:
+        # ジョブ行を作れなかった要求は、ロック・日次枠・登録を残さない（再送で作り直せる）。
+        _undo_reservation(job_store, user_id, request, lock_job_id=job_id, slot_day=day)
+        raise
     try:
         invoke_worker(job_id)
     except Exception as error:  # noqa: BLE001 - 失敗は利用者に一般化して返す
-        _log('invoke_worker', 'error', error)
+        _log('invoke_worker', 'error', error, job_id)
         job_store.fail_job(job_id, 'Internal', '調査を開始できませんでした。時間をおいて再度お試しください')
-        _undo_reservation(job_store, user_id, request, lock_job_id=job_id, slot=True)
+        _undo_reservation(job_store, user_id, request, lock_job_id=job_id, slot_day=day)
         return http.error(502, 'StartFailed', '調査を開始できませんでした。時間をおいて再度お試しください')
-    _log('create', 'ok')
+    _log('create', 'ok', job_id=job_id)
     return _accepted(job_id, 'queued')
 
 
@@ -178,6 +202,7 @@ def _expire_if_stale(job_store, job: dict) -> dict:
     """期限切れの進行中ジョブは Timeout で終わらせ、ロックを外す（残さない）。"""
     if job['status'] in config.ACTIVE_STATUSES and job.get('expiresAt', 0) < now():
         if job_store.expire_job(job['jobId']):
+            job_store.refund_slot(job)  # 時間切れはシステム起因。枠を取った日へ 1 回だけ返す
             job_store.release_lock(job['userId'], job['jobId'])
         return job_store.get_job(job['jobId']) or job
     return job
@@ -211,6 +236,11 @@ def lambda_handler(event, context):
     user_id = claims.get('sub') or ''
     if not user_id:
         return http.error(401, 'Unauthorized', 'ログインが必要です')
+    missing = config.missing_api_env()
+    if missing:
+        for name in missing:
+            _log('config', 'missing_env:' + name)
+        return http.error(500, 'InternalError', '処理中にエラーが発生しました')
     try:
         if method == 'POST':
             return _create(event, user_id)

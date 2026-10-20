@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-10-20
+last-verified: 2026-10-21
 related-code:
   - lambda/rag/rag-function/senpai_research_*.py
   - lambda/chat/chat-management/app.py
@@ -11,7 +11,7 @@ related-code:
 
 # 工技先輩の調査ジョブ（試作）: バックエンド実装メモ
 
-> 最終検証: 2026-10-20 — 単体テスト（moto・偽の Bedrock/KB）と cfn-lint まで。dev への実機デプロイと実モデルでの所要時間は未確認。
+> 最終検証: 2026-10-21 — 単体テスト（moto・偽の Bedrock/KB）と cfn-lint まで。監査 F1〜F13 を反映済み。dev への実機デプロイと実モデルでの所要時間は未確認。
 
 API・段階イベント・結果の形は [契約](./senpai-research-contract.md) が正本。ここでは実装の構成、パラメータ、デプロイ時の注意、契約との差、未対応を残す。画面側は別担当（`frontend/**`）。
 
@@ -82,7 +82,7 @@ API・段階イベント・結果の形は [契約](./senpai-research-contract.m
 | `SenpaiUnderstandModelId` | 空 | 整理・十分性用の小さいモデル。空なら `BedrockModelId` |
 | `SenpaiUnderstandModelIdType` | `system-profile` | 上記の種別（`QueryRewriteModelIdType` と同じ意味。値と合わせる） |
 
-固定値（環境変数）: 受付 `SENPAI_RESEARCH_JOB_TTL_SECONDS=150`（進行中ジョブとロックの有効秒数。ワーカーの 120 秒より長く）、ワーカー `BEDROCK_READ_TIMEOUT=40`・`BEDROCK_MAX_ATTEMPTS=2`・`SENPAI_RESEARCH_SYNTH_RESERVE_MS=20000`。ワーカーは RAG 関数と同じ検索・生成の環境変数を持つ（`Rerank` と `QueryRewrite` は試作では使わない）。
+固定値（環境変数）: 受付 `SENPAI_RESEARCH_JOB_TTL_SECONDS=300`（進行中ジョブとロックのリース秒数。非同期起動の最大待ち 120 秒 + ワーカーの 120 秒以上）、ワーカー `BEDROCK_READ_TIMEOUT=40`・`BEDROCK_MAX_ATTEMPTS=2`（app.py 側の既定。調査は下の専用値を使う）・`SENPAI_RESEARCH_SYNTH_RESERVE_MS=20000`・`SENPAI_RESEARCH_KB_READ_TIMEOUT=12`（KB 検索 1 回の読み取り待ち。`app.bedrock_agent` をワーカー内だけ差し替える）・`SENPAI_RESEARCH_MODEL_READ_TIMEOUT=40`（モデル 1 呼び出しの上限。実際は残り予算で短くなる）。必須の環境変数（受付: `SENPAI_RESEARCH_TABLE` `SENPAI_RESEARCH_WORKER_NAME`、ワーカー: `SENPAI_RESEARCH_TABLE` `CHATLOGS_TABLE`）が欠けると、受付は 500、ワーカーはそのジョブを `Internal` で失敗にする。`SENPAI_UNDERSTAND_MODEL_ID` が空だと、コールドスタートで `config / understand_model_unset` を警告ログに出す（整理・十分性も大きいモデルで呼ぶため）。ワーカーは RAG 関数と同じ検索・生成の環境変数を持つ（`Rerank` と `QueryRewrite` は試作では使わない）。
 
 ### 権限（最小）
 
@@ -100,7 +100,7 @@ API・段階イベント・結果の形は [契約](./senpai-research-contract.m
 - ノウハウと法令は、ワーカーが RAG 関数と同じパラメータを読む。使うなら既存の `KnowhowEnabled` `KnowhowIndexBucket` `KnowhowIndexKey` `LawRagEnabled` `LawKnowledgeBaseId` `LawDataBucketName`（`LawDataBucketKmsKeyArn`）を同じ値で引き継ぐ。未設定なら該当の段階は `skipped` になるだけで調査は動く。
 - prod では `SenpaiResearchEnabled` に何を指定しても何も作られない（`Environment=dev` の条件）。
 - 画面は `NEXT_PUBLIC_ENABLE_SENPAI_RESEARCH=true` のときだけこの経路を使う（別担当）。
-- 確認のしかた: `GET /rag/senpai/research/{jobId}` の `debug.budget` と `steps` で所要時間・回数を見る。CloudWatch には段階名・件数・時間・終了理由・エラー種別だけが出る（`event: senpai_research`、`stage` が `job` の行に `elapsedMs` `modelCalls` `searches` `stopReason`）。
+- 確認のしかた: `GET /rag/senpai/research/{jobId}` の `debug.budget` と `steps` で所要時間・回数を見る。CloudWatch には段階名・件数・時間・終了理由・エラー種別だけが出る（`event: senpai_research`、`stage` が `job_finished` の行に `elapsedMs` `modelCalls` `searches` `stopReason`。すべての行に `jobId` が付く）。
 
 ## 契約からのずれ・解釈した点
 
@@ -114,6 +114,8 @@ API・段階イベント・結果の形は [契約](./senpai-research-contract.m
 8. **`doc_page`**: 原資料のページ画像・全文は取得せず、資料名（とページ）を検索語に含めた KB 検索で、その資料の断片だけを追加する。
 9. **POST の追加エラー**: `StartFailed`（502）。冪等の再送は 202 で現在の状態を返す。進捗の `pollAfterMs` は進行中 1500、終了後 0。
 10. **法令に関係するかが不明**（整理の失敗・判定不能）なときは、法令検索を省略せず実行する。
+11. **監査（2026-10-21）の反映**: 時間予算は待ち時間を実際に縛る（契約「ワーカーの手順と上限」）。ジョブ行の更新は `complete_job` の成否で分岐し、履歴は成功後にだけ保存する。リース切れは `lost_lease`。段階イベントの seq は保存先の `nextSeq` から取り直せる。日次枠は失敗時に枠を取った日へ 1 回だけ返す（契約「日次枠の扱い」）。参照の検証は個別・NFKC・括弧の種類を許す。検証済み参照が無い回答は `not_found`。回答からリンク・画像・URL を除く。
+12. **任意の結果項目 `warnings`**: 技術・法令の検索が全滅したときだけ付く日本語の文字列配列。フロントの検証は無くても有っても通ること（新しい必須項目・列挙の追加は無い）。
 
 ## テスト
 

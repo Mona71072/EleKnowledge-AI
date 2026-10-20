@@ -85,6 +85,7 @@ def run_search_step(ctx, step: str, tool: str, queries: list, *, detail: str,
               'selected': len(unique),
               'documents': len(documents)}
     if summary['failed']:
+        ctx.lane_failed(tool)
         ctx.recorder.end(handle, 'failed', detail='検索に失敗しました', counts=counts)
     else:
         ctx.recorder.end(handle, 'done', counts=counts)

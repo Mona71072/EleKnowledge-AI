@@ -31,25 +31,42 @@ def _bounded(detail):
 
 
 class StepRecorder:
-    def __init__(self, append, now_iso=utc_now_iso):
-        """append(event) -> bool。False または例外のイベントは記録されなかったものとして扱う。"""
+    def __init__(self, append, now_iso=utc_now_iso, resync=None):
+        """append(event) -> bool。False または例外のイベントは記録されなかったものとして扱う。
+
+        resync() -> 次の seq（保存先が持つ値）。保存の応答が失われた（書けたのに例外）場合、
+        保存先の番号だけが進み、以降の追記がすべて拒否される。失敗の直後は保存先から番号を取り直す。
+        """
         self._append = append
         self._now_iso = now_iso
+        self._resync = resync
         self._lock = threading.Lock()
         self._next_seq = 1
+        self._needs_resync = False
 
     def _emit(self, event: dict):
         """連番を付けて追記する。記録できたときだけ seq を返す。"""
         with self._lock:
+            self._resync_if_needed()
             numbered = {**event, 'seq': self._next_seq}
             try:
                 stored = self._append(numbered)
             except Exception:  # noqa: BLE001 - 進捗の保存失敗で調査を止めない
                 stored = False
             if not stored:
+                self._needs_resync = self._resync is not None
                 return None
             self._next_seq += 1
             return numbered['seq']
+
+    def _resync_if_needed(self) -> None:
+        if not self._needs_resync:
+            return
+        try:
+            self._next_seq = max(self._next_seq, int(self._resync()))
+            self._needs_resync = False
+        except Exception:  # noqa: BLE001 - 取り直せなければ次の追記でまた試す
+            pass
 
     def _event(self, step: str, status: str, started_at: str, ended_at, detail, counts) -> dict:
         event = {'step': step, 'labelJa': STEP_LABELS[step], 'status': status,

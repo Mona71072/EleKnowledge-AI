@@ -1,5 +1,6 @@
 """出典の番号付け（[T#] [L#] [K#]）、回答中の参照の照合、結果の sources 組み立て。純粋関数のみ。"""
 import re
+import unicodedata
 
 MAX_TECH_REFS = 10
 MAX_LAW_REFS = 6
@@ -7,6 +8,10 @@ TECH_TEXT_MAX_CHARS = 1500
 LAW_TEXT_MAX_CHARS = 4000
 KNOWHOW_BODY_MAX_CHARS = 4000
 REF_PATTERN = re.compile(r'\[([TLK])([0-9]{1,3})\]')
+# 括弧（半角・全角・隅付き）で囲まれた短い塊。中身がすべて参照（カンマ区切り可）のときだけ参照として扱う。
+BRACKET_GROUP = re.compile(r'[\[［【]([^\[\]［］【】\n]{1,60})[\]］】]')
+REF_TOKEN = re.compile(r'^([TLK])\s*([0-9]{1,3})$')
+REF_SEPARATORS = re.compile(r'[,;\s]+')
 
 
 def _by_score(evidence: list) -> list:
@@ -76,21 +81,77 @@ def valid_refs(sources: dict) -> set:
     return {source['ref'] for kind in ('tech', 'law', 'knowhow') for source in sources[kind]}
 
 
+def _tokens(inner: str):
+    """括弧の中身がすべて参照なら [(種別, 番号文字列)]、そうでなければ None。"""
+    normalized = unicodedata.normalize('NFKC', inner).upper().replace('、', ',')
+    parts = [part for part in REF_SEPARATORS.split(normalized) if part]
+    if not parts:
+        return None
+    # 「T 1」のように空白で割れた場合を戻す（種別だけの塊と番号だけの塊を結合）
+    merged, index = [], 0
+    while index < len(parts):
+        part = parts[index]
+        if part in ('T', 'L', 'K') and index + 1 < len(parts):
+            part, index = part + parts[index + 1], index + 1
+        merged.append(part)
+        index += 1
+    tokens = []
+    for part in merged:
+        match = REF_TOKEN.match(part)
+        if not match:
+            return None
+        tokens.append((match.group(1), match.group(2)))
+    return tokens
+
+
 def verify_refs(text: str, sources: dict) -> dict:
-    """実在する参照だけを残す。実在しない参照は本文から外し、unverifiedRefs に記録する。"""
+    """実在する参照だけを残す。実在しない参照は本文から外し、unverifiedRefs に記録する。
+
+    `[T1, T2]`・全角・隅付き括弧は個別に検証し、`[T1][T2]` の標準形に直す。
+    番号の先頭ゼロ（`T01`）は別物として未検証にする。
+    """
     known = valid_refs(sources)
     unverified, cited = [], set()
 
     def replace(match):
-        ref = f'{match.group(1)}{match.group(2)}'
-        if ref in known:
-            cited.add(ref)
+        tokens = _tokens(match.group(1))
+        if tokens is None:
             return match.group(0)
-        if ref not in unverified:
-            unverified.append(ref)
-        return ''
+        kept = []
+        for kind, number in tokens:
+            ref = f'{kind}{number}'
+            if ref in known:
+                cited.add(ref)
+                kept.append(f'[{ref}]')
+            elif ref not in unverified:
+                unverified.append(ref)
+        return ''.join(kept)
 
-    return {'text': REF_PATTERN.sub(replace, text or ''), 'unverifiedRefs': unverified, 'cited': cited}
+    return {'text': BRACKET_GROUP.sub(replace, text or ''), 'unverifiedRefs': unverified, 'cited': cited}
+
+
+MARKDOWN_IMAGE = re.compile(r'!\[[^\]]*\]\([^)]*\)')
+MARKDOWN_LINK = re.compile(r'\[([^\]]*)\]\([^)]*\)')
+AUTOLINK = re.compile(r'<(?:https?|ftp)://[^>\s]*>', re.IGNORECASE)
+RAW_URL = re.compile(r'(?:(?:https?|ftp)://|www\.)[^\s)\]>"\u3000]+', re.IGNORECASE)
+BARE_REF = re.compile(r'^[TLK][0-9]{1,3}$')
+
+
+def _link_text(match) -> str:
+    label = match.group(1).strip()
+    # `[T1](url)` は参照として残し、URL だけを落とす。
+    return f'[{label}]' if BARE_REF.match(label) else label
+
+
+def strip_links(text: str) -> str:
+    """回答からリンク・画像・生の URL を除く（出典は [T#] [L#] [K#] の参照でのみ示す）。
+
+    取得した資料の中の命令文が、外部へ送信するリンクや画像をモデルに書かせても、画面に出ない。
+    """
+    cleaned = MARKDOWN_IMAGE.sub('', text or '')
+    cleaned = MARKDOWN_LINK.sub(_link_text, cleaned)
+    cleaned = AUTOLINK.sub('', cleaned)
+    return RAW_URL.sub('', cleaned)
 
 
 def _drop_none(mapping: dict) -> dict:

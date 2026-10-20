@@ -13,5 +13,9 @@ class ResearchFailure(Exception):
         self.debug = debug or {}
 
 
+class TimeBudgetExceeded(Exception):
+    """残り時間が足りず、モデル・検索を呼べない（呼ぶと Lambda の Timeout を超えるため）。"""
+
+
 class KnowhowUnavailable(Exception):
     """ノウハウの索引を読めない（調査は続行し、ノウハウなしで答える）。"""

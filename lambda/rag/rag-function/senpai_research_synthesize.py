@@ -91,3 +91,24 @@ def not_found_markdown() -> str:
         '該当する資料・法令・事例が見つかりませんでした。\n\n'
         '機種名、部位、症状、状況を具体的に書いて、もう一度お試しください。'
     )
+
+
+def no_citation_markdown() -> str:
+    return (
+        '回答に根拠となる資料の参照を付けられなかったため、回答を表示しません。\n\n'
+        '機種名、部位、症状、状況を具体的に書いて、もう一度お試しください。'
+    )
+
+
+def source_list_markdown(sources: dict) -> str:
+    """時間切れで回答をまとめられないときの、見つかった資料の一覧（参照つき・推測なし）。"""
+    lines = ['時間内に回答をまとめられませんでした。見つかった資料は次のとおりです。確認してください。', '']
+    for source in sources['tech']:
+        page = f' p.{source["pageNumber"]}' if source.get('pageNumber') else ''
+        lines.append(f'- 技術資料: {source["title"]}{page} [{source["ref"]}]')
+    for source in sources['law']:
+        title = ' '.join(part for part in (source.get('lawTitle'), source.get('provision')) if part)
+        lines.append(f'- 法令: {title} [{source["ref"]}]')
+    for source in sources['knowhow']:
+        lines.append(f'- ノウハウ（未承認・参考）: {source["title"]} [{source["ref"]}]')
+    return '\n'.join(lines)

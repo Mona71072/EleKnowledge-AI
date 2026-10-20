@@ -51,8 +51,40 @@ def daily_limit() -> int:
 
 
 def job_ttl_seconds() -> int:
-    """進行中ジョブ・ロックの有効秒数。ワーカーの Timeout（120秒）より少し長く取る。"""
-    return env_int('SENPAI_RESEARCH_JOB_TTL_SECONDS', 150, 30, 900)
+    """進行中ジョブ・ロックの有効秒数（リース）。
+
+    非同期起動の最大待ち（MaximumEventAgeInSeconds: 120）+ ワーカーの Timeout（120）以上にする。
+    これより短いと、起動が遅れたジョブの実行中にロックが切れ、同じ人の調査が二重に走る。
+    """
+    return env_int('SENPAI_RESEARCH_JOB_TTL_SECONDS', 300, 30, 900)
+
+
+def kb_read_timeout_seconds() -> int:
+    """ナレッジベース検索 1 回の読み取り待ち（秒）。"""
+    return env_int('SENPAI_RESEARCH_KB_READ_TIMEOUT', 12, 3, 30)
+
+
+def model_read_timeout_seconds() -> int:
+    """モデル 1 呼び出しの読み取り待ちの上限（秒）。実際は残り予算でさらに短くなる。"""
+    return env_int('SENPAI_RESEARCH_MODEL_READ_TIMEOUT', 40, 5, 100)
+
+
+def understand_model_id() -> str:
+    return os.environ.get('SENPAI_UNDERSTAND_MODEL_ID', '').strip()
+
+
+def _missing(names) -> list:
+    return [name for name in names if not os.environ.get(name, '').strip()]
+
+
+def missing_api_env() -> list:
+    """受付 Lambda が動くのに必要な環境変数のうち、未設定のもの。"""
+    return _missing(('SENPAI_RESEARCH_TABLE', 'SENPAI_RESEARCH_WORKER_NAME'))
+
+
+def missing_worker_env() -> list:
+    """ワーカー Lambda が動くのに必要な環境変数のうち、未設定のもの。"""
+    return _missing(('SENPAI_RESEARCH_TABLE', 'CHATLOGS_TABLE'))
 
 
 @dataclass(frozen=True)
@@ -61,6 +93,8 @@ class BudgetLimits:
     max_model_calls: int
     job_ms: int
     synth_reserve_ms: int
+    # Lambda の残り時間から、強制終了されないために必ず残す時間（ミリ秒）。
+    safety_ms: int = 10000
 
 
 def load_limits() -> BudgetLimits:

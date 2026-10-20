@@ -1,6 +1,6 @@
 ---
 status: draft
-last-verified: 2026-10-20
+last-verified: 2026-10-21
 related-code:
   - lambda/rag/rag-function/senpai_research_*.py
   - infrastructure/sam/phase2-template.yaml
@@ -10,7 +10,7 @@ related-code:
 
 # 工技先輩の調査ジョブ（試作）: API と段階イベントの契約
 
-> 最終検証: 2026-10-20 — 実装前の契約。根拠は [調査](../../survey-2026-10-20-senpai-agentic-search.md) §2・§4・§6。dev・管理者限定、既定オフ。
+> 最終検証: 2026-10-21 — 実装済み。バックエンドは単体テスト（moto・偽の Bedrock/KB）と cfn-lint まで確認し、監査 F1〜F13（時間予算・リース・日次枠の返却・引用の強制など）を反映済み。dev への実機デプロイと実モデルでの所要時間は未確認。根拠は [調査](../../survey-2026-10-20-senpai-agentic-search.md) §2・§4・§6。dev・管理者限定、既定オフ。
 
 ## 目的
 
@@ -39,9 +39,33 @@ related-code:
 
 応答 `202`: `{ "jobId": "UUID", "status": "queued", "pollAfterMs": 1500 }`
 
-- 同じ `clientRequestId` の再送は同じ `jobId` を返す。
+- 同じ `clientRequestId` の再送は同じ `jobId` を返す（`status` は現在の状態）。前回の受付が途中で落ちてジョブ行が無いときは、登録し直して新しい `jobId` で受け付ける。
 - 1人1件まで同時実行（実行中は 409 `JobInProgress`）。1人1日の上限は SAM パラメータ `SenpaiResearchDailyLimit`（既定 20。超過は 429 `DailyLimitExceeded`）。
 - `userId` は JWT の `sub` のみ。要求本文から受け取らない。
+
+#### 日次枠の扱い（返却ポリシー）
+
+- 受付で 1 回分を消費する。**システム起因で `failed` になったジョブは、1 回だけ返す**（`Timeout`・`BudgetExceeded`・`Internal`・`QuestionUnavailable`、起動失敗 `StartFailed`）。返す先は枠を取った日（JST）の枠で、日付を跨いでも翌日の枠は減らない。
+- `completed` は `kind` が `answer` / `clarify` / `not_found` のどれでも消費したままにする（調査は実行されたため）。
+- 期限切れ（リース切れ）でポーリングが `Timeout` にしたジョブも同じ規則で 1 回だけ返す。
+
+#### エラー応答（統一形式 `{ "error": "<code>", "message": "日本語" }`）
+
+| HTTP | `error` | 条件 |
+| --- | --- | --- |
+| 400 | `ValidationError` | 本文・`afterSeq` が不正（未知のキー、UUID でない ID、質問が空または 2000 文字超、未知の機種キー） |
+| 401 | `Unauthorized` | JWT に `sub` が無い |
+| 403 | `FeatureUnavailable` | 本番・無効時・`admin` グループ外（DB・ワーカーに触れる前に返す） |
+| 404 | `JobNotFound` | 他人のジョブ・存在しないジョブ・UUID でない `jobId`（区別しない） |
+| 405 | `MethodNotAllowed` | POST / GET 以外 |
+| 409 | `JobInProgress` | 同じ人の調査が実行中 |
+| 429 | `DailyLimitExceeded` | 1 日の上限 |
+| 500 | `InternalError` | 想定外の失敗（必須の環境変数の欠落を含む。スタックトレースは返さない） |
+| 502 | `StartFailed` | ワーカーを起動できなかった（枠・ロックは戻す） |
+
+#### リース（ジョブとロックの有効期限）
+
+進行中ジョブとロックの有効秒数は 300 秒（`SENPAI_RESEARCH_JOB_TTL_SECONDS`）。非同期起動の最大待ち 120 秒 + ワーカーの Timeout 120 秒以上にする。期限を過ぎたジョブは開始も完了もできず（ワーカーは `lost_lease` をログに出して止まり、履歴にも保存しない）、次のポーリングで `Timeout` になる。
 
 ### `GET /rag/senpai/research/{jobId}?afterSeq=<int>`
 
@@ -101,12 +125,17 @@ related-code:
     "lawRelevant": true
   },
   "unverifiedRefs": ["回答に現れたが取得結果に無かった参照（照合で除去したもの）"],
-  "stopReason": "sufficient | budget | no_new_results | clarify"
+  "stopReason": "sufficient | budget | no_new_results | clarify",
+  "warnings": ["任意。検索に失敗した道具があるときだけ付く日本語の注意。例: 法令の検索に失敗したため、法令の根拠は含まれていません。"]
 }
 ```
 
 - `used` は回答本文で実際に引用されたカード。`candidates` は渡したが引用されなかったカード。どれも引用されなければ `used` は空配列で、画面は「ノウハウは参照していません」と表示する。
-- 回答本文の `[T*]` `[L*]` `[K*]` は、ワーカーが**取得結果に実在する参照だけを残す**（実在しない参照は本文から外し `unverifiedRefs` に記録）。
+- 回答本文の `[T*]` `[L*]` `[K*]` は、ワーカーが**取得結果に実在する参照だけを残す**（実在しない参照は本文から外し `unverifiedRefs` に記録）。`[T1, T2]`・全角・隅付き括弧（`［Ｔ１］` `【T1】`）は個別に検証し、`[T1][T2]` の標準形に直す。`T01` のような先頭ゼロは別物（未検証）。
+- **検証できた参照が 1 つも無い回答は出さない**。まとめが参照を付けなかった、または付けた参照がすべて実在しなかったときは、再生成せずに `kind=not_found` とし、`answerMarkdown` に「回答に根拠となる資料の参照を付けられなかったため、回答を表示しません」の定型文を入れる（`unverifiedRefs` は記録。`stopReason` は元の理由のまま）。
+- 回答本文から**リンク・画像・生の URL は除く**（Markdown のリンクは文字だけ残し、`[T1](…)` は `[T1]` にする）。出典は `sources` の参照でだけ示す。
+- **時間切れ**: まとめを呼ぶ残り時間（8 秒）が無いとき、または残り時間が足りずモデルを呼べなかったときは、まとめを省略（段階 `synthesize` は `skipped` または `failed`）し、見つかった資料の一覧（参照つき・推測なし）を `kind=answer`・`stopReason=budget` で返す。
+- **`warnings`（任意項目）**: 技術資料・法令のどちらかの検索が全滅したときだけ付く（無いときはキーごと無い）。同じ内容は、まとめにも「確認できていません」として伝わる。画面の検証は、このキーが無くても有っても通ること。
 
 ## 開発者向け（`debug`、admin のみ）
 
@@ -119,6 +148,8 @@ related-code:
 }
 ```
 
+`queries` には元の質問の文そのもの（元の文での検索）とモデルが整理した言い換えが入る。管理者にだけ返し、ジョブ行の TTL（7 日）で消える。CloudWatch には出さない。
+
 ## ワーカーの手順と上限（初期値。SAM パラメータで変更可）
 
 0. **質問の整理（LLM 1回、小さいモデル）**: 上記 `understanding` と、道具ごとの検索語（技術・法令・ノウハウ）、足りない情報を JSON で出させ、コードで検証する。失敗時は元の質問をそのまま使う。**元の質問は常に残し、検索は元の文と整理した検索語の両方で行う。** 機種は根拠なく補わない。画面で機種が選ばれていればそれを優先する。
@@ -130,8 +161,11 @@ related-code:
 
 上限: 検索系 合計6回、モデル呼び出し 合計4回、ジョブ全体 60 秒（超過は確認できた範囲で答えて `stopReason=budget`）、ワーカー Lambda のタイムアウトは余裕を見て 120 秒。
 
+**時間予算は待ち時間そのものを縛る**。柔らかい上限（60 秒）を過ぎたら追加の検索・判断は始めない。さらに、すべての KB 検索とモデル呼び出しは「硬い上限 = 予算 60 秒 + まとめ用 20 秒（Lambda の残り時間 - 10 秒を超えない）」までの残りに収まる読み取り待ちで呼ぶ（KB 検索 1 回は最大 12 秒・再試行 1 回、モデル 1 呼び出しは最大 40 秒で、余裕が 20 秒以上のときだけ半分にして 1 回再試行）。残りが足りない検索・モデル呼び出しは呼ばずに失敗として扱い、まとめの前に残りが 8 秒を切っていれば資料の一覧で返す。
+
 ## 保存とログ
 
 - ジョブ表 `senpai-research-jobs-<env>`（TTL 7日）。段階イベントはジョブ表に保存。
 - 完了した回答は ChatLogs に `ragMode=senpai_research`、既存の先輩タグ（`senpaiConversationId`/`senpaiTurnId`）付きの assistant 行として保存（TTL 60日）。相談履歴から開き直すと回答・出典を復元する（段階イベントは復元しない）。通常の `/chat` 履歴には出さない。
-- CloudWatch には段階名・件数・時間・終了理由・エラー種別だけを出す。質問・検索語・本文・回答は出さない。
+- 完了した回答の保存は、ジョブ行を `completed` にできた**後**にだけ行う（期限切れで失敗にされたジョブの回答は履歴に残さない）。
+- CloudWatch には `jobId`（UUID）・段階名・件数・時間・終了理由・エラー種別だけを出す。質問・検索語・本文・回答・`userId` は出さない。ワーカーは `job_started` と `job_finished`（`status` は `completed` / `failed` / `lost_lease`）を対で出し、片方だけの `jobId` は異常（強制終了など）として検知できる。
