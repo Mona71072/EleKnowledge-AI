@@ -57,3 +57,5 @@ docs/ops-ai-driven-dev.md    AIを用いた開発の共同運用
 先輩チャットは通常チャットと同様に左側の相談履歴から開き直せる構成とする。履歴対応にはフロントに加え、RAGとchat-managementの両Lambdaの更新が必要である。[相談履歴の契約](features/development/knowledge-research-workspace.md#先輩チャットの相談履歴)を参照する。
 
 先輩チャットからの自動探索は[Markdown検索の実装範囲](features/development/knowledge-markdown-retrieval.md)を参照する。取込対象の版・ハッシュを固定した一覧と、サーバー側の管理者認可を用い、カード全件を静的画面へ埋め込まない。
+
+先輩チャットの調査ジョブ・まとめ・「結果を残す」（いずれも dev・管理者限定、既定オフ）は、[調査ジョブの契約](features/development/senpai-research-contract.md)、[調査ジョブの実装メモ](features/development/senpai-research.md)、[工技先輩のまとめ（試作）](features/development/senpai-synthesis-prototype.md)、[結果を残す（現場の報告候補）](features/development/senpai-field-reports.md)を参照する。

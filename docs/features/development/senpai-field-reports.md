@@ -41,22 +41,24 @@ related-code:
 
 ## 3. サーバー（`POST /rag/senpai/field-reports`）
 
+> 最終検証: 2026-10-21 — エラーコード・保存先テーブル名を lambda/rag/senpai-field-report/app.py・field_report_store.py と infrastructure/sam/phase2-template.yaml に照合（§3 のみ）。
+
 1関数1責任のため、新しい Lambda `senpai-field-report-${Environment}` を置く（既存 chat-management・まとめ Lambda には混ぜない）。
 
-- 利用条件: `ENVIRONMENT=dev` かつ `SENPAI_FIELD_REPORTS_ENABLED=true` かつ Cognito `admin` グループ。それ以外は 403。
-- `userId` は JWT の `sub` だけを使う。リクエストに `userId` を含めると 400。
+- 利用条件: `ENVIRONMENT=dev` かつ `SENPAI_FIELD_REPORTS_ENABLED=true` かつ Cognito `admin` グループ。それ以外は 403 `FeatureUnavailable`。JWT が無いときは 401 `Unauthorized`。
+- `userId` は JWT の `sub` だけを使う。リクエストに `userId` を含めると 400 `ValidationError`。
 - 相談の実在と所有の確認: ChatLogs のユーザー GSI（`userId-timestamp-index`、Scan なし）で、その利用者の
-  `senpaiConversationId`＋`senpaiTurnId` の行を読む。無ければ 404。
-- カード ID と版は **保存済みの技術KB回答行の `knowhow.matches`** と照合する。回答で参照していないカード、
-  版違いは 400。カードの適用範囲の確認状態（`scope_status`）と機種の値は、クライアントではなく保存行から写す。
+  `senpaiConversationId`＋`senpaiTurnId` の行を読む。無ければ 404 `TurnNotFound`。
+- カード ID と版は **保存済みの技術KB回答行の `knowhow.matches`** と照合する。回答で参照していないカードは 400 `UnknownCard`、
+  版違いは 400 `UnknownCard`。カードの適用範囲の確認状態（`scope_status`）と機種の値は、クライアントではなく保存行から写す。
 - 1 相談につき 1 件（`reportId = field-report-<senpaiTurnId>`、条件付き Put）。同じ相談に再送すると既存を返す（冪等）。
-  別所有者の行と衝突したら 409 で何も返さない。
-- 本文は制御文字を除いて保存し、長さ超過は 400。CloudWatch には段階・状態・例外クラスだけを出す（本文・ID・トークンを出さない）。
+  別所有者の行と衝突したら 409 `ReportConflict` で何も返さない。
+- 本文は制御文字を除いて保存し、長さ超過は 400 `ValidationError`。保存・読み込みの失敗は 500 `InternalError`。未対応のメソッドは 405 `MethodNotAllowed`。CloudWatch には段階・状態・例外クラスだけを出す（本文・ID・トークンを出さない）。
 
 `GET /rag/senpai/field-reports?senpaiConversationId=<uuid>` は、本人のその相談の報告だけを返す（GSI `userId-createdAt-index`）。
 履歴から相談を開き直したときに「送信済み」を表示するために使う。
 
-### 3.1 保存項目（DynamoDB `SenpaiFieldReports-${Environment}`）
+### 3.1 保存項目（DynamoDB `senpai-field-reports-${Environment}`）
 
 | 項目 | 内容 |
 | --- | --- |

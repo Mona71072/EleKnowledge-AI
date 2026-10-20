@@ -54,17 +54,18 @@ knowhow: {
 
 ## 先輩の検索ルールと機種フィルタ（2026-10-20 方針）
 
-> 最終検証: 2026-10-20 — 合成カードの単体テスト（検索・索引検証・キュー生成）、合成索引での評価ケース実行、実カード398枚でのキュー生成、`modelFit` の判定・API・フロント（検証と画面の注意表示）の合成テスト。AWS上・実画面の動作は未確認。
+> 最終検証: 2026-10-21 — 評価ケースの終了コード（eval_senpai_retrieval.py:121-125 と `--index`）を照合し文書を修正。点数の付け方の改訂は単体テスト（tests/unit/test_knowhow_scoring.py）と、実カード 398 枚から作った評価用の索引（評価後に削除）で確認。2026-10-20 の合成カードの単体テスト（検索・索引検証・キュー生成）、合成索引での評価ケース実行、実カード398枚でのキュー生成、`modelFit` の判定・API・フロント（検証と画面の注意表示）の合成テストの結果は変更なし。AWS上・実画面の動作は未確認。
 
 Lists の機種欄は信頼できない（例: VFGH と書かれたカードが実際は全エレベーターに当てはまる）ため、機種で自動的にカードを落とさない。製品判断は「**適用範囲を人が確認したカードだけを機種フィルタで除外する**」とする。
 
 - **順位付け**: `excludes` / `may_apply_to` / `scope_note` は点数に使わない。点数に効くのは `control_methods` / `door_families` / `door_types` / `guide_systems` / `lists_model_label` / `machine_room` / `model_abbreviations` / `observed_on` / `product_lines` / `conditions` とタイトル・検索語・本文だけ。検証用の3キー（`scope_status` / `scope_verified_by` / `scope_verified_at`）は点数にも検索語にも入れない。
+- **点数の付け方（2026-10-21 改訂）**: 質問の文字の並び（2・3 文字）と英数字の語ごとに、カードの項目（タイトル 1.0・検索語 1.0・適用範囲 0.8・本文 0.6）のうち最も重い一致を 1 回だけ数え、カード全体での出現の少なさ（IDF）で重み付けした 0〜1 の点数にする。英数字の語は 4 倍、数字を含む語（エラーコードなど）が完全一致すれば +0.3（上限 1）。長い文の質問では、一致した量そのもの（量／(量＋100)）が高ければそちらを使う。カードと質問は NFKC・大文字小文字・カタカナ→ひらがな・長音記号を揃え、質問側だけ口語の言い回し（できない・ください・教えて など）を除き、別名（リンクス→links など）を足す。返すのは 0.2 以上かつ 1 位の 0.7 倍以上のカードで、最大 3 件。実カード由来の質問 85 件と無関係な質問 16 件の評価で、1 位正解率 0.88→0.92、無関係な質問への誤ヒット 12/16→2/16、返したカードの適合率 0.51→0.77。評価ケース 23 件はすべて合格。
 - **機種フィルタ（画面の「機種（任意）」）**: 未選択なら何も除外しない。選択時は、`scope_status: verified` のカードのうち、`product_lines` / `model_abbreviations` / `lists_model_label` / `observed_on` で認識できる機種が**選んだ機種以外だけ**のものを除外する。`未検証`（省略を含む）のカード、認識できる機種が1つもないカード、選んだ機種・汎用ラベル（全エレ機種 等）を含むカードは除外しない。
 - **制御コード**: VFGH・CM-MA などの未知のコードは判定に使わない。
 - **別製品の注意（`modelFit`）**: 機種を選んだときだけ、サーバーが返す各カードに応答専用の `modelFit`（`matched` 選択機種に一致 / `general` 全エレ機種などの汎用 / `other_product` 認識できる機種が他製品だけ / `unknown` 認識できる機種なし）を付ける。`other_product` には該当製品名（UI の機種キー）を `modelFitProducts` で添える。索引のフィールドではなく、順位・除外も変えない。`other_product` は未検証カードで起きる（検証済みの場合は除外される）。画面は `other_product` のカードにだけ「AXIEZ-LINKs（VFGLF・巻上機上部）の事例です。選択中の AXIEZ（VFGLB・巻上機下部）でも当てはまるかは要確認です。」のように表示し、`matched` / `general` / `unknown` と保存済みの古い回答（`modelFit` なし）には何も出さない。制御方式・巻上機の位置の表示は AXIEZ（VFGLB・巻上機下部）と AXIEZ-LINKs（VFGLF・巻上機上部）だけで、他の機種は製品名のみ。AXIEZ と AXIEZ-LINKs は別製品である（[APPLICABILITY-TAXONOMY.md](../../../knowledge/registry/APPLICABILITY-TAXONOMY.md)）。
 - **検証済みの付け方**: `model_scope` に `scope_status: verified` / `scope_verified_by` / `scope_verified_at`（YYYY-MM-DD）を書く。`verified` で確認者・確認日が欠ける、または形式が不正だと、取込ツールとLambdaの索引検証のどちらも失敗する。定義は [knowledge/CONTRACT.md](../../../knowledge/CONTRACT.md)、訂正の仕方は [APPLICABILITY-TAXONOMY.md](../../../knowledge/registry/APPLICABILITY-TAXONOMY.md) の「適用範囲の訂正と検証」。
 - **確認キュー**: `python scripts/knowledge/build_scope_review_queue.py` が [knowledge/queues/scope-review/QUEUE.md](../../../knowledge/queues/scope-review/QUEUE.md) を生成する。P1 矛盾の疑い（機種名があるのに適用範囲が広い）、P2 機種名あり・未検証、P3 制御方式・略称のみ（機種フィルタ対象外。全機種対応なら全エレ機種へ）、P4 汎用ラベル／空。件数は `QUEUE.md` の「件数」表を正とする（この文書に手で写さない。CI が `QUEUE.md` の鮮度を検査する）。
-- **評価ケース**: `tests/fixtures/knowledge/senpai-eval-cases.json`。実カードは未検証のため SE-021・SE-022 は「除外されず返ること」を確認する。検証済みカードが除外される動作は `tests/unit/test_knowhow_retrieval.py` の合成カードで確認する。実行は次のとおり（結果の表示のみ、終了コードは常に0）。
+- **評価ケース**: `tests/fixtures/knowledge/senpai-eval-cases.json`。実カードは未検証のため SE-021・SE-022 は「除外されず返ること」を確認する。検証済みカードが除外される動作は `tests/unit/test_knowhow_retrieval.py` の合成カードで確認する。実行は次のとおり（結果の表示のみ。`--index` は終了コード 0。`--from-cards` は無効カードがあると 2、評価ケースの FAIL だけなら 0）。
 
 ```sh
 python scripts/knowledge/eval_senpai_retrieval.py --index .private-knowhow/index.json
@@ -143,7 +144,7 @@ node scripts/knowledge/build-senpai-index.mjs inventory .
 3. 棚卸しに出たカードのうち、索引生成が通るものだけを取込一覧にする。カード数と索引に入れられる枚数の最新は`check`の出力（`node scripts/knowledge/build-senpai-index.mjs check .`）を正とする。失敗するカードを1枚でも一覧に入れると索引ファイルはできない。2026-10-20に、法令の出典に`law_id`が欠けていた`KH-ALL-CABIN-ILLUMINANCE-62LX-282`へ、他カードと同じ建築基準法施行令の`law_id`を補い、版を2に上げた（`law_rag_status: pending`のまま）。
    - 編集者用の注記項目（`note`など6種）は`build`が索引へ出さずに捨てる。
    - 適用範囲の値と出典の`locator`・`law_title`に`/`があってもよい。`..`区間、先頭の`/`、`\`、URL形式は引き続き拒否する。
-   > 最終検証: 2026-10-20 — 実カード398枚を1枚ずつ`build`し、282の補修前は397枚が成功、成功分でPython `parse_index`も通過（索引は検証後に削除）。
+   - 確認（2026-10-20）: 実カード398枚を1枚ずつ`build`し、282の補修前は397枚が成功、成功分でPython `parse_index`も通過（索引は検証後に削除）。
 4. 取込一覧の`approvedBy`と`approvedAt`（UTCの`YYYY-MM-DDTHH:mm:ss.sssZ`）を担当者が記入し、各entryの`cloudApproved`を`true`にする。その後に索引を作る。
 
 ```sh

@@ -55,6 +55,10 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 | RAG の 2 モード化（通常モード＋じっくりモード。設計段階） | [設計（合意済み・未実装）](docs/design-2026-09-24-rag-two-modes.md) | 決定: [docs/decisions-2026-09-24-rag-two-modes.md](docs/decisions-2026-09-24-rag-two-modes.md) ／ 調査: [docs/survey-2026-09-24-agentic-rag.md](docs/survey-2026-09-24-agentic-rag.md) ／ [KB 修正依頼台帳](docs/kb-change-requests.md) |
 | Know-how Knowledge Layer（設計段階・未確定） | [docs/design-2026-10-01-knowhow-flywheel.md](docs/design-2026-10-01-knowhow-flywheel.md) | 調査: [docs/survey-2026-10-01-knowhow-flywheel.md](docs/survey-2026-10-01-knowhow-flywheel.md) |
 | 先輩チャット・ノウハウ確認（管理者向け開発版） | [照合画面・相談履歴](docs/features/development/knowledge-research-workspace.md) ／ [Markdown自動探索](docs/features/development/knowledge-markdown-retrieval.md) | 通常チャットに揃えた左側の相談履歴、両KBの回答、参照Markdownの版を保存・復元する実装。AWS反映・会社ネットでの受入は未実施。 |
+| 先輩チャット「調査ジョブ（試作）」（API・段階イベントの契約） | [docs/features/development/senpai-research-contract.md](docs/features/development/senpai-research-contract.md) | dev・管理者限定、既定オフ。API と段階イベントの契約。 |
+| 先輩チャット「調査ジョブ（試作）」（バックエンド実装メモ） | [docs/features/development/senpai-research.md](docs/features/development/senpai-research.md) | dev・管理者限定、既定オフ。SAM パラメータと契約からのずれ。 |
+| 先輩チャット「工技先輩のまとめ（試作）」 | [docs/features/development/senpai-synthesis-prototype.md](docs/features/development/senpai-synthesis-prototype.md) | dev・管理者限定、既定オフ。ターンごとに手動で作る両KB回答の統合。 |
+| 先輩チャット「結果を残す」（現場の報告候補） | [docs/features/development/senpai-field-reports.md](docs/features/development/senpai-field-reports.md) | dev・管理者限定、既定オフ。未確認の観測候補。保存期間と共同確認事項は未確定。 |
 
 ### 📖 利用者向け案内
 

@@ -2,6 +2,8 @@
 
 ## テーマカード（`knowledge/cards/`）
 
+> 最終検証: 2026-10-21 — `model_scope` のキー一覧を lambda/rag/rag-function/knowhow_retrieval.py（MODEL_SCOPE_KEYS・POSITIVE_SCOPE_KEYS）と scripts/knowledge/build-senpai-index.mjs と照合（`conditions` を追加）。本節のみ。
+
 ```yaml
 knowledge_id: KH-XXXX          # 安定ID
 kind: case_summary | practice_guide
@@ -21,6 +23,7 @@ model_scope:
   observed_on: []              # 発生確認の要約（従来互換・検索用）
   may_apply_to: []             # 適用可能性（未確認可）
   excludes: []
+  conditions: []               # 機種・制御以外の適用条件（例: 「LINKs ドア 開閉」）。正の条件として順位付けに使う（除外は excludes）
   scope_note: ""               # 全エレ機種・複数制御など短文
   scope_status: unverified     # verified | unverified（省略時 unverified）。verified のカードだけ Senpai の機種フィルタで除外されうる
   scope_verified_by: ""        # verified のとき必須: 適用範囲を確認した人の名前

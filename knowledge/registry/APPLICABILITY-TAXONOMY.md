@@ -126,7 +126,7 @@ AXIEZ と AXIEZ-LINKs は、制御方式だけでなく**据付・機械（巻�
 **ファイル:** [u形エスカレーター_機種一覧.md](../drafts/u形エスカレーター_機種一覧.md)  
 **Vault category:** `エスカ機種一覧` / `エスカ（u形）` / `総点(u型エス)` 等
 
-u 形: 機種略称 S1UJ1(S1000), S6UJ1(S600) 等 — 詳細は structured_data。エスカカードは **`product_line: escalator`** と **`model_abbreviations`** を必須とし、エレの VFGH/VFGLB 軸に載せない。
+u 形: 機種略称 S1UJ1(S1000), S6UJ1(S600) 等 — 詳細は structured_data。エスカカードは **`product_lines: [エスカレーター]`**（配列。単数の `product_line` は未知キーとして `check` が失敗する） と **`model_abbreviations`** を必須とし、エレの VFGH/VFGLB 軸に載せない。
 
 ---
 

@@ -69,10 +69,13 @@ dev の先輩チャット（管理者限定）で、同じ質問に対する技�
 
 ## 上限とエラー
 
+> 最終検証: 2026-10-21 — エラーコードと上限値を lambda/rag/senpai-synthesis/app.py・synthesis_prompt.py・synthesis_model.py と phase2-template.yaml に照合（本節のみ）。
+
 - 入力は合計約24,000文字に収める（超えると回答本文・ノウハウ本文を短くし、なお超えればノウハウを外す）。出力は `max_tokens` 2048（環境変数、256〜4096）。
 - Bedrock の読み取り待ちは22秒（環境変数 `BEDROCK_READ_TIMEOUT`、上限27秒）、再試行なし。Lambda のタイムアウトは60秒。API Gateway は29秒で切れるため、遅い場合は 504 `SynthesisTimeout`。
 - ブラウザ側は35秒で打ち切る。失敗時の画面文言は固定文で、サーバーの詳細は出さない。
 - エラー形式は既存の RAG と同じ `{error, message}`。スタックトレースは返さない。
+- 全コード: 403 `FeatureUnavailable`（ゲート）、405 `MethodNotAllowed`、401 `Unauthorized`、400 `ValidationError`（ID の形式）、404 `TurnNotFound`（該当ターンの行が無い）、422 `NothingToSynthesize`、409 `SynthesisConflict`、502 `SynthesisFailed`（モデル呼び出しの失敗・空の出力）、504 `SynthesisTimeout`、500 `InternalError`（読み書きの失敗・想定外）。
 - CloudWatch Logs には `stage` と `status`、例外クラス名だけを構造化して出す。回答本文・質問・ID・トークンは出さない。
 
 ## SAM のデプロイ設定（デプロイは itai が行う）
