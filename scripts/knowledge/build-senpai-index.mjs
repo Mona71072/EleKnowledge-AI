@@ -24,6 +24,12 @@ const SOURCE_REF_KEYS = new Set([
   'ref_type', 'list_item_id', 'onenote_id', 'source_id', 'document_number', 'kb_filename',
   'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator',
 ]);
+// Editor-only annotations on source refs. They are dropped at build and never reach the index.
+const SOURCE_REF_ANNOTATION_KEYS = new Set([
+  'note', 'law_rag_status', 'retrieval', 'summary_from_kb', 'record_id', 'kb_category',
+]);
+// Free-text ref fields may contain "/" as ordinary notation (e.g. "D14 DCB/DOB").
+const SOURCE_REF_FREE_TEXT_KEYS = new Set(['law_title', 'locator']);
 const MODEL_SCOPE_KEYS = new Set([
   'conditions', 'control_methods', 'door_families', 'door_types', 'excludes', 'guide_systems',
   'lists_model_label', 'machine_room', 'may_apply_to', 'model_abbreviations', 'observed_on',
@@ -165,11 +171,17 @@ async function readCard(rootResolved, relativePath) {
   return { parsed, metadata, markdown, sha256: digest(markdown), relativePath };
 }
 
-function safeScalar(value, label, { max = 200, allowPath = false } = {}) {
+// SECURITY: must stay equal to or stricter than knowhow_retrieval.py so a built index passes validate_index.
+const UNSAFE_SCHEME = /(?:https?:\/\/|s3:\/\/|file:\/\/|javascript:)/iu;
+const PARENT_SEGMENT = /(?:^|\/)\.\.(?:\/|$)/u;
+
+function safeScalar(value, label, { max = 200, allowSlash = false } = {}) {
   if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') fail(`${label} must be a safe scalar.`);
   const text = String(value);
-  if (!text || text.length > max || /[\u0000-\u001f\u007f]/u.test(text) || /https?:\/\//iu.test(text)) fail(`${label} is invalid.`);
-  if (!allowPath && /[\\/]/u.test(text)) fail(`${label} cannot contain a path.`);
+  if (!text || text.length > max || /[\u0000-\u001f\u007f]/u.test(text) || UNSAFE_SCHEME.test(text) || text.includes('\\')) fail(`${label} is invalid.`);
+  if (allowSlash) {
+    if (text.startsWith('/') || PARENT_SEGMENT.test(text)) fail(`${label} cannot be a path.`);
+  } else if (text.includes('/')) fail(`${label} cannot contain a path.`);
   return text;
 }
 
@@ -179,7 +191,7 @@ function sourceRefs(metadata) {
   for (const ref of refs) {
     if (!isPlainObject(ref)) fail('A source reference must be an object.');
     if (ref.ref_type === 'draft_record') continue;
-    for (const key of Object.keys(ref)) if (!SOURCE_REF_KEYS.has(key)) fail('A source reference contains an unsupported field.');
+    for (const key of Object.keys(ref)) if (!SOURCE_REF_KEYS.has(key) && !SOURCE_REF_ANNOTATION_KEYS.has(key)) fail('A source reference contains an unsupported field.');
     if (!SOURCE_REF_TYPES.has(ref.ref_type)) fail('A source reference type is unsupported.');
     let identityField;
     if (ref.ref_type === 'lists_item') identityField = 'list_item_id';
@@ -192,7 +204,7 @@ function sourceRefs(metadata) {
     for (const key of ['list_item_id', 'onenote_id', 'source_id', 'document_number', 'kb_filename', 'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator']) {
       const value = ref[key];
       if (value === undefined || value === null || value === '') continue;
-      result[key] = safeScalar(value, 'Source reference field');
+      result[key] = safeScalar(value, 'Source reference field', { allowSlash: SOURCE_REF_FREE_TEXT_KEYS.has(key) });
     }
     result[identityField] = safeScalar(id, 'Source identity');
     output.push(result);
@@ -209,9 +221,9 @@ function modelScope(metadata) {
   for (const key of Object.keys(scope).sort()) {
     if (!MODEL_SCOPE_KEYS.has(key)) fail('Model scope contains an unsupported field.');
     const value = scope[key];
-    if (typeof value === 'string') output[key] = safeScalar(value, 'Model scope value');
+    if (typeof value === 'string') output[key] = safeScalar(value, 'Model scope value', { allowSlash: true });
     else if (Array.isArray(value) && value.length <= 20) {
-      output[key] = value.map((item) => safeScalar(item, 'Model scope value'));
+      output[key] = value.map((item) => safeScalar(item, 'Model scope value', { allowSlash: true }));
     } else fail('Model scope values must be strings or bounded string arrays.');
   }
   return output;

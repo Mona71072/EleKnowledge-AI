@@ -2,7 +2,7 @@
 knowledge_id: KH-ALL-CABIN-ILLUMINANCE-62LX-282
 kind: practice_guide
 status: draft
-card_version: 1
+card_version: 2
 title: "かご室照度 — 62.5 lx 社内基準"
 symptoms:
   - "照度"
@@ -17,6 +17,7 @@ source_refs:
     document_number: "S-30-A20.7"
     kb_verify_status: pending
   - ref_type: law_rag
+    law_id: "325CO0000000338_20251201_507CO0000000377"
     law_title: "建築基準法施行令"
     retrieval: "mode=law"
     law_rag_status: pending
