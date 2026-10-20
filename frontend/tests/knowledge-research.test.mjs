@@ -94,6 +94,16 @@ function normalPayloadWithKnowhow(knowhow) {
   return normalPayload({ knowhow });
 }
 
+test('accepts canonical empty scope arrays from the private Markdown index', async () => {
+  const knowhow = knowhowPayload();
+  knowhow.matches[0].modelScope = { excludes: [], model_abbreviations: [] };
+  const answer = await queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '合成された検索', includeKnowhow: true,
+    fetchImpl: fetchOk(normalPayloadWithKnowhow(knowhow)),
+  });
+  assert.deepEqual(answer.knowhow.matches[0].modelScope.excludes, []);
+});
+
 function fetchOk(payload, onRequest = () => {}) {
   return async (url, init) => {
     onRequest(url, init);

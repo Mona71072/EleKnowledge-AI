@@ -216,3 +216,51 @@ def test_missing_private_index_returns_503_before_bedrock(rag_app, monkeypatch):
 
     assert response["statusCode"] == 503
     assert json.loads(response["body"])["error"] == "KnowledgeUnavailable"
+
+
+def test_markdown_search_reuses_the_conversation_rewrite_once(rag_app, monkeypatch):
+    captured = _configure_successful_pipeline(rag_app, monkeypatch)
+    rewrites = []
+
+    def rewrite(query, *_args, **_kwargs):
+        rewrites.append(query)
+        return "かごの走行中振動"
+
+    monkeypatch.setattr(rag_app, "maybe_rewrite_search_query", rewrite)
+    response = rag_app.handle_rag_request(
+        _event({"query": "それについて教えて", "includeKnowhow": True}), None, 0
+    )
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert body["knowhow"]["status"] == "matched"
+    assert len(rewrites) == 1
+    assert "かごの走行中振動" in captured["search_query"]
+
+
+def test_kb_hints_never_truncate_a_composed_question_or_its_exclusion(rag_app, monkeypatch):
+    captured = _configure_successful_pipeline(rag_app, monkeypatch)
+    composed = "かごの走行中振動。" + "あ" * 1980 + "対象外の設備には適用しない"
+    monkeypatch.setattr(rag_app, "compose_search_query", lambda *_args: composed)
+    response = rag_app.handle_rag_request(
+        _event({"query": "対象外です", "includeKnowhow": True}), None, 0
+    )
+    assert response["statusCode"] == 200
+    assert captured["search_query"] == composed
+    assert json.loads(response["body"])["knowhow"]["searchTerms"] == []
+
+
+def test_private_markdown_index_cannot_use_the_document_download_route(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "DOCUMENTS_BUCKET", "shared-documents")
+    monkeypatch.setattr(rag_app, "KNOWHOW_INDEX_BUCKET", "shared-documents")
+    monkeypatch.setattr(rag_app, "KNOWHOW_INDEX_KEY", "private-senpai/index.json")
+    assert not rag_app.is_allowed_document_uri("s3://shared-documents/private-senpai/index.json")
+    assert rag_app.is_allowed_document_uri("s3://shared-documents/ordinary.pdf")
+
+
+def test_index_bucket_must_be_separate_from_ordinary_document_buckets(rag_app, monkeypatch):
+    _configure_successful_pipeline(rag_app, monkeypatch)
+    monkeypatch.setattr(rag_app, "DOCUMENTS_BUCKET", "private-bucket")
+    response = rag_app.handle_rag_request(
+        _event({"query": "かごの走行中振動", "includeKnowhow": True}), None, 0
+    )
+    assert response["statusCode"] == 503

@@ -179,3 +179,21 @@ def test_prompt_card_is_json_escaped_as_user_data_and_never_a_system_instruction
     candidate_block = next(block["text"] for block in final_user if "ノウハウMarkdown候補" in block.get("text", ""))
     assert "\\u003c/system\\u003e" in candidate_block
     assert "</system>" not in candidate_block
+
+
+def test_empty_private_index_is_unavailable_instead_of_a_false_no_match():
+    import io
+    module = _module()
+
+    class EmptyS3:
+        def get_object(self, **_kwargs):
+            return {"Body": io.BytesIO(json.dumps(_index()).encode())}
+
+    with pytest.raises(module.KnowhowIndexError):
+        module.load_index(EmptyS3(), bucket="private-bucket", key="empty.json")
+
+
+def test_canonical_source_registry_id_survives_index_validation():
+    module = _module()
+    card = _card(sourceRefs=[{"ref_type": "lists_item", "list_item_id": "123", "source_id": "SYNTH-SOURCE-123"}])
+    assert module.validate_index(_index(card))["cards"][0]["sourceRefs"] == card["sourceRefs"]
