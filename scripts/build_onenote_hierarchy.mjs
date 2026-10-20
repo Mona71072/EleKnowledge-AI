@@ -134,7 +134,8 @@ async function buildManifest(vaultRoot, snapshotRoot) {
     const candidates = sourcePages.get(page.onenoteId) ?? [];
     const record = {
       onenote_id: page.onenoteId,
-      section_key: null,
+      root_container_key: null,
+      notebook_id: null,
       section_id: null,
       parent_onenote_id: null,
       ancestor_onenote_ids: [],
@@ -156,12 +157,12 @@ async function buildManifest(vaultRoot, snapshotRoot) {
     const relativePath = path.relative(vaultRoot, sourcePath);
     const parts = relativePath.split(path.sep);
     if (parts.length < 2) {
-      record.hierarchy_status = 'section_unknown';
+      record.hierarchy_status = 'root_container_unknown';
       records.push(record);
       continue;
     }
 
-    record.section_key = opaqueKey(parts[0]);
+    record.root_container_key = opaqueKey(parts[0]);
     const parents = await parentPageIds(vaultRoot, relativePath, includedIds);
     record.ancestor_onenote_ids = parents.ancestorIds;
     record.parent_onenote_id = parents.immediateParentId;
@@ -173,7 +174,7 @@ async function buildManifest(vaultRoot, snapshotRoot) {
 
     if (parts.length === 2) {
       record.page_level = 0;
-      record.hierarchy_status = 'section_page_candidate';
+      record.hierarchy_status = 'root_level_page_candidate';
     } else if (parents.unresolvedContainerKeys.length) {
       record.hierarchy_status = 'parent_container_without_page_id';
     } else if (parents.excludedAncestorIds.length) {
@@ -198,10 +199,11 @@ async function buildManifest(vaultRoot, snapshotRoot) {
     schema_version: 1,
     source_system: 'OneNote',
     snapshot_page_count: records.length,
-    matched_to_vault_count: records.filter(record => record.section_key).length,
+    matched_to_vault_count: records.filter(record => record.root_container_key).length,
     excluded_parent_stub_count: excludedParentStubs.length,
     relationship_source: 'inferred_from_local_vault_markdown_paths',
-    section_key_note: 'Opaque key derived from the first Vault path segment; not a native OneNote section ID or title.',
+    root_container_key_note: 'Opaque key derived from the first Vault path component; it is a grouping hint only, not a verified OneNote notebook or section ID/title.',
+    notebook_id_note: 'Native OneNote notebook IDs remain null unless independently reconciled.',
     section_id_note: 'Native OneNote section IDs remain null unless explicitly reconciled.',
     page_order_note: 'Page order remains null because filesystem order is not authoritative OneNote order.',
     status_counts: Object.fromEntries(Object.entries(statusCounts).sort()),
