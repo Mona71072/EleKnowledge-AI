@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "indexVersion": "sha256:630dbe57fbea0876010cd91e25f669d777eb3d2fd7593848931cdb14d881e5d8",
+  "indexVersion": "sha256:d8d04594a4514b3383886e6b46552058add8a5a4e7b957fe5f6ab6a903bb2155",
   "generatedAt": "2026-10-20T00:00:00.000Z",
   "cards": [
     {
@@ -29,6 +29,36 @@
         "scope_status": "verified",
         "scope_verified_at": "2026-10-20",
         "scope_verified_by": "合成レビュー担当"
+      }
+    },
+    {
+      "knowledgeId": "KH-SYN-DUPTERMS",
+      "cardVersion": 1,
+      "sha256": "54c09c32abc2176b077863097c5f7f65ecd439729038c181152d33a77369696e",
+      "title": "qxdupterm 重複検索語 合成カード",
+      "status": "draft",
+      "usage": "navigation_only",
+      "body": "# qxdupterm 重複検索語 合成カード\n\n同じ語が title・symptoms・keywords・aliases・tags・適用範囲に重複して現れる合成本文。実設備の助言ではない。\n",
+      "searchTerms": [
+        "qxdupterm 重複検索語 合成カード",
+        "qxdupterm",
+        "qxdupterm 症状",
+        "AXIEZ"
+      ],
+      "sourceRefs": [
+        {
+          "ref_type": "lists_item",
+          "list_item_id": "SYN-DUP-1"
+        }
+      ],
+      "modelScope": {
+        "observed_on": [
+          "qxdupterm"
+        ],
+        "product_lines": [
+          "AXIEZ",
+          "AXIEZ"
+        ]
       }
     },
     {

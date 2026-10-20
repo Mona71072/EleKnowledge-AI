@@ -64,7 +64,7 @@ def test_index_and_from_cards_are_mutually_exclusive(tmp_path, capsys):
         module.main([])
 
 
-def test_from_cards_reports_check_failures_but_still_cleans_up(tmp_path, monkeypatch, capsys):
+def test_from_cards_with_an_invalid_card_warns_and_exits_2_but_still_evaluates_and_cleans_up(tmp_path, monkeypatch, capsys):
     module = _module()
     root = tmp_path / "repo"
     shutil.copytree(FIXTURE_ROOT, root)
@@ -72,8 +72,38 @@ def test_from_cards_reports_check_failures_but_still_cleans_up(tmp_path, monkeyp
     bad.write_text("---\nknowledge_id: KH-SYN-BAD\nstatus: draft\ncard_version: 1\ntitle: bad\n"
                    "source_refs:\n  - ref_type: lists_item\n    bogus: 1\n    list_item_id: X\n---\nbody\n",
                    encoding="utf-8")
+    created = _record_tempdirs(monkeypatch)
     code = module.main(["--from-cards", str(root), "--cases", str(_cases(tmp_path / "cases.json"))])
     captured = capsys.readouterr()
-    assert code == 0
+    assert code == 2
     assert "KH-SYN-BAD" in captured.out + captured.err
+    assert "WARNING" in captured.out + captured.err
+    assert "1" in next(line for line in (captured.out + captured.err).splitlines() if "WARNING" in line)
     assert "合計: 2/2 PASS" in captured.out
+    assert created and all(not path.exists() for path in created)
+
+
+def test_from_cards_with_only_failing_eval_cases_still_exits_0(tmp_path, capsys):
+    module = _module()
+    cases = tmp_path / "cases.json"
+    cases.write_text(json.dumps({"cases": [
+        {"id": "T-9", "category": "synthetic", "query": "qxpositive",
+         "expect": {"status": "not_found", "mustInclude": [], "mustNotInclude": []}},
+    ]}), encoding="utf-8")
+    code = module.main(["--from-cards", str(FIXTURE_ROOT), "--cases", str(cases)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "FAIL" in out and "WARNING" not in out
+
+
+def _record_tempdirs(monkeypatch):
+    created: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def recording_mkdtemp(*args, **kwargs):
+        path = Path(real_mkdtemp(*args, **kwargs))
+        created.append(path)
+        return str(path)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", recording_mkdtemp)
+    return created

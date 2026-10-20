@@ -151,17 +151,25 @@ OneNote の LV5K CLT 注意（**L型ドア**で駆動装置が桁上、など）
 
 ## 5b. 適用範囲の訂正と検証（Senpai 機種フィルタ）
 
+> 最終検証: 2026-10-20 — `check` の合成カードテスト（認識できない機種名の拒否・版台帳）と Lambda の `MODEL_ALIASES` との一致テスト。実運用での訂正作業は未実施。
+
 Senpai の機種フィルタは `scope_status: verified` のカードだけを除外する（定義は [CONTRACT.md](../CONTRACT.md)）。Lists の機種欄は誤りがあり得るため、**確認前のカードは機種を選んでも除外されない**。
+
+UI「機種（任意）」の機種キーは **AXIEZ / AXIEZ-LINKs / NEXCUBE / メルシティ / メルワイド / エスカレーター**。判定に使われるのは `product_lines` / `model_abbreviations` / `lists_model_label` / `observed_on` の値で、**AXIEZ と AXIEZ-LINKs は別の機種**として扱う（AXIEZ を選ぶと、AXIEZ-LINKs だけの確認済みカードは除外される）。`verified` のカードは、この4キーのどれかに上の機種名か `全エレ機種` / `全エス機種` が必要（誤字だけだと `check` が失敗する）。
 
 訂正の手順:
 
 1. Lists / OneNote / KB の原文で、そのカードが実際にどの機種に当てはまるかを確認する。
 2. `model_scope` を実態に合わせる。
-   - 例: **VFGH と書かれているが全エレベーターに当てはまる** → `lists_model_label: ["全エレ機種"]` にし、特定機種だけの `product_lines` / `model_abbreviations` は外す（原文の表記は `scope_note` に残す）。
-   - 例: 特定機種だけに当てはまる → `product_lines` にその機種名（AXIEZ / Nexcube / AXIEZ-LINKs / メルシティ / メルワイド / escalator）を入れ、`may_apply_to` / `scope_note` が広い表現なら直す。
+   - 例（機種欄が狭すぎた）: **Lists に VFGH と書かれているが、原文では全エレベーターに当てはまる** → `lists_model_label: ["全エレ機種"]` にし、特定機種だけの `product_lines` / `model_abbreviations` は外す（原文の表記は `scope_note` に残す）。
+   - 例（機種欄が広すぎた）: **Lists では「全エレ機種」だが、原文を読むと AXIEZ だけの現象** → `lists_model_label` から `全エレ機種` を外して `product_lines: ["AXIEZ"]` にする（全エレのまま `verified` にすると、AXIEZ 以外を選んでも除外されない）。原文の表記は `scope_note` に残す。
+   - 例: 特定機種だけに当てはまる → `product_lines` にその機種名（AXIEZ / NEXCUBE / AXIEZ-LINKs / メルシティ / メルワイド / エスカレーター）を入れ、`may_apply_to` / `scope_note` が広い表現なら直す。
    - 制御方式（VFGH 等）や機種略称だけでは機種フィルタの判定に使われない。機種名（`product_lines`）か `全エレ機種` / `全エス機種` を書く。
-3. 確認したら `scope_status: verified` / `scope_verified_by: <名前>` / `scope_verified_at: YYYY-MM-DD` を足す。
-4. 確認待ちの一覧は `python scripts/knowledge/build_scope_review_queue.py` が [queues/scope-review/QUEUE.md](../queues/scope-review/QUEUE.md) に生成する（矛盾の疑い P1 を最優先）。
+3. 確認したら `scope_status: verified` / `scope_verified_by: <名前>` / `scope_verified_at: YYYY-MM-DD`（実在し、本日以前）を足す。
+4. **`card_version` を上げる**（`model_scope` やスコープ確認印を直した時点で、カードの内容が変わるため）。
+5. **台帳を再生成**する: `node scripts/knowledge/build-senpai-index.mjs ledger .`（`registry/card-versions.jsonl`。版を上げずに内容だけ変えると、台帳の再生成は拒否され、`check` も失敗する）。
+6. **確認キューを再生成**する: `python scripts/knowledge/build_scope_review_queue.py`。
+7. `node scripts/knowledge/build-senpai-index.mjs check .` が成功することを確認する。確認待ちの一覧は [queues/scope-review/QUEUE.md](../queues/scope-review/QUEUE.md)（矛盾の疑い P1 を最優先）。
 
 ---
 

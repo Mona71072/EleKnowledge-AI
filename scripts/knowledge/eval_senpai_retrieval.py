@@ -2,8 +2,9 @@
 """Run the Senpai knowhow retrieval eval cases against a local index file.
 
 Report only: prints a PASS/FAIL line per case and totals per category.
-Card bodies are never printed, only knowledgeIds. The exit code is always 0
-because the case set is still a draft.
+Card bodies are never printed, only knowledgeIds. Failing eval cases do not change the exit
+code (0) because the case set is still a draft. With ``--from-cards`` the exit code is 2 when
+any card failed the build check, since the eval then ran on an incomplete card set.
 
 Usage:
     python scripts/knowledge/eval_senpai_retrieval.py --index <path> [--cases <path>]
@@ -11,7 +12,8 @@ Usage:
 
 ``--from-cards`` runs ``build-senpai-index.mjs check <repo_root> --eval-index <tmp>`` so the
 eval uses the real build output (never a hand-made index), then deletes the temporary,
-unapproved index. Cards that fail the build check are listed and left out of the eval.
+unapproved index. Cards that fail the build check are listed, left out of the eval, and make the
+run exit 2 after printing a WARNING line. The version ledger is not part of this eval (--no-ledger).
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ import argparse
 import importlib.util
 import inspect
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -74,18 +77,25 @@ def evaluate(case: dict, result: dict, notes: list[str]) -> tuple[list[str], lis
     return reasons, ids
 
 
-def build_eval_index(cards_root: Path, index_path: Path) -> None:
-    """Run the real build ``check`` and write a local-only eval index (raises on setup failure)."""
+def build_eval_index(cards_root: Path, index_path: Path) -> int:
+    """Run the real build ``check`` and write a local-only eval index.
+
+    Returns how many cards failed the check (0 when none). Raises on setup failure.
+    """
     node = shutil.which("node")
     if node is None:
         raise RuntimeError("node が見つかりません")
     completed = subprocess.run(
-        [node, str(BUILD_SCRIPT), "check", str(cards_root), "--eval-index", str(index_path)],
+        [node, str(BUILD_SCRIPT), "check", str(cards_root), "--no-ledger", "--eval-index", str(index_path)],
         capture_output=True, text=True, check=False,
     )
     sys.stdout.write(completed.stdout)
     if not index_path.exists():
         raise RuntimeError(f"評価用索引を作れませんでした: {completed.stderr.strip()[:300]}")
+    if completed.returncode == 0:
+        return 0
+    match = re.search(r"(\d+) failed", completed.stdout)
+    return int(match.group(1)) if match else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,12 +111,19 @@ def main(argv: list[str] | None = None) -> int:
         try:
             index_path = work_dir / "index.json"
             try:
-                build_eval_index(args.from_cards, index_path)
+                invalid_cards = build_eval_index(args.from_cards, index_path)
             except (OSError, RuntimeError) as exc:
                 print(f"読み込みに失敗: {type(exc).__name__}: {exc}", file=sys.stderr)
                 return 0
             args.index = index_path
-            return _run(args)
+            code = _run(args)
+            if invalid_cards:
+                message = (f"WARNING: 無効なカードが {invalid_cards} 枚あり、評価から除外されました。"
+                           "上の FAIL 行を直してから再実行してください（終了コード 2）。")
+                print(f"\n{message}")
+                print(message, file=sys.stderr)
+                return 2
+            return code
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
     return _run(args)

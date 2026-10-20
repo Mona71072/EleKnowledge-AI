@@ -6,6 +6,7 @@ Lambda against an index produced by the real build code instead of a hand-made o
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import re
@@ -64,6 +65,78 @@ def test_scope_verification_keys_match_between_lambda_and_builder():
     assert set(_retrieval().SCOPE_VERIFICATION_KEYS) == _js_set(BUILD_SCRIPT, "SCOPE_VERIFICATION_KEYS")
 
 
+def _js_block(path: Path, name: str) -> str:
+    text = path.read_text(encoding="utf-8")
+    match = re.search(rf"const {name} = (?:Object\.freeze\()?\{{(.*?)\n?\}}\)?;", text, re.DOTALL)
+    assert match, f"{name} not found in {path.name}"
+    return match.group(1)
+
+
+def _js_string_map(path: Path, name: str) -> dict[str, str]:
+    return dict(re.findall(r"(\w+): '([^']+)'", _js_block(path, name)))
+
+
+def _js_alias_map(path: Path, name: str) -> dict[str, set[str]]:
+    return {key: set(re.findall(r"'([^']+)'", values))
+            for key, values in re.findall(r"'([^']+)': \[([^\]]*)\]", _js_block(path, name))}
+
+
+def _js_string(path: Path, name: str) -> str:
+    match = re.search(rf"const {name} = '([^']*)';", path.read_text(encoding="utf-8"))
+    assert match, f"{name} not found in {path.name}"
+    return match.group(1)
+
+
+def _js_regex_source(path: Path, name: str) -> str:
+    match = re.search(rf"const {name} = /(.*?)/u;", path.read_text(encoding="utf-8"))
+    assert match, f"{name} not found in {path.name}"
+    return match.group(1)
+
+
+def test_source_types_and_identity_keys_match_across_lambda_builder_and_frontend():
+    lambda_module = _retrieval()
+    assert set(lambda_module.SOURCE_TYPES) == _js_set(BUILD_SCRIPT, "SOURCE_REF_TYPES")
+    assert dict(lambda_module.SOURCE_ID_KEYS) == _js_string_map(BUILD_SCRIPT, "SOURCE_ID_KEYS")
+    assert dict(lambda_module.SOURCE_ID_KEYS) == _js_string_map(FRONTEND_LIB, "KNOWHOW_SOURCE_IDS")
+
+
+def test_scope_status_values_and_date_pattern_match_between_lambda_and_builder():
+    lambda_module = _retrieval()
+    assert set(lambda_module.SCOPE_STATUSES) == _js_set(BUILD_SCRIPT, "SCOPE_STATUSES")
+    assert lambda_module.SCOPE_DATE_PATTERN.pattern == _js_regex_source(BUILD_SCRIPT, "SCOPE_DATE")
+
+
+def test_model_aliases_and_generic_labels_match_between_lambda_and_builder():
+    lambda_module = _retrieval()
+    assert {key: set(values) for key, values in lambda_module.MODEL_ALIASES.items()} == _js_alias_map(BUILD_SCRIPT, "MODEL_ALIASES")
+    assert lambda_module.GENERIC_ELEVATOR_LABEL == _js_string(BUILD_SCRIPT, "GENERIC_ELEVATOR_LABEL")
+    assert lambda_module.GENERIC_ESCALATOR_LABEL == _js_string(BUILD_SCRIPT, "GENERIC_ESCALATOR_LABEL")
+    assert set(lambda_module.MODEL_CLASSIFY_KEYS) == _js_set(BUILD_SCRIPT, "MODEL_CLASSIFY_KEYS")
+
+
+def test_committed_card_version_ledger_matches_every_card_file():
+    """Independent of node: a body edit without a card_version bump and ledger regeneration fails here too."""
+    ledger = ROOT / "knowledge/registry/card-versions.jsonl"
+    assert ledger.exists(), "run: node scripts/knowledge/build-senpai-index.mjs ledger ."
+    entries = {}
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        item = json.loads(line)
+        assert list(item) == ["knowledgeId", "cardVersion", "sha256"]
+        assert item["knowledgeId"] not in entries
+        entries[item["knowledgeId"]] = item
+    cards = {}
+    for path in sorted((ROOT / "knowledge/cards").glob("*/*.md")):
+        text = path.read_text(encoding="utf-8")
+        front = text.split("---", 2)[1]
+        card_id = re.search(r"^knowledge_id:\s*(\S+)", front, re.MULTILINE).group(1).strip("\"'")
+        version = int(re.search(r"^card_version:\s*(\d+)", front, re.MULTILINE).group(1))
+        cards[card_id] = (version, hashlib.sha256(path.read_bytes()).hexdigest())
+    assert set(entries) == set(cards), "ledger and cards differ; run: node scripts/knowledge/build-senpai-index.mjs ledger ."
+    for card_id, (version, sha) in cards.items():
+        assert (entries[card_id]["cardVersion"], entries[card_id]["sha256"]) == (version, sha), (
+            f"{card_id}: bump card_version, then regenerate the ledger")
+
+
 @pytest.fixture(scope="module")
 def retrieval():
     return _retrieval()
@@ -79,7 +152,7 @@ def _ids(result):
 
 
 def test_lambda_accepts_the_really_built_fixture(index):
-    assert {c["knowledgeId"] for c in index["cards"]} == {"KH-SYN-POSITIVE", "KH-SYN-CONFLICT", "KH-SYN-UNVERIFIED"}
+    assert {c["knowledgeId"] for c in index["cards"]} == {"KH-SYN-POSITIVE", "KH-SYN-CONFLICT", "KH-SYN-UNVERIFIED", "KH-SYN-DUPTERMS"}
 
 
 @pytest.mark.parametrize("term", ["qxexcl", "qxmay", "qxnote"])
@@ -111,3 +184,10 @@ def test_scope_review_queue_is_fresh(tmp_path):
         "knowledge/queues/scope-review/QUEUE.md is stale. Regenerate with: "
         "python scripts/knowledge/build_scope_review_queue.py"
     )
+
+
+def test_fixture_search_terms_have_no_duplicates(index):
+    for card in index["cards"]:
+        assert len(card["searchTerms"]) == len(set(card["searchTerms"])), card["knowledgeId"]
+    dup = next(card for card in index["cards"] if card["knowledgeId"] == "KH-SYN-DUPTERMS")
+    assert dup["searchTerms"].count("qxdupterm") == 1

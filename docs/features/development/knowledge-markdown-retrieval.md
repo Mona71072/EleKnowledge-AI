@@ -73,20 +73,31 @@ python scripts/knowledge/eval_senpai_retrieval.py --from-cards .
 
 ## 改善の回し方（2026-10-20）
 
-> 最終検証: 2026-10-20 — `check`（実カードで全件成功・失敗カードの検出は合成カードのテストで確認）、`eval_senpai_retrieval.py --from-cards .` の実カード実行、キュー鮮度・語彙同期・合成契約索引のテスト。CI での実行結果は未確認。
+> 最終検証: 2026-10-20 — `check`（実カード398枚で全件成功・台帳一致）、`eval_senpai_retrieval.py --from-cards .` の実カード実行、キュー鮮度・語彙同期・合成契約索引のテスト、下記ガードを破る変異（誤字・語彙のずれ・フォルダー外・版上げ忘れ・重複除去の削除・未来日・ファイル名・重複ID・無効カード・title の URL）がすべて検出されることの再確認。CI での実行結果は未確認。
 
 手書きの合成索引だけで評価すると、取込ツールが本物の索引に何を入れるかのずれを見逃す（実際に、`excludes` / `may_apply_to` が検索語へ混入して順位修正を無効にしていた）。そこで、実カードと同じ生成コードを通る検査を回す。
 
-1. **カードを直す**。
-2. **`node scripts/knowledge/build-senpai-index.mjs check .`**。取込一覧なし・何も書き出さず、全カードを索引生成と同じ検証で1枚ずつ確認し、失敗カードと理由を出す（1枚でも失敗なら終了コード1）。CI でも実行する。
-3. **確認キューを再生成**する（`python scripts/knowledge/build_scope_review_queue.py`）。古いままだと CI の鮮度テストが失敗する。
-4. **`python scripts/knowledge/eval_senpai_retrieval.py --from-cards .`** で評価ケースを実カードの本物の検索語で流す。
-5. **先輩チャットで利用する**。
-6. （今後）利用者の結果入力を確認キューへ反映し、優先度付けに使う。未実装。
+1. **カードを直す**。内容（本文・frontmatter）を変えたら **`card_version` を上げる**。
+2. **台帳を再生成**する（`node scripts/knowledge/build-senpai-index.mjs ledger .`）。`knowledge/registry/card-versions.jsonl` に、カードごとの `card_version` と内容 sha256 を記録する（版を上げずに内容だけ変えた場合は再生成を拒否する）。台帳もコミットする。
+3. **`node scripts/knowledge/build-senpai-index.mjs check .`**。取込一覧なし・何も書き出さず、全カードを索引生成と同じ検証で1枚ずつ確認し、失敗カードと理由を出す（1枚でも失敗なら終了コード1）。台帳との照合（版上げ忘れ・台帳の再生成忘れ）もここで検出する。CI でも実行する。
+4. **確認キューを再生成**する（`python scripts/knowledge/build_scope_review_queue.py`）。古いままだと CI の鮮度テストが失敗する。
+5. **`python scripts/knowledge/eval_senpai_retrieval.py --from-cards .`** で評価ケースを実カードの本物の検索語で流す。無効なカードがあると WARNING を出して終了コード2（評価ケースの FAIL だけなら 0）。評価は台帳を見ない（`--no-ledger`）。
+6. **先輩チャットで利用する**。
+7. （今後）利用者の結果入力を確認キューへ反映し、優先度付けに使う。未実装。
 
 補足:
 - `check --eval-index <path>` は未承認の全有効カード本文を含む評価用索引を出す。OS の一時フォルダ内（リポジトリ内は拒否）に権限0600でのみ書き、アップロード・共有・コミットしない。`--from-cards` が自動で作り、評価後に削除する。
 - 同じ語彙一覧（適用範囲キー・順位に使うキー・出典キー）が Lambda・取込ツール・フロントの3か所にあるため、`tests/unit/test_knowhow_contract_sync.py` が一致を検査する。一覧を変えるときは3か所を同時に直す。
+- **変異テストで確認済みのガード**（それぞれ、破ると `check` かテストが失敗する。`frontend/tests/knowledge-index-guards.test.mjs` と `tests/unit/test_knowhow_contract_sync.py`）:
+  - `verified` なのに4つの分類キーに認識できる機種名・全機種ラベルが無い（誤字 `AXEIZ` 等）→ 失敗し、認識される値を表示
+  - 出典キー・出典種別・`SOURCE_ID_KEYS`・`scope_status` の値・日付の正規表現・`MODEL_ALIASES`・全エレ/全エスラベルが Lambda と取込ツールでずれる
+  - 承認済みフォルダー外（`knowledge/cards/newdir/` 等）のカード
+  - 内容を変えたのに `card_version` が同じ／版を上げたのに台帳を再生成していない
+  - 検索語の重複除去の削除（重複する検索語を持つ合成カード `KH-SYN-DUPTERMS`）
+  - `scope_verified_at` が未来日・実在しない日付（分かりやすい文言で失敗）
+  - ファイル名と `knowledge_id` の不一致、重複した `knowledge_id`（両方のパスを表示）
+  - `title` に URL・制御文字・`\` を含む
+  - `--from-cards` で無効カードがあるのに終了コード0になる
 - 取込ツールの出力は合成カードから生成した `tests/fixtures/knowledge/synthetic/built-index.json` に固定し、JS（再生成結果と一致）と Python（Lambda が受理し、`excludes` 等だけの語で出ないこと）の両方で検査する。取込ツールの出力を変えたら `npm --prefix frontend run knowledge:regen-contract-fixture` で再生成する。
 
 ## 画面と記録

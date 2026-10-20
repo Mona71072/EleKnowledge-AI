@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { lstat, mkdir, open, readFile, readdir, realpath, rename, unlink } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,23 @@ const ALLOWED_PREFIXES = [
   `${CARD_ROOT}/case-summaries/`,
   `${CARD_ROOT}/practice-guides/`,
 ];
+const LEDGER_PATH = 'knowledge/registry/card-versions.jsonl';
+const MAX_LEDGER_BYTES = 1024 * 1024;
+// Files at the top of knowledge/cards that are documentation, not cards. Anywhere else (including a
+// same-named file in a subfolder) a Markdown file under knowledge/cards must sit in ALLOWED_PREFIXES.
+const NON_CARD_FILES = new Set([
+  `${CARD_ROOT}/INDEX.md`, `${CARD_ROOT}/README.md`, `${CARD_ROOT}/TEMPLATE.md`, `${CARD_ROOT}/_SOURCE-LEGEND.md`,
+]);
+// SYNC: must equal SOURCE_TYPES in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
 const SOURCE_REF_TYPES = new Set(['lists_item', 'onenote_page', 'kb_document', 'law_rag']);
+// SYNC: must equal SOURCE_ID_KEYS in knowhow_retrieval.py and KNOWHOW_SOURCE_IDS in knowledge-research.mjs
+// (tests/unit/test_knowhow_contract_sync.py).
+const SOURCE_ID_KEYS = Object.freeze({
+  lists_item: 'list_item_id',
+  onenote_page: 'onenote_id',
+  kb_document: 'document_number',
+  law_rag: 'law_id',
+});
 // SYNC: keys must equal SOURCE_REF_KEYS in knowhow_retrieval.py and KNOWHOW_SOURCE_FIELDS in
 // knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 const SOURCE_REF_KEYS = new Set([
@@ -50,8 +66,32 @@ const POSITIVE_SCOPE_KEYS = new Set([
 // Verification marks decide only the Senpai model filter; they are not scoring input or search terms.
 // SYNC: must equal SCOPE_VERIFICATION_KEYS in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
 const SCOPE_VERIFICATION_KEYS = new Set(['scope_status', 'scope_verified_by', 'scope_verified_at']);
+// SYNC: must equal SCOPE_STATUSES / SCOPE_DATE_PATTERN in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
 const SCOPE_STATUSES = new Set(['verified', 'unverified']);
 const SCOPE_DATE = /^\d{4}-\d{2}-\d{2}$/u;
+// A verified scope only filters when one of these fields holds a recognized product or generic label
+// (mirrors MODEL_CLASSIFY_KEYS / MODEL_ALIASES / GENERIC_* in knowhow_retrieval.py). Values are compared
+// after NFKC + lower-casing + trimming, so the alias lists below are already normalized.
+// SYNC: tests/unit/test_knowhow_contract_sync.py compares all four with the Lambda.
+const MODEL_CLASSIFY_KEYS = new Set(['product_lines', 'model_abbreviations', 'lists_model_label', 'observed_on']);
+const MODEL_ALIASES = Object.freeze({
+  'AXIEZ': ['axiez', 'axiez(ke-wf・ke-hf)', '駅舎エレ'],
+  'AXIEZ-LINKs': ['axiez-links'],
+  'NEXCUBE': ['nexcube', 'nexcube limited', '特注機械室レスエレベーター'],
+  'メルシティ': ['メルシティ'],
+  'メルワイド': ['メルワイド'],
+  'エスカレーター': ['エスカレーター', 'escalator'],
+});
+const GENERIC_ELEVATOR_LABEL = '全エレ機種';
+const GENERIC_ESCALATOR_LABEL = '全エス機種';
+const RECOGNIZED_MODEL_LABELS = new Set([
+  ...Object.values(MODEL_ALIASES).flat(), GENERIC_ELEVATOR_LABEL.normalize('NFKC').toLowerCase(), GENERIC_ESCALATOR_LABEL.normalize('NFKC').toLowerCase(),
+]);
+
+/** Today's date in UTC as YYYY-MM-DD; callers may inject another day for tests. */
+function utcToday() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 function fail(message) {
   throw new TypeError(message);
@@ -210,11 +250,7 @@ function sourceRefs(metadata) {
     if (ref.ref_type === 'draft_record') continue;
     for (const key of Object.keys(ref)) if (!SOURCE_REF_KEYS.has(key) && !SOURCE_REF_ANNOTATION_KEYS.has(key)) fail('A source reference contains an unsupported field.');
     if (!SOURCE_REF_TYPES.has(ref.ref_type)) fail('A source reference type is unsupported.');
-    let identityField;
-    if (ref.ref_type === 'lists_item') identityField = 'list_item_id';
-    else if (ref.ref_type === 'onenote_page') identityField = 'onenote_id';
-    else if (ref.ref_type === 'kb_document') identityField = 'document_number';
-    else identityField = 'law_id';
+    const identityField = SOURCE_ID_KEYS[ref.ref_type];
     const id = ref[identityField];
     if (id === undefined || id === null) fail('A source reference is missing its stable identity.');
     const result = { ref_type: ref.ref_type };
@@ -231,7 +267,7 @@ function sourceRefs(metadata) {
   return output;
 }
 
-function modelScope(metadata) {
+function modelScope(metadata, today) {
   const scope = metadata.model_scope ?? {};
   if (!isPlainObject(scope)) fail('Model scope must be an object.');
   const output = {};
@@ -243,11 +279,20 @@ function modelScope(metadata) {
       output[key] = value.map((item) => safeScalar(item, 'Model scope value', { allowSlash: true }));
     } else fail('Model scope values must be strings or bounded string arrays.');
   }
-  validateScopeVerification(output);
+  validateScopeVerification(output, today);
   return output;
 }
 
-function validateScopeVerification(scope) {
+function normalizeModelLabel(value) {
+  return value.normalize('NFKC').toLowerCase().trim();
+}
+
+function recognizedModelValues(scope) {
+  return [...MODEL_CLASSIFY_KEYS].flatMap((key) => (Array.isArray(scope[key]) ? scope[key] : key in scope ? [scope[key]] : []))
+    .filter((value) => RECOGNIZED_MODEL_LABELS.has(normalizeModelLabel(value)));
+}
+
+function validateScopeVerification(scope, today) {
   for (const key of SCOPE_VERIFICATION_KEYS) {
     if (key in scope && typeof scope[key] !== 'string') fail('Scope verification fields must be strings.');
   }
@@ -256,8 +301,19 @@ function validateScopeVerification(scope) {
   if (status !== 'verified') return;
   if (!scope.scope_verified_by?.trim()) fail('A verified scope requires scope_verified_by.');
   const at = scope.scope_verified_at ?? '';
-  if (!SCOPE_DATE.test(at) || new Date(`${at}T00:00:00Z`).toISOString().slice(0, 10) !== at) {
-    fail('A verified scope requires scope_verified_at as a valid YYYY-MM-DD date.');
+  const invalidDate = `scope_verified_at は実在する日付を YYYY-MM-DD で書いてください（例: 2026-10-20）。現在の値: "${at}"`;
+  if (!SCOPE_DATE.test(at)) fail(invalidDate);
+  let normalized;
+  try {
+    normalized = new Date(`${at}T00:00:00Z`).toISOString().slice(0, 10);
+  } catch {
+    fail(invalidDate);
+  }
+  if (normalized !== at) fail(invalidDate);
+  if (at > today) fail(`scope_verified_at が未来の日付です（${at} > 本日 ${today} UTC）。確認した日を書いてください。`);
+  if (recognizedModelValues(scope).length === 0) {
+    fail(`scope_status: verified ですが、${[...MODEL_CLASSIFY_KEYS].join(' / ')} に認識できる機種名も全機種ラベルもありません（機種フィルタが効きません）。`
+      + ` 認識される値: ${Object.keys(MODEL_ALIASES).join(', ')}, ${GENERIC_ELEVATOR_LABEL}, ${GENERIC_ESCALATOR_LABEL}。表記ゆれ・誤字を直してください。`);
   }
 }
 
@@ -287,18 +343,22 @@ function searchTerms(parsed, scope) {
   return terms;
 }
 
+function duplicateIdMessage(id, firstPath, secondPath) {
+  return `The inventory contains a duplicate knowledge ID "${id}": ${firstPath} and ${secondPath}.`;
+}
+
 export async function inventoryKnowhowCards(root) {
   const { resolved } = await rootInfo(root);
   const paths = (await Promise.all(ALLOWED_PREFIXES.map((prefix) => listMarkdownFiles(resolved, prefix)))).flat().sort();
   if (paths.length > MAX_CARDS) fail('The knowledge inventory exceeds 1,000 cards.');
-  const ids = new Set();
+  const idPaths = new Map();
   const cards = [];
   const errors = [];
   for (const relativePath of paths) {
     try {
       const { parsed, metadata, sha256 } = await readCard(resolved, relativePath);
-      if (ids.has(parsed.id)) fail('The inventory contains a duplicate knowledge ID.');
-      ids.add(parsed.id);
+      if (idPaths.has(parsed.id)) fail(duplicateIdMessage(parsed.id, idPaths.get(parsed.id), relativePath));
+      idPaths.set(parsed.id, relativePath);
       cards.push({ path: relativePath, knowledgeId: parsed.id, cardVersion: parsed.version, sha256, title: parsed.title, status: metadata.status });
     } catch (error) {
       if (String(error.message).includes('duplicate knowledge ID')) throw error;
@@ -314,14 +374,14 @@ function stableJson(value) {
   return JSON.stringify(value);
 }
 
-function indexCard({ parsed, metadata, sha256 }) {
+function indexCard({ parsed, metadata, sha256 }, today) {
   const refs = sourceRefs(metadata);
-  const scope = modelScope(metadata);
+  const scope = modelScope(metadata, today);
   return {
     knowledgeId: parsed.id,
     cardVersion: parsed.version,
     sha256,
-    title: parsed.title,
+    title: safeScalar(parsed.title, 'Card title (URL, backslash, control character or path is not allowed)', { max: 400, allowSlash: true }),
     status: metadata.status,
     usage: 'navigation_only',
     body: parsed.body,
@@ -339,7 +399,7 @@ function assembleIndex(cards, generatedAt) {
   return result;
 }
 
-export async function buildKnowhowIndex({ root, manifest, generatedAt = new Date().toISOString() }) {
+export async function buildKnowhowIndex({ root, manifest, generatedAt = new Date().toISOString(), today = utcToday() }) {
   validateManifest(manifest);
   if (!validIsoDate(generatedAt)) fail('generatedAt must be an ISO timestamp.');
   const { resolved } = await rootInfo(root);
@@ -349,7 +409,7 @@ export async function buildKnowhowIndex({ root, manifest, generatedAt = new Date
     if (parsed.id !== entry.knowledgeId || parsed.version !== entry.cardVersion || sha256 !== entry.sha256) {
       fail('A selected card does not match its approved ID, version, and hash.');
     }
-    selected.push(indexCard({ parsed, metadata, sha256 }));
+    selected.push(indexCard({ parsed, metadata, sha256 }, today));
   }
   return assembleIndex(selected, generatedAt);
 }
@@ -406,47 +466,190 @@ async function writeEvalIndex(outputPath, value) {
   }
 }
 
-/**
- * Validate every inventoried card individually through the same code path as `build`.
- * Needs no manifest and writes nothing unless `evalIndexPath` is given. SECURITY: that
- * index holds unapproved card bodies for local evaluation only and must never be uploaded.
- */
-export async function checkKnowhowCards(root, { evalIndexPath, generatedAt = new Date().toISOString() } = {}) {
-  const { resolved } = await rootInfo(root);
-  const outputPath = evalIndexPath === undefined ? undefined : await resolveEvalIndexPath(resolved, evalIndexPath);
+async function listCardPaths(resolved) {
   const paths = (await Promise.all(ALLOWED_PREFIXES.map((prefix) => listMarkdownFiles(resolved, prefix)))).flat().sort();
   if (paths.length > MAX_CARDS) fail('The knowledge inventory exceeds 1,000 cards.');
-  const ids = new Set();
-  const cards = [];
+  return paths;
+}
+
+/** Markdown files under knowledge/cards that are neither in an approved folder nor a known non-card file. */
+async function listStrayCardFiles(resolved) {
+  const all = await listMarkdownFiles(resolved, `${CARD_ROOT}/`);
+  return all.filter((file) => !ALLOWED_PREFIXES.some((prefix) => file.startsWith(prefix)) && !NON_CARD_FILES.has(file));
+}
+
+/** Validate each card through the build code path plus file-name and duplicate-ID rules. */
+async function evaluateCards(resolved, paths, today) {
+  const idPaths = new Map();
+  const records = [];
   const failures = [];
   for (const relativePath of paths) {
     try {
-      const { parsed, metadata, sha256 } = await readCard(resolved, relativePath);
-      if (ids.has(parsed.id)) fail('The inventory contains a duplicate knowledge ID.');
-      cards.push(indexCard({ parsed, metadata, sha256 }));
-      ids.add(parsed.id);
+      const card = await readCard(resolved, relativePath);
+      const { parsed, sha256 } = card;
+      if (idPaths.has(parsed.id)) fail(duplicateIdMessage(parsed.id, idPaths.get(parsed.id), relativePath));
+      idPaths.set(parsed.id, relativePath);
+      const base = path.posix.basename(relativePath, '.md');
+      if (base !== parsed.id) fail(`The file name "${base}.md" must equal knowledge_id "${parsed.id}". ファイル名か knowledge_id のどちらかを直してください。`);
+      records.push({ relativePath, knowledgeId: parsed.id, cardVersion: parsed.version, sha256, index: indexCard(card, today) });
     } catch (error) {
       failures.push({ path: relativePath, reason: String(error?.message ?? error) });
     }
   }
-  const result = { total: paths.length, valid: cards.length, failures };
+  return { records, failures };
+}
+
+const LEDGER_REGENERATE_HINT = '`node scripts/knowledge/build-senpai-index.mjs ledger .` で ledger を再生成してください';
+const HEX64 = /^[a-f0-9]{64}$/u;
+
+function parseLedger(text) {
+  const entries = new Map();
+  for (const [position, line] of text.split('\n').entries()) {
+    if (!line.trim()) continue;
+    let item;
+    try {
+      item = JSON.parse(line);
+    } catch {
+      fail(`${position + 1} 行目が JSON ではありません`);
+    }
+    if (!isPlainObject(item) || Object.keys(item).join(',') !== 'knowledgeId,cardVersion,sha256'
+      || typeof item.knowledgeId !== 'string' || !Number.isSafeInteger(item.cardVersion) || item.cardVersion < 1
+      || typeof item.sha256 !== 'string' || !HEX64.test(item.sha256)) fail(`${position + 1} 行目の形式が不正です`);
+    if (entries.has(item.knowledgeId)) fail(`${item.knowledgeId} が重複しています`);
+    entries.set(item.knowledgeId, item);
+  }
+  return entries;
+}
+
+async function readLedger(resolved) {
+  let file;
+  try {
+    file = await checkNoSymlinkPath(resolved, LEDGER_PATH);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return undefined;
+    throw error;
+  }
+  if ((await lstat(file)).size > MAX_LEDGER_BYTES) fail('ledger が大きすぎます');
+  return parseLedger(await readFile(file, 'utf8'));
+}
+
+function ledgerEntryProblem(record, entry) {
+  if (!entry) return `ledger に未登録のカードです: ${LEDGER_REGENERATE_HINT}`;
+  if (entry.cardVersion === record.cardVersion) {
+    return entry.sha256 === record.sha256 ? undefined
+      : `内容が変わったのに card_version が同じです（v${record.cardVersion}）: card_version を上げてから ledger を再生成してください`;
+  }
+  if (entry.cardVersion < record.cardVersion) return `ledger が古いです（ledger v${entry.cardVersion} / カード v${record.cardVersion}）: ${LEDGER_REGENERATE_HINT}`;
+  return `card_version が下がっています（ledger v${entry.cardVersion} > カード v${record.cardVersion}）: card_version は下げられません`;
+}
+
+/** Compare cards with the committed version ledger; returns per-card and ledger-level failures. */
+async function checkLedger(resolved, records, hasCardFailures) {
+  let ledger;
+  try {
+    ledger = await readLedger(resolved);
+  } catch (error) {
+    return { cardProblems: new Map(), general: [{ path: LEDGER_PATH, reason: `ledger を読めません（${error.message}）: ${LEDGER_REGENERATE_HINT}` }] };
+  }
+  if (!ledger) return { cardProblems: new Map(), general: [{ path: LEDGER_PATH, reason: `ledger がありません: ${LEDGER_REGENERATE_HINT}` }] };
+  const cardProblems = new Map();
+  for (const record of records) {
+    const problem = ledgerEntryProblem(record, ledger.get(record.knowledgeId));
+    if (problem) cardProblems.set(record.relativePath, problem);
+  }
+  const general = [];
+  if (!hasCardFailures) {
+    const present = new Set(records.map((record) => record.knowledgeId));
+    for (const id of ledger.keys()) {
+      if (!present.has(id)) general.push({ path: LEDGER_PATH, reason: `カード ${id} が存在しないのに ledger に残っています: ${LEDGER_REGENERATE_HINT}` });
+    }
+  }
+  return { cardProblems, general };
+}
+
+/**
+ * Validate every inventoried card individually through the same code path as `build`.
+ * Needs no manifest and writes nothing unless `evalIndexPath` is given. SECURITY: that
+ * index holds unapproved card bodies for local evaluation only and must never be uploaded.
+ * Also fails for Markdown files under knowledge/cards outside the approved folders, file names
+ * that differ from knowledge_id, and (unless `ledger: false`) content changes without a
+ * card_version bump against knowledge/registry/card-versions.jsonl.
+ */
+export async function checkKnowhowCards(root, { evalIndexPath, generatedAt = new Date().toISOString(), ledger = true, today = utcToday() } = {}) {
+  const { resolved } = await rootInfo(root);
+  const outputPath = evalIndexPath === undefined ? undefined : await resolveEvalIndexPath(resolved, evalIndexPath);
+  const paths = await listCardPaths(resolved);
+  const strays = await listStrayCardFiles(resolved);
+  const evaluated = await evaluateCards(resolved, paths, today);
+  const failures = [...evaluated.failures];
+  let records = evaluated.records;
+  for (const stray of strays) {
+    failures.push({ path: stray, reason: `knowledge/cards の承認済みフォルダー（case-summaries / practice-guides）の外にあるため検査・取込の対象外になります。正しいフォルダーへ移すか削除してください。` });
+  }
+  if (ledger) {
+    const { cardProblems, general } = await checkLedger(resolved, records, failures.length > 0);
+    for (const [cardPath, reason] of cardProblems) failures.push({ path: cardPath, reason });
+    failures.push(...general);
+    records = records.filter((record) => !cardProblems.has(record.relativePath));
+  }
+  failures.sort((left, right) => left.path.localeCompare(right.path, 'en'));
+  const result = { total: paths.length + strays.length, valid: records.length, failures };
   if (outputPath) {
-    await writeEvalIndex(outputPath, assembleIndex(cards, generatedAt));
+    await writeEvalIndex(outputPath, assembleIndex(records.map((record) => record.index), generatedAt));
     result.evalIndexPath = outputPath;
   }
   return result;
 }
 
+/**
+ * Regenerate knowledge/registry/card-versions.jsonl (knowledgeId, cardVersion, sha256 per card).
+ * Refuses when a card's content changed without a card_version bump relative to the existing ledger.
+ */
+export async function writeKnowhowLedger(root, { today = utcToday() } = {}) {
+  const { resolved } = await rootInfo(root);
+  const { records, failures } = await evaluateCards(resolved, await listCardPaths(resolved), today);
+  if (failures.length > 0) {
+    fail(`カードに失敗があるため ledger を作れません（先に check を直してください）: ${failures.slice(0, 5).map((item) => `${item.path}: ${item.reason}`).join(' / ')}`);
+  }
+  let existing = new Map();
+  try {
+    existing = (await readLedger(resolved)) ?? existing;
+  } catch {
+    existing = new Map();
+  }
+  const refused = records.map((record) => ({ record, problem: ledgerEntryProblem(record, existing.get(record.knowledgeId)) }))
+    .filter(({ record, problem }) => existing.has(record.knowledgeId)
+      && (existing.get(record.knowledgeId).cardVersion >= record.cardVersion) && problem);
+  if (refused.length > 0) {
+    fail(`ledger を再生成できません: ${refused.slice(0, 5).map(({ record, problem }) => `${record.relativePath}: ${problem}`).join(' / ')}`);
+  }
+  const lines = records.map(({ knowledgeId, cardVersion, sha256 }) => ({ knowledgeId, cardVersion, sha256 }))
+    .sort((left, right) => (left.knowledgeId < right.knowledgeId ? -1 : left.knowledgeId > right.knowledgeId ? 1 : 0))
+    .map((entry) => JSON.stringify(entry));
+  const target = path.join(resolved, ...LEDGER_PATH.split('/'));
+  await mkdir(path.dirname(target), { recursive: true });
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${lines.join('\n')}\n`, { encoding: 'utf8', flag: 'wx' });
+    await rename(temporary, target);
+  } catch (error) {
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
+  return { path: LEDGER_PATH, count: lines.length };
+}
+
 function parseCheckArgs(args) {
-  const options = { root: undefined, evalIndexPath: undefined, json: false };
+  const options = { root: undefined, evalIndexPath: undefined, json: false, ledger: true };
   for (let position = 0; position < args.length; position += 1) {
     const arg = args[position];
     if (arg === '--json') options.json = true;
+    else if (arg === '--no-ledger') options.ledger = false;
     else if (arg === '--eval-index') {
       options.evalIndexPath = args[position + 1];
       position += 1;
       if (!options.evalIndexPath) fail('--eval-index requires a path.');
-    } else if (arg.startsWith('--') || options.root !== undefined) fail('Usage: build-senpai-index.mjs check <root> [--eval-index <path>] [--json]');
+    } else if (arg.startsWith('--') || options.root !== undefined) fail('Usage: build-senpai-index.mjs check <root> [--eval-index <path>] [--json] [--no-ledger]');
     else options.root = arg;
   }
   return { ...options, root: options.root ?? process.cwd() };
@@ -454,7 +657,7 @@ function parseCheckArgs(args) {
 
 async function runCheck(args) {
   const options = parseCheckArgs(args);
-  const result = await checkKnowhowCards(options.root, { evalIndexPath: options.evalIndexPath });
+  const result = await checkKnowhowCards(options.root, { evalIndexPath: options.evalIndexPath, ledger: options.ledger });
   if (options.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } else {
@@ -474,6 +677,11 @@ async function main(args) {
     return;
   }
   const [command, root = process.cwd(), manifestPath] = args;
+  if (command === 'ledger' && !manifestPath) {
+    const written = await writeKnowhowLedger(root);
+    process.stdout.write(`Ledger written: ${written.count} cards in ${written.path}. Commit it with the card changes.\n`);
+    return;
+  }
   if (command === 'inventory' && !manifestPath) {
     const inventory = await inventoryKnowhowCards(root);
     await writePrivateOutput(root, 'inventory.json', inventory);
@@ -488,7 +696,7 @@ async function main(args) {
     process.stdout.write(`Index built: ${index.cards.length} explicitly selected cards; index ${index.indexVersion}. No upload was performed.\n`);
     return;
   }
-  fail('Usage: build-senpai-index.mjs inventory <root> | build <root> <manifest.json> | check <root> [--eval-index <path>] [--json]');
+  fail('Usage: build-senpai-index.mjs inventory <root> | build <root> <manifest.json> | ledger <root> | check <root> [--eval-index <path>] [--json] [--no-ledger]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
