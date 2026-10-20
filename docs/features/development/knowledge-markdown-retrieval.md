@@ -16,9 +16,9 @@ related-code:
 
 管理者用の先輩チャットで質問すると、サーバーが許可されたテーマカードを自動検索し、関連カードの条件・出典・調査の手掛かりを読んで技術KBを検索する。利用者が毎回ファイルを選ぶ操作は不要とする。法令KBは独立した会話のままとし、下書きの記述を法令の根拠にはしない。
 
-これはユーザーが依頼した検索機能の実装であり、カードの技術承認、全カードのクラウド投入、デプロイ、OneNote/Listsへのアクセス追加を成立させるものではない。現在の397カードはすべて下書きである。カードの既存状態を書き換えず、クラウド処理を許可された特定版だけを別の一覧で指定する。実データをAWSへ送る操作は今回行わない。
+カードは下書きのままである。技術承認や、一般利用者向けKBへの投入、OneNoteへの自動書込は、この経路では行わない。クラウドで読む枚は、取込一覧で`cloudApproved: true`にした特定版だけである。カード本文の`status`は書き換えない。
 
-元資料・写し棚・修復待ちを含む知識データと、その管理文書は資料ブランチ`feature/knowledge-reconcile-prep`で管理し、実装・デプロイ用の`mona`には取り込まない。新しい開発用の検索経路はこの文書を仕様とする。一般利用者向けの承認済みカードKBとは区別する。
+2026-10-20時点の`mona`には、事例カードと実践ガイド、OneNoteスナップショット、この検索経路の実装が同じブランチに入っている。devでの試行は別端末から行い、問題がなければその後に`develop`へマージする。一般利用者向けの承認済みカードKBとは区別する。
 
 ## 読み込む範囲と取込一覧
 
@@ -78,6 +78,44 @@ node scripts/knowledge/build-senpai-index.mjs build <知識リポジトリ> <取
 
 AWS導入には`Environment=dev`、`KnowhowEnabled=true`、`KnowhowIndexBucket`、`KnowhowIndexKey`、既存adminグループ、画面の`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH=true`を対応させる。索引のS3配置はこのツールの機能に含めない。配置先を通常の資料配信へ公開しない。フラグを無効にすると先輩チャットの技術側は利用不可を案内するため、完全に停止する場合は画面のフラグも無効にする。
 
+## 別端末から mona の dev を試す
+
+> 最終検証: 2026-10-20 — リポジトリ上の手順・カード検査・Amplify設定を照合。AWSへの反映は未実施。
+
+正本の試行順はこれだけである。Phase2の一般手順は[運用ランブック](../../ops-runbook.md)の「デプロイとロールバック」と[移行ランブック](../../aws-migration-runbook.md)の Phase 2 を使う。ここには先輩チャットを足すときの差分だけを書く。
+
+1. 別端末で`git fetch origin`し、`git checkout mona`、`git pull origin mona`する。先端に事例カードと`amplify.yml`の`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH=true`があることを確認する。
+2. `cd frontend && npm ci`のあと、リポジトリルートで棚卸しする。
+
+```sh
+node scripts/knowledge/build-senpai-index.mjs inventory .
+```
+
+3. 棚卸しに出たカードのうち、索引生成が通るものだけを取込一覧にする。2026-10-20の検査では事例・実践あわせて398枚が棚卸しでき、320枚は索引に入れられた。78枚は次の理由で`build`が失敗する。失敗する1枚を一覧に入れると索引ファイルはできない。
+   - 出典に未対応の項目がある: 44枚
+   - 適用範囲の値に`/`がある: 33枚
+   - 出典の値に`/`がある: 1枚
+4. 取込一覧の`approvedBy`と`approvedAt`（UTCの`YYYY-MM-DDTHH:mm:ss.sssZ`）を担当者が記入し、各entryの`cloudApproved`を`true`にする。その後に索引を作る。
+
+```sh
+node scripts/knowledge/build-senpai-index.mjs build . <取込一覧.json>
+```
+
+生成先は`.private-knowhow/index.json`である。Gitには入れない。
+
+5. そのJSONを、資料配信用バケットともKB取込バケットとも違う、既存のprivateバケットの固定キーへ置く。同じバケットだとLambdaは503にする。新しい公開バケットは作らない。オブジェクトの中身はカード全文を含む。
+6. いま動いている`EleKnowledge-dev-phase2`のパラメータを読み、同じ値をすべて`--parameter-overrides`へ戻す。`KnowledgeBaseId`、モデルID、法令ゲートをテンプレート既定のままにすると、devの通常チャットの接続先が変わる。そのうえで次だけを試行値にする。
+   - `RagLogicVersion`は`git rev-parse --short=12 HEAD`（7〜40桁の小文字16進）
+   - `Environment=dev`
+   - `KnowhowEnabled=true`
+   - `KnowhowIndexBucket`と`KnowhowIndexKey`は手順5の置き場所
+7. `infrastructure/sam`で`sam build`し、`sam deploy --no-execute-changeset`でchangesetを見る。Replaceが出たら実行しない。問題なければchangesetを実行する。このデプロイはdevのRAG Lambda全体を`mona`のコードへ替える。カード索引を読まない通常質問でも、`mona`に入っている他のLambda変更は同じスタックに入る。
+8. Amplifyは`develop`を自動ビルドする。`mona`の画面を試す間は、Amplifyの対象ブランチを`mona`にして、このコミットから再ビルドする。コンソール側でビルド定義を上書きしている場合は、`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH`が文字列`true`であることを確認する。
+9. 管理者でそのブランチのURLを開き、先輩チャットでカードの症状語を質問する。返答に「参照したノウハウMarkdown」が出ること、非管理者は入口が出ないこと、通常の`/chat`がこれまでどおり資料検索できることを見る。索引が無い、またはバケットが資料配信と同じだと503になる。
+10. 試してよければ`develop`へマージする。よくなければ`KnowhowEnabled=false`と、デプロイ前の`RagLogicVersion`・モデル・KB IDへ戻してPhase2を再デプロイし、Amplifyの対象を`develop`に戻す。
+
+OneNoteの自動書込はこの試行に含めない。
+
 ### 2026-10-20 実装検証
 
 > 最終検証: 2026-10-20 — 合成Markdownの実取込・実検索処理・ローカルHTTP・ブラウザー。AWSと会社KBへの実接続は未実施。
@@ -87,8 +125,8 @@ AWS導入には`Environment=dev`、`KnowhowEnabled=true`、`KnowhowIndexBucket`�
 - 質問クライアントの行カバレッジ98.36%、分岐90.99%。取込処理の行92.61%、新規Python検索モジュールの行・分岐合算82%。全体のアプリに対する80%保証ではない。
 - 実際の取込ツールで架空のカード1枚を索引化し、実際のRAGハンドラー・私有S3読取・検索・KBへの手掛かり追加・プロンプトのデータ境界・画面表示をローカルで確認した。Cognito、Bedrock、DynamoDBなどのクラウド接続部分はテスト用に置き換え、実AI回答品質の検証とは区別した。
 - 追加質問の文脈、本文・出典・適用除外の展開表示、関連カードなし、索引欠落時の503案内と法令側の継続、非管理者403を確認した。
-- 実カードのローカル棚卸しは397件、読取エラー0件。すべてdraft、取込許可一覧なしの選択は0件。実カードのアップロード・技術承認・OneNoteへの追記は実施していない。
-- `mona`反映用に最新developへ実装だけを移した後も、フロントエンド151件・Python680件と11 subtests、型検査・依存監査が成功した。元の687件には資料処理専用の7件も含まれる。実装ブランチには業務資料とその取り込み履歴を含めない。
+- 実カードのローカル棚卸しは398件、読取エラー0件。すべてdraft、取込許可一覧なしの選択は0件。索引生成まで通るのは320件で、78件は出典項目またはパス文字で失敗する。実カードのアップロード・技術承認・OneNoteへの追記は実施していない。
+- 2026-10-20に、事例カードと実践ガイドを含む`mona`を別端末のdev試行に使う方針とした。実装だけを資料なしで移す、という以前の分離は、この試行では使わない。
 
 現在の順位付けは文字列・検索語による候補探索であり、意味検索や技術的な適用判定ではない。会社ネットで、同義語・機種違い・適用除外・根拠不足を含む実質問と、担当者が選んだ期待カード・KB資料を照合して評価する。実際の検索品質、認証・IAM、資料閲覧、AWSデプロイの受入は残る。
 
