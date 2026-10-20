@@ -97,7 +97,7 @@ def test_answer_is_saved_to_chatlogs_with_senpai_tags(world):
         # 回答の集計（日別 GSI）に混ぜない
         assert "metricDay" not in row and "metricDayShard" not in row
     assert by_role["user"]["content"] == QUESTION
-    assert by_role["assistant"]["content"].startswith("## 結論の候補")
+    assert by_role["assistant"]["content"].startswith("## 結論")
     assert by_role["assistant"]["timestamp"] >= by_role["user"]["timestamp"]
     saved = by_role["assistant"]["researchResult"]
     assert saved["kind"] == "answer" and saved["sources"]["tech"][0]["ref"] == "T1"

@@ -56,7 +56,7 @@ def _directive(**kw):
 
 
 SUFFICIENT = _directive(sufficient=True, action="none")
-GOOD_ANSWER = "## 結論の候補\nドアの調整を確認します[T1]。\n## 法令から\nなし\n## ノウハウ（未承認・参考）\n類似事例[K1]"
+GOOD_ANSWER = "## 結論\nドアの調整を確認します[T1]。\n## 根拠と手順\n- 類似事例（ノウハウ・未承認）[K1]"
 
 
 class FakeDeps:
@@ -277,7 +277,7 @@ def test_knowhow_hints_are_appended_to_the_original_query(runner):
 
 def test_knowhow_unavailable_is_reported_and_search_continues(runner):
     support_mod = support.load_module("senpai_research_runner.py")
-    deps = FakeDeps(knowhow_error=support_mod.KnowhowUnavailable("index"), synth="## 結論の候補\n資料[T1]")
+    deps = FakeDeps(knowhow_error=support_mod.KnowhowUnavailable("index"), synth="## 結論\n資料[T1]")
     outcome, events, *_ = _run(runner, deps)
     failed = next(e for e in events if e["step"] == "knowhow" and e["status"] == "failed")
     assert "ノウハウ" in failed["detailJa"]
@@ -286,7 +286,7 @@ def test_knowhow_unavailable_is_reported_and_search_continues(runner):
 
 
 def test_knowhow_disabled_is_skipped(runner):
-    deps = FakeDeps(knowhow_available=False, cards=[], synth="## 結論の候補\n資料[T1]")
+    deps = FakeDeps(knowhow_available=False, cards=[], synth="## 結論\n資料[T1]")
     _outcome, events, *_ = _run(runner, deps)
     assert ("knowhow", "skipped") in _flow(events)
     assert deps.knowhow_calls == []

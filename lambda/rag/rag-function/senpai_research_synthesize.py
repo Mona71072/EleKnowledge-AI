@@ -17,13 +17,20 @@ SYSTEM_PROMPT = """あなたはEleKnowledgeの技術サポートアシスタン�
   ノウハウだけで結論を断定しない。
 - 資料に書かれていないことは推測しない。資料同士が食い違うときは、そのまま両方を示す。
 
-出力は次の見出し（Markdown の ##）を、この順で使う。該当する根拠が無い見出しには「なし」と書く。
-## 結論の候補
-## 技術資料から
-## 法令から
-## ノウハウ（未承認・参考）
-## 食い違い・不足
-## 次に確認すること
+回答の書き方（結論が先。出典ごとの見出しは作らない）:
+出力は次の見出し（Markdown の ##）を、この順で使う。
+
+## 結論
+質問への答えを 1〜3 文で直接書く。参照を付ける。確実でないときは「おそらく〜。〜の確認が必要」のように、
+有力な答えと確認すべき点を短く言い切る（長い but・可能性の羅列にしない）。
+
+## 根拠と手順
+箇条書き 2〜6 件。1 件につき事実または手順を 1 つ、その参照を付ける。
+ノウハウだけを根拠にする文には、文中に（ノウハウ・未承認）と書く。法令の文は <law_references> の参照だけで書く。
+
+## 確認が必要な点
+資料同士の食い違い、資料に無い・足りない点、追加で確認する事項（機種・条件など）を箇条書きにまとめる。
+無ければ、この見出しごと省く。
 """
 
 
@@ -101,8 +108,8 @@ def no_citation_markdown() -> str:
 
 
 def source_list_markdown(sources: dict) -> str:
-    """時間切れで回答をまとめられないときの、見つかった資料の一覧（参照つき・推測なし）。"""
-    lines = ['時間内に回答をまとめられませんでした。見つかった資料は次のとおりです。確認してください。', '']
+    """時間切れで回答をまとめられないときの、見つかった資料の一覧（参照つき・推測なし）。見出しは通常の回答と同じ。"""
+    lines = ['## 結論', '時間の上限に達したため、確認できた資料を示します。', '', '## 根拠と手順']
     for source in sources['tech']:
         page = f' p.{source["pageNumber"]}' if source.get('pageNumber') else ''
         lines.append(f'- 技術資料: {source["title"]}{page} [{source["ref"]}]')
@@ -110,5 +117,5 @@ def source_list_markdown(sources: dict) -> str:
         title = ' '.join(part for part in (source.get('lawTitle'), source.get('provision')) if part)
         lines.append(f'- 法令: {title} [{source["ref"]}]')
     for source in sources['knowhow']:
-        lines.append(f'- ノウハウ（未承認・参考）: {source["title"]} [{source["ref"]}]')
+        lines.append(f'- {source["title"]}（ノウハウ・未承認） [{source["ref"]}]')
     return '\n'.join(lines)

@@ -366,7 +366,7 @@ def test_unknown_prefix_and_leading_zero_refs_are_unverified():
 
 def test_answer_without_any_verified_ref_becomes_not_found():
     runner = support.load_module("senpai_research_runner.py")
-    deps = FakeDeps(synth="## 結論の候補\n根拠のない断定。")
+    deps = FakeDeps(synth="## 結論\n根拠のない断定。")
     job, budget, recorder, events, clock = _setup(runner, deps)
     result = runner.run_research(job, deps, recorder, budget)["result"]
     assert result["kind"] == "not_found"
@@ -466,3 +466,15 @@ def test_cold_start_warns_when_understand_model_is_unset(monkeypatch, capsys):
     monkeypatch.setenv("SENPAI_UNDERSTAND_MODEL_ID", "some-model")
     worker.warn_if_unconfigured()
     assert capsys.readouterr().out == ""
+
+
+# ================================================================ 回答形式（結論先行）
+
+def test_budget_fallback_uses_the_same_headings():
+    synth = support.load_module("senpai_research_synthesize.py")
+    citations = support.load_module("senpai_research_citations.py")
+    sources = citations.build_sources([_tech("a.pdf", 3)], [_law()], [])
+    text = synth.source_list_markdown(sources)
+    assert text.startswith("## 結論\n時間の上限に達したため、確認できた資料を示します")
+    assert "## 根拠と手順\n- " in text and "[T1]" in text and "[L1]" in text
+    assert "技術資料から" not in text and "## 確認が必要な点" not in text

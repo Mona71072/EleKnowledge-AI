@@ -21,7 +21,7 @@ UNDERSTANDING = json.dumps({
     "lawRelevant": False,
     "queries": {"tech": "整理語ZZZQRY ドア 異音", "law": "", "knowhow": ""}, "missing": [],
 }, ensure_ascii=False)
-ANSWER = "## 結論の候補\nドアの調整を確認します[T1]。根拠のない主張[T9]\n## 法令から\nなし"
+ANSWER = "## 結論\nドアの調整を確認します[T1]。根拠のない主張[T9]\n## 根拠と手順\n- 調整手順[T1]"
 
 
 @pytest.fixture

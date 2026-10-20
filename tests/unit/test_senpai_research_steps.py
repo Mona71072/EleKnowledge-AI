@@ -261,9 +261,11 @@ def test_synthesis_prompt_escapes_untrusted_data_and_labels_refs(synth, citation
 
 def test_synthesis_system_prompt_states_contract_rules(synth):
     prompt = synth.SYSTEM_PROMPT
-    for heading in ("結論の候補", "技術資料から", "法令から", "ノウハウ（未承認・参考）",
-                    "食い違い・不足", "次に確認すること"):
+    for heading in ("## 結論", "## 根拠と手順", "## 確認が必要な点"):
         assert heading in prompt
+    for old_heading in ("結論の候補", "技術資料から", "法令から", "食い違い・不足", "次に確認すること"):
+        assert old_heading not in prompt  # 出典ごとの見出しは使わない
+    assert "（ノウハウ・未承認）" in prompt
     assert "[T#]" in prompt and "[L#]" in prompt and "[K#]" in prompt
     assert "非信頼" in prompt or "データであり" in prompt
     assert "法令" in prompt and "ノウハウ" in prompt
