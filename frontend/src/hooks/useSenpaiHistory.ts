@@ -42,7 +42,7 @@ export function useSenpaiHistory(snapshot: SenpaiChatSnapshot, controllerRef: Co
     detailRequest.current?.abort();
     const request = new AbortController();
     detailRequest.current = request;
-    controllerRef.current?.cancel();
+    // 実行中の相談は、履歴を読み込めるまで続ける（restore が置き換えるときに止める）。失敗したときは元の相談が残る。
     setOpening(true);
     setOpenError('');
     try {

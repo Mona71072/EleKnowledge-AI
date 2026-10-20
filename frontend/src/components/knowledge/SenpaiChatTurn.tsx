@@ -1,14 +1,15 @@
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import type { SenpaiChatTurn as Turn } from '@/lib/knowledge-senpai-chat.mjs';
 import type { FieldReport } from '@/lib/knowledge-senpai-field-report.mjs';
 import { LaneReply, SynthesisSection } from './SenpaiLegacyLanes';
 import { SenpaiFieldReportForm } from './SenpaiFieldReportForm';
 import { SenpaiResearchAnswer } from './SenpaiResearchAnswer';
 
-export type ResendOptions = { query: string; modelType?: string };
+/** 聞き直し・もう一度試す。補足つきの相談では、検索に使う質問（query）のほかに補足も渡して、同じ見え方で残す。 */
+export type ResendOptions = { query: string; modelType?: string; supplement?: string; supplementOf?: string };
 
 /** 1回の相談: 右寄せの質問の吹き出しと、枠なしの回答。 */
-export function SenpaiChatTurn({ turn, running, conversationId, report, onReportSent, developerView, canReport, synthesisEnabled, onSynthesize, onResend }: {
+export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conversationId, report, onReportSent, developerView, canReport, synthesisEnabled, onSynthesize, onResend }: {
   turn: Turn;
   running: boolean;
   conversationId?: string;
@@ -22,6 +23,9 @@ export function SenpaiChatTurn({ turn, running, conversationId, report, onReport
   /** 最新の調査の相談にだけ渡す（聞き直し・もう一度試す）。 */
   onResend?: (options: ResendOptions) => void;
 }) {
+  const resend = onResend
+    ? (options: ResendOptions) => onResend({ ...options, ...(turn.supplement && turn.supplementOf ? { supplement: turn.supplement, supplementOf: turn.supplementOf } : {}) })
+    : undefined;
   const reportForm: ReactNode = canReport
     ? <SenpaiFieldReportForm conversationId={conversationId} turn={turn} sent={turn.senpaiTurnId ? report : undefined} onSent={onReportSent} />
     : null;
@@ -31,7 +35,7 @@ export function SenpaiChatTurn({ turn, running, conversationId, report, onReport
         <div className="max-w-[85%] rounded-3xl bg-gray-100 px-4 py-2.5 text-[15px] leading-7 text-gray-900">
           <p className="whitespace-pre-wrap break-words">{turn.supplement ?? turn.query}</p>
         </div>
-        {turn.supplement && <p className="text-xs text-gray-400">元の質問に補足して検索</p>}
+        {turn.supplement && <p className="text-xs text-gray-500">元の質問に補足して検索</p>}
         {turn.modelType && <p className="rounded-full bg-gray-50 px-2 py-0.5 text-[11px] text-gray-500">機種: {turn.modelType}</p>}
       </div>
       <div className="flex gap-3">
@@ -39,7 +43,7 @@ export function SenpaiChatTurn({ turn, running, conversationId, report, onReport
         <div className="min-w-0 flex-1">
           <h3 className="mb-1.5 text-xs font-medium text-gray-500">工技先輩</h3>
           {turn.research ? (
-            <SenpaiResearchAnswer research={turn.research} anchorPrefix={`senpai-turn-${turn.id}`} selectedModel={turn.modelType} developerView={developerView} query={turn.query} onResend={onResend} actions={reportForm} />
+            <SenpaiResearchAnswer research={turn.research} anchorPrefix={`senpai-turn-${turn.id}`} selectedModel={turn.modelType} developerView={developerView} query={turn.query} onResend={resend} actions={reportForm} />
           ) : (
             <div className="space-y-4">
               <SynthesisSection turn={turn} running={running} onSynthesize={onSynthesize} synthesisEnabled={synthesisEnabled} />
@@ -53,7 +57,7 @@ export function SenpaiChatTurn({ turn, running, conversationId, report, onReport
                   <LaneReply lane={turn.law} mode="law" />
                 </section>
               </div>
-              <p className="text-xs text-gray-400">各KBの回答を個別に表示しています。必要に応じて根拠と適用条件を確認してください。</p>
+              <p className="text-xs text-gray-500">各KBの回答を個別に表示しています。必要に応じて根拠と適用条件を確認してください。</p>
               {reportForm && <div className="-mx-1 flex flex-wrap items-center">{reportForm}</div>}
             </div>
           )}
@@ -61,4 +65,4 @@ export function SenpaiChatTurn({ turn, running, conversationId, report, onReport
       </div>
     </article>
   );
-}
+});

@@ -6,7 +6,16 @@ import type { SenpaiResearchResult, SenpaiResearchStepStatus, SenpaiResearchStep
 export function stepRowLabel(row: { step: SenpaiResearchStepName | string; status: SenpaiResearchStepStatus; labelJa: string }): string;
 export type SenpaiAnswerSection = { kind: 'conclusion' | 'caution' | 'todo' | 'normal'; heading?: string; body: string };
 export function splitAnswerSections(markdown: string | undefined): SenpaiAnswerSection[] | null;
+export const CLARIFY_ORIGINAL_RESERVE: number;
+export function clarifySupplementLimit(original: string): number;
+export function clarifyOriginalTruncated(original: string, supplement: string): boolean;
 export function composeClarifyQuestion(original: string, supplement: string): string;
+export function splitClarifyQuestion(query: string): { original: string; supplement: string } | null;
+export function nextAnnouncement(
+  wasRunning: boolean,
+  snapshot: { running: boolean; turns: readonly { research?: { status: string; result?: { kind?: string } }; normal?: { status: string }; law?: { status: string } }[] },
+  current?: string,
+): string;
 export function clarifyAsksModel(result: Pick<SenpaiResearchResult, 'clarifyQuestions' | 'answerMarkdown'>): boolean;
 export function modelMismatch(
   result: Pick<SenpaiResearchResult, 'understanding'>,

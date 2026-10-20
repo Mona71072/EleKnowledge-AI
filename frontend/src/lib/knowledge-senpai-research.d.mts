@@ -64,6 +64,8 @@ export type SenpaiResearchResult = {
   };
   understanding?: SenpaiResearchUnderstanding;
   unverifiedRefs: string[];
+  /** Present only when a technical or law search failed completely. */
+  warnings?: string[];
   stopReason?: SenpaiResearchStopReason;
 };
 
@@ -127,6 +129,8 @@ export function getSenpaiResearchStatus(options: CommonOptions & {
   afterSeq?: number;
 }): Promise<SenpaiResearchStatusResponse>;
 
+export const START_RETRY_INTERVAL_MS: number;
+export const START_RETRY_GIVE_UP_MS: number;
 export function runSenpaiResearch(options: CommonOptions & {
   question: string;
   modelType?: string;
@@ -134,6 +138,12 @@ export function runSenpaiResearch(options: CommonOptions & {
   senpaiTurnId: string;
   clientRequestId: string;
   onUpdate?: (update: SenpaiResearchUpdate) => void;
+  /** 前の調査がサーバーで続いている間（409）、開始を待つたびに呼ばれる。 */
+  onWaiting?: () => void;
+  retryIntervalMs?: number;
+  retryGiveUpMs?: number;
+  /** タブの表示・非表示を見る対象（既定は document）。 */
+  visibility?: { visibilityState?: string; addEventListener?: Function; removeEventListener?: Function } | null;
   now?: () => number;
   setTimer?: (fn: () => void, delayMs: number) => unknown;
   clearTimer?: (timer: unknown) => void;

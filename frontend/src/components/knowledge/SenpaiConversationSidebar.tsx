@@ -1,3 +1,6 @@
+'use client';
+
+import { useEffect, useRef } from 'react';
 import type { SenpaiHistoryEntry } from '@/hooks/useSenpaiHistory';
 
 type Props = {
@@ -14,16 +17,35 @@ type Props = {
 };
 
 export function SenpaiConversationSidebar(props: Props) {
+  const { open } = props;
+  const onCloseRef = useRef(props.onClose);
+  useEffect(() => { onCloseRef.current = props.onClose; });
+  const newButtonRef = useRef<HTMLButtonElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  // 開いたら中（新しい相談）へフォーカスを移し、閉じたら開いたボタンへ戻す。Escape は画面のどこにいても閉じる。
+  useEffect(() => {
+    if (!open) return undefined;
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    newButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onCloseRef.current(); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      const opener = openerRef.current;
+      openerRef.current = null;
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [open]);
   return (
     <>
       {props.open && <button type="button" aria-label="履歴を閉じる" onClick={props.onClose} className="fixed inset-0 z-40 bg-black/30 md:hidden" />}
-      <aside id="senpai-history" aria-label="相談履歴" onKeyDown={(event) => { if (event.key === 'Escape') props.onClose(); }} className={`fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col bg-gray-50 transition-transform md:static md:z-auto md:visible md:translate-x-0 md:border-r md:border-gray-100 ${props.open ? 'visible translate-x-0' : 'invisible -translate-x-full'}`}>
+      <aside id="senpai-history" aria-label="相談履歴" role={props.open ? 'dialog' : undefined} aria-modal={props.open ? true : undefined} className={`fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col bg-gray-50 transition-transform md:static md:z-auto md:visible md:translate-x-0 md:border-r md:border-gray-100 ${props.open ? 'visible translate-x-0' : 'invisible -translate-x-full'}`}>
         <div className="flex items-center justify-between px-3 pb-1 pt-3">
           <h2 className="px-2 text-xs font-medium text-gray-500">相談履歴</h2>
           <button type="button" aria-label="履歴メニューを閉じる" onClick={props.onClose} className="flex h-10 w-10 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 md:hidden">✕</button>
         </div>
         <div className="px-3 pb-2">
-          <button type="button" onClick={props.onNew} className="min-h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-left text-sm text-gray-800 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">新しい相談</button>
+          <button type="button" ref={newButtonRef} onClick={props.onNew} className="min-h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-left text-sm text-gray-800 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">新しい相談</button>
         </div>
         <nav aria-label="過去の相談" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
           {props.loading && <p role="status" className="px-3 py-4 text-sm text-gray-500">履歴を読み込み中…</p>}
@@ -37,7 +59,7 @@ export function SenpaiConversationSidebar(props: Props) {
           ))}
           {!props.complete && !props.error && <p className="px-3 py-2 text-xs leading-5 text-amber-700">履歴の一部を表示しています。</p>}
         </nav>
-        <p className="px-4 py-3 text-[11px] leading-4 text-gray-400">相談は60日間保存され、再読み込み後も履歴から開き直せます。</p>
+        <p className="px-4 py-3 text-[11px] leading-4 text-gray-500">相談は60日間保存され、再読み込み後も履歴から開き直せます。</p>
       </aside>
     </>
   );

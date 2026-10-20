@@ -23,7 +23,7 @@ export function SenpaiChatHeader({ sidebarOpen, onOpenSidebar, onNewChat, newCha
       <div className="flex min-w-0 items-center gap-1">
         <button type="button" aria-label="履歴を開く" aria-controls="senpai-history" aria-expanded={sidebarOpen} onClick={onOpenSidebar} className={`${iconButton} md:hidden`}><MenuIcon /></button>
         <h1 className="px-2 text-[15px] font-semibold text-gray-900">先輩チャット</h1>
-        <span className="text-xs text-gray-400">開発中</span>
+        <span className="text-xs text-gray-500">開発中</span>
       </div>
       <div className="flex items-center gap-1">
         <button type="button" aria-label="新しい相談を始める" title="新しい相談" onClick={onNewChat} disabled={newChatDisabled} className={iconButton}><PlusIcon /></button>
@@ -33,7 +33,7 @@ export function SenpaiChatHeader({ sidebarOpen, onOpenSidebar, onNewChat, newCha
             <Link href="/admin/knowledge/research" aria-label="ノウハウの確認・編集" onClick={close} className={menuItem}>ノウハウの確認・編集</Link>
             {showDeveloperToggle && (
               <button type="button" aria-pressed={developerView} onClick={() => { onToggleDeveloperView(); close(); }} className={menuItem}>
-                開発者表示<span className="ml-2 text-xs text-gray-400">{developerView ? 'オン' : 'オフ'}</span>
+                開発者表示<span className="ml-2 text-xs text-gray-500">{developerView ? 'オン' : 'オフ'}</span>
               </button>
             )}
             <Link href="/" aria-label="ホームへ戻る" onClick={close} className={menuItem}>ホームへ戻る</Link>

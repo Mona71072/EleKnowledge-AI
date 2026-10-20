@@ -31,6 +31,8 @@ export type SenpaiResearchState = {
   /** Epoch milliseconds from the controller clock; absent for restored turns. */
   startedAt?: number;
   endedAt?: number;
+  /** True while a 409 (the previous job is still running on the server) is being retried. */
+  waiting?: boolean;
   result?: SenpaiResearchResult;
   debug?: SenpaiResearchDebug;
   error?: { code: SenpaiResearchErrorCode | 'ClientError'; message: string };
@@ -89,6 +91,7 @@ export type SenpaiChatResearchSource = (request: {
   clientRequestId: string;
   signal: AbortSignal;
   onUpdate: (update: SenpaiResearchUpdate) => void;
+  onWaiting?: () => void;
 }) => Promise<SenpaiResearchFinal>;
 
 export type SenpaiChatController = {
@@ -97,7 +100,7 @@ export type SenpaiChatController = {
    * In research mode, a send right after a clarify result is composed with the previous question
    * unless `fresh` is true (used for retries and re-asking with another model).
    */
-  send(query: string, options?: { modelType?: string; fresh?: boolean }): Promise<void>;
+  send(query: string, options?: { modelType?: string; fresh?: boolean; supplement?: string; supplementOf?: string }): Promise<void>;
   /**
    * Build the combined summary of a turn. Allowed only when no search is running, both lanes
    * have settled and at least one succeeded; otherwise rejects with a validation error.

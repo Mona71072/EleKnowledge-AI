@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { NoteIcon } from './SenpaiIcons';
 import { getIdToken } from '@/lib/auth-helpers';
@@ -66,6 +66,15 @@ export function SenpaiFieldReportForm({ conversationId, turn, sent, onSent }: {
   const [preview, setPreview] = useState<FieldReportPayload | null>(null);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
+  const findingRef = useRef<HTMLTextAreaElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const wasOpen = useRef(false);
+  // 開いたら最初の入力欄へ、閉じたら開いたボタンへフォーカスを移す。
+  useEffect(() => {
+    if (open) findingRef.current?.focus();
+    else if (wasOpen.current) triggerRef.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
   if (sent) return <SentReport report={sent} />;
   if (!conversationId || !turn.senpaiTurnId) return null;
   const cards = fieldReportCards(turn);
@@ -74,7 +83,7 @@ export function SenpaiFieldReportForm({ conversationId, turn, sent, onSent }: {
 
   if (!open) {
     return (
-      <button type="button" aria-label="結果を残す" title="結果を残す" onClick={() => { setDraft(createFieldReportDraft(turn)); setOpen(true); }} className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+      <button type="button" ref={triggerRef} aria-label="結果を残す" title="結果を残す" onClick={() => { setDraft(createFieldReportDraft(turn)); setOpen(true); }} className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
         <NoteIcon />
       </button>
     );
@@ -119,7 +128,7 @@ export function SenpaiFieldReportForm({ conversationId, turn, sent, onSent }: {
       </div>
       <div className="space-y-1">
         <label htmlFor={`${idPrefix}-finding`} className="block text-xs font-medium text-gray-700">何が分かったか（必須）</label>
-        <textarea id={`${idPrefix}-finding`} rows={3} maxLength={FIELD_REPORT_FINDING_MAX} value={draft.finding} onChange={(event) => update({ finding: event.target.value })} placeholder="例: 記載の手順で症状が変わった／別の確認が必要だった" className={fieldClass} />
+        <textarea id={`${idPrefix}-finding`} ref={findingRef} rows={3} maxLength={FIELD_REPORT_FINDING_MAX} value={draft.finding} onChange={(event) => update({ finding: event.target.value })} placeholder="例: 記載の手順で症状が変わった／別の確認が必要だった" className={fieldClass} />
       </div>
       <div className="space-y-1">
         <label htmlFor={`${idPrefix}-condition`} className="block text-xs font-medium text-gray-700">どの条件か（任意）</label>
@@ -141,14 +150,14 @@ export function SenpaiFieldReportForm({ conversationId, turn, sent, onSent }: {
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <div role="radiogroup" aria-label={`${card.title}への反応`} className="inline-flex overflow-hidden rounded-full border border-gray-300 bg-white">
                   {REACTIONS.map((reaction) => (
-                    <label key={reaction} className="relative flex min-h-8 cursor-pointer items-center border-l border-gray-200 px-3 text-xs text-gray-700 first:border-l-0 has-[:checked]:bg-gray-900 has-[:checked]:text-white has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-violet-500">
+                    <label key={reaction} className="relative flex min-h-10 cursor-pointer items-center border-l border-gray-200 px-3 text-xs text-gray-700 first:border-l-0 has-[:checked]:bg-gray-900 has-[:checked]:text-white has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-violet-500">
                       <input type="radio" className="sr-only" name={`${idPrefix}-${card.knowledgeId}`} value={reaction} checked={draft.reactions[card.knowledgeId] === reaction} onChange={() => update({ reactions: { ...draft.reactions, [card.knowledgeId]: reaction } })} />
                       {SEGMENT_LABELS[reaction]}
                     </label>
                   ))}
                 </div>
                 {draft.reactions[card.knowledgeId] && (
-                  <button type="button" onClick={() => update({ reactions: { ...draft.reactions, [card.knowledgeId]: '' } })} className="min-h-8 rounded px-2 text-xs text-gray-500 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">選択を外す</button>
+                  <button type="button" onClick={() => update({ reactions: { ...draft.reactions, [card.knowledgeId]: '' } })} className="min-h-10 rounded px-2 text-xs text-gray-500 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">選択を外す</button>
                 )}
               </div>
             </div>

@@ -11,6 +11,8 @@ const MAX_LIST_ITEMS = 100;
 const MAX_TEXT_LENGTH = 2_000;
 const MAX_DETAIL_LENGTH = 120;
 const MAX_DEBUG_JSON_LENGTH = 20_000;
+const MAX_WARNINGS = 10;
+const MAX_WARNING_LENGTH = 200;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/u;
 
@@ -182,9 +184,9 @@ function normalizeUnderstanding(raw) {
   return understanding;
 }
 
-function stringList(value, max = MAX_TEXT_LENGTH) {
+function stringList(value, max = MAX_TEXT_LENGTH, maxItems = MAX_LIST_ITEMS) {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > MAX_LIST_ITEMS || !value.every((item) => isText(item, max))) invalid();
+  if (!Array.isArray(value) || value.length > maxItems || !value.every((item) => isText(item, max))) invalid();
   return [...value];
 }
 
@@ -206,6 +208,8 @@ export function normalizeSenpaiResearchResult(raw) {
     sources: normalizeSources(raw.sources),
     ...(understanding ? { understanding } : {}),
     unverifiedRefs: stringList(raw.unverifiedRefs, 64),
+    // 任意。技術・法令の検索が完全に失敗したときだけ付く、利用者向けの日本語の注意。
+    ...(raw.warnings !== undefined ? { warnings: stringList(raw.warnings, MAX_WARNING_LENGTH, MAX_WARNINGS) } : {}),
     ...(raw.stopReason ? { stopReason: raw.stopReason } : {}),
   };
 }
@@ -312,7 +316,7 @@ function startStatusError(status) {
   if (status === 400) fail('validation', '質問や相談の識別情報を確認してください');
   if (status === 401) fail('auth', 'ログイン状態を確認できませんでした。再ログインしてください');
   if (status === 403) fail('unavailable', '調査機能を現在利用できません（開発環境の管理者のみ使えます）');
-  if (status === 409) fail('unavailable', 'すでに調査を実行中です。終わってから次の質問を送信してください');
+  if (status === 409) fail('unavailable', 'すでに調査を実行中です。終わってから次の質問を送信してください', 409);
   if (status === 429) fail('server', '本日の調査回数の上限に達したか、混み合っています。時間をおいてお試しください', 429);
   if (status === 502) fail('server', '調査を開始できませんでした。時間をおいて再度お試しください', 502);
   if (status === 504) fail('timeout', MESSAGE_TIMEOUT);
@@ -513,9 +517,48 @@ const TERMINAL = new Set(['completed', 'failed']);
  * }} options
  * @returns {Promise<{jobId:string, status:'completed'|'failed', steps:object[], result?:object, error?:object, debug?:object}>}
  */
-export async function runSenpaiResearch({ onUpdate, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, ...options }) {
+/** 前の調査がサーバーで続いている間（409）、開始を待つ間隔と、待つ上限。 */
+export const START_RETRY_INTERVAL_MS = 5_000;
+export const START_RETRY_GIVE_UP_MS = 150_000;
+
+const isJobInProgress = (error) => error?.status === 409 && error?.code === 'unavailable';
+
+function sleepUnlessAborted({ ms, signal, setTimer, clearTimer }) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new KnowledgeResearchError('cancelled', MESSAGE_CANCELLED)); return; }
+    let timer;
+    const onAbort = () => { clearTimer(timer); reject(new KnowledgeResearchError('cancelled', MESSAGE_CANCELLED)); };
+    timer = setTimer(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * 開始する。前の調査がサーバーで続いていて 409 になったときは、中止できるまま
+ * `intervalMs` ごとに開始をやり直す（合計 `giveUpMs` まで）。それ以外のエラーは待たずに投げる。
+ */
+async function startWithRetry(options, { onWaiting, now, setTimer, clearTimer, intervalMs, giveUpMs }) {
+  const began = now();
+  for (;;) {
+    try {
+      return await startSenpaiResearch(options);
+    } catch (error) {
+      if (!isJobInProgress(error) || now() - began + intervalMs > giveUpMs) throw error;
+      onWaiting?.();
+      await sleepUnlessAborted({ ms: intervalMs, signal: options.signal, setTimer, clearTimer });
+    }
+  }
+}
+
+export async function runSenpaiResearch({
+  onUpdate, onWaiting, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout,
+  retryIntervalMs = START_RETRY_INTERVAL_MS, retryGiveUpMs = START_RETRY_GIVE_UP_MS,
+  visibility = globalThis.document, ...options
+}) {
   const { signal } = options;
-  const started = await startSenpaiResearch(options);
+  const started = await startWithRetry(options, {
+    onWaiting, now, setTimer, clearTimer, intervalMs: retryIntervalMs, giveUpMs: retryGiveUpMs,
+  });
   const { jobId } = started;
   if (signal?.aborted) fail('cancelled', MESSAGE_CANCELLED);
   let steps = [];
@@ -525,9 +568,13 @@ export async function runSenpaiResearch({ onUpdate, now = Date.now, setTimer = s
     let settled = false;
     let poller;
     const onAbort = () => finish(reject, new KnowledgeResearchError('cancelled', MESSAGE_CANCELLED));
+    const isVisible = () => visibility?.visibilityState !== 'hidden';
+    // タブが非表示の間は確認を止め、表示に戻ったら すぐ 1 回確認する（設計 §4.11）。
+    const onVisibilityChange = () => poller?.setVisible(isVisible());
     function finish(settle, value) {
       if (settled) return;
       settled = true;
+      visibility?.removeEventListener?.('visibilitychange', onVisibilityChange);
       poller?.stopAll();
       signal?.removeEventListener('abort', onAbort);
       settle(value);
@@ -560,6 +607,7 @@ export async function runSenpaiResearch({ onUpdate, now = Date.now, setTimer = s
       now, setTimer, clearTimer,
     });
     signal?.addEventListener('abort', onAbort, { once: true });
-    poller.start(jobId);
+    visibility?.addEventListener?.('visibilitychange', onVisibilityChange);
+    poller.start(jobId, { visible: isVisible() });
   });
 }

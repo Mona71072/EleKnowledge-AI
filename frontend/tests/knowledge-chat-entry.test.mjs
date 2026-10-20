@@ -59,12 +59,29 @@ function findExpanded(root, predicate) {
 }
 
 
-// 画面は props だけで描く部品の組み合わせなので、フックを使わない部品は展開して中の要素を探す。
+// 画面は props だけで描く部品の組み合わせなので、部品を展開して中の要素を探す。
+// 入力欄のフォーカス管理などで使うフックは、副作用なしの代用品（React の dispatcher）で動かす。
+const HOOK_SHIM = {
+  useRef: (initial) => ({ current: initial }),
+  useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+  useEffect() {}, useLayoutEffect() {},
+  useCallback: (fn) => fn, useMemo: (fn) => fn(), useId: () => 'test-id',
+};
+
+function withHookShim(run) {
+  const internals = createRequire(import.meta.url)('react').__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const previous = internals.H;
+  internals.H = HOOK_SHIM;
+  try { return run(); } finally { internals.H = previous; }
+}
+
 function expandTree(node) {
   if (Array.isArray(node)) return node.map(expandTree);
   if (!node || typeof node !== 'object' || !node.props) return node;
-  if (typeof node.type === 'function') {
-    try { return expandTree(node.type(node.props)); } catch { return node; }
+  const component = typeof node.type === 'function' ? node.type
+    : node.type?.$$typeof === Symbol.for('react.memo') && typeof node.type.type === 'function' ? node.type.type : null;
+  if (component) {
+    try { return expandTree(withHookShim(() => component(node.props))); } catch { return node; }
   }
   return { ...node, props: { ...node.props, children: expandTree(node.props.children) } };
 }
@@ -75,7 +92,7 @@ function loadInteractiveChat({ initialSnapshot, createController }) {
   let hookIndex = 0;
   let effectStarted = false;
   const mockReact = {
-    ...React,
+    ...React, useCallback: (fn) => fn,
     useState(initial) {
       const index = hookIndex++;
       if (!(index in slots)) slots[index] = initial;
@@ -240,7 +257,7 @@ test('Senpai chat opts normal searches into the server Markdown index and leaves
   let querySource;
   const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
     react: {
-      ...React,
+      ...React, useCallback: (fn) => fn,
       useEffect(effect) { effect(); },
       useState(initial) { return [initial, () => {}]; },
       useRef(initial) { return { current: initial }; },
@@ -408,7 +425,7 @@ test('Senpai chat forwards the model type to the research query', async () => {
   const React = require('react');
   let querySource;
   const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
-    react: { ...React, useEffect(effect) { effect(); }, useState(initial) { return [initial, () => {}]; }, useRef(initial) { return { current: initial }; } },
+    react: { ...React, useCallback: (fn) => fn, useEffect(effect) { effect(); }, useState(initial) { return [initial, () => {}]; }, useRef(initial) { return { current: initial }; } },
     'next/link': Link,
     '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
     '@/lib/chat-session-link.mjs': { buildChatSessionHref: () => '/chat' },
@@ -511,7 +528,7 @@ test('history sidebar selects the requested consultation, escapes titles, and di
     selectedId: '11111111-1111-4111-8111-111111111111', loading: false, error: '', complete: true,
     onNew() {}, onSelect: (id) => selected.push(id), onClose() {}, onRetry() {},
   };
-  const tree = SenpaiConversationSidebar(props);
+  const tree = withHookShim(() => SenpaiConversationSidebar(props));
   const current = findElement(tree, (element) => element.type === 'button' && element.props['aria-current'] === 'page');
   current.props.onClick();
   assert.deepEqual(selected, [props.selectedId]);
@@ -637,7 +654,7 @@ test('wires the synthesis source to the RAG API with the id token', async () => 
   let synthesisSource;
   const requests = [];
   const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
-    react: { ...React, useEffect(effect) { effect(); }, useState(initial) { return [initial, () => {}]; }, useRef(initial) { return { current: initial }; } },
+    react: { ...React, useCallback: (fn) => fn, useEffect(effect) { effect(); }, useState(initial) { return [initial, () => {}]; }, useRef(initial) { return { current: initial }; } },
     'next/link': Link,
     '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
     '@/lib/chat-session-link.mjs': { buildChatSessionHref: () => '/chat' },
@@ -708,7 +725,8 @@ test('「結果を残す」 appears only after a settled turn with at least one 
   withFieldReportsFlag('true', () => {
     assert.match(html(synthesisChat().render), /結果を残す/);
     assert.match(html(synthesisChat({ law: lane('error', { message: 'x' }) }).render), /結果を残す/);
-    assert.doesNotMatch(html(synthesisChat({}, { running: true }).render), /結果を残す/);
+    // 別の質問を実行中でも、回答済みのターンの「結果を残す」は消さない（入力途中の下書きを失わないため）。
+    assert.match(html(synthesisChat({}, { running: true }).render), /結果を残す/);
     assert.doesNotMatch(html(synthesisChat({ law: lane('loading') }).render), /結果を残す/);
     assert.doesNotMatch(html(synthesisChat({ normal: lane('error'), law: lane('cancelled') }).render), /結果を残す/);
     assert.doesNotMatch(html(synthesisChat({ senpaiTurnId: undefined }).render), /結果を残す/);
@@ -781,4 +799,19 @@ test('shows no fit notice for matching, general, unknown, legacy or unselected c
     const page = html(synthesisChat({ ...(modelType ? { modelType } : {}), normal: lane('success', { answer: fitAnswer(fit) }) }).render);
     assert.doesNotMatch(page, /でも当てはまるかは要確認です/, JSON.stringify(fit));
   }
+});
+
+test('a question that could not be sent is put back in the input instead of being lost', async () => {
+  const render = loadInteractiveChat({
+    initialSnapshot: { turns: [], running: false },
+    createController: (snapshot) => ({
+      getSnapshot: () => snapshot, send: async () => { throw Object.assign(new Error('x'), { code: 'validation' }); }, cancel() {}, reset() {}, dispose() {},
+    }),
+  });
+  render();
+  findElement(render(), (el) => el.type === 'textarea').props.onChange({ target: { value: '送れなかった長い質問' } });
+  await findElement(render(), (el) => el.type === 'form').props.onSubmit({ preventDefault() {} });
+  const view = render();
+  assert.equal(findElement(view, (el) => el.type === 'textarea').props.value, '送れなかった長い質問');
+  assert.match(renderToStaticMarkup(view), /質問を送信できませんでした/);
 });

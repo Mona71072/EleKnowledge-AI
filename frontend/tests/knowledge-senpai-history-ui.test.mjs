@@ -132,3 +132,28 @@ test('new question appears before persistence and completion refreshes server hi
   view.render({ ...snapshot, running: false }); await flush();
   assert.equal(calls, 2);
 });
+
+test('the running consultation is kept until the saved one has been read, and kept when reading fails', async (t) => {
+  const pending = deferred();
+  const view = harness(t, {
+    getSenpaiConversations: async () => ({ sessions: [], complete: true }),
+    readSenpaiConversation: () => pending.promise,
+  });
+  const ui = view.render();
+  const opening = ui.openConversation(conversationA);
+  assert.equal(view.cancelled(), 0, 'nothing is cancelled while the history is still loading');
+  pending.reject(Object.assign(new Error('読み込めません'), { code: 'server' }));
+  await opening;
+  assert.equal(view.cancelled(), 0, 'a failed read leaves the running consultation alone');
+  assert.deepEqual(view.restored, []);
+  assert.equal(view.render().openError, '読み込めません');
+});
+
+test('a successful read replaces the running consultation through restore, which stops it', async (t) => {
+  const view = harness(t, {
+    getSenpaiConversations: async () => ({ sessions: [], complete: true }),
+    readSenpaiConversation: async () => ({ conversationId: conversationB, turns: [], complete: true }),
+  });
+  await view.render().openConversation(conversationB);
+  assert.deepEqual(view.restored.map((saved) => saved.conversationId), [conversationB]);
+});

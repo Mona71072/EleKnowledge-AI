@@ -89,3 +89,27 @@ test('research and two-lane turns can share one conversation and restore into th
   assert.equal(turns[0].normal.status, 'success');
   assert.equal(turns[1].research.result.answerMarkdown, '保存された統一回答 [T1] [K1]');
 });
+
+test('a saved clarify reply restores as a supplement of the original question', async () => {
+  const saved = await read([row('user', { content: 'ドアの異音\n補足: AXIEZ、走行中に発生' }), row('assistant')]);
+  const turn = saved.turns[0];
+  assert.equal(turn.query, 'ドアの異音\n補足: AXIEZ、走行中に発生');
+  assert.equal(turn.supplement, 'AXIEZ、走行中に発生');
+  assert.equal(turn.supplementOf, 'ドアの異音');
+  const plain = await read([row('user'), row('assistant')]);
+  assert.equal('supplement' in plain.turns[0], false);
+  const chat = createSenpaiChat({ querySource: async () => ({}), createId: () => conversationId });
+  chat.restore(saved);
+  assert.equal(chat.getSnapshot().turns[0].supplement, 'AXIEZ、走行中に発生');
+});
+
+test('warnings saved inside researchResult survive a restore', async () => {
+  const warning = '技術資料の検索に失敗したため確認できていません';
+  const saved = await read([row('user'), row('assistant', { researchResult: result({ warnings: [warning] }) })]);
+  assert.deepEqual(saved.turns[0].research.result.warnings, [warning]);
+  const chat = createSenpaiChat({ querySource: async () => ({}), createId: () => conversationId });
+  chat.restore(saved);
+  assert.deepEqual(chat.getSnapshot().turns[0].research.result.warnings, [warning]);
+  const plain = await read([row('user'), row('assistant')]);
+  assert.equal('warnings' in plain.turns[0].research.result, false);
+});

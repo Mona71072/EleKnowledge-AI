@@ -26,10 +26,10 @@ import { SenpaiStepTimeline } from './SenpaiStepTimeline';
 const KNOWN_MODELS: ReadonlySet<string> = new Set(ALL_MODEL_TYPES.map((model) => model.value));
 // 見た目は小さいまま、押せる範囲だけ上下左右に広げる（::before）。
 const textButton = 'relative rounded px-1 text-xs font-medium text-gray-700 underline underline-offset-2 before:absolute before:-inset-x-2 before:-inset-y-2.5 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500';
-const iconButton = 'flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500';
+const iconButton = 'flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500';
 const groupLabel = 'mt-3 text-xs font-medium text-gray-500 first:mt-0';
 
-type Resend = (options: { query: string; modelType?: string }) => void;
+type Resend = (options: { query: string; modelType?: string; supplement?: string; supplementOf?: string }) => void;
 
 function RefPill({ refId }: { refId: string }) {
   return <span className={`inline-block shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium leading-4 ${REF_TONES[refId[0]].split(' hover:')[0]}`}>{`${REF_PREFIX[refId[0]]}${refId.slice(1)}`}</span>;
@@ -177,11 +177,12 @@ function ClarifyBlock({ result, prefix, query, onResend }: { result: SenpaiResea
       {hasQuestions
         ? <ul className="mt-1 list-disc space-y-0.5 pl-5 marker:text-gray-400">{result.clarifyQuestions.map((question, index) => <li key={`${index}-${question}`}>{question}</li>)}</ul>
         : result.answerMarkdown.trim() && <AnswerText result={result} prefix={prefix} />}
-      <p className="mt-2 text-sm text-gray-500">下の入力欄に答えを書いて送ると、元の質問に補足して調べ直します。</p>
+      {/* 最新の相談だけが続きを受け付ける（onResend が渡るのは最新の相談だけ）。古い聞き返しには出さない。 */}
+      {onResend && <p className="mt-2 text-sm text-gray-500">下の入力欄に答えを書いて送ると、元の質問に補足して調べ直します。</p>}
       {onResend && query && clarifyAsksModel(result) && (
         <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="機種を選んで聞き直す">
           {ALL_MODEL_TYPES.map((model) => (
-            <button key={model.value} type="button" onClick={() => onResend({ query, modelType: model.value })} className="min-h-8 rounded-full border border-gray-300 bg-white px-3 text-xs text-gray-700 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">{model.label}</button>
+            <button key={model.value} type="button" onClick={() => onResend({ query, modelType: model.value })} className="min-h-10 rounded-full border border-gray-300 bg-white px-3 text-xs text-gray-700 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">{model.label}</button>
           ))}
         </div>
       )}
@@ -203,12 +204,13 @@ function ResultBody({ result, prefix, selectedModel, query, onResend, actions }:
           {onResend && query && <button type="button" onClick={() => onResend({ query, modelType: mismatch.detected })} className={`ml-2 ${textButton}`}>{mismatch.detected}で聞き直す</button>}
         </p>
       )}
+      {(result.warnings ?? []).map((warning, index) => <p key={`${index}-${warning}`} role="note" className="text-xs text-amber-700">{warning}</p>)}
+      {result.stopReason === 'budget' && <p className="text-xs text-gray-500">時間の上限に達したため、確認できた範囲でまとめています</p>}
       {result.kind === 'clarify' && <ClarifyBlock result={result} prefix={prefix} query={query} onResend={onResend} />}
       {result.kind === 'not_found' && (
         <p className="text-[15px] leading-7 text-gray-900">該当する情報を確認できませんでした。質問の言い換えや、機種の指定を試してください。</p>
       )}
       {result.kind === 'answer' && <AnswerText result={result} prefix={prefix} />}
-      {result.stopReason === 'budget' && <p className="text-xs text-gray-500">調査の上限までに確認できた範囲での回答です。</p>}
       <Sources result={result} prefix={prefix} selectedModel={noticeModel} />
       {result.kind === 'answer' && (
         <div role="group" aria-label="回答の操作" className="-mx-1 flex flex-wrap items-center gap-1">

@@ -456,10 +456,99 @@ test('runner gives up with a timeout after the polling window', async () => {
   assert.equal(clock.pending(), 0);
 });
 
-test('runner surfaces start failures such as an already running job', async () => {
+test('runner waits and retries every 5s while the previous job is still running (409), then gives up with the 409 error', async () => {
   const clock = createClock();
-  await assert.rejects(
-    runSenpaiResearch(runOptions(clock, async () => response({}, 409))),
-    (error) => error.code === 'unavailable' && /実行中/u.test(error.message),
-  );
+  let posts = 0;
+  let waiting = 0;
+  const done = runSenpaiResearch(runOptions(clock, async (_url, init) => {
+    if (init.method === 'POST') posts += 1;
+    return response({}, 409);
+  }, { onWaiting: () => { waiting += 1; } }));
+  done.catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(posts, 1);
+  assert.equal(waiting, 1);
+  await clock.advance(4999);
+  assert.equal(posts, 1);
+  await clock.advance(1);
+  assert.equal(posts, 2);
+  await clock.advance(145000);
+  await assert.rejects(done, (error) => error.code === 'unavailable' && error.status === 409 && /実行中/u.test(error.message));
+  assert.ok(posts >= 30 && posts <= 32, `posts=${posts}`);
+  assert.equal(clock.pending(), 0);
+});
+
+test('runner starts as soon as the 409 clears and then polls normally', async () => {
+  const clock = createClock();
+  let posts = 0;
+  const { fetchImpl: inner } = scripted([{ body: { jobId, status: 'completed', steps: [], result: result() } }]);
+  const done = runSenpaiResearch(runOptions(clock, async (url, init) => {
+    if (init.method === 'POST') { posts += 1; if (posts < 3) return response({}, 409); }
+    return inner(url, init);
+  }));
+  await new Promise((resolve) => setImmediate(resolve));
+  await clock.advance(10000);
+  await clock.advance(2000);
+  assert.equal((await done).status, 'completed');
+  assert.equal(posts, 3);
+});
+
+test('runner stops waiting for the previous job when aborted', async () => {
+  const clock = createClock();
+  const controller = new AbortController();
+  let posts = 0;
+  const done = runSenpaiResearch(runOptions(clock, async () => { posts += 1; return response({}, 409); }, { signal: controller.signal }));
+  done.catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  await assert.rejects(done, (error) => error.code === 'cancelled');
+  await clock.advance(60000);
+  assert.equal(posts, 1);
+  assert.equal(clock.pending(), 0);
+});
+
+test('runner does not wait on other start failures', async () => {
+  const clock = createClock();
+  await assert.rejects(runSenpaiResearch(runOptions(clock, async () => response({}, 429))), (error) => error.code === 'server');
+  assert.equal(clock.pending(), 0);
+});
+
+test('runner pauses polling while the tab is hidden and checks again once it is visible', async () => {
+  const clock = createClock();
+  const listeners = new Set();
+  const doc = {
+    visibilityState: 'visible',
+    addEventListener: (type, fn) => { if (type === 'visibilitychange') listeners.add(fn); },
+    removeEventListener: (type, fn) => { if (type === 'visibilitychange') listeners.delete(fn); },
+  };
+  const { fetchImpl, calls } = scripted([
+    { body: { jobId, status: 'running', steps: [step(1)] } },
+    { body: { jobId, status: 'completed', steps: [], result: result() } },
+  ]);
+  const done = runSenpaiResearch(runOptions(clock, fetchImpl, { visibility: doc }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(listeners.size, 1);
+  await clock.advance(2000);
+  const gets = () => calls.filter((call) => call.method === 'GET').length;
+  assert.equal(gets(), 1);
+  doc.visibilityState = 'hidden';
+  listeners.forEach((fn) => fn());
+  await clock.advance(30000);
+  assert.equal(gets(), 1);
+  doc.visibilityState = 'visible';
+  listeners.forEach((fn) => fn());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await done).status, 'completed');
+  assert.equal(gets(), 2);
+  assert.equal(listeners.size, 0);
+});
+
+test('result.warnings is optional, bounded and strictly a list of non-empty strings', () => {
+  const base = { kind: 'not_found', sources: { tech: [], law: [], knowhow: { used: [], candidates: [] } } };
+  assert.equal('warnings' in normalizeSenpaiResearchResult(base), false);
+  assert.deepEqual(normalizeSenpaiResearchResult({ ...base, warnings: [] }).warnings, []);
+  assert.deepEqual(normalizeSenpaiResearchResult({ ...base, warnings: ['法令の検索に失敗したため確認できていません'] }).warnings, ['法令の検索に失敗したため確認できていません']);
+  for (const bad of [null, 'text', {}, [''], ['  '], [1], ['x'.repeat(201)], Array.from({ length: 11 }, () => '注意')]) {
+    assert.throws(() => normalizeSenpaiResearchResult({ ...base, warnings: bad }), (error) => error.code === 'invalid_response', JSON.stringify(bad)?.slice(0, 40));
+  }
 });

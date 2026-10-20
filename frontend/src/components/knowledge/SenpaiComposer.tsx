@@ -1,5 +1,9 @@
+'use client';
+
+import { useEffect, useRef } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
+import { shouldRestoreComposerFocus } from '@/lib/knowledge-senpai-dom.mjs';
 import { SendIcon, StopIcon } from './SenpaiIcons';
 
 const MAX_ROWS = 6;
@@ -15,7 +19,7 @@ function rowsFor(value: string) {
  * 画面下の入力欄。Enter で送信、Shift+Enter で改行（変換中の Enter は送信しない）。
  * 機種の選択は入力欄の左下、送信／中止は右下に置く。
  */
-export function SenpaiComposer({ question, onQuestionChange, modelType, onModelChange, disabled, running, sendError, disclaimer, placeholder, onSubmit, onCancel }: {
+export function SenpaiComposer({ question, onQuestionChange, modelType, onModelChange, disabled, running, sendError, disclaimer, placeholder, maxLength = 2000, hint, warning, onSubmit, onCancel }: {
   question: string;
   onQuestionChange: (value: string) => void;
   modelType: string;
@@ -26,9 +30,23 @@ export function SenpaiComposer({ question, onQuestionChange, modelType, onModelC
   sendError: string;
   disclaimer: string;
   placeholder: string;
+  /** 入力できる最大文字数（聞き返しへの補足では、元の質問を残すぶん小さくなる）。 */
+  maxLength?: number;
+  /** 入力欄の下に出す補助（残り文字数など）。 */
+  hint?: string;
+  /** 入力欄の下に出す注意（元の質問が一部省略されるときなど）。 */
+  warning?: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
 }) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const wasDisabled = useRef(disabled);
+  // 送信中は入力欄が無効になりフォーカスが外れるので、入力できる状態に戻ったら入力欄へ戻す。
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea && shouldRestoreComposerFocus({ wasDisabled: wasDisabled.current, disabled, activeElement: document.activeElement, body: document.body })) textarea.focus();
+    wasDisabled.current = disabled;
+  }, [disabled]);
   const modelLabel = ALL_MODEL_TYPES.find((model) => model.value === modelType)?.label ?? '指定なし';
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -44,15 +62,16 @@ export function SenpaiComposer({ question, onQuestionChange, modelType, onModelC
           <label htmlFor="senpai-chat-question" className="sr-only">質問を入力</label>
           <textarea
             id="senpai-chat-question"
+            ref={textareaRef}
             aria-label="質問を入力"
             value={question}
             onChange={(event) => onQuestionChange(event.target.value)}
             onKeyDown={onKeyDown}
             disabled={disabled}
             rows={rowsFor(question)}
-            maxLength={2000}
+            maxLength={maxLength}
             placeholder={placeholder}
-            className="block max-h-40 w-full resize-none bg-transparent text-[15px] leading-7 text-gray-900 placeholder:text-gray-400 focus:outline-none disabled:opacity-60"
+            className="block max-h-40 w-full resize-none bg-transparent text-[15px] leading-7 text-gray-900 placeholder:text-gray-500 focus:outline-none disabled:opacity-60"
           />
           <div className="mt-1 flex items-center justify-between gap-2">
             <label className="relative inline-flex min-h-10 items-center rounded-full px-3 text-xs text-gray-600 focus-within:ring-2 focus-within:ring-violet-500 hover:bg-gray-100">
@@ -75,8 +94,10 @@ export function SenpaiComposer({ question, onQuestionChange, modelType, onModelC
             )}
           </div>
         </div>
+        {warning && <p role="note" className="mt-2 text-center text-xs text-amber-700">{warning}</p>}
+        {hint && <p className="mt-1 text-center text-xs text-gray-500">{hint}</p>}
         {sendError && <p role="alert" className="mt-2 text-center text-sm text-red-700">{sendError}</p>}
-        <p className="mt-2 text-center text-[11px] leading-4 text-gray-400">{disclaimer}</p>
+        <p className="mt-2 text-center text-[11px] leading-4 text-gray-500">{disclaimer}</p>
       </form>
     </footer>
   );

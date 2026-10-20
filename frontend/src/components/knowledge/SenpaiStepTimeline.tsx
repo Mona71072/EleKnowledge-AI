@@ -6,9 +6,9 @@ import { buildTimelineRows, type SenpaiResearchStepStatus, type SenpaiResearchSt
 import { formatElapsed, isRedundantDetail, stepRowLabel } from '@/lib/knowledge-senpai-research-view.mjs';
 
 const STATUS_VIEW: Record<SenpaiResearchStepStatus, { icon: string; label: string; className: string }> = {
-  running: { icon: '●', label: '実行中', className: 'animate-pulse text-violet-600' },
-  done: { icon: '✓', label: '完了', className: 'text-gray-400' },
-  skipped: { icon: '–', label: '省略', className: 'text-gray-400' },
+  running: { icon: '●', label: '実行中', className: 'animate-pulse motion-reduce:animate-none text-violet-600' },
+  done: { icon: '✓', label: '完了', className: 'text-gray-500' },
+  skipped: { icon: '–', label: '省略', className: 'text-gray-500' },
   failed: { icon: '✕', label: '失敗', className: 'text-red-600' },
 };
 
@@ -60,7 +60,7 @@ const textButton = 'rounded px-2 text-xs text-gray-500 underline-offset-2 hover:
  * 「詳細」から手順の一覧を開ける。
  */
 export function SenpaiStepTimeline({ research }: {
-  research: Pick<SenpaiResearchState, 'status' | 'steps' | 'startedAt' | 'endedAt'>;
+  research: Pick<SenpaiResearchState, 'status' | 'steps' | 'startedAt' | 'endedAt' | 'waiting'>;
 }) {
   const active = research.status === 'queued' || research.status === 'running';
   const now = useNow(active);
@@ -70,12 +70,13 @@ export function SenpaiStepTimeline({ research }: {
   if (active) {
     const current = [...rows].reverse().find((row) => row.status === 'running');
     return (
-      <div role="status" aria-label="調査の経過" className="text-sm text-gray-900">
+      // 進捗はスクリーンリーダーに逐一通知しない（開始と結果だけを、画面全体の通知欄が1回ずつ読み上げる）。
+      <div className="text-sm text-gray-900">
         <details className="min-w-0">
-          <summary className="flex min-h-8 cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-0.5 [&::-webkit-details-marker]:hidden">
-            <span aria-hidden="true" className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-violet-500" />
-            <span className="min-w-0 break-words font-medium">{current ? `${current.labelJa}…` : '調査を開始しています…'}</span>
-            {elapsed !== undefined && <span className="text-xs text-gray-500">経過 {formatElapsed(elapsed)}</span>}
+          <summary className="flex min-h-10 cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-0.5 [&::-webkit-details-marker]:hidden">
+            <span aria-hidden="true" className="inline-block h-2 w-2 shrink-0 animate-pulse motion-reduce:animate-none rounded-full bg-violet-500" />
+            <span className="min-w-0 break-words font-medium">{research.waiting ? '前の調査の終了を待っています…' : current ? `${current.labelJa}…` : '調査を開始しています…'}</span>
+            {elapsed !== undefined && <span aria-hidden="true" className="text-xs text-gray-500">経過 {formatElapsed(elapsed)}</span>}
             <span className={textButton}>詳細</span>
           </summary>
           {rows.length > 0 && <StepList rows={rows} active />}
@@ -86,7 +87,7 @@ export function SenpaiStepTimeline({ research }: {
   if (rows.length === 0) return null;
   return (
     <details className="text-xs text-gray-500">
-      <summary className="flex min-h-8 cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden">
+      <summary className="flex min-h-10 cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden">
         <span className="underline-offset-2 hover:text-gray-900 hover:underline">
           {elapsed !== undefined && `${formatElapsed(elapsed)}・`}{rows.length}手順で調査
           {research.status !== 'completed' && <span className="ml-2">詳細</span>}

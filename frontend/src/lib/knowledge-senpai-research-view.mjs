@@ -35,6 +35,8 @@ export function formatElapsed(ms) {
 
 const MAX_QUESTION_CODEPOINTS = 2_000;
 const SUPPLEMENT_LABEL = '\n補足: ';
+/** 聞き返しへの補足を足すとき、元の質問のうち最低限ここまでは必ず残す（文字数）。 */
+export const CLARIFY_ORIGINAL_RESERVE = 1_000;
 
 const STEP_LABELS = Object.freeze({
   understand: { done: '質問を整理しました', failed: '質問を整理できませんでした' },
@@ -88,17 +90,66 @@ export function splitAnswerSections(markdown) {
   return sections.some((section) => section.kind !== 'normal') ? sections : null;
 }
 
+const codepoints = (value) => Array.from(String(value ?? '').trim());
+const LABEL_LENGTH = Array.from(SUPPLEMENT_LABEL).length;
+
+/**
+ * 聞き返しへの補足に入力できる最大文字数。元の質問のうち先頭 CLARIFY_ORIGINAL_RESERVE 文字までは、
+ * 補足がどれだけ長くても必ず残るようにする。
+ */
+export function clarifySupplementLimit(original) {
+  return Math.max(0, MAX_QUESTION_CODEPOINTS - LABEL_LENGTH - Math.min(codepoints(original).length, CLARIFY_ORIGINAL_RESERVE));
+}
+
+/** 元の質問と補足をつなぐと 2000 文字を超え、元の質問が一部省略されて検索されるか。 */
+export function clarifyOriginalTruncated(original, supplement) {
+  return codepoints(original).length + LABEL_LENGTH + codepoints(supplement).length > MAX_QUESTION_CODEPOINTS;
+}
+
 /**
  * 聞き返しへの返事を、元の質問につなげた検索用の質問にする（2000 文字まで）。
- * 長すぎるときは元の質問側を切り詰め、利用者が書いた補足を優先して残す。
+ * 長すぎるときは元の質問側を切り詰める。元の質問の先頭 CLARIFY_ORIGINAL_RESERVE 文字は残し、
+ * 補足は clarifySupplementLimit までを残す。
  */
 export function composeClarifyQuestion(original, supplement) {
-  const supplementChars = Array.from(String(supplement ?? '').trim());
-  const originalChars = Array.from(String(original ?? '').trim());
-  const labelLength = Array.from(SUPPLEMENT_LABEL).length;
-  const keepSupplement = Math.min(supplementChars.length, MAX_QUESTION_CODEPOINTS - labelLength - Math.min(originalChars.length, 1));
-  const keepOriginal = Math.max(0, Math.min(originalChars.length, MAX_QUESTION_CODEPOINTS - labelLength - keepSupplement));
+  const supplementChars = codepoints(supplement);
+  const originalChars = codepoints(original);
+  const keepSupplement = Math.min(supplementChars.length, clarifySupplementLimit(original));
+  const keepOriginal = Math.max(0, Math.min(originalChars.length, MAX_QUESTION_CODEPOINTS - LABEL_LENGTH - keepSupplement));
   return `${originalChars.slice(0, keepOriginal).join('')}${SUPPLEMENT_LABEL}${supplementChars.slice(0, keepSupplement).join('')}`;
+}
+
+/** composeClarifyQuestion の逆。保存済みの質問を「元の質問」と「補足」に戻す。補足の形でなければ null。 */
+export function splitClarifyQuestion(query) {
+  if (typeof query !== 'string') return null;
+  const index = query.lastIndexOf(SUPPLEMENT_LABEL);
+  if (index <= 0) return null;
+  const original = query.slice(0, index).trim();
+  const supplement = query.slice(index + SUPPLEMENT_LABEL.length).trim();
+  return original && supplement ? { original, supplement } : null;
+}
+
+const SETTLED_ANNOUNCEMENTS = Object.freeze({ answer: '回答ができました', clarify: '条件の確認が必要です。入力欄に答えを書いてください', not_found: '該当する情報を確認できませんでした' });
+
+/**
+ * スクリーンリーダー向けの通知文。調査が始まったら「調査中です」を1回、終わったら結果を1回だけ。
+ * 画面の途中経過（手順・経過秒数）は通知しない。
+ * @param {boolean} wasRunning 直前の実行中フラグ
+ * @param {{running: boolean, turns: readonly object[]}} snapshot
+ * @param {string} current 今の通知文（変化がなければそのまま返す）
+ */
+export function nextAnnouncement(wasRunning, snapshot, current = '') {
+  if (snapshot.running) return wasRunning ? current : '調査中です';
+  if (!wasRunning) return current;
+  const latest = snapshot.turns.at(-1);
+  if (!latest) return '';
+  const research = latest.research;
+  if (research) {
+    if (research.status === 'completed') return SETTLED_ANNOUNCEMENTS[research.result?.kind] ?? '';
+    if (research.status === 'failed') return '調査に失敗しました';
+    return research.status === 'cancelled' ? '中止しました' : '';
+  }
+  return [latest.normal, latest.law].some((lane) => lane?.status === 'success') ? SETTLED_ANNOUNCEMENTS.answer : '';
 }
 
 /** 聞き返しが機種・型式を尋ねているか（そうなら機種の選択肢を出す）。 */

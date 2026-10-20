@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, UIEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, UIEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useSenpaiHistory } from '@/hooks/useSenpaiHistory';
 import { SenpaiChatView, isContinuationPaused } from './SenpaiChatView';
 import type { ResendOptions } from './SenpaiChatTurn';
@@ -11,6 +11,7 @@ import { runSenpaiResearch } from '@/lib/knowledge-senpai-research.mjs';
 import { listFieldReports, type FieldReport } from '@/lib/knowledge-senpai-field-report.mjs';
 import { queryKnowledgeSource } from '@/lib/knowledge-research.mjs';
 import { attachMenuDismissal } from '@/lib/knowledge-senpai-menu.mjs';
+import { nextAnnouncement } from '@/lib/knowledge-senpai-research-view.mjs';
 
 const EMPTY_SNAPSHOT: SenpaiChatSnapshot = { turns: [], running: false };
 // 「結果を残す」は SAM の SenpaiFieldReportsEnabled と合わせて有効化する（既定オフ）。
@@ -72,24 +73,31 @@ function useController(
 }
 
 /** Reports the caller already sent for the open conversation, keyed by senpaiTurnId. */
+const NO_REPORTS: Readonly<Record<string, FieldReport>> = Object.freeze({});
+
 function useFieldReports(conversationId: string | undefined, running: boolean) {
-  const [reports, setReports] = useState<Record<string, FieldReport>>({});
+  // 送信済みの印は相談ごとに持つ。相談が変わったときだけ捨て、質問の実行中・再取得中は保つ。
+  const [store, setStore] = useState<{ conversationId?: string; reports: Readonly<Record<string, FieldReport>> }>({ reports: NO_REPORTS });
+  const reports = store.conversationId === conversationId ? store.reports : NO_REPORTS;
+  const merge = useCallback((incoming: Readonly<Record<string, FieldReport>>) => {
+    setStore((current) => ({
+      conversationId,
+      reports: { ...(current.conversationId === conversationId ? current.reports : NO_REPORTS), ...incoming },
+    }));
+  }, [conversationId]);
   useEffect(() => {
-    setReports({});
-    if (!FIELD_REPORTS_ENABLED || !conversationId || running) return;
+    if (!FIELD_REPORTS_ENABLED || !conversationId || running) return undefined;
     const controller = new AbortController();
     listFieldReports({
       baseUrl: process.env.NEXT_PUBLIC_RAG_API_URL || '', getToken: getIdToken, conversationId, signal: controller.signal,
     }).then((byTurn) => {
-      if (!controller.signal.aborted) setReports(byTurn);
+      if (!controller.signal.aborted) merge(byTurn);
     }).catch(() => {
       // Missing "sent" marks only re-show the form; the server keeps one report per turn.
     });
     return () => controller.abort();
-  }, [conversationId, running]);
-  function markSent(report: FieldReport) {
-    setReports((current) => ({ ...current, [report.senpaiTurnId]: report }));
-  }
+  }, [conversationId, running, merge]);
+  const markSent = useCallback((report: FieldReport) => merge({ [report.senpaiTurnId]: report }), [merge]);
   return { reports, markSent };
 }
 
@@ -97,7 +105,11 @@ function useFieldReports(conversationId: string | undefined, running: boolean) {
 function useMenuDismissal(open: boolean, setOpen: (open: boolean) => void) {
   useEffect(() => {
     if (!open || typeof document === 'undefined') return undefined;
-    return attachMenuDismissal(document, () => setOpen(false));
+    return attachMenuDismissal(document, (reason) => {
+      setOpen(false);
+      // Escape で閉じたら、メニューを開いたボタンへフォーカスを戻す。
+      if (reason === 'escape') document.querySelector<HTMLElement>('[data-senpai-menu] > summary')?.focus();
+    });
   }, [open, setOpen]);
 }
 
@@ -138,6 +150,11 @@ export function KnowledgeSenpaiChat() {
   const scrollAfterSendRef = useRef(false);
   useController(setSnapshot, controllerRef, mountedRef);
   const history = useSenpaiHistory(snapshot, controllerRef);
+  // 調査の開始と結果だけをスクリーンリーダーへ知らせる（描画中に、実行中フラグが変わった瞬間だけ更新する）。
+  const [announced, setAnnounced] = useState({ running: false, text: '' });
+  if (announced.running !== snapshot.running) {
+    setAnnounced({ running: snapshot.running, text: nextAnnouncement(announced.running, snapshot, announced.text) });
+  }
   const fieldReports = useFieldReports(snapshot.conversationId, snapshot.running);
   const developerView = useDeveloperView();
   useEffect(() => {
@@ -166,6 +183,8 @@ export function KnowledgeSenpaiChat() {
     } catch (error) {
       const code = (error as { code?: string } | null)?.code;
       if (mountedRef.current && controllerRef.current === controller && requestIdRef.current === requestId) {
+        // 送れなかった質問は消さずに入力欄へ戻す（その間に新しく入力していれば、そちらを優先する）。
+        setQuestion((current) => current || query);
         setSendError(code === 'validation' ? '質問を送信できませんでした。入力内容を確認してください。' : '質問を送信できませんでした。時間をおいて再度お試しください。');
       }
     }
@@ -194,19 +213,19 @@ export function KnowledgeSenpaiChat() {
     void history.openConversation(conversationId);
   }
 
-  function requestSynthesis(turnId: number) {
+  const requestSynthesis = useCallback((turnId: number) => {
     // The controller keeps the failure on the turn's synthesis lane; nothing else to show here.
     controllerRef.current?.synthesize(turnId).catch(() => {});
-  }
+  }, []);
 
-  function resend({ query, modelType: resendModel }: ResendOptions) {
+  function resend({ query, modelType: resendModel, supplement, supplementOf }: ResendOptions) {
     const controller = controllerRef.current;
     if (!controller || snapshot.running || history.opening) return;
     const requestId = ++requestIdRef.current;
     setSendError('');
     setModelType(resendModel ?? '');
     scrollAfterSendRef.current = true;
-    controller.send(query, { ...(resendModel ? { modelType: resendModel } : {}), fresh: true }).catch(() => {
+    controller.send(query, { ...(resendModel ? { modelType: resendModel } : {}), fresh: true, ...(supplement && supplementOf ? { supplement, supplementOf } : {}) }).catch(() => {
       if (mountedRef.current && controllerRef.current === controller && requestIdRef.current === requestId) {
         setSendError('質問を送信できませんでした。時間をおいて再度お試しください。');
       }
@@ -248,6 +267,7 @@ export function KnowledgeSenpaiChat() {
       onMenuOpenChange={setMenuOpen}
       reports={fieldReports.reports}
       onReportSent={fieldReports.markSent}
+      announcement={announced.text}
       transcriptRef={transcriptRef}
       onTranscriptScroll={onTranscriptScroll}
     />

@@ -131,3 +131,54 @@ test('three example questions are offered for the empty state', () => {
   assert.equal(EXAMPLE_QUESTIONS.length, 3);
   assert.ok(EXAMPLE_QUESTIONS.every((text) => text.length > 10 && text.length <= 2000));
 });
+
+import {
+  CLARIFY_ORIGINAL_RESERVE, clarifyOriginalTruncated, clarifySupplementLimit, nextAnnouncement, splitClarifyQuestion,
+} from '../src/lib/knowledge-senpai-research-view.mjs';
+
+test('the clarify supplement is capped so the start of the original question always survives', () => {
+  assert.equal(clarifySupplementLimit('ドアの異音'), 2000 - 5 - 5);
+  assert.equal(clarifySupplementLimit('あ'.repeat(1990)), 2000 - 5 - CLARIFY_ORIGINAL_RESERVE);
+  const original = 'あ'.repeat(1500);
+  const composed = composeClarifyQuestion(original, 'い'.repeat(2000));
+  assert.equal(Array.from(composed).length, 2000);
+  assert.ok(composed.startsWith('あ'.repeat(CLARIFY_ORIGINAL_RESERVE)));
+  assert.equal(Array.from(composed.split('\n補足: ')[1]).length, clarifySupplementLimit(original));
+  // a supplement typed within the cap never loses a character
+  const typed = 'い'.repeat(clarifySupplementLimit('元の質問'));
+  assert.ok(composeClarifyQuestion('元の質問', typed).endsWith(typed));
+});
+
+test('truncation of the original question is reported before it happens', () => {
+  assert.equal(clarifyOriginalTruncated('元の質問', 'い'.repeat(100)), false);
+  assert.equal(clarifyOriginalTruncated('あ'.repeat(1990), 'い'.repeat(100)), true);
+  assert.equal(clarifyOriginalTruncated('あ'.repeat(1000), 'い'.repeat(995)), false);
+  assert.equal(clarifyOriginalTruncated('あ'.repeat(1001), 'い'.repeat(995)), true);
+});
+
+test('a saved composed question is split back into the question and the supplement', () => {
+  assert.deepEqual(splitClarifyQuestion('ドアの異音\n補足: AXIEZです'), { original: 'ドアの異音', supplement: 'AXIEZです' });
+  assert.deepEqual(splitClarifyQuestion('異音\n補足: ドア\n補足: 走行中'), { original: '異音\n補足: ドア', supplement: '走行中' });
+  assert.equal(splitClarifyQuestion('ドアの異音について'), null);
+  assert.equal(splitClarifyQuestion('\n補足: だけ'), null);
+  assert.equal(splitClarifyQuestion('質問\n補足: '), null);
+  assert.equal(splitClarifyQuestion(undefined), null);
+  const composed = composeClarifyQuestion('異音', '走行中');
+  assert.deepEqual(splitClarifyQuestion(composed), { original: '異音', supplement: '走行中' });
+});
+
+test('screen readers hear "調査中です" once and the outcome once, never the steps', () => {
+  const research = (status, kind) => ({ running: false, turns: [{ research: { status, ...(kind ? { result: { kind } } : {}) } }] });
+  assert.equal(nextAnnouncement(false, { running: true, turns: [{}] }), '調査中です');
+  assert.equal(nextAnnouncement(true, { running: true, turns: [{}] }, '調査中です'), '調査中です');
+  assert.equal(nextAnnouncement(true, research('completed', 'answer')), '回答ができました');
+  assert.match(nextAnnouncement(true, research('completed', 'clarify')), /条件の確認/u);
+  assert.match(nextAnnouncement(true, research('completed', 'not_found')), /確認できませんでした/u);
+  assert.equal(nextAnnouncement(true, research('failed')), '調査に失敗しました');
+  assert.equal(nextAnnouncement(true, research('cancelled')), '中止しました');
+  // changes that are not a start or an end (restore, synthesis, reports) keep the text as is
+  assert.equal(nextAnnouncement(false, research('completed', 'answer'), '回答ができました'), '回答ができました');
+  assert.equal(nextAnnouncement(true, { running: false, turns: [] }), '');
+  assert.equal(nextAnnouncement(true, { running: false, turns: [{ normal: { status: 'success' }, law: { status: 'error' } }] }), '回答ができました');
+  assert.equal(nextAnnouncement(true, { running: false, turns: [{ normal: { status: 'error' }, law: { status: 'error' } }] }), '');
+});

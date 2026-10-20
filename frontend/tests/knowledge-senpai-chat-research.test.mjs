@@ -358,3 +358,72 @@ test('field reports for a research turn use the knowhow cards of the result', ()
   assert.deepEqual(payload.cardReactions, [{ knowledgeId: 'KH-1', cardVersion: 2, reaction: 'matched' }]);
   assert.deepEqual(fieldReportCards({ ...turn, research: { status: 'running', steps: [] } }), []);
 });
+
+test('while the previous job still runs on the server the turn shows it is waiting, and the flag clears once the job starts', async () => {
+  const gate = deferred();
+  let onWaiting;
+  let onUpdate;
+  const { chat } = setup(async (request) => { onWaiting = request.onWaiting; onUpdate = request.onUpdate; return gate.promise; });
+  const sending = chat.send('ドアの異音');
+  onWaiting();
+  assert.equal(chat.getSnapshot().turns[0].research.waiting, true);
+  assert.equal(chat.getSnapshot().turns[0].research.status, 'queued');
+  onWaiting();
+  onUpdate({ jobId, status: 'queued', steps: [] });
+  assert.equal('waiting' in chat.getSnapshot().turns[0].research, false);
+  gate.resolve({ jobId, status: 'completed', steps: [], result: result() });
+  await sending;
+  assert.equal(chat.getSnapshot().turns[0].research.status, 'completed');
+});
+
+test('cancelling while waiting leaves a cancelled turn without the waiting flag', async () => {
+  const gate = deferred();
+  let onWaiting;
+  const { chat } = setup(async (request) => { onWaiting = request.onWaiting; request.signal.addEventListener('abort', () => gate.reject(new KnowledgeResearchError('cancelled', 'x'))); return gate.promise; });
+  const sending = chat.send('ドアの異音');
+  onWaiting();
+  chat.cancel();
+  await sending;
+  const research = chat.getSnapshot().turns[0].research;
+  assert.equal(research.status, 'cancelled');
+  assert.equal('waiting' in research, false);
+});
+
+test('retrying a supplemented turn keeps the composed question and still shows it as a supplement', async () => {
+  const requests = [];
+  const { chat } = setup(async (request) => { requests.push(request); return { jobId, status: 'completed', steps: [], result: result() }; });
+  await chat.send('異音\n補足: 走行中', { fresh: true, supplement: '走行中', supplementOf: '異音' });
+  assert.equal(requests[0].question, '異音\n補足: 走行中');
+  const turn = chat.getSnapshot().turns[0];
+  assert.equal(turn.query, '異音\n補足: 走行中');
+  assert.equal(turn.supplement, '走行中');
+  assert.equal(turn.supplementOf, '異音');
+  await chat.send('別の質問', { fresh: true, supplement: '', supplementOf: '' });
+  assert.equal('supplement' in chat.getSnapshot().turns[1], false);
+});
+
+test('a restored supplemented research turn keeps its supplement and rejects malformed ones', () => {
+  const { chat } = setup(async () => ({}));
+  const saved = (extra) => ({
+    conversationId: UUID_A, complete: true,
+    turns: [{ id: 1, senpaiTurnId: 'b0000000-0000-4000-8000-000000000001', query: '異音\n補足: 走行中', ...extra,
+      research: { status: 'completed', steps: [], result: result() } }],
+  });
+  chat.restore(saved({ supplement: '走行中', supplementOf: '異音' }));
+  assert.equal(chat.getSnapshot().turns[0].supplement, '走行中');
+  chat.restore(saved({ supplement: 42, supplementOf: '異音' }));
+  assert.equal('supplement' in chat.getSnapshot().turns[0], false);
+});
+
+test('snapshots reuse the same turn object while a turn is unchanged', async () => {
+  const gate = deferred();
+  const { chat } = setup(async () => gate.promise);
+  const first = chat.send('一つ目');
+  gate.resolve({ jobId, status: 'completed', steps: [], result: result() });
+  await first;
+  const before = chat.getSnapshot().turns[0];
+  const gate2 = deferred();
+  const { chat: other } = setup(async () => gate2.promise);
+  assert.notEqual(other.getSnapshot().turns[0], before);
+  assert.equal(chat.getSnapshot().turns[0], before);
+});

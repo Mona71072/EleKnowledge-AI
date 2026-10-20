@@ -191,3 +191,16 @@ test('every real error response maps to a safe Japanese message with a sensible 
   await assert.rejects(start('job_in_progress'), /実行中/);
   await assert.rejects(start('daily_limit_exceeded'), /上限/);
 });
+
+test('a synthetic variant of the answer sample with warnings parses, renders them and keeps the rest', async () => {
+  const fixture = sample('status-answer.json');
+  const warning = '法令の検索に失敗したため確認できていません';
+  fixture.body.result = { ...fixture.body.result, warnings: [warning], stopReason: 'budget' };
+  const done = await getSenpaiResearchStatus({ ...client(fixture), jobId: JOB, afterSeq: 0 });
+  assert.deepEqual(done.result.warnings, [warning]);
+  const page = render({ status: 'completed', steps: done.steps, result: done.result });
+  assert.match(page, new RegExp(warning, 'u'));
+  assert.match(page, /時間の上限に達したため、確認できた範囲でまとめています/);
+  fixture.body.result.warnings = 'oops';
+  await assert.rejects(getSenpaiResearchStatus({ ...client(fixture), jobId: JOB, afterSeq: 0 }), (error) => error.code === 'invalid_response');
+});

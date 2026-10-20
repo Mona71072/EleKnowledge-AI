@@ -1,4 +1,5 @@
 import { KnowledgeResearchError, normalizeStoredResearchAnswer } from './knowledge-research.mjs';
+import { splitClarifyQuestion } from './knowledge-senpai-research-view.mjs';
 import { normalizeSavedModelType } from './knowledge-senpai-chat.mjs';
 import { normalizeSenpaiResearchResult } from './knowledge-senpai-research.mjs';
 
@@ -242,8 +243,11 @@ export async function readSenpaiConversation({ baseUrl, getToken, fetchImpl = fe
     }
     seen.add(`${group.senpaiTurnId}\0${query}`);
     const modelType = normalizeSavedModelType(research.assistant.modelType);
+    // 聞き返しへの補足は「元の質問\n補足: 返事」として保存されている。直後の表示と同じ見え方に戻す。
+    const split = splitClarifyQuestion(query);
     return {
       id: index + 1, senpaiTurnId: group.senpaiTurnId, ...(modelType ? { modelType } : {}), query,
+      ...(split ? { supplement: split.supplement, supplementOf: split.original } : {}),
       research: { status: 'completed', steps: [], result: savedResearchResult(research.assistant) },
       normal: { status: 'paused', message: RESEARCH_LANE_MESSAGE },
       law: { status: 'paused', message: RESEARCH_LANE_MESSAGE },

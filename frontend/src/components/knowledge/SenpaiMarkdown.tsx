@@ -3,7 +3,8 @@
 import { Children, isValidElement, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { linkResearchRefs } from '@/lib/knowledge-senpai-research-view.mjs';
+import { linkResearchRefs, researchRefAnchor } from '@/lib/knowledge-senpai-research-view.mjs';
+import { openAncestorDetails } from '@/lib/knowledge-senpai-dom.mjs';
 
 // SECURITY: 回答本文はモデルの出力。生の HTML は react-markdown が描画せず、画像は出さず、
 // リンクは同じ画面内の出典アンカーだけを許す（外部へ送る追跡リンクを作らない）。
@@ -52,14 +53,16 @@ export function keepRefRunsTogether(children: ReactNode): ReactNode[] {
 
 export type SenpaiMarkdownVariant = 'default' | 'plain';
 
-function makeComponents(refTitles: Readonly<Record<string, string>>): Components {
+function makeComponents(refTitles: Readonly<Record<string, string>>, knownRefs: ReadonlySet<string>, anchorPrefix: string): Components {
   return {
     a: ({ href, children }) => {
       const match = typeof href === 'string' ? REF_ANCHOR.exec(href) : null;
       if (!match || typeof href !== 'string') return <span>{children}</span>;
       const refId = `${match[1]}${match[2]}`;
+      // 取得結果にある出典で、この回答（相談）のアンカーだけをリンクにする。本文中に書かれた偽の番号は文字のまま出す。
+      if (!knownRefs.has(refId) || href !== `#${researchRefAnchor(anchorPrefix, refId)}`) return <span>{children}</span>;
       return (
-        <a href={href} title={refTitles[refId]} className={`relative mx-0.5 inline-block rounded px-1 align-super text-[10px] font-medium leading-4 no-underline before:absolute before:-inset-x-1 before:-inset-y-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${REF_TONES[match[1]]}`}>{`${REF_PREFIX[match[1]]}${match[2]}`}</a>
+        <a href={href} title={refTitles[refId]} onClick={() => openAncestorDetails(document.getElementById(href.slice(1)))} className={`relative mx-0.5 inline-block rounded px-1 align-super text-[10px] font-medium leading-4 no-underline before:absolute before:-inset-x-1 before:-inset-y-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${REF_TONES[match[1]]}`}>{`${REF_PREFIX[match[1]]}${match[2]}`}</a>
       );
     },
     img: ({ alt }) => <span>{alt ? `（画像: ${alt}）` : ''}</span>,
@@ -94,7 +97,7 @@ export function SenpaiMarkdown({ markdown, knownRefs, anchorPrefix, refTitles = 
 }) {
   return (
     <div className={`min-w-0 break-words [overflow-wrap:anywhere] ${variant === 'plain' ? 'text-sm leading-6 text-gray-700' : 'text-[15px] leading-7 text-gray-900'} ${className}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(refTitles)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(refTitles, knownRefs, anchorPrefix)}>
         {linkResearchRefs(markdown, knownRefs, anchorPrefix)}
       </ReactMarkdown>
     </div>

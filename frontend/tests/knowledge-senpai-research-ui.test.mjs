@@ -187,11 +187,16 @@ test('the model fit notice shows only for used cards of another product', () => 
 });
 
 test('clarify shows the questions and asks for an answer in the input', () => {
-  const page = view(completed({}, { kind: 'clarify', answerMarkdown: '', clarifyQuestions: ['機種は何ですか？', '異音はいつ出ますか？'], sources: { tech: [], law: [], knowhow: { used: [], candidates: [] } } }));
+  const clarify = completed({}, { kind: 'clarify', answerMarkdown: '', clarifyQuestions: ['機種は何ですか？', '異音はいつ出ますか？'], sources: { tech: [], law: [], knowhow: { used: [], candidates: [] } } });
+  const page = view(clarify, { query: 'q', onResend() {} });
   assert.match(page, /条件の確認が必要です/);
   assert.match(page, /機種は何ですか？/);
   assert.match(page, /異音はいつ出ますか？/);
   assert.match(page, /入力欄/);
+  // 最新の相談だけが続きを受け付ける（onResend が渡るのは最新の相談だけ）。古い聞き返しには案内を出さない。
+  const older = view(clarify, { query: 'q' });
+  assert.match(older, /機種は何ですか？/);
+  assert.doesNotMatch(older, /入力欄/);
 });
 
 test('not_found explains that nothing was found', () => {
@@ -201,8 +206,8 @@ test('not_found explains that nothing was found', () => {
 });
 
 test('a budget stop is disclosed', () => {
-  assert.match(view(completed({}, { stopReason: 'budget' })), /上限までに確認できた範囲/);
-  assert.doesNotMatch(view(completed({}, { stopReason: 'sufficient' })), /上限までに確認できた範囲/);
+  assert.match(view(completed({}, { stopReason: 'budget' })), /時間の上限に達したため、確認できた範囲でまとめています/);
+  assert.doesNotMatch(view(completed({}, { stopReason: 'sufficient' })), /時間の上限に達したため/);
 });
 
 test('failed and cancelled turns keep the steps and show a clear message', () => {
@@ -298,7 +303,7 @@ function chatPage({ flag = 'true', snapshot, storage = {} }) {
   const cancels = [];
   const Chat = withEnv('NEXT_PUBLIC_ENABLE_SENPAI_RESEARCH', flag, () => loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
     react: {
-      ...React,
+      ...React, useCallback: (fn) => fn,
       useState(initial) {
         const index = hookIndex++;
         if (!(index in slots)) slots[index] = initial;
@@ -443,11 +448,28 @@ test('with the flag off a restored research turn is still readable but cannot be
 
 // ---- 画面の改善（聞き返し・聞き直し・コールアウト・出典カード・操作ボタン） ----
 
+// 入力欄のフォーカス管理などで使うフックは、副作用なしの代用品（React の dispatcher）で動かす。
+const HOOK_SHIM = {
+  useRef: (initial) => ({ current: initial }),
+  useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+  useEffect() {}, useLayoutEffect() {},
+  useCallback: (fn) => fn, useMemo: (fn) => fn(), useId: () => 'test-id',
+};
+
+function withHookShim(run) {
+  const internals = require('react').__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const previous = internals.H;
+  internals.H = HOOK_SHIM;
+  try { return run(); } finally { internals.H = previous; }
+}
+
 function expand(node) {
   if (Array.isArray(node)) return node.map(expand);
   if (!node || typeof node !== 'object' || !node.props) return node;
-  if (typeof node.type === 'function') {
-    try { return expand(node.type(node.props)); } catch { return node; }
+  const component = typeof node.type === 'function' ? node.type
+    : node.type?.$$typeof === Symbol.for('react.memo') && typeof node.type.type === 'function' ? node.type.type : null;
+  if (component) {
+    try { return expand(withHookShim(() => component(node.props))); } catch { return node; }
   }
   return { ...node, props: { ...node.props, children: expand(node.props.children) } };
 }
@@ -461,7 +483,7 @@ test('clarify shows the questions once, even when the markdown repeats them', ()
     kind: 'clarify', sources: NO_SOURCES, clarifyQuestions: ['機種は何ですか', '異音はいつ出ますか'],
     answerMarkdown: '次の点を教えてください。\n\n- 機種は何ですか\n- 異音はいつ出ますか',
   });
-  const page = view(research);
+  const page = view(research, { query: 'q', onResend() {} });
   assert.equal(page.match(/機種は何ですか/g).length, 1);
   assert.equal(page.match(/異音はいつ出ますか/g).length, 1);
   assert.match(page, /元の質問に補足して調べ直します/);
@@ -682,7 +704,7 @@ test('small links and buttons keep their look but get a larger invisible hit are
   const failed = view({ status: 'failed', steps: [] }, { query: 'q', onResend() {} });
   assert.match(failed, /class="[^"]*before:-inset-y-2\.5[^"]*">もう一度試す</);
   const running = view({ status: 'running', startedAt: NOW, steps: [] });
-  assert.match(running, /<summary class="flex min-h-8/);
+  assert.match(running, /<summary class="flex min-h-10/);
 });
 
 test('the action bar comes last, after the sources and the knowhow', () => {
@@ -766,7 +788,7 @@ test('field report reactions are a compact segmented control with radio semantic
   const React = require('react');
   let calls = 0;
   const { SenpaiFieldReportForm } = loadTsx('../src/components/knowledge/SenpaiFieldReportForm.tsx', {
-    react: { ...React, useState(initial) { calls += 1; return [calls === 1 ? true : typeof initial === 'function' ? initial() : initial, () => {}]; } },
+    react: { ...React, useCallback: (fn) => fn, useState(initial) { calls += 1; return [calls === 1 ? true : typeof initial === 'function' ? initial() : initial, () => {}]; } },
     '@/lib/auth-helpers': { getIdToken: async () => 'token' },
   });
   const turn = {
@@ -778,7 +800,7 @@ test('field report reactions are a compact segmented control with radio semantic
   assert.equal(out.match(/role="radiogroup"/g).length, 2);
   assert.equal(out.match(/type="radio"/g).length, 6);
   for (const label of ['当てはまった', '当てはまらなかった', '分からない']) assert.equal(out.match(new RegExp(`>${label}</label>`, 'g')).length, 2);
-  assert.match(out, /min-h-8/);
+  assert.match(out, /min-h-10/);
   assert.match(out, /name="field-report-1-KH-1001"/);
   assert.doesNotMatch(out, /この条件で当てはまった/);
 });
@@ -790,4 +812,13 @@ test('the research disclaimer is one short line, and the legacy one keeps the lo
   assert.ok('重要な判断は出典で確認してください（ノウハウは未承認）'.length <= 30);
   const legacy = html(chatPage({ flag: 'false', snapshot: { ...base, turns: [] } }).render());
   assert.match(legacy, /ローカルファイルは送信されません。重要な判断は出典で確認してください/);
+});
+
+test('warnings from a failed lane are shown as small amber lines above the answer, and nothing when absent', () => {
+  const warned = view(completed({}, { warnings: ['法令の検索に失敗したため確認できていません', '技術資料の検索に失敗したため確認できていません'] }));
+  assert.equal(warned.match(/<p role="note" class="text-xs text-amber-700">/g).length, 2);
+  assert.match(warned, /法令の検索に失敗したため確認できていません/);
+  assert.ok(warned.indexOf('法令の検索に失敗したため') < warned.indexOf('ドアの調整'), 'above the answer body');
+  assert.doesNotMatch(view(completed()), /検索に失敗したため/);
+  assert.doesNotMatch(view(completed({}, { warnings: [] })), /text-amber-700">/);
 });

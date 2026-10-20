@@ -46,7 +46,18 @@ function normalizeSavedSynthesis(value) {
   };
 }
 
+const cloneCache = new WeakMap();
+
+/** 同じ（変更されていない）ターンは同じ複製を返し、画面側が変わっていないターンを再描画しないで済むようにする。 */
 function cloneTurn(turn) {
+  const cached = cloneCache.get(turn);
+  if (cached) return cached;
+  const copy = buildClone(turn);
+  cloneCache.set(turn, copy);
+  return copy;
+}
+
+function buildClone(turn) {
   return Object.freeze({
     id: turn.id,
     ...(turn.senpaiTurnId ? { senpaiTurnId: turn.senpaiTurnId } : {}),
@@ -58,6 +69,10 @@ function cloneTurn(turn) {
     ...(turn.research ? { research: freezeCopy(turn.research) } : {}),
     ...(turn.supplement ? { supplement: turn.supplement, supplementOf: turn.supplementOf } : {}),
   });
+}
+
+function validSupplement(value) {
+  return typeof value === 'string' && value.trim() !== '' && Array.from(value).length <= MAX_QUERY_LENGTH;
 }
 
 function researchLane() {
@@ -76,8 +91,11 @@ function restoreResearchTurn(turn, id, modelType) {
   } catch {
     throw chatError('相談履歴の調査結果を確認できないため、復元できません');
   }
+  const supplement = validSupplement(turn.supplement) && validSupplement(turn.supplementOf)
+    ? { supplement: turn.supplement, supplementOf: turn.supplementOf } : {};
   return {
     id, senpaiTurnId: turn.senpaiTurnId, ...(modelType ? { modelType } : {}), query: turn.query,
+    ...supplement,
     research: { status: 'completed', steps: [], result },
     normal: researchLane(), law: researchLane(),
   };
@@ -269,15 +287,22 @@ export function createSenpaiChat({
     notify();
   }
 
+  function withoutWaiting(research) {
+    const { waiting: _waiting, ...rest } = research;
+    return rest;
+  }
+
   function applyResearchUpdate(research, update) {
     if (RESEARCH_SETTLED.has(research.status)) return research;
-    const steps = mergeResearchSteps(research.steps, update.steps);
-    const running = update.status === 'running' || steps.length > 0 || research.status === 'running';
-    return { ...research, jobId: update.jobId ?? research.jobId, steps, status: running ? 'running' : 'queued' };
+    const { waiting: _waiting, ...rest } = research;
+    const steps = mergeResearchSteps(rest.steps, update.steps);
+    const running = update.status === 'running' || steps.length > 0 || rest.status === 'running';
+    return { ...rest, jobId: update.jobId ?? rest.jobId, steps, status: running ? 'running' : 'queued' };
   }
 
   function applyResearchFinal(research, final) {
-    const done = { ...research, jobId: final.jobId ?? research.jobId, steps: mergeResearchSteps(research.steps, final.steps), endedAt: now() };
+    const { waiting: _waiting, ...rest } = research;
+    const done = { ...rest, jobId: final.jobId ?? rest.jobId, steps: mergeResearchSteps(rest.steps, final.steps), endedAt: now() };
     if (final.status === 'completed' && final.result) {
       return { ...done, status: 'completed', result: final.result, ...(final.debug ? { debug: final.debug } : {}) };
     }
@@ -306,14 +331,16 @@ export function createSenpaiChat({
         clientRequestId: createId(),
         signal: run.controller.signal,
         onUpdate: (update) => updateResearch(run, (research) => applyResearchUpdate(research, update)),
+        // 前の調査がサーバーで続いている間は、待っていることを画面に出す。
+        onWaiting: () => updateResearch(run, (research) => (research.waiting ? research : { ...research, waiting: true })),
       });
       updateResearch(run, (research) => (RESEARCH_SETTLED.has(research.status) ? research : applyResearchFinal(research, final || {})));
     } catch (error) {
       const cancelled = run.controller.signal.aborted || error?.code === 'cancelled';
       const message = error instanceof KnowledgeResearchError && !cancelled ? error.message : RESEARCH_FAILED_MESSAGE;
       updateResearch(run, (research) => (RESEARCH_SETTLED.has(research.status) ? research : cancelled
-        ? { ...research, status: 'cancelled', endedAt: now() }
-        : { ...research, status: 'failed', endedAt: now(), error: { code: 'ClientError', message } }));
+        ? { ...withoutWaiting(research), status: 'cancelled', endedAt: now() }
+        : { ...withoutWaiting(research), status: 'failed', endedAt: now(), error: { code: 'ClientError', message } }));
     }
     if (isCurrent(run)) {
       running = false;
@@ -348,9 +375,12 @@ export function createSenpaiChat({
       const previous = turns.at(-1);
       const answering = !options?.fresh && previous?.research?.status === 'completed'
         && previous.research.result?.kind === 'clarify';
+      // A retry of a supplemented turn re-sends the composed question but keeps showing it as a supplement.
+      const retryOfSupplement = options?.fresh && validSupplement(options.supplement) && validSupplement(options.supplementOf)
+        ? { supplement: options.supplement, supplementOf: options.supplementOf } : undefined;
       await sendResearch(run, answering ? composeClarifyQuestion(previous.query, normalizedQuery) : normalizedQuery,
         modelType ?? (answering ? previous.modelType : undefined),
-        answering ? { supplement: normalizedQuery, supplementOf: previous.query } : undefined);
+        answering ? { supplement: normalizedQuery, supplementOf: previous.query } : retryOfSupplement);
       return;
     }
     turns = [...turns, {
@@ -437,7 +467,7 @@ export function createSenpaiChat({
       if (turn.id !== run.turnId) return turn;
       if (turn.research) {
         return RESEARCH_SETTLED.has(turn.research.status)
-          ? turn : { ...turn, research: { ...turn.research, status: 'cancelled', endedAt: now() } };
+          ? turn : { ...turn, research: { ...withoutWaiting(turn.research), status: 'cancelled', endedAt: now() } };
       }
       const next = { ...turn };
       for (const mode of MODES) if (next[mode].status === 'loading') {

@@ -18,8 +18,8 @@ export function SenpaiCopyButton({ getText }: { getText: () => string }) {
 
   return (
     <>
-      <button type="button" onClick={copy} aria-label="回答をコピー" title="回答をコピー" className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><CopyIcon /></button>
-      <span role="status" className="text-xs text-gray-500">{state === 'copied' ? 'コピーしました' : state === 'failed' ? 'コピーできませんでした' : ''}</span>
+      <button type="button" onClick={copy} aria-label="回答をコピー" title="回答をコピー" className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><CopyIcon /></button>
+      <span role="status" className="text-xs text-gray-600">{state === 'copied' ? 'コピーしました' : state === 'failed' ? 'コピーできませんでした' : ''}</span>
     </>
   );
 }

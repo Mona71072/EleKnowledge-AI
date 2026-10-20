@@ -2,7 +2,7 @@ import type { FormEvent, RefObject, UIEvent } from 'react';
 import type { SenpaiHistoryEntry } from '@/hooks/useSenpaiHistory';
 import type { SenpaiChatSnapshot, SenpaiChatTurn as Turn } from '@/lib/knowledge-senpai-chat.mjs';
 import type { FieldReport } from '@/lib/knowledge-senpai-field-report.mjs';
-import { EXAMPLE_QUESTIONS } from '@/lib/knowledge-senpai-research-view.mjs';
+import { EXAMPLE_QUESTIONS, clarifyOriginalTruncated, clarifySupplementLimit } from '@/lib/knowledge-senpai-research-view.mjs';
 import { SenpaiChatHeader } from './SenpaiChatHeader';
 import { SenpaiChatTurn, type ResendOptions } from './SenpaiChatTurn';
 import { SenpaiComposer } from './SenpaiComposer';
@@ -36,12 +36,15 @@ export type SenpaiChatViewProps = {
   onMenuOpenChange?: (open: boolean) => void;
   reports: Readonly<Record<string, FieldReport>>;
   onReportSent: (report: FieldReport) => void;
+  /** スクリーンリーダーへ知らせる短い文（調査中・結果）。進捗の途中経過は含めない。 */
+  announcement?: string;
   transcriptRef?: RefObject<HTMLDivElement | null>;
   onTranscriptScroll?: (event: UIEvent<HTMLDivElement>) => void;
 };
 
-function reportable(turn: Turn, running: boolean, fieldReports: boolean) {
-  if (!fieldReports || running || !turn.senpaiTurnId) return false;
+/** 「結果を残す」を出してよいターンか。別の質問を実行中でも、回答済みのターンの入力途中のフォームは消さない。 */
+export function reportable(turn: Turn, fieldReports: boolean) {
+  if (!fieldReports || !turn.senpaiTurnId) return false;
   // 調査ジョブの相談は、回答が出たものだけ結果を残せる（聞き返し・見つからなかった回答は対象外）。
   if (turn.research) return turn.research.status === 'completed' && turn.research.result?.kind === 'answer';
   const lanes = [turn.normal, turn.law];
@@ -91,13 +94,20 @@ export function SenpaiChatView({ snapshot, history, flags, transcriptRef, onTran
     ? '重要な判断は出典で確認してください（ノウハウは未承認）'
     : 'ローカルファイルは送信されません。重要な判断は出典で確認してください';
   const answeringClarify = latestTurn?.research?.status === 'completed' && latestTurn.research.result?.kind === 'clarify';
+  // 聞き返しへの補足は、元の質問の先頭を残すぶん入力できる文字数が小さくなる。残りと、省略される場合の注意を出す。
+  const clarifyOriginal = answeringClarify ? latestTurn.query : undefined;
+  const supplementLimit = clarifyOriginal === undefined ? undefined : clarifySupplementLimit(clarifyOriginal);
+  const supplementLength = Array.from(props.question).length;
+  const limitHint = supplementLimit === undefined ? undefined : `補足はあと${Math.max(0, supplementLimit - supplementLength).toLocaleString('ja-JP')}文字まで入力できます`;
+  const limitWarning = clarifyOriginal !== undefined && clarifyOriginalTruncated(clarifyOriginal, props.question)
+    ? '元の質問が長いため、検索では元の質問の後半が省略されます。' : undefined;
   const placeholder = answeringClarify ? '補足を入力（例: AXIEZ、走行中に発生）' : '質問を入力';
 
   return (
     <section aria-label="先輩チャット" className="flex h-dvh min-h-[24rem] flex-col overflow-hidden bg-white text-gray-900">
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <SenpaiConversationSidebar open={props.sidebarOpen} entries={history.entries} selectedId={snapshot.conversationId} loading={history.loading} error={history.error} complete={history.complete} onNew={props.onNewChat} onSelect={props.onSelectConversation} onClose={props.onCloseSidebar} onRetry={history.onRetry} />
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main inert={props.sidebarOpen} className="flex min-w-0 flex-1 flex-col">
           <SenpaiChatHeader
             sidebarOpen={props.sidebarOpen} onOpenSidebar={props.onOpenSidebar} onNewChat={props.onNewChat}
             newChatDisabled={snapshot.turns.length === 0 && !snapshot.running && !history.opening}
@@ -106,7 +116,7 @@ export function SenpaiChatView({ snapshot, history, flags, transcriptRef, onTran
           />
           {history.openError && <p role="alert" className="px-4 py-2 text-center text-sm text-red-700">{history.openError}</p>}
           {history.opening && <p role="status" className="px-4 py-2 text-center text-sm text-gray-500">相談履歴を開いています…</p>}
-          <div ref={transcriptRef} onScroll={onTranscriptScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6" aria-live="polite" aria-relevant="additions text">
+          <div ref={transcriptRef} onScroll={onTranscriptScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
             <div className="mx-auto max-w-3xl space-y-10">
               {snapshot.turns.length === 0
                 ? <EmptyState research={flags.research} onPick={props.onQuestionChange} />
@@ -115,7 +125,7 @@ export function SenpaiChatView({ snapshot, history, flags, transcriptRef, onTran
                     key={`${snapshot.conversationId ?? 'new'}-${turn.id}`} turn={turn} running={snapshot.running}
                     conversationId={snapshot.conversationId} report={turn.senpaiTurnId ? props.reports[turn.senpaiTurnId] : undefined}
                     onReportSent={props.onReportSent} developerView={flags.research && props.developerView}
-                    canReport={reportable(turn, snapshot.running, flags.fieldReports)} synthesisEnabled={flags.synthesis}
+                    canReport={reportable(turn, flags.fieldReports)} synthesisEnabled={flags.synthesis}
                     onSynthesize={props.onSynthesize}
                     onResend={turn.research && turn === latestTurn && !snapshot.running ? props.onResend : undefined}
                   />
@@ -127,9 +137,12 @@ export function SenpaiChatView({ snapshot, history, flags, transcriptRef, onTran
               )}
             </div>
           </div>
+          {/* 画面の変化のうち、開始と結果だけを1回ずつ読み上げる。途中の手順や経過秒数は通知しない。 */}
+          <p role="status" aria-live="polite" className="sr-only">{props.announcement ?? ''}</p>
           <SenpaiComposer
             question={props.question} onQuestionChange={props.onQuestionChange} modelType={props.modelType} onModelChange={props.onModelChange}
             disabled={disabled} running={snapshot.running} sendError={props.sendError} disclaimer={disclaimer} placeholder={placeholder}
+            maxLength={supplementLimit} hint={limitHint} warning={limitWarning}
             onSubmit={props.onSubmit} onCancel={props.onCancel}
           />
         </main>
