@@ -134,4 +134,4 @@ TDDで認証・送信項目・モード分離・不正入力・不正応答・�
 
 実環境の確認記録: **未実施**。担当者照合まとめのローカル評価: **合成ケースで実施**。実資料の適用条件・食い違いに対する評価: **未実施**。二つのAI回答と担当者の比較メモを組み合わせる実装であり、単一の統合AI回答ではない。
 
-関連: [ノウハウ編集画面](knowledge-review-workbench.md)、[法令API](../../api/legal-chat.md)、[カードとPDF KB](card-kb-two-tier-retrieval.md)。
+関連: [ノウハウ編集画面](knowledge-review-workbench.md)、[法令API](../../api/legal-chat.md)、[Markdown自動探索の実装契約](knowledge-markdown-retrieval.md)。

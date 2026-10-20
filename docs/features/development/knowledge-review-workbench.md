@@ -82,11 +82,12 @@ OneNoteへの自動追記・API書込は作らない。追加済みは担当者�
 
 既存のフロントエンド設定に`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH=true`を加えて起動し、既存の管理画面の「ノウハウ確認」から開く。`NEXT_PUBLIC_`設定はビルド時に固定されるため、配信済みの静的成果物を変更する場合は再ビルドが必要。既定は無効であり、今回はデプロイしていない。担当者に広く提供する段階では、admin権限の追加で代用せず、担当者用の認可・版保存を設計する。
 
-作業ブランチは指定の資料ブランチから分け、元資料ブランチは変更していない。この作業ブランチは資料の取り込み履歴も含むため、実装PRを作る段階では最新developへアプリ変更だけを移し、業務資料全量を意図せず配信・共有する差分にしない。
+最初の作業ブランチは指定の資料ブランチから分け、元資料ブランチは変更していない。2026-10-20、`mona`への反映用に最新developへアプリ変更だけを移した。業務資料・写し棚・資料処理スクリプトの取り込み履歴は実装ブランチに含めない。資料側の棚卸し結果と、実装ブランチでのテスト結果は区別する。
 
 ## 関連
 
-- [Markdown基盤の契約](./knowledge-markdown-foundation.md)
-- [承認カードとPDF KBの二段検索](./card-kb-two-tier-retrieval.md)
-- [カード契約](../../../knowledge/CONTRACT.md)
+- [ノウハウMarkdown自動探索の実装契約](./knowledge-markdown-retrieval.md)
+- [技術KB・法令KBとの照合画面](./knowledge-research-workspace.md)
 - [構想と管理者への読取相談](../../concept-2026-10-19-kougi-senpai-knowledge-cycle.md)
+
+知識地図、カード契約、Markdown基盤と二段検索の検討文書は、資料ブランチ`feature/knowledge-reconcile-prep`側で参照する。

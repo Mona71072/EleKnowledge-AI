@@ -50,7 +50,7 @@ docs/ops-ai-driven-dev.md    AIを用いた開発の共同運用
 
 > 最終検証: 2026-10-20 — 初期実装範囲の文書を追加。公開・実データ送信・KBへの索引化は対象外。
 
-[担当者ワークスペースの実装範囲](features/development/knowledge-review-workbench.md)を参照する。元Markdownを選んで確認・編集し、OneNote追記案の確認・コピーと手動追加の記録を試す。構想と管理者への読取連携相談は[工技先輩の構想](concept-2026-10-19-kougi-senpai-knowledge-cycle.md)、既存カードとKBの関係は[二段検索の設計](features/development/card-kb-two-tier-retrieval.md)に分けている。
+[担当者ワークスペースの実装範囲](features/development/knowledge-review-workbench.md)を参照する。元Markdownを選んで確認・編集し、OneNote追記案の確認・コピーと手動追加の記録を試す。構想と管理者への読取連携相談は[工技先輩の構想](concept-2026-10-19-kougi-senpai-knowledge-cycle.md)へ。知識データとその管理文書は資料ブランチ`feature/knowledge-reconcile-prep`に保持し、実装ブランチとは分ける。
 
 技術KB・法令KBを調べながら編集する開発版は[工技先輩の照合画面](features/development/knowledge-research-workspace.md)へ。実検索の接続確認と、ローカルHTTPテストダブルによる画面検証を区別して記録する。
 
