@@ -141,6 +141,41 @@ test('posts only the explicit query, mode, and empty filters with the Cognito ID
   assert.equal(answer.sourceDocuments[0].sourceUri, 's3://technical-kb/docs/install.pdf');
 });
 
+test('sends paired Senpai history UUIDs only when supplied and requires the response to echo them', async () => {
+  const conversationId = '10000000-0000-4000-8000-000000000001';
+  const turnId = '20000000-0000-4000-8000-000000000001';
+  let body;
+  const payload = { ...normalPayload(), senpaiConversationId: conversationId, senpaiTurnId: turnId };
+  const answer = await queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '先輩相談',
+    senpaiConversationId: conversationId, senpaiTurnId: turnId,
+    fetchImpl: fetchOk(payload, (_url, init) => { body = JSON.parse(init.body); }),
+  });
+  assert.equal(body.senpaiConversationId, conversationId);
+  assert.equal(body.senpaiTurnId, turnId);
+  assert.equal(answer.senpaiConversationId, conversationId);
+  assert.equal(answer.senpaiTurnId, turnId);
+  assert.deepEqual(JSON.parse(JSON.stringify({ query: 'ordinary', mode: 'normal', filters: {} })), {
+    query: 'ordinary', mode: 'normal', filters: {},
+  });
+  for (const overrides of [
+    { senpaiConversationId: conversationId },
+    { senpaiTurnId: turnId },
+    { senpaiConversationId: 'bad', senpaiTurnId: turnId },
+    { senpaiConversationId: conversationId, senpaiTurnId: 'bad' },
+  ]) {
+    await assert.rejects(queryKnowledgeSource({
+      baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: 'invalid', ...overrides,
+      fetchImpl: fetchOk(payload),
+    }), (error) => error.code === 'validation');
+  }
+  await assert.rejects(queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '先輩相談',
+    senpaiConversationId: conversationId, senpaiTurnId: turnId,
+    fetchImpl: fetchOk(normalPayload()),
+  }), (error) => error.code === 'invalid_response');
+});
+
 test('preserves ordinary request bodies and opts into server-indexed Markdown only when explicitly requested', async () => {
   const bodies = [];
   await queryKnowledgeSource({
