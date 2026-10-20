@@ -40,8 +40,11 @@ MODEL_SCOPE_KEYS = frozenset({
     "control_methods", "door_families", "door_types", "excludes",
     "guide_systems", "lists_model_label", "machine_room", "may_apply_to",
     "model_abbreviations", "observed_on", "product_lines", "scope_note",
-    "conditions",
+    "conditions", "scope_status", "scope_verified_by", "scope_verified_at",
 })
+SCOPE_VERIFICATION_KEYS = frozenset({"scope_status", "scope_verified_by", "scope_verified_at"})
+SCOPE_STATUSES = frozenset({"verified", "unverified"})
+SCOPE_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # Only fields stating where a card DOES apply may influence ranking; excludes,
 # may_apply_to and scope_note describe exclusions or unconfirmed scope.
 POSITIVE_SCOPE_KEYS = (
@@ -135,6 +138,22 @@ def _validate_model_scope(model_scope: Any) -> None:
             raise KnowhowIndexError("modelScope value count is invalid")
         if any(not _safe_text(item, 200) for item in values):
             raise KnowhowIndexError("modelScope value is invalid")
+    _validate_scope_verification(model_scope)
+
+
+def _validate_scope_verification(model_scope: dict) -> None:
+    """Reject malformed verification marks; ``verified`` needs a reviewer and a date."""
+    for key in SCOPE_VERIFICATION_KEYS & set(model_scope):
+        if not isinstance(model_scope[key], str):
+            raise KnowhowIndexError("modelScope verification fields must be strings")
+    status = model_scope.get("scope_status", "unverified")
+    if status not in SCOPE_STATUSES:
+        raise KnowhowIndexError("modelScope scope_status is invalid")
+    if status == "verified":
+        if not model_scope.get("scope_verified_by", "").strip():
+            raise KnowhowIndexError("verified modelScope requires scope_verified_by")
+        if not SCOPE_DATE_PATTERN.match(model_scope.get("scope_verified_at", "")):
+            raise KnowhowIndexError("verified modelScope requires scope_verified_at as YYYY-MM-DD")
 
 
 def validate_index(index: Any) -> dict:
@@ -322,11 +341,15 @@ def _classify_model_value(value: str, model_type: str) -> str:
 
 
 def _conflicts_with_model(card: dict, model_type: str) -> bool:
-    """True when the card's recognized product scope names only other products.
+    """True when a person-verified card's recognized product scope names only other products.
 
-    Unrecognized values (control codes, sub-attributes) are ignored; a card with
-    no recognized product value, or any matched/general one, is never dropped.
+    Only cards with ``scope_status == "verified"`` can be dropped: list model labels
+    are unreliable, so unverified scope never excludes a card. Unrecognized values
+    (control codes, sub-attributes) are ignored; a card with no recognized product
+    value, or any matched/general one, is never dropped.
     """
+    if card["modelScope"].get("scope_status") != "verified":
+        return False
     kinds = {
         _classify_model_value(value, model_type)
         for value in _scope_values(card, MODEL_CLASSIFY_KEYS)
@@ -337,8 +360,9 @@ def _conflicts_with_model(card: dict, model_type: str) -> bool:
 def search_index(index: dict, query: str, model_type: str | None = None) -> dict:
     """Return up to three whole relevant cards under one combined body-size budget.
 
-    ``model_type`` (a UI model key) drops cards whose recognized product scope names
-    only other products; unknown keys and unrecognized codes never filter.
+    ``model_type`` (a UI model key) drops only person-verified cards
+    (``scope_status == "verified"``) whose recognized product scope names only other
+    products; unverified cards, unknown keys and unrecognized codes never filter.
     """
     index = validate_index(index)
     if not isinstance(query, str) or len(query) > 12000:

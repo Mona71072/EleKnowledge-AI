@@ -267,13 +267,20 @@ def test_index_bucket_must_be_separate_from_ordinary_document_buckets(rag_app, m
     assert response["statusCode"] == 503
 
 
-def _two_product_index():
+VERIFIED_SCOPE = {
+    "scope_status": "verified",
+    "scope_verified_by": "reviewer",
+    "scope_verified_at": "2026-10-20",
+}
+
+
+def _two_product_index(other_scope=None):
     index = _index()
     other = dict(index["cards"][0])
     other.update(
         knowledgeId="KH-SYN-ESC",
         sourceRefs=[{"ref_type": "kb_document", "document_number": "E-1-ESC", "kb_filename": "ESC-1.pdf"}],
-        modelScope={"product_lines": ["escalator"]},
+        modelScope={"product_lines": ["escalator"], **(VERIFIED_SCOPE if other_scope is None else other_scope)},
     )
     return {**index, "cards": [index["cards"][0], other]}
 
@@ -296,6 +303,19 @@ def test_model_type_filter_excludes_cards_scoped_only_to_another_product(rag_app
     assert _matched_ids(filtered) == ["KH-SYN-001"]
     assert "E-1-ESC" not in captured["search_query"]
     assert "ESC-1.pdf" not in captured["search_query"]
+
+
+def test_model_type_filter_keeps_unverified_cards(rag_app, monkeypatch):
+    _configure_successful_pipeline(rag_app, monkeypatch)
+    monkeypatch.setattr(
+        rag_app, "load_index", lambda **_kwargs: _two_product_index({"product_lines": ["escalator"]})
+    )
+
+    response = rag_app.handle_rag_request(
+        _event({"query": "かごの走行中振動", "includeKnowhow": True, "filters": {"modelType": "AXIEZ"}}), None, 0
+    )
+
+    assert sorted(_matched_ids(response)) == ["KH-SYN-001", "KH-SYN-ESC"]
 
 
 def test_knowhow_model_vocabulary_covers_every_ui_model_filter(rag_app):

@@ -4,3 +4,4 @@ moto[dynamodb]>=5.0
 PyJWT[crypto]>=2.8
 -r ../../lambda/rag/rag-function/requirements.txt
 cryptography>=41.0
+PyYAML>=6.0

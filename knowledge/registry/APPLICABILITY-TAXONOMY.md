@@ -149,6 +149,22 @@ OneNote の LV5K CLT 注意（**L型ドア**で駆動装置が桁上、など）
 
 ---
 
+## 5b. 適用範囲の訂正と検証（Senpai 機種フィルタ）
+
+Senpai の機種フィルタは `scope_status: verified` のカードだけを除外する（定義は [CONTRACT.md](../CONTRACT.md)）。Lists の機種欄は誤りがあり得るため、**確認前のカードは機種を選んでも除外されない**。
+
+訂正の手順:
+
+1. Lists / OneNote / KB の原文で、そのカードが実際にどの機種に当てはまるかを確認する。
+2. `model_scope` を実態に合わせる。
+   - 例: **VFGH と書かれているが全エレベーターに当てはまる** → `lists_model_label: ["全エレ機種"]` にし、特定機種だけの `product_lines` / `model_abbreviations` は外す（原文の表記は `scope_note` に残す）。
+   - 例: 特定機種だけに当てはまる → `product_lines` にその機種名（AXIEZ / Nexcube / AXIEZ-LINKs / メルシティ / メルワイド / escalator）を入れ、`may_apply_to` / `scope_note` が広い表現なら直す。
+   - 制御方式（VFGH 等）や機種略称だけでは機種フィルタの判定に使われない。機種名（`product_lines`）か `全エレ機種` / `全エス機種` を書く。
+3. 確認したら `scope_status: verified` / `scope_verified_by: <名前>` / `scope_verified_at: YYYY-MM-DD` を足す。
+4. 確認待ちの一覧は `python scripts/knowledge/build_scope_review_queue.py` が [queues/scope-review/QUEUE.md](../queues/scope-review/QUEUE.md) に生成する（矛盾の疑い P1 を最優先）。
+
+---
+
 ## 6. 関連 registry
 
 | 用途 | ファイル |

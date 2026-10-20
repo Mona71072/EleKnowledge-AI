@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "purpose": "senpai-knowhow-retrieval-eval-draft",
   "status": "draft",
-  "notes": "たたき台。質問文は実カードの内容から人が言い換えて作成した。knowledgeId は knowledge/cards の knowledge_id と一致させている。mustInclude / mustNotInclude は検索層（search_index）の判定だけを対象とし、回答の正しさ（矛盾の扱い・古い情報の扱い・KB への誘導）は rationale に書いた観点で人が回答を読んで確認する。索引（.private-knowhow/index.json）は承認済みの選定カードだけを含むため、索引に含まれないカードは FAIL になりうる。モデル絞り込み（modelType）の仕様は検索関数の実装に合わせて後で調整する。",
+  "notes": "たたき台。質問文は実カードの内容から人が言い換えて作成した。knowledgeId は knowledge/cards の knowledge_id と一致させている。mustInclude / mustNotInclude は検索層（search_index）の判定だけを対象とし、回答の正しさ（矛盾の扱い・古い情報の扱い・KB への誘導）は rationale に書いた観点で人が回答を読んで確認する。索引（.private-knowhow/index.json）は承認済みの選定カードだけを含むため、索引に含まれないカードは FAIL になりうる。モデル絞り込み（modelType）は 2026-10-20 方針により、scope_status: verified のカードだけを除外する（実カードは検証が進むまで除外されない）。",
   "cases": [
     {
       "id": "SE-001",
@@ -232,11 +232,11 @@
       "query": "3 台群管理で 2C-2BC の状態になってしまいます。工事中の影響でしょうか。",
       "modelType": "AXIEZ-LINKs",
       "expect": {
-        "mustInclude": [],
-        "mustNotInclude": ["KH-CM-MA-3CAR-GROUP-2C2BC-384"],
-        "status": "any"
+        "mustInclude": ["KH-CM-MA-3CAR-GROUP-2C2BC-384"],
+        "mustNotInclude": [],
+        "status": "matched"
       },
-      "rationale": "AXIEZ-LINKs 指定で Nexcube 専用の CM-MA カードが出ないかを見る。"
+      "rationale": "2026-10-20 方針: 適用範囲を人が検証した（scope_status: verified）カードだけが機種フィルタで除外される。実カードは未検証のため、AXIEZ-LINKs 指定でも Nexcube 表記の CM-MA カードは除外されず返る。検証済みカードの除外動作は tests/unit/test_knowhow_retrieval.py（合成カード）で確認する。"
     },
     {
       "id": "SE-022",
@@ -244,11 +244,11 @@
       "query": "MBS-800 の受光器が緑に点滅していて、戸が強制的に閉まります。",
       "modelType": "NEXCUBE",
       "expect": {
-        "mustInclude": [],
-        "mustNotInclude": ["KH-LINKS-MBS-800-RECEIVER-4"],
-        "status": "any"
+        "mustInclude": ["KH-LINKS-MBS-800-RECEIVER-4"],
+        "mustNotInclude": [],
+        "status": "matched"
       },
-      "rationale": "AXIEZ-LINKs 専用のカードが NEXCUBE 指定で出ないかを見る。"
+      "rationale": "2026-10-20 方針: 未検証カードは機種フィルタで除外されない。AXIEZ-LINKs 表記のカードが NEXCUBE 指定でも返ることを見る（検証済みなら除外される動作は合成カードの単体テストで確認）。"
     },
     {
       "id": "SE-023",

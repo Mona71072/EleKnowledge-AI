@@ -52,6 +52,25 @@ knowhow: {
 
 これはclarify、not_found、pagesの各応答で同じ契約とする。該当カードが0件なら「該当なし」とKB検索のみの状態を表示する。索引が利用不可であることとカードが見つからないことを混同しない。
 
+## 先輩の検索ルールと機種フィルタ（2026-10-20 方針）
+
+> 最終検証: 2026-10-20 — 合成カードの単体テスト（検索・索引検証・キュー生成）、合成索引での評価ケース実行、実カード398枚でのキュー生成。AWS上の動作は未確認。
+
+Lists の機種欄は信頼できない（例: VFGH と書かれたカードが実際は全エレベーターに当てはまる）ため、機種で自動的にカードを落とさない。製品判断は「**適用範囲を人が確認したカードだけを機種フィルタで除外する**」とする。
+
+- **順位付け**: `excludes` / `may_apply_to` / `scope_note` は点数に使わない。点数に効くのは `control_methods` / `door_families` / `door_types` / `guide_systems` / `lists_model_label` / `machine_room` / `model_abbreviations` / `observed_on` / `product_lines` / `conditions` とタイトル・検索語・本文だけ。検証用の3キー（`scope_status` / `scope_verified_by` / `scope_verified_at`）は点数にも検索語にも入れない。
+- **機種フィルタ（画面の「機種（任意）」）**: 未選択なら何も除外しない。選択時は、`scope_status: verified` のカードのうち、`product_lines` / `model_abbreviations` / `lists_model_label` / `observed_on` で認識できる機種が**選んだ機種以外だけ**のものを除外する。`未検証`（省略を含む）のカード、認識できる機種が1つもないカード、選んだ機種・汎用ラベル（全エレ機種 等）を含むカードは除外しない。
+- **制御コード**: VFGH・CM-MA などの未知のコードは判定に使わない。
+- **検証済みの付け方**: `model_scope` に `scope_status: verified` / `scope_verified_by` / `scope_verified_at`（YYYY-MM-DD）を書く。`verified` で確認者・確認日が欠ける、または形式が不正だと、取込ツールとLambdaの索引検証のどちらも失敗する。定義は [knowledge/CONTRACT.md](../../../knowledge/CONTRACT.md)、訂正の仕方は [APPLICABILITY-TAXONOMY.md](../../../knowledge/registry/APPLICABILITY-TAXONOMY.md) の「適用範囲の訂正と検証」。
+- **確認キュー**: `python scripts/knowledge/build_scope_review_queue.py` が [knowledge/queues/scope-review/QUEUE.md](../../../knowledge/queues/scope-review/QUEUE.md) を生成する。P1 矛盾の疑い（機種名があるのに適用範囲が広い）、P2 機種名あり・未検証、P3 制御方式・略称のみ（機種フィルタ対象外。全機種対応なら全エレ機種へ）、P4 汎用ラベル／空。件数は `QUEUE.md` の「件数」表を正とする（この文書に手で写さない。CI が `QUEUE.md` の鮮度を検査する）。
+- **評価ケース**: `tests/fixtures/knowledge/senpai-eval-cases.json`。実カードは未検証のため SE-021・SE-022 は「除外されず返ること」を確認する。検証済みカードが除外される動作は `tests/unit/test_knowhow_retrieval.py` の合成カードで確認する。実行は次のとおり（結果の表示のみ、終了コードは常に0）。
+
+```sh
+python scripts/knowledge/eval_senpai_retrieval.py --index .private-knowhow/index.json
+# 実カードから一時索引を作って評価し、終了時に削除する（取込一覧は不要）
+python scripts/knowledge/eval_senpai_retrieval.py --from-cards .
+```
+
 ## 画面と記録
 
 - 通常側の返答に「参照したノウハウMarkdown」を表示し、タイトル・安定ID・版・ハッシュ・元の状態を確認できる。折り畳み内の本文は文字表示とし、画像・生HTML・外部埋込を実行しない。適用範囲・除外条件・元情報の識別子も確認できる。

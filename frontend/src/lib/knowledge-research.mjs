@@ -17,6 +17,7 @@ const KNOWHOW_SCOPE_FIELDS = new Set([
   'control_methods', 'door_families', 'door_types', 'excludes', 'guide_systems',
   'lists_model_label', 'machine_room', 'may_apply_to', 'model_abbreviations',
   'observed_on', 'product_lines', 'scope_note', 'conditions',
+  'scope_status', 'scope_verified_by', 'scope_verified_at',
 ]);
 const RESPONSE_FIELDS = [
   'documentName',

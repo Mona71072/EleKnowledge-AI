@@ -206,3 +206,50 @@ test('path-like, backslash, parent-segment, absolute, and URL values are still r
     await assert.rejects(buildKnowhowIndex({ root, manifest: manifest([entry]) }), undefined, markdown);
   }
 });
+
+const scopedCard = (lines) => card().replace('model_scope:\n', `model_scope:\n  product_lines:\n    - AXIEZ\n${lines.map((line) => `  ${line}\n`).join('')}`);
+
+async function buildScoped(t, lines) {
+  const { root, allowed } = await fixture(t);
+  const markdown = scopedCard(lines);
+  await writeFile(path.join(allowed, 'one.md'), markdown);
+  const entry = await selectedEntry(root, 'knowledge/cards/practice-guides/one.md', markdown);
+  return buildKnowhowIndex({ root, manifest: manifest([entry]) });
+}
+
+test('scope verification marks are kept as scalars in modelScope but never become search terms', async (t) => {
+  const index = await buildScoped(t, ['scope_status: verified', 'scope_verified_by: reviewer-a', 'scope_verified_at: 2026-10-20']);
+  const [built] = index.cards;
+  assert.equal(built.modelScope.scope_status, 'verified');
+  assert.equal(built.modelScope.scope_verified_by, 'reviewer-a');
+  assert.equal(built.modelScope.scope_verified_at, '2026-10-20');
+  for (const term of ['verified', 'reviewer-a', '2026-10-20']) assert.equal(built.searchTerms.includes(term), false);
+});
+
+test('an unverified or unmarked scope builds without verification fields being required', async (t) => {
+  const marked = await buildScoped(t, ['scope_status: unverified']);
+  assert.equal(marked.cards[0].modelScope.scope_status, 'unverified');
+  const unmarked = await buildScoped(t, []);
+  assert.equal('scope_status' in unmarked.cards[0].modelScope, false);
+});
+
+test('verified scope without reviewer and date, or with malformed marks, fails the build', async (t) => {
+  const rejected = [
+    ['scope_status: verified'],
+    ['scope_status: verified', 'scope_verified_by: reviewer-a'],
+    ['scope_status: verified', 'scope_verified_at: 2026-10-20'],
+    ['scope_status: verified', 'scope_verified_by: reviewer-a', 'scope_verified_at: 20261020'],
+    ['scope_status: verified', 'scope_verified_by: reviewer-a', 'scope_verified_at: 2026-13-45'],
+    ['scope_status: maybe'],
+    ['scope_verified_by: reviewer-a', 'scope_status:', '  - verified'],
+  ];
+  for (const lines of rejected) await assert.rejects(buildScoped(t, lines), undefined, lines.join(' / '));
+});
+
+test('excluded, unconfirmed and note scope values never become search terms', async (t) => {
+  const index = await buildScoped(t, ['scope_note: other products only']);
+  const [built] = index.cards;
+  assert.equal(built.searchTerms.includes('AXIEZ'), true);
+  for (const term of ['real cases', 'synthetic only', 'other products only']) assert.equal(built.searchTerms.includes(term), false);
+  assert.deepEqual(built.modelScope.excludes, ['real cases']);
+});

@@ -33,8 +33,18 @@ const SOURCE_REF_FREE_TEXT_KEYS = new Set(['law_title', 'locator']);
 const MODEL_SCOPE_KEYS = new Set([
   'conditions', 'control_methods', 'door_families', 'door_types', 'excludes', 'guide_systems',
   'lists_model_label', 'machine_room', 'may_apply_to', 'model_abbreviations', 'observed_on',
-  'product_lines', 'scope_note',
+  'product_lines', 'scope_note', 'scope_status', 'scope_verified_by', 'scope_verified_at',
 ]);
+// Only scope fields stating where a card DOES apply become search terms (mirrors
+// POSITIVE_SCOPE_KEYS in knowhow_retrieval.py); excludes / may_apply_to / scope_note never do.
+const POSITIVE_SCOPE_KEYS = new Set([
+  'conditions', 'control_methods', 'door_families', 'door_types', 'guide_systems',
+  'lists_model_label', 'machine_room', 'model_abbreviations', 'observed_on', 'product_lines',
+]);
+// Verification marks decide only the Senpai model filter; they are not scoring input or search terms.
+const SCOPE_VERIFICATION_KEYS = new Set(['scope_status', 'scope_verified_by', 'scope_verified_at']);
+const SCOPE_STATUSES = new Set(['verified', 'unverified']);
+const SCOPE_DATE = /^\d{4}-\d{2}-\d{2}$/u;
 
 function fail(message) {
   throw new TypeError(message);
@@ -226,7 +236,22 @@ function modelScope(metadata) {
       output[key] = value.map((item) => safeScalar(item, 'Model scope value', { allowSlash: true }));
     } else fail('Model scope values must be strings or bounded string arrays.');
   }
+  validateScopeVerification(output);
   return output;
+}
+
+function validateScopeVerification(scope) {
+  for (const key of SCOPE_VERIFICATION_KEYS) {
+    if (key in scope && typeof scope[key] !== 'string') fail('Scope verification fields must be strings.');
+  }
+  const status = scope.scope_status ?? 'unverified';
+  if (!SCOPE_STATUSES.has(status)) fail('scope_status must be "verified" or "unverified".');
+  if (status !== 'verified') return;
+  if (!scope.scope_verified_by?.trim()) fail('A verified scope requires scope_verified_by.');
+  const at = scope.scope_verified_at ?? '';
+  if (!SCOPE_DATE.test(at) || new Date(`${at}T00:00:00Z`).toISOString().slice(0, 10) !== at) {
+    fail('A verified scope requires scope_verified_at as a valid YYYY-MM-DD date.');
+  }
 }
 
 function searchTerms(parsed, scope) {
@@ -236,7 +261,10 @@ function searchTerms(parsed, scope) {
     if (typeof value === 'string') candidates.push(value);
     else if (Array.isArray(value)) candidates.push(...value);
   }
-  for (const value of Object.values(scope)) candidates.push(...(Array.isArray(value) ? value : [value]));
+  for (const [key, value] of Object.entries(scope)) {
+    if (!POSITIVE_SCOPE_KEYS.has(key)) continue;
+    candidates.push(...(Array.isArray(value) ? value : [value]));
+  }
   const terms = [];
   const seen = new Set();
   for (const item of candidates) {

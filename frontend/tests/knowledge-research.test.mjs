@@ -104,6 +104,22 @@ test('accepts canonical empty scope arrays from the private Markdown index', asy
   assert.deepEqual(answer.knowhow.matches[0].modelScope.excludes, []);
 });
 
+test('accepts scope verification marks returned from the private Markdown index', async () => {
+  const knowhow = knowhowWithVerifiedScope();
+  const answer = await queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '合成された検索', includeKnowhow: true,
+    fetchImpl: fetchOk(normalPayloadWithKnowhow(knowhow)),
+  });
+  assert.equal(answer.knowhow.matches[0].modelScope.scope_status, 'verified');
+  assert.equal(answer.knowhow.matches[0].modelScope.scope_verified_at, '2026-10-20');
+});
+
+function knowhowWithVerifiedScope() {
+  const knowhow = knowhowPayload();
+  knowhow.matches[0].modelScope = { product_lines: ['AXIEZ'], scope_status: 'verified', scope_verified_by: 'reviewer', scope_verified_at: '2026-10-20' };
+  return knowhow;
+}
+
 function fetchOk(payload, onRequest = () => {}) {
   return async (url, init) => {
     onRequest(url, init);

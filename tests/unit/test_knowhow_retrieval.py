@@ -271,6 +271,17 @@ def _scoped(knowledge_id, **scope):
     return _card(knowledgeId=knowledge_id, modelScope=scope)
 
 
+VERIFIED = {
+    "scope_status": "verified",
+    "scope_verified_by": "reviewer",
+    "scope_verified_at": "2026-10-20",
+}
+
+
+def _verified(knowledge_id, **scope):
+    return _scoped(knowledge_id, **{**scope, **VERIFIED})
+
+
 def _ids(result):
     return [card["knowledgeId"] for card in result["matches"]]
 
@@ -290,9 +301,9 @@ def test_no_model_type_keeps_every_card():
 def test_model_filter_drops_only_cards_scoped_exclusively_to_other_products():
     module = _module()
     index = _index(
-        _scoped("KH-1", product_lines=["escalator"]),
-        _scoped("KH-2", product_lines=["Nexcube"]),
-        _scoped("KH-3", product_lines=["AXIEZ"]),
+        _verified("KH-1", product_lines=["escalator"]),
+        _verified("KH-2", product_lines=["Nexcube"]),
+        _verified("KH-3", product_lines=["AXIEZ"]),
     )
 
     assert _ids(module.search_index(index, QUERY, model_type="AXIEZ")) == ["KH-3"]
@@ -303,9 +314,9 @@ def test_model_filter_drops_only_cards_scoped_exclusively_to_other_products():
 def test_model_filter_matches_case_insensitive_and_alias_values():
     module = _module()
     index = _index(
-        _scoped("KH-1", lists_model_label=["AXIEZ-LINKS"]),
-        _scoped("KH-2", observed_on=["駅舎エレ"]),
-        _scoped("KH-3", product_lines=["escalator"]),
+        _verified("KH-1", lists_model_label=["AXIEZ-LINKS"]),
+        _verified("KH-2", observed_on=["駅舎エレ"]),
+        _verified("KH-3", product_lines=["escalator"]),
     )
 
     assert _ids(module.search_index(index, QUERY, model_type="AXIEZ-LINKs")) == ["KH-1"]
@@ -323,7 +334,7 @@ def test_model_filter_matches_case_insensitive_and_alias_values():
 def test_model_filter_keeps_ambiguous_general_and_unscoped_cards(scope):
     module = _module()
 
-    result = module.search_index(_index(_scoped("KH-A", **scope)), QUERY, model_type="AXIEZ")
+    result = module.search_index(_index(_verified("KH-A", **scope)), QUERY, model_type="AXIEZ")
 
     assert _ids(result) == ["KH-A"]
 
@@ -331,11 +342,11 @@ def test_model_filter_keeps_ambiguous_general_and_unscoped_cards(scope):
 def test_unrecognized_codes_do_not_save_a_card_scoped_to_another_product():
     module = _module()
     index = _index(
-        _scoped(
+        _verified(
             "KH-384", product_lines=["Nexcube"], lists_model_label=["CM-MA"],
             observed_on=["CM-MA"], model_abbreviations=["CM-MA"],
         ),
-        _scoped("KH-ESC", product_lines=["escalator", "VFGLF"]),
+        _verified("KH-ESC", product_lines=["escalator", "VFGLF"]),
     )
 
     assert _ids(module.search_index(index, QUERY, model_type="AXIEZ-LINKs")) == []
@@ -346,8 +357,8 @@ def test_unrecognized_codes_do_not_save_a_card_scoped_to_another_product():
 def test_generic_labels_conflict_only_with_the_other_vehicle_family():
     module = _module()
     index = _index(
-        _scoped("KH-ELE", lists_model_label=["全エレ機種"]),
-        _scoped("KH-ESC", lists_model_label=["全エス機種"]),
+        _verified("KH-ELE", lists_model_label=["全エレ機種"]),
+        _verified("KH-ESC", lists_model_label=["全エス機種"]),
     )
 
     assert _ids(module.search_index(index, QUERY, model_type="メルシティ")) == ["KH-ELE"]
@@ -367,3 +378,52 @@ def test_model_vocabulary_keys_are_the_ui_keys():
     assert set(module.MODEL_ALIASES) == {
         "AXIEZ", "AXIEZ-LINKs", "NEXCUBE", "メルシティ", "メルワイド", "エスカレーター",
     }
+
+
+def test_unverified_cards_are_never_dropped_by_the_model_filter():
+    module = _module()
+    index = _index(
+        _scoped("KH-ABSENT", product_lines=["escalator"]),
+        _scoped("KH-EXPLICIT", product_lines=["escalator"], scope_status="unverified"),
+    )
+
+    result = module.search_index(index, QUERY, model_type="AXIEZ")
+
+    assert sorted(_ids(result)) == ["KH-ABSENT", "KH-EXPLICIT"]
+
+
+def test_verified_conflicting_card_is_dropped_and_verified_matching_card_is_kept():
+    module = _module()
+    index = _index(
+        _verified("KH-OTHER", product_lines=["escalator"]),
+        _verified("KH-MATCH", product_lines=["AXIEZ"]),
+    )
+
+    assert _ids(module.search_index(index, QUERY, model_type="AXIEZ")) == ["KH-MATCH"]
+
+
+def test_scope_verification_fields_do_not_contribute_to_ranking():
+    module = _module()
+    assert not {"scope_status", "scope_verified_by", "scope_verified_at"} & set(module.POSITIVE_SCOPE_KEYS)
+    assert not {"scope_status", "scope_verified_by", "scope_verified_at"} & set(module.MODEL_CLASSIFY_KEYS)
+
+
+@pytest.mark.parametrize("scope", [
+    {"scope_status": "verified"},
+    {"scope_status": "verified", "scope_verified_by": "reviewer"},
+    {"scope_status": "verified", "scope_verified_at": "2026-10-20"},
+    {"scope_status": "verified", "scope_verified_by": "reviewer", "scope_verified_at": "20261020"},
+    {"scope_status": "maybe"},
+    {"scope_verified_by": "reviewer", "scope_verified_at": "2026-10-20", "scope_status": ["verified"]},
+])
+def test_index_rejects_incomplete_or_malformed_scope_verification(scope):
+    module = _module()
+
+    with pytest.raises(module.KnowhowIndexError):
+        module.validate_index(_index(_scoped("KH-A", **scope)))
+
+
+def test_index_accepts_complete_scope_verification():
+    module = _module()
+
+    module.validate_index(_index(_verified("KH-A", product_lines=["AXIEZ"])))

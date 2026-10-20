@@ -22,6 +22,9 @@ model_scope:
   may_apply_to: []             # 適用可能性（未確認可）
   excludes: []
   scope_note: ""               # 全エレ機種・複数制御など短文
+  scope_status: unverified     # verified | unverified（省略時 unverified）。verified のカードだけ Senpai の機種フィルタで除外されうる
+  scope_verified_by: ""        # verified のとき必須: 適用範囲を確認した人の名前
+  scope_verified_at: ""        # verified のとき必須: 確認日 YYYY-MM-DD
 source_refs:
   # 参照元（利用者・AIが辿る原情報）は次の4種類を「出典」と呼ぶ（draft_record は写し索引）
   - ref_type: lists_item      # Microsoft Lists の list_item_id（スナップショット上の項目番号）
@@ -49,6 +52,16 @@ review_status: in_review
 publication_status: not_published
 cloud_approval: not_reviewed
 ```
+
+### 適用範囲の検証（`scope_status`）
+
+Lists の機種欄は信頼できない（例: VFGH と書かれたカードが実は全エレベーターに当てはまる）。そのため Senpai の機種フィルタ（UI「機種（任意）」）は、**人が適用範囲を確認したカードだけ**を除外対象にする。
+
+- `scope_status: verified` のカードだけが、`product_lines` / `model_abbreviations` / `lists_model_label` / `observed_on` の認識済み機種がすべて「選んだ機種以外」のとき除外される。
+- `unverified`（省略を含む）のカードは、機種欄が何であっても除外されない。
+- `verified` には `scope_verified_by`（名前）と `scope_verified_at`（YYYY-MM-DD）が**両方必須**。欠ける、または形式が不正なカードはインデックスのビルドと検証で失敗する。
+- 3 つのキーは検索スコアにも検索語にも使われない。
+- 確認手順: 原情報（Lists / OneNote / KB）で適用範囲を確かめ、`model_scope` を直してから 3 キーを記入する。直し方は [APPLICABILITY-TAXONOMY.md](registry/APPLICABILITY-TAXONOMY.md) の「適用範囲の訂正」、確認待ちの一覧は [queues/scope-review/QUEUE.md](queues/scope-review/QUEUE.md)。
 
 整理軸（機種略称・制御方式・Vault 棚・エスカ）: [registry/APPLICABILITY-TAXONOMY.md](./registry/APPLICABILITY-TAXONOMY.md)
 
