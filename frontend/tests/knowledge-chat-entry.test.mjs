@@ -354,7 +354,7 @@ test('safe lane errors are shown and a healthy lane answer remains visible', () 
   assert.match(html, /法令KBを利用できません。接続設定・APIの有効化・権限を確認してください。/);
 });
 
-test('chat explains separate history retention and that its combined transcript is local to this page', () => {
+test('Senpai chat has a left conversation history and keeps saved consultations after reload', () => {
   const initialSnapshot = { turns: [], running: false };
   const render = loadInteractiveChat({
     initialSnapshot,
@@ -365,6 +365,9 @@ test('chat explains separate history retention and that its combined transcript 
 
   assert.match(html, /60日/);
   assert.match(html, /再読み込み/);
+  assert.match(html, /aria-label="相談履歴"/);
+  assert.match(html, /履歴を開く/);
+  assert.doesNotMatch(html, /まとめ表示は保存されない|再読み込みすると表示が消えます/);
 });
 
 test('law source displays the returned law number, provision reference, and effective date', () => {
