@@ -2,6 +2,22 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_QUERY_LENGTH = 2_000;
 const RESPONSE_TYPES = new Set(['pages', 'clarify', 'not_found']);
+const KNOWHOW_NOT_READY_MESSAGE = 'ノウハウMarkdownの検索準備ができていません。管理者が取込設定を確認してください。';
+const KNOWHOW_SOURCE_IDS = Object.freeze({
+  lists_item: 'list_item_id',
+  onenote_page: 'onenote_id',
+  kb_document: 'document_number',
+  law_rag: 'law_id',
+});
+const KNOWHOW_SOURCE_FIELDS = new Set([
+  'ref_type', 'source_id', 'list_item_id', 'onenote_id', 'document_number',
+  'kb_filename', 'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator',
+]);
+const KNOWHOW_SCOPE_FIELDS = new Set([
+  'control_methods', 'door_families', 'door_types', 'excludes', 'guide_systems',
+  'lists_model_label', 'machine_room', 'may_apply_to', 'model_abbreviations',
+  'observed_on', 'product_lines', 'scope_note', 'conditions',
+]);
 const RESPONSE_FIELDS = [
   'documentName',
   'title',
@@ -179,7 +195,102 @@ function stringArray(value) {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
-function normalizeResponse(data, mode, query, receivedAt, expectedSessionId) {
+function validSearchTerms(value, maxTerms = 20) {
+  return stringArray(value) && value.length <= maxTerms
+    && value.every((term) => term.trim().length > 0 && Array.from(term).length <= 200
+      && !/[\u0000-\u001f\u007f]/u.test(term));
+}
+
+function isPlainObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function cleanKnowhowSourceRef(value) {
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !KNOWHOW_SOURCE_FIELDS.has(key))) return null;
+  const identityKey = KNOWHOW_SOURCE_IDS[value.ref_type];
+  if (!identityKey || typeof value[identityKey] !== 'string' || !value[identityKey].trim()) return null;
+  const otherIdentityKeys = Object.values(KNOWHOW_SOURCE_IDS).filter((key) => key !== identityKey);
+  if (otherIdentityKeys.some((key) => Object.hasOwn(value, key))) return null;
+  const clean = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item !== 'string' || item.length > 500 || !item.trim()
+      || /[\u0000-\u001f\u007f]/u.test(item)
+      || /(?:https?:\/\/|s3:\/\/|javascript:|file:\/\/|\\|(?:^|\/)\.\.(?:\/|$))/iu.test(item)) return null;
+    clean[key] = item;
+  }
+  return clean;
+}
+
+function cleanModelScope(value) {
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !KNOWHOW_SCOPE_FIELDS.has(key))) return null;
+  const clean = {};
+  for (const [key, item] of Object.entries(value)) {
+    const values = Array.isArray(item) ? item : [item];
+    if (values.length < 1 || values.length > 20 || !values.every((text) => typeof text === 'string'
+      && text.trim() && Array.from(text).length <= 200 && !/[\u0000-\u001f\u007f]/u.test(text)
+      && !/(?:https?:\/\/|s3:\/\/|javascript:|file:\/\/|\\|(?:^|\/)\.\.(?:\/|$))/iu.test(text))) return null;
+    clean[key] = Array.isArray(item) ? [...item] : item;
+  }
+  return clean;
+}
+
+function cleanKnowhowMatch(match) {
+  if (!isPlainObject(match)
+    || typeof match.knowledgeId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(match.knowledgeId)
+    || !Number.isSafeInteger(match.cardVersion) || match.cardVersion < 1
+    || typeof match.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(match.sha256)
+    || typeof match.title !== 'string' || !match.title.trim() || Array.from(match.title).length > 400
+    || !['draft', 'approved'].includes(match.status)
+    || match.usage !== 'navigation_only'
+    || typeof match.body !== 'string' || Array.from(match.body).length > 16_000
+    || !validSearchTerms(match.searchTerms, 100)
+    || !Array.isArray(match.sourceRefs) || match.sourceRefs.length < 1 || match.sourceRefs.length > 30
+    || !match.sourceRefs.every((sourceRef) => cleanKnowhowSourceRef(sourceRef) !== null)) return null;
+  const modelScope = cleanModelScope(match.modelScope);
+  if (!modelScope) return null;
+  let serialized;
+  try {
+    serialized = JSON.stringify(match);
+  } catch {
+    return null;
+  }
+  if (serialized.length > 32_000) return null;
+  return {
+    knowledgeId: match.knowledgeId,
+    cardVersion: match.cardVersion,
+    sha256: match.sha256.toLowerCase(),
+    title: match.title,
+    status: match.status,
+    usage: 'navigation_only',
+    body: match.body,
+    searchTerms: [...match.searchTerms],
+    sourceRefs: match.sourceRefs.map(cleanKnowhowSourceRef),
+    modelScope,
+  };
+}
+
+function cleanKnowhow(value) {
+  if (!isPlainObject(value)
+    || !['matched', 'not_found'].includes(value.status)
+    || typeof value.indexVersion !== 'string' || !/^sha256:[a-f0-9]{64}$/i.test(value.indexVersion)
+    || !Array.isArray(value.matches) || value.matches.length > 3
+    || !validSearchTerms(value.searchTerms, 8)) return null;
+  const matches = value.matches.map(cleanKnowhowMatch);
+  if (matches.some((match) => match === null)
+    || new Set(matches.map((match) => match.knowledgeId)).size !== matches.length
+    || (value.status === 'matched' && matches.length === 0)
+    || (value.status === 'not_found' && matches.length !== 0)) return null;
+  return {
+    status: value.status,
+    indexVersion: value.indexVersion.toLowerCase(),
+    matches,
+    searchTerms: [...value.searchTerms],
+  };
+}
+
+function normalizeResponse(data, mode, query, receivedAt, expectedSessionId, includeKnowhow) {
   if (!data || typeof data !== 'object' || Array.isArray(data)
     || typeof data.content !== 'string'
     || !RESPONSE_TYPES.has(data.responseType)
@@ -188,6 +299,13 @@ function normalizeResponse(data, mode, query, receivedAt, expectedSessionId) {
     || !Array.isArray(data.sourceDocuments) || !data.sourceDocuments.every((item) => cleanSource(item, mode) !== null)
     || !Array.isArray(data.pageCandidates) || !data.pageCandidates.every((item) => cleanSource(item, mode) !== null)) {
     fail('invalid_response', '検索結果の形式を確認できませんでした。もう一度お試しください');
+  }
+  let knowhow;
+  if (includeKnowhow) {
+    knowhow = cleanKnowhow(data.knowhow);
+    if (!knowhow) fail('invalid_response', 'ノウハウMarkdownの検索結果を確認できませんでした。もう一度お試しください');
+  } else if (Object.hasOwn(data, 'knowhow')) {
+    fail('invalid_response', '検索結果に予期しない情報が含まれています');
   }
   const messageId = typeof data.aiMessageId === 'string' && data.aiMessageId.trim()
     ? data.aiMessageId
@@ -210,17 +328,24 @@ function normalizeResponse(data, mode, query, receivedAt, expectedSessionId) {
     sourceDocuments: data.sourceDocuments.map((item) => cleanSource(item, mode)),
     pageCandidates: data.pageCandidates.map((item) => cleanSource(item, mode)),
     clarifyQuestions: [...data.clarifyQuestions],
+    ...(includeKnowhow ? { knowhow } : {}),
   };
 }
 
 /**
  * Search one existing RAG mode with an independent request and bounded auth/network wait.
  * The Markdown and any local metadata are deliberately not accepted by this API.
- * @param {{baseUrl:string, getToken:()=>Promise<string|null|undefined>, fetchImpl?:typeof fetch, mode:'normal'|'law', query:string, sessionId?:string, signal?:AbortSignal, timeoutMs?:number}} options
+ * @param {{baseUrl:string, getToken:()=>Promise<string|null|undefined>, fetchImpl?:typeof fetch, mode:'normal'|'law', query:string, sessionId?:string, signal?:AbortSignal, timeoutMs?:number, includeKnowhow?:boolean}} options
  */
-export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS, includeKnowhow }) {
   const endpoint = safeEndpoint(baseUrl);
   const normalizedQuery = validateQuery(query, mode);
+  if (includeKnowhow !== undefined && typeof includeKnowhow !== 'boolean') {
+    fail('validation', 'ノウハウMarkdown検索の指定を確認してください');
+  }
+  if (includeKnowhow === true && mode !== 'normal') {
+    fail('validation', 'ノウハウMarkdown検索は技術KBでのみ利用できます');
+  }
   if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId.trim()
     || sessionId.length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(sessionId))) {
     fail('validation', '会話の識別情報を確認してください');
@@ -270,7 +395,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
         response = await fetchImpl(`${endpoint}/rag/query`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: normalizedQuery, mode, filters: {}, ...(sessionId !== undefined ? { sessionId } : {}) }),
+          body: JSON.stringify({ query: normalizedQuery, mode, filters: {}, ...(sessionId !== undefined ? { sessionId } : {}), ...(includeKnowhow === true ? { includeKnowhow: true } : {}) }),
           signal: controller.signal,
         });
       } catch {
@@ -285,6 +410,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
       }
       if (!response.ok) {
         if (response.status === 401) fail('auth', 'ログイン状態を確認できませんでした。再ログインしてください');
+        if (includeKnowhow === true && response.status === 503) fail('unavailable', KNOWHOW_NOT_READY_MESSAGE);
         if (response.status === 403) fail('unavailable', mode === 'law' ? '法令KBを現在利用できません' : '検索サービスを現在利用できません');
         if (response.status >= 500) fail('server', '検索サービスでエラーが発生しました。時間をおいてお試しください');
         fail('unavailable', '検索サービスを現在利用できません');
@@ -295,7 +421,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
       } catch {
         fail('invalid_response', '検索結果の形式を確認できませんでした');
       }
-      return normalizeResponse(data, mode, normalizedQuery, receivedAt, sessionId);
+      return normalizeResponse(data, mode, normalizedQuery, receivedAt, sessionId, includeKnowhow === true);
     })();
     return await Promise.race([operation, interruption]);
   } catch (error) {

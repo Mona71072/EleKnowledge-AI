@@ -1,16 +1,20 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { buildKnowhowIndex, inventoryKnowhowCards, parsePublicationManifest } from '../../scripts/knowledge/build-senpai-index.mjs';
 
-const card = ({ id = 'KH-TEST-001', version = 1, status = 'draft', title = 'Synthetic case', body = 'A synthetic body.', scope = { conditions: ['synthetic only'], excludes: ['real cases'] }, refs = [{ ref_type: 'lists_item', list_item_id: 'SYNTH-LIST-1' }, { ref_type: 'kb_document', document_number: 'SYNTH-DOC-1', kb_filename: 'synthetic.pdf', kb_verify_status: 'pending' }] } = {}) => [
+const card = ({ id = 'KH-TEST-001', version = 1, status = 'draft', title = 'Synthetic case', body = 'A synthetic body.', scope = { may_apply_to: ['synthetic only'], excludes: ['real cases'] }, refs = [{ ref_type: 'lists_item', list_item_id: 'SYNTH-LIST-1' }, { ref_type: 'kb_document', document_number: 'SYNTH-DOC-1', kb_filename: 'synthetic.pdf', kb_verify_status: 'pending' }] } = {}) => [
   '---', `knowledge_id: ${id}`, `card_version: ${version}`, `status: ${status}`, `title: ${title}`,
   'model_scope:', ...Object.entries(scope).flatMap(([key, value]) => [`  ${key}:`, ...(Array.isArray(value) ? value.map((item) => `    - ${item}`) : [`    - ${value}`])]),
   'source_refs:', ...refs.flatMap((ref) => [`  - ref_type: ${ref.ref_type}`, ...Object.entries(ref).filter(([key]) => key !== 'ref_type').map(([key, value]) => `    ${key}: ${value}`)]),
   '---', body, '',
 ].join('\n');
+const execFileAsync = promisify(execFile);
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'senpai-index-'));
@@ -71,6 +75,7 @@ test('build requires explicit exact path, ID, version, hash, and cloud approval;
   assert.equal(index.cards.length, 1);
   assert.equal(index.cards[0].status, 'draft');
   assert.equal(index.cards[0].body, 'A synthetic body.\n');
+  assert.equal(await readFile(path.join(allowed, 'one.md'), 'utf8'), markdown);
   assert.equal(index.cards[0].usage, 'navigation_only');
   for (const change of [
     { ...entry, sha256: '0'.repeat(64) },
@@ -78,6 +83,25 @@ test('build requires explicit exact path, ID, version, hash, and cloud approval;
     { ...entry, cardVersion: 2 },
     { ...entry, cloudApproved: false },
   ]) await assert.rejects(buildKnowhowIndex({ root, manifest: manifest([change]) }));
+});
+
+test('CLI output replaces a preexisting symlink without following it or printing source content', async (t) => {
+  const { root, allowed } = await fixture(t);
+  const markdown = card();
+  const sourcePath = path.join(allowed, 'one.md');
+  await writeFile(sourcePath, markdown);
+  const privateDirectory = path.join(root, '.private-knowhow');
+  await mkdir(privateDirectory);
+  const outsideTarget = path.join(root, 'outside-target.txt');
+  await writeFile(outsideTarget, 'untouched synthetic target');
+  await symlink(outsideTarget, path.join(privateDirectory, 'inventory.json'));
+  const script = fileURLToPath(new URL('../../scripts/knowledge/build-senpai-index.mjs', import.meta.url));
+  const { stdout } = await execFileAsync(process.execPath, [script, 'inventory', root]);
+  assert.match(stdout, /1 valid metadata records/);
+  assert.equal(stdout.includes('A synthetic body.'), false);
+  assert.equal(await readFile(outsideTarget, 'utf8'), 'untouched synthetic target');
+  assert.equal((await lstat(path.join(privateDirectory, 'inventory.json'))).isSymbolicLink(), false);
+  assert.equal(await readFile(sourcePath, 'utf8'), markdown);
 });
 
 test('build excludes unselected files and does not silently accept nested or invalid approvals', async (t) => {
@@ -117,15 +141,15 @@ test('duplicate IDs, duplicate paths, YAML duplicate keys, status drift, and sym
 
 test('index digest is stable for identical cards and retains full body, conditions, and source references', async (t) => {
   const { root, allowed } = await fixture(t);
-  const markdown = card({ body: 'Condition A applies.\nExclude condition B.', scope: { conditions: ['Condition A'], excludes: ['Condition B'] }, refs: [{ ref_type: 'onenote_page', onenote_id: 'SYNTH-NOTE-1', page_role: 'workflow' }, { ref_type: 'kb_document', document_number: 'SYNTH-DOC-1', kb_filename: 'manual.pdf', kb_verify_status: 'pending' }] });
+  const markdown = card({ body: 'Condition A applies.\nExclude condition B.', scope: { may_apply_to: ['Condition A'], excludes: ['Condition B'] }, refs: [{ ref_type: 'onenote_page', onenote_id: 'SYNTH-NOTE-1', page_role: 'workflow' }, { ref_type: 'kb_document', document_number: 'SYNTH-DOC-1', kb_filename: 'manual.pdf', kb_verify_status: 'pending' }] });
   await writeFile(path.join(allowed, 'one.md'), markdown);
   const entry = await selectedEntry(root, 'knowledge/cards/practice-guides/one.md', markdown);
   const first = await buildKnowhowIndex({ root, manifest: manifest([entry]), generatedAt: '2026-10-20T00:00:00.000Z' });
   const second = await buildKnowhowIndex({ root, manifest: manifest([entry]), generatedAt: '2026-10-21T00:00:00.000Z' });
   assert.equal(first.indexVersion, second.indexVersion);
   assert.equal(first.cards[0].body, 'Condition A applies.\nExclude condition B.\n');
-  assert.deepEqual(first.cards[0].modelScope.conditions, ['Condition A']);
+  assert.deepEqual(first.cards[0].modelScope.may_apply_to, ['Condition A']);
   assert.deepEqual(first.cards[0].modelScope.excludes, ['Condition B']);
-  assert.ok(first.cards[0].sourceRefs.some((ref) => ref.type === 'onenote_page' && ref.pageRole === 'workflow'));
-  assert.ok(first.cards[0].sourceRefs.some((ref) => ref.type === 'kb_document' && ref.documentNumber === 'SYNTH-DOC-1' && ref.fileName === 'manual.pdf' && ref.verificationStatus === 'pending'));
+  assert.ok(first.cards[0].sourceRefs.some((ref) => ref.ref_type === 'onenote_page' && ref.onenote_id === 'SYNTH-NOTE-1' && ref.page_role === 'workflow'));
+  assert.ok(first.cards[0].sourceRefs.some((ref) => ref.ref_type === 'kb_document' && ref.document_number === 'SYNTH-DOC-1' && ref.kb_filename === 'manual.pdf' && ref.kb_verify_status === 'pending'));
 });

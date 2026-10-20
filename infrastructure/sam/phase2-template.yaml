@@ -86,6 +86,24 @@ Parameters:
       - 'false'
     Description: Enable law mode only when Environment is dev and a LawKnowledgeBaseId is configured
 
+  KnowhowEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable the admin-only development Markdown navigation feature
+
+  KnowhowIndexBucket:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: Existing private bucket containing the single Senpai navigation index object
+
+  KnowhowIndexKey:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[A-Za-z0-9._/-]{1,512}$'
+    Description: Fixed key for the Senpai navigation index; no prefix listing is granted
+
   LawDataBucketName:
     Type: String
     Default: ''
@@ -349,6 +367,11 @@ Conditions:
   BedrockModelIdIsApplicationProfile: !Equals [!Ref BedrockModelIdType, application-profile]
   HasQueryRewriteModelId: !Not [!Equals [!Ref QueryRewriteModelId, '']]
   QueryRewriteModelIdIsApplicationProfile: !Equals [!Ref QueryRewriteModelIdType, application-profile]
+  KnowhowIndexDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref KnowhowEnabled, 'true']
+    - !Not [!Equals [!Ref KnowhowIndexBucket, '']]
+    - !Not [!Equals [!Ref KnowhowIndexKey, '']]
 
 Globals:
   Function:
@@ -581,6 +604,13 @@ Resources:
                     StringEquals:
                       kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
                 - !Ref AWS::NoValue
+              - !If
+                - KnowhowIndexDevEnabled
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource: !Sub arn:aws:s3:::${KnowhowIndexBucket}/${KnowhowIndexKey}
+                - !Ref AWS::NoValue
 
   ChatLambdaRole:
     Type: AWS::IAM::Role
@@ -649,6 +679,10 @@ Resources:
           RAG_LOGIC_VERSION: !Ref RagLogicVersion
           LAW_KNOWLEDGE_BASE_ID: !Ref LawKnowledgeBaseId
           LAW_RAG_ENABLED: !Ref LawRagEnabled
+          KNOWHOW_ENABLED: !If [KnowhowIndexDevEnabled, 'true', 'false']
+          KNOWHOW_INDEX_BUCKET: !If [KnowhowIndexDevEnabled, !Ref KnowhowIndexBucket, '']
+          KNOWHOW_INDEX_KEY: !If [KnowhowIndexDevEnabled, !Ref KnowhowIndexKey, '']
+          ADMIN_GROUP_NAME: admin
           LAW_DATA_BUCKET_NAME: !If [LawFullTextDevEnabled, !Ref LawDataBucketName, '']
           LAW_DATA_BUCKET_OWNER: !If [LawFullTextDevEnabled, !Ref AWS::AccountId, '']
           BEDROCK_MODEL_ID: !Ref BedrockModelId

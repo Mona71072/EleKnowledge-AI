@@ -55,3 +55,4 @@ docs/metadata-schema-local.md
 docs/*-local.md
 docs/*-local.json
 *-confidential.*
+/.private-knowhow/

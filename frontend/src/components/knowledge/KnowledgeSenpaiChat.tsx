@@ -30,6 +30,7 @@ function useController(
         mode,
         query,
         ...(sessionId ? { sessionId } : {}),
+        ...(mode === 'normal' ? { includeKnowhow: true } : {}),
         signal,
       }),
       onChange: (nextSnapshot) => {
@@ -53,6 +54,44 @@ function sourceTitle(source: ResearchCitationSource, mode: KnowledgeResearchMode
     : source.title || source.documentName || '技術資料';
 }
 
+function KnowhowReferences({ answer }: { answer: import('@/lib/knowledge-research.mjs').ResearchAnswer }) {
+  const knowhow = answer.knowhow;
+  if (!knowhow) return null;
+  if (knowhow.status === 'not_found') {
+    return <p className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs leading-5 text-gray-700">参照できるノウハウMarkdownは見つかりませんでした。この回答は技術KBの検索結果を確認してください。</p>;
+  }
+  return (
+    <section aria-label="参照したノウハウMarkdown" className="rounded-lg border border-violet-200 bg-violet-50/70 p-3">
+      <h5 className="text-xs font-semibold text-violet-950">参照したノウハウMarkdown</h5>
+      <p className="mt-1 text-xs leading-5 text-violet-950">サーバーで検索が許可されたノウハウMarkdownの関連部分をAIへの参考情報として利用しました。ローカルファイルは送信されません。これは未承認の探索候補で、技術的な根拠や承認を示しません。</p>
+      <ul className="mt-2 space-y-3">
+        {knowhow.matches.map((match) => (
+          <li key={`${match.knowledgeId}-${match.cardVersion}`} className="rounded-md border border-violet-100 bg-white p-3 text-xs text-gray-800">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">{match.title}</span>
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-950">{match.status === 'draft' ? '未承認（下書き）' : '承認済みカード・参照用のみ'}</span>
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-700">参照用のみ</span>
+            </div>
+            <dl className="mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 break-words text-gray-700">
+              <dt className="text-gray-500">ノウハウID</dt><dd>{match.knowledgeId}</dd>
+              <dt className="text-gray-500">カード版</dt><dd>v{match.cardVersion}</dd>
+              <dt className="text-gray-500">本文SHA-256</dt><dd className="font-mono">{match.sha256}</dd>
+              <dt className="text-gray-500">検索語</dt><dd>{match.searchTerms.join('、') || 'なし'}</dd>
+              <dt className="text-gray-500">適用条件・除外</dt><dd><pre className="whitespace-pre-wrap break-words font-sans">{JSON.stringify(match.modelScope, null, 2)}</pre></dd>
+              <dt className="text-gray-500">元情報</dt><dd><pre className="whitespace-pre-wrap break-words font-sans">{JSON.stringify(match.sourceRefs, null, 2)}</pre></dd>
+            </dl>
+            <details className="mt-2 rounded border border-gray-200 p-2">
+              <summary className="cursor-pointer font-semibold text-violet-900">関連本文を確認</summary>
+              <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-gray-800">{match.body}</pre>
+            </details>
+          </li>
+        ))}
+      </ul>
+      {knowhow.searchTerms.length > 0 && <p className="mt-2 text-xs text-gray-700">技術KB検索へ加えた手掛かり: {knowhow.searchTerms.join('、')}</p>}
+    </section>
+  );
+}
+
 function LaneReply({ lane, mode }: { lane: SenpaiChatLane; mode: KnowledgeResearchMode }) {
   const name = mode === 'law' ? '法令KB' : '技術KB';
   if (lane.status === 'loading') return <p role="status" className="text-sm text-gray-600">{name}を検索しています…</p>;
@@ -66,6 +105,7 @@ function LaneReply({ lane, mode }: { lane: SenpaiChatLane; mode: KnowledgeResear
   const candidates = answer.pageCandidates || [];
   return (
     <div className="space-y-3">
+      {mode === 'normal' && <KnowhowReferences answer={answer} />}
       {answer.responseType === 'not_found' ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">このKBでは該当情報を確認できませんでした。</p>
       ) : answer.responseType === 'clarify' ? (
@@ -205,7 +245,7 @@ export function KnowledgeSenpaiChat() {
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gradient-to-r from-violet-50 to-indigo-50 px-4 py-4 sm:px-6">
         <div>
           <h1 className="text-xl font-bold text-gray-900">先輩チャット</h1>
-          <p className="mt-1 text-sm text-gray-600">技術KBと法令KBに質問し、会話を続けながら回答と出典を確認します。</p>
+          <p className="mt-1 text-sm text-gray-600">サーバーで検索が許可されたノウハウMarkdownを参考に技術KBを調べ、法令KBにも質問します。会話を続けながら回答と出典を確認できます。</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-xs font-semibold text-violet-900">開発中・管理者限定</span>
@@ -220,7 +260,8 @@ export function KnowledgeSenpaiChat() {
         {snapshot.turns.length === 0 ? (
           <div className="mx-auto max-w-2xl rounded-2xl border border-dashed border-violet-200 bg-violet-50/60 p-6 text-center">
             <h2 className="text-base font-semibold text-gray-900">どんなことを調べますか？</h2>
-            <p className="mt-2 text-sm leading-6 text-gray-600">質問すると技術KBと法令KBへそれぞれ問い合わせます。回答は出典とともに分けて表示します。</p>
+            <p className="mt-2 text-sm leading-6 text-gray-600">質問すると、サーバーの許可済みノウハウMarkdownを参考に技術KBを調べ、法令KBにも個別に問い合わせます。回答は出典とともに分けて表示します。</p>
+            <p className="mt-2 text-xs leading-5 text-gray-600">ローカルファイルは送信されません。ノウハウMarkdownは参考情報として表示し、Markdownの編集やOneNoteへの追記は行いません。</p>
             <p className="mt-3 text-xs leading-5 text-gray-600">技術チャットと法令チャットの履歴は、それぞれの履歴に60日間保存されます。先輩チャットのまとめ表示は保存されないため、このページを再読み込みすると表示が消えます。</p>
           </div>
         ) : snapshot.turns.map((turn) => <ChatTurnView key={turn.id} turn={turn} />)}
@@ -248,7 +289,7 @@ export function KnowledgeSenpaiChat() {
               {snapshot.running && <button type="button" onClick={cancelSearch} className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-400">中止</button>}
               <button type="button" onClick={startNewChat} disabled={snapshot.turns.length === 0 && !snapshot.running} className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-50">新しい相談</button>
             </div>
-            <span className="text-xs text-gray-500">送信した質問のみ、技術KB・法令KBへ個別に送られます。Markdownは送信されません。</span>
+            <span className="text-xs text-gray-500">質問のみを技術KB・法令KBへ個別に送ります。サーバー許可済みMarkdownを参考検索します。ローカルファイルの送信やMarkdown編集、OneNote追記は行いません。</span>
           </div>
         </form>
       </footer>

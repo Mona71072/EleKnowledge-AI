@@ -226,12 +226,12 @@ test('renders returned Markdown as escaped collapsed text with status, identity,
     mode: 'normal', query: '設置条件', content: '技術KB回答', responseType: 'pages', sessionId: 'session-tech',
     messageId: 'm1', receivedAt: '2026-10-20T00:00:00Z', sourceDocuments: [], pageCandidates: [], clarifyQuestions: [],
     knowhow: {
-      status: 'matched', indexVersion: 'a'.repeat(64), searchTerms: ['設置条件'],
+      status: 'matched', indexVersion: `sha256:${'a'.repeat(64)}`, searchTerms: ['設置条件'],
       matches: [{
-        knowledgeId: 'KH-<img src=x>', cardVersion: 3, sha256: 'b'.repeat(64), title: '仮設材の固定',
+        knowledgeId: 'KH-1001', cardVersion: 3, sha256: 'b'.repeat(64), title: '仮設材の固定',
         status: 'draft', usage: 'navigation_only', body: '<img src=x onerror=alert(1)>本文',
-        searchTerms: ['仮設材'], sourceRefs: [{ type: 'Lists', id: 'L-1', title: '不具合一覧' }],
-        modelScope: { models: ['M1'], excludes: ['M1R'] },
+        searchTerms: ['仮設材'], sourceRefs: [{ ref_type: 'lists_item', list_item_id: 'L-1', source_id: 'SRC-1' }],
+        modelScope: { model_abbreviations: ['M1'], excludes: ['M1R'] },
       }],
     },
   };
@@ -244,16 +244,16 @@ test('renders returned Markdown as escaped collapsed text with status, identity,
   const html = renderToStaticMarkup(render());
 
   assert.match(html, /参照したノウハウMarkdown/);
-  assert.match(html, /KH-&lt;img src=x&gt;/);
+  assert.match(html, /KH-1001/);
   assert.match(html, /仮設材の固定/);
   assert.match(html, /未承認/);
   assert.match(html, /参照用のみ/);
   assert.match(html, /除外/);
-  assert.match(html, /不具合一覧/);
+  assert.match(html, /SRC-1/);
   assert.match(html, /<details/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;本文/);
   assert.doesNotMatch(html, /<img\b|href="javascript:/);
-  assert.match(html, /承認済み資料ではありません/);
+  assert.match(html, /技術的な根拠や承認を示しません/);
 });
 
 test('explains that Markdown retrieval is server-authorized and does not upload a local vault or edit files', () => {
@@ -269,7 +269,7 @@ test('explains that Markdown retrieval is server-authorized and does not upload 
   const html = renderToStaticMarkup(createElement(Chat));
 
   assert.match(html, /サーバーで検索が許可されたノウハウMarkdown/);
-  assert.match(html, /関連部分をAIへの参考情報として利用/);
+  assert.match(html, /参考に技術KBを調べ/);
   assert.match(html, /ローカルファイルは送信されません/);
   assert.match(html, /Markdownの編集やOneNoteへの追記は行いません/);
 });

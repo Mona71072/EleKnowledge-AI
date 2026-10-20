@@ -40,6 +40,27 @@ export type ResearchCitationSource = {
 export type ResearchSource = ResearchCitationSource;
 export type ResearchPageCandidate = ResearchCitationSource & { lowConfidence?: boolean };
 
+export type ResearchKnowhowMatch = {
+  knowledgeId: string;
+  cardVersion: number;
+  sha256: string;
+  title: string;
+  status: 'draft' | 'approved';
+  usage: 'navigation_only';
+  body: string;
+  searchTerms: string[];
+  sourceRefs: Array<Record<string, string>>;
+  modelScope: Record<string, unknown>;
+};
+
+export type ResearchKnowhow = {
+  status: 'matched' | 'not_found';
+  indexVersion: string;
+  matches: ResearchKnowhowMatch[];
+  /** Search hints actually added to the technical KB query by the server. */
+  searchTerms: string[];
+};
+
 export type ResearchAnswer = {
   mode: KnowledgeResearchMode;
   query: string;
@@ -54,6 +75,8 @@ export type ResearchAnswer = {
   sourceDocuments: ResearchSource[];
   pageCandidates: ResearchPageCandidate[];
   clarifyQuestions: string[];
+  /** Present only when the caller explicitly requested Markdown retrieval. */
+  knowhow?: ResearchKnowhow;
 };
 
 export class KnowledgeResearchError extends Error {
@@ -71,6 +94,8 @@ export function queryKnowledgeSource(options: {
   sessionId?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Retrieve the server-authorized Markdown index for normal mode only. */
+  includeKnowhow?: boolean;
 }): Promise<ResearchAnswer>;
 
 export function researchSourceHref(
