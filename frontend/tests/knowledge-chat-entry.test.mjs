@@ -115,10 +115,12 @@ test('disabled route explains availability without mounting the workspace', () =
 test('chat page starts as an empty conversation with a message composer and reset action', () => {
   const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
     'next/link': Link,
+    '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
+    '@/lib/chat-session-link.mjs': { buildChatSessionHref: (sessionId, mode) => `/chat?session=${encodeURIComponent(sessionId)}${mode === 'law' ? '&mode=law' : ''}` },
     '@/lib/knowledge-senpai-chat.mjs': {
       createSenpaiChat: () => ({ getSnapshot: () => ({ turns: [], running: false }), send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
     },
-    '@/lib/knowledge-research.mjs': { researchSourceHref: () => null },
+    '@/lib/knowledge-research.mjs': { queryKnowledgeSource: async () => ({}), researchSourceHref: () => null },
   }).KnowledgeSenpaiChat;
   const html = renderToStaticMarkup(createElement(Chat));
 

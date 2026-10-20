@@ -34,6 +34,7 @@ test('keeps a separate technical and law session through multiple chat turns', a
   });
 
   await chat.send('最初の質問');
+  const firstSnapshot = chat.getSnapshot();
   await chat.send('関連する追加質問');
 
   assert.deepEqual(calls.map(({ mode, query, sessionId }) => ({ mode, query, sessionId })), [
@@ -46,6 +47,24 @@ test('keeps a separate technical and law session through multiple chat turns', a
   assert.equal(snapshot.turns.length, 2);
   assert.equal(snapshot.turns[1].normal.answer.query, '関連する追加質問');
   assert.equal(snapshot.turns[1].law.answer.query, '関連する追加質問');
+  assert.equal(firstSnapshot.turns.length, 1);
+  assert.equal(Object.isFrozen(snapshot.turns), true);
+  assert.equal(Object.isFrozen(snapshot.turns[0]), true);
+  chat.dispose();
+});
+
+test('requires a query function and does not expose unexpected server error details', async () => {
+  assert.throws(() => createSenpaiChat({}), (error) => error.code === 'validation');
+  const chat = createSenpaiChat({
+    querySource: async (request) => {
+      if (request.mode === 'normal') throw new Error('secret server traceback');
+      return answer('law', 'law-session', request.query);
+    },
+  });
+  await chat.send('質問');
+  const message = chat.getSnapshot().turns[0].normal.message;
+  assert.match(message, /検索に失敗しました/);
+  assert.doesNotMatch(message, /secret server traceback/);
   chat.dispose();
 });
 

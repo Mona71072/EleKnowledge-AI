@@ -16,10 +16,10 @@ export function KnowledgeChatEntry({ isAdmin = false, enabled = false }: { isAdm
           </div>
           <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1.5 text-xs font-semibold text-violet-900">開発中・管理者限定</span>
         </div>
-        <h3 className="mb-2 text-xl font-semibold text-gray-900 transition-colors group-hover:text-violet-700">工技先輩</h3>
-        <p className="text-sm leading-relaxed text-gray-600">技術KBと法令KBへ質問し、回答と出典を比較します。Markdownを選ぶと、調査メモを編集案へ取り込めます。</p>
+        <h3 className="mb-2 text-xl font-semibold text-gray-900 transition-colors group-hover:text-violet-700">先輩チャット</h3>
+        <p className="text-sm leading-relaxed text-gray-600">技術KBや法令KBについて会話形式で質問し、回答と出典を確認できます。</p>
         <div className="mt-4 inline-flex items-center text-sm font-semibold text-violet-700">
-          質問・照合を開く
+          チャットを開く
           <svg className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
           </svg>

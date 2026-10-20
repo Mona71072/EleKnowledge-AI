@@ -13,6 +13,7 @@
     "test:knowledge": "node --test --experimental-test-coverage --test-coverage-include=src/lib/knowledge-workbench.mjs --test-coverage-lines=80 --test-coverage-branches=80 tests/knowledge-workbench.test.mjs",
     "test:research": "node --test --experimental-test-coverage --test-coverage-include=src/lib/knowledge-research.mjs --test-coverage-lines=80 --test-coverage-branches=80 tests/knowledge-research.test.mjs tests/knowledge-research-http.test.mjs",
     "test:comparison": "node --test --experimental-test-coverage --test-coverage-include=src/lib/knowledge-comparison.mjs --test-coverage-lines=80 --test-coverage-branches=80 tests/knowledge-comparison.test.mjs",
+    "test:senpai": "node --test --experimental-test-coverage --test-coverage-include=src/lib/knowledge-senpai-chat.mjs --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 tests/knowledge-senpai-chat.test.mjs",
     "audit:production": "node scripts/check-production-audit.mjs",
     "audit:all": "node scripts/check-all-audit.mjs",
     "test:lint-dependencies": "node --test tests/dependencies/*.test.mjs",

@@ -179,7 +179,7 @@ function stringArray(value) {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
-function normalizeResponse(data, mode, query, receivedAt) {
+function normalizeResponse(data, mode, query, receivedAt, expectedSessionId) {
   if (!data || typeof data !== 'object' || Array.isArray(data)
     || typeof data.content !== 'string'
     || !RESPONSE_TYPES.has(data.responseType)
@@ -195,6 +195,9 @@ function normalizeResponse(data, mode, query, receivedAt) {
       ? data.messageId
       : null;
   if (!messageId) fail('invalid_response', '検索結果に回答の識別情報がありません');
+  if (expectedSessionId !== undefined && data.sessionId !== expectedSessionId) {
+    fail('invalid_response', '会話の識別情報が一致しないため、続きの回答を表示できません');
+  }
   return {
     mode,
     query,
@@ -213,11 +216,15 @@ function normalizeResponse(data, mode, query, receivedAt) {
 /**
  * Search one existing RAG mode with an independent request and bounded auth/network wait.
  * The Markdown and any local metadata are deliberately not accepted by this API.
- * @param {{baseUrl:string, getToken:()=>Promise<string|null|undefined>, fetchImpl?:typeof fetch, mode:'normal'|'law', query:string, signal?:AbortSignal, timeoutMs?:number}} options
+ * @param {{baseUrl:string, getToken:()=>Promise<string|null|undefined>, fetchImpl?:typeof fetch, mode:'normal'|'law', query:string, sessionId?:string, signal?:AbortSignal, timeoutMs?:number}} options
  */
-export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, signal, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   const endpoint = safeEndpoint(baseUrl);
   const normalizedQuery = validateQuery(query, mode);
+  if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId.trim()
+    || sessionId.length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(sessionId))) {
+    fail('validation', '会話の識別情報を確認してください');
+  }
   if (typeof getToken !== 'function' || typeof fetchImpl !== 'function') {
     fail('config', '認証または通信の設定を確認してください');
   }
@@ -263,7 +270,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
         response = await fetchImpl(`${endpoint}/rag/query`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: normalizedQuery, mode, filters: {} }),
+          body: JSON.stringify({ query: normalizedQuery, mode, filters: {}, ...(sessionId !== undefined ? { sessionId } : {}) }),
           signal: controller.signal,
         });
       } catch {
@@ -288,7 +295,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
       } catch {
         fail('invalid_response', '検索結果の形式を確認できませんでした');
       }
-      return normalizeResponse(data, mode, normalizedQuery, receivedAt);
+      return normalizeResponse(data, mode, normalizedQuery, receivedAt, sessionId);
     })();
     return await Promise.race([operation, interruption]);
   } catch (error) {

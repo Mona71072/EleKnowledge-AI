@@ -318,8 +318,6 @@ export default function HomePage() {
               </Link>
             )}
 
-            <KnowledgeChatEntry isAdmin={isAdmin} enabled={process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH === 'true'} />
-
             {isAdmin ? (
               <Link href="/troubleshooting" className="group block h-full">
                 <Card variant="default" padding="md" className="h-full group-hover:shadow-xl transition-all duration-300 transform group-hover:-translate-y-1 border-2 border-transparent group-hover:border-purple-200">
@@ -371,6 +369,8 @@ export default function HomePage() {
                 </p>
               </Card>
             )}
+
+            <KnowledgeChatEntry isAdmin={isAdmin} enabled={process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH === 'true'} />
           </div>
         </section>
 

@@ -67,6 +67,8 @@ export function queryKnowledgeSource(options: {
   fetchImpl?: typeof fetch;
   mode: KnowledgeResearchMode;
   query: string;
+  /** Continue an existing session for the same mode only. */
+  sessionId?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<ResearchAnswer>;
