@@ -8,7 +8,7 @@ related-code:
 
 # 承認カード KB と PDF KB の二段検索（設計ドラフト）
 
-> 最終検証: 2026-10-19 — コード読取（RAG Lambda）+ knowledge パイプライン未実装の確認
+> 最終検証: 2026-10-20 — jump index（`build_onenote_jump_index.py`）追加。カード KB ingest は未実装
 
 ## 背景
 
@@ -20,9 +20,13 @@ related-code:
 
 ```text
 自然文クエリ
-  →（1）承認済みカード専用 KB — 切り分け・適用条件・手順要約
-  → カードの source_refs から正式層へ誘導
-  →（2）既存 PDF KB — 図番・据付基準・TI/C 等
+  →（1）承認済みカード専用 KB — 切り分け・適用条件・手順要約（§4）
+  → カードの onenote_id を jump index で開く
+       read_this_page        … その OneNote 本文スナップショット
+       navigate_to_child_content … 索引は飛ばし、子 content 頁
+       use_citing_cards      … 同じ頁を引用するテーマカード（§6）
+       navigation_only       … 回答に使わない（索引タイトルで埋めない）
+  →（2）既存 PDF KB — 図番・据付基準・TI/C 等（content_reviewed 後に手順断定）
   → 引用・資料候補表示
 ```
 

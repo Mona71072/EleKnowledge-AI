@@ -67,6 +67,7 @@ source_refs:
 | **139** | LINKs **94D** |
 | **185** | 回生 **141** |
 | [392](./KH-VFGLF-BRAKE-SW-392.md) | 本スロー後 **94D** — `:156` 索引 |
+| [Nexcube QC `:177`](../practice-guides/KH-NEXCUBE-VFGH-QC-HUB.md) | **VFGH** の P1 コイン電池。制御が違う |
 | [据付・試験・調整ハブ](../practice-guides/KH-ALL-INSTALL-TEST-ADJUST-HUB.md) | **横断入口** |
 
 ## KB確認に基づく追記

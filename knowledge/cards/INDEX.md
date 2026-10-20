@@ -2,7 +2,7 @@
 
 法令系（Lists / OneNote よく使うテーマ）: [registry/LAW-FREQUENT-THEMES.md](../registry/LAW-FREQUENT-THEMES.md)（Wave1–23）
 
-AI は **symptoms** と **machine_room（MRL/MR）/ guide_systems / door_* / 制御 / 機種略称**（[APPLICABILITY-TAXONOMY.md](../registry/APPLICABILITY-TAXONOMY.md)）で絞り、本文は **ソース要約 → 統合回答** の順。テンプレ: [TEMPLATE.md](./TEMPLATE.md)
+AI は **symptoms** と **machine_room（MRL/MR）/ guide_systems / door_* / 制御 / 機種略称**（[APPLICABILITY-TAXONOMY.md](../registry/APPLICABILITY-TAXONOMY.md)）で絞り、本文は **ソース要約 → 統合回答** の順。テンプレ: [TEMPLATE.md](./TEMPLATE.md)。OneNote を開く順: [ONENOTE-JUMP.md](../validation/ONENOTE-JUMP.md)。
 
 ## エレベーター — 制御方式別
 
@@ -68,6 +68,8 @@ AI は **symptoms** と **machine_room（MRL/MR）/ guide_systems / door_* / 制
 | 315 | [KH-LINKS-NS-TEMP-RELEASE-BLINK-315](./practice-guides/KH-LINKS-NS-TEMP-RELEASE-BLINK-315.md) | AXIEZ-LINKS | NS 点滅 |
 
 ### VFGH（Nexcube 高速系等）
+
+NEXWAY 表記の品質確認は [KH-NEXCUBE-VFGH-QC-HUB](./practice-guides/KH-NEXCUBE-VFGH-QC-HUB.md)（Nexcube として開く）。
 
 | list | knowledge_id | 機種略称 | タイトル |
 | --- | --- | --- | --- |

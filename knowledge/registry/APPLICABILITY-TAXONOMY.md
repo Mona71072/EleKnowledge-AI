@@ -79,7 +79,7 @@ Lists `Model=VFGLF` だけでは MRL/MR は決まらない — **Lists 機種ラ
 | 技術メモ【ELV】２ | 一般・FAQ・**エレ機種一覧** | catalog 系。`elv-model-abbreviations-user-image` |
 | 技術メモ【ELV】３ | モード・群管理・**機種別**（CM-LB, KM-LD …） | draft 前缀 **`ELV3_`** ≒ この Vault ツリー |
 | 総点（VFGH）/ 総点（VFGLB・VFGLF） | 引渡し総点 | 制御方式別。カードは総点手順の要約に留める |
-| NEXWAY(VFGH) / NEXIEZ(VFGLF) | QC メモ | 制御方式 + 品質 |
+| NEXWAY(VFGH) / NEXIEZ(VFGLF) | QC メモ | **NEXWAY は NEXCUBE の海外呼称**（2026-10-20）。日本向けカードは `product_lines: Nexcube`。フォルダ名の VFGH は制御。CM-MA だけに狭めない |
 | 工技業務（現場系）１/２、現場担当業務 | 工技業務（`knowledge_domain: engineering_business`） | エレ技術と混ぜない。必要なら `product: 昇降機` 等 |
 
 **制御エラー参照（Vault 路径の慣例）**
@@ -104,7 +104,7 @@ Lists `Model=VFGLF` だけでは MRL/MR は決まらない — **Lists 機種ラ
 | `VFGH_` / `VFGLB総点` | 制御方式または総点系列 |
 | `ESC_` / `u形` / `ZJ2` / `エスカ機種一覧` | **エスカレーター**（`product: エスカレーター`） |
 | `工技現場系` / `現場_` / `研修` | 工技業務・現場運用 |
-| `NEXWAY` / `NEXIEZ` | 制御方式別 QC |
+| `NEXWAY` / `NEXIEZ` | QC。**NEXWAY → Nexcube**（海外呼称）。NEXIEZ は VFGLF 側の QC 呼称としてフォルダに残る |
 
 ---
 

@@ -116,7 +116,9 @@ last-verified: "2026-10-19"
 | 78 | 完了 | 調整ハブ 113/411、171↔422、PATCHES 監査 |
 | 79 | 完了 | 415/336/158/SCU/遮煙 §6、duplicate 索引追記 |
 | 80 | 完了 | 98↔158、227 duplicate ↔154/174 |
-| 80+ | 待ち | Lists §384 スナップ再取得、ingest、absent PDF 114 |
+| 81 | 完了 | **OneNote ジャンプ索引**（階層×page_role×カード）。回答の開き方を ONENOTE-JUMP |
+| 82 | 完了 | **NEXWAY→Nexcube** QC 入口。振動・94D と条件分け |
+| 82+ | 待ち | Lists §384 スナップ再取得、カード KB ingest、absent PDF 114、QC 35 頁の個別要約 |
 
 ### Wave 4 優先キュー（案）
 

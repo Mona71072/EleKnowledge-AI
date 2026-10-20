@@ -88,7 +88,7 @@ source_refs:
 | 種別 | 参照 |
 | --- | --- |
 | Lists | §415 |
-| OneNote | `a8c15103…:106` |
+| OneNote | `a8c15103-95f4-4d08-897a-403d412bffb5:106` | **content** `onenote-15fdf4b73ce899ff2c9eee95.md`（`read_this_page`）。子 content は `:107` `onenote-dbf139ed6555627dc834f457.md`、`:108` `onenote-2847082e91becb1e2d7049e4.md`（タイトル転記なし） |
 | KB | C-7-C3331.1、C-7-C3333.1 |
 
 ## 未確認事項

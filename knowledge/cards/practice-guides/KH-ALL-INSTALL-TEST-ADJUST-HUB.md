@@ -68,6 +68,7 @@ source_refs:
 | 軸 | カード | 備考 |
 | --- | --- | --- |
 | **本スロー・BK** | [392 本スロー BK1](../case-summaries/KH-VFGLF-BRAKE-SW-392.md) / [63 BK2](../case-summaries/KH-LINKS-BK2-SETTING-63.md) / [81 BK SW](../case-summaries/KH-LINKS-BK-SW-SETTING-81.md) | 設定不良→要領で再調整 |
+| **Nexcube QC** | [NEXWAY→Nexcube 品質確認](./KH-NEXCUBE-VFGH-QC-HUB.md) | VFGH チェック。振動は防振ゴム・戸を先に見る |
 | **巻上・93F** | [113 レゾルバ基板](../case-summaries/KH-VFGLF-RESOLVER-BOARD-113.md) / [411 レゾルバ線](../case-summaries/KH-VFGLF-HOIST-RESOLVER-WIRE-411.md) | duplicate — **基板 vs 断線** |
 | **本スロー後・運転** | [176](../case-summaries/KH-ALL-GROUND-N00-NORMAL-SLOW-176.md) / [87 RHQ](../case-summaries/KH-LINKS-RHQ-CONNECTOR-87.md) / [139 94D](../case-summaries/KH-LINKS-POLE-ALIGN-94D-139.md) / [414 421](../case-summaries/KH-VFGLF-LINE-LED-GROUND-414.md) / [407 気配り](../case-summaries/KH-ALL-KEIAIN-DOOR-WIRING-407.md) | **392 `:156`** 索引と双方向 |
 | **PSL・DN** | [55](../case-summaries/KH-LINKS-PSL-PIN-55.md) / [342](../case-summaries/KH-LINKS-PSL-PIN-S21-342.md) | 本スロー DN |
@@ -84,7 +85,7 @@ source_refs:
 | `a8c15103…:156` 等 | 392 カード §3 参照 | **BK / 本スロー** 不具合リスト索引 |
 | `a8c15103…:98` | `onenote-bbde917c12a4aa975f724a2c.md` | ロープ張力・振動診断 **C-1-E10** / AM-218 |
 | `a8c15103…:99` | （ハイブリッド索引） | VFGL* **検査試験調整要領** EA-030 等 |
-| `ec02c9c5…:110` | `onenote-18d9613f585c8d2f94ed4965.md` | **VFGH** 検査試験調整要領・高速運転調整 |
+| `ec02c9c5…:110` | `onenote-18d9613f585c8d2f94ed4965.md` | **VFGH 調整資料** — EA-097 検査試験調整要領、C-7-F2900.1-J 据付調整資料、高速運転調整 |
 | `a8c15103…:116` | `onenote-069a048b18233339abda2d6a.md` | **群管理パラメータ** C-8-S451 / S436 等 |
 
 ## 統合した回答・ノウハウ
@@ -116,7 +117,7 @@ source_refs:
 | 種別 | 参照 |
 | --- | --- |
 | INDEX | [§据付・試験・調整](../INDEX.md#据付試験調整横断入口) |
-| OneNote | frontmatter の 5 頁（navigation） |
+| OneNote | frontmatter の 5 頁。開き方は [ONENOTE-JUMP.md](../../validation/ONENOTE-JUMP.md)（`:99` は子 content、`:98` `:110` は引用カード） |
 | Lists | 各 `list_item_id` カード |
 
 ## 未確認事項

@@ -129,3 +129,14 @@ frontmatter がパース不能な draft は `queues/repair/MANIFEST.md` に載�
 | `empty_or_attachment_only` | 実質空・添付のみ | `source_refs` に載せない |
 
 自動 title / prefix / draft 一致は **監査台帳の候補**として扱い、未確認のまま §3 へ他テーマ語を増やさない。公開・RAG 経路は [card-kb-two-tier-retrieval.md](../docs/features/development/card-kb-two-tier-retrieval.md)（ドラフト）。
+
+## OneNote ジャンプ（回答の開き方）
+
+正本: [validation/ONENOTE-JUMP.md](validation/ONENOTE-JUMP.md)。生成: `scripts/knowledge/build_onenote_jump_index.py` → `registry/onenote-jump-index.jsonl` / `registry/card-onenote-jumps.jsonl`。
+
+| `answer_mode` | EleKnowledge で開くもの |
+| --- | --- |
+| `read_this_page` | 引用頁のスナップショット（**content / cross_topic**）。子 content があれば続けて開く |
+| `navigate_to_child_content` | 索引頁は目次。**子の content 頁**が回答 |
+| `use_citing_cards` | 索引に本文の子が無い。**同じ `onenote_id` のテーマカード**（§4 / §6）が回答 |
+| `navigation_only` | キュレーション済み回答が無い。索引タイトルから手順を作らない |

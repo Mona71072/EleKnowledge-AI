@@ -173,6 +173,7 @@ cloud_approval: not_reviewed
 | BSER のみ（旧） | 外し運用あり | Lists 経緯 |
 | BSER-CP（2024/4〜原則） | **付けたまま** | Lists / OneNote |
 | 併設・客先了承なし | BSER 継続可 | OneNote |
+| 走行・戸の振動 | 本カードではない | [Nexcube QC](./KH-NEXCUBE-VFGH-QC-HUB.md) 防振ゴム・戸。未調整は候補であり原因断定しない |
 
 ## KB確認に基づく追記
 

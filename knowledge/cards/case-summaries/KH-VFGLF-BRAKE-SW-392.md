@@ -137,7 +137,7 @@ Lists progress の順を推奨:
 | 種別 | 識別子 | 補足 |
 | --- | --- | --- |
 | Lists | §392 |
-| **OneNote** | `a8c15103-95f4-4d08-897a-403d412bffb5:156` | `onenote-1ce36975e184ab075d978bd7.md` |
+| **OneNote** | `a8c15103-95f4-4d08-897a-403d412bffb5:156` | `onenote-1ce36975e184ab075d978bd7.md` — **hybrid 索引**。`answer_mode: use_citing_cards`（子 content なし）。回答は本カード §4 と §6 の同頁テーマ。索引タイトルは転記しない |
 | **KB** | Lists 通称 → **`C-7-C3900-J-E.pdf`** | C資料 / AXIEZ-LINKs |
 
 編集用写し: `record_id` `case-elv-vfglf-brake-switch-stroke-id392`

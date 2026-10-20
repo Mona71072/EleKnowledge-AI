@@ -28,6 +28,12 @@ related-code:
 - **`:page` は UUID 横断で一意ではない**（別ノートブックにも `:156` がありうる）。略称だけ渡されたときは **registry で uuid を確定**してから編集・リンク・監査する。文脈不明なら略称を増やさず **フル ID を書く**。
 - 他カードへ「同索引」と書くときは、**そのカードが `source_refs` で持つ `onenote_id`**、または **Lists テーマカードへの Markdown リンク**を優先する（索引タイトル一覧の転記は [CONTRACT.md](../knowledge/CONTRACT.md) の `page_role: index` どおり禁止）。
 
+## 機種呼称（2026-10-20）
+
+- **NEXWAY** は **NEXCUBE の海外呼称**。日本向けのテーマカードでは `product_lines: Nexcube` として扱う。フォルダ名に VFGH とある品質確認は **制御 VFGH** のまま（NEXWAY＝VFGH とはしない）。
+- **CM-MA** は Nexcube の機種略称の一つ。NEXWAY 品質確認フォルダ全体を CM-MA 専用にしない。
+- 入口: [KH-NEXCUBE-VFGH-QC-HUB](../knowledge/cards/practice-guides/KH-NEXCUBE-VFGH-QC-HUB.md)。走行振動では防振ゴム・戸のチェック未実施を**候補**にする。未実施が原因だと断定しない。長周期感知（Lists §416）は別現象。
+
 ## 作業手順（Must）
 
 テーマカード・draft を新規／更新するとき:
