@@ -128,7 +128,7 @@ AWS導入には`Environment=dev`、`KnowhowEnabled=true`、`KnowhowIndexBucket`�
 
 ## 別端末から mona の dev を試す
 
-> 最終検証: 2026-10-20 — リポジトリ上の手順・カード検査・Amplify設定を照合。AWSへの反映は未実施。
+> 最終検証: 2026-10-20 — Phase2のAWS反映、Lambda設定、Amplifyのビルド履歴を確認。管理者ログイン後の画面・認証付き検索は未確認。
 
 正本の試行順はこれだけである。Phase2の一般手順は[運用ランブック](../../ops-runbook.md)の「デプロイとロールバック」と[移行ランブック](../../aws-migration-runbook.md)の Phase 2 を使う。ここには先輩チャットを足すときの差分だけを書く。
 
@@ -151,18 +151,36 @@ node scripts/knowledge/build-senpai-index.mjs build . <取込一覧.json>
 
 生成先は`.private-knowhow/index.json`である。Gitには入れない。
 
-5. そのJSONを、資料配信用バケットともKB取込バケットとも違う、既存のprivateバケットの固定キーへ置く。同じバケットだとLambdaは503にする。新しい公開バケットは作らない。オブジェクトの中身はカード全文を含む。
+5. そのJSONを、資料配信用バケットともKB取込バケットとも違うprivateバケットの固定キーへ置く。同じバケットだとLambdaは503にする。既存の専用privateバケットを優先し、無ければ組織ポリシーに従ってprivate専用バケットを用意する。公開バケットは作らない。暗号化・TLS必須・非公開状態を確認する。オブジェクトの中身はカード全文を含む。
 6. いま動いている`EleKnowledge-dev-phase2`のパラメータを読み、同じ値をすべて`--parameter-overrides`へ戻す。`KnowledgeBaseId`、モデルID、法令ゲートをテンプレート既定のままにすると、devの通常チャットの接続先が変わる。そのうえで次だけを試行値にする。
    - `RagLogicVersion`は`git rev-parse --short=12 HEAD`（7〜40桁の小文字16進）
    - `Environment=dev`
    - `KnowhowEnabled=true`
    - `KnowhowIndexBucket`と`KnowhowIndexKey`は手順5の置き場所
-7. `infrastructure/sam`で`sam build`し、`sam deploy --no-execute-changeset`でchangesetを見る。Replaceが出たら実行しない。問題なければchangesetを実行する。このデプロイはdevのRAG Lambda全体を`mona`のコードへ替える。カード索引を読まない通常質問でも、`mona`に入っている他のLambda変更は同じスタックに入る。
+7. 対象SHAを確認して`infrastructure/sam`で`sam build`する。SCPでSAMの自動S3解決が許可されない環境では、承認済みartifacts bucketを明示して`sam package`し、パッケージ済みtemplateからCloudFormation changesetを作る。`--resolve-s3`に頼らない。changesetのAdd/Modify/RemoveとReplacementを確認し、Replaceが出たら実行しない。問題なければchangesetを実行する。このデプロイはdevのRAG Lambda全体を`mona`のコードへ替える。カード索引を読まない通常質問でも、`mona`に入っている他のLambda変更は同じスタックに入る。
 8. Amplifyは`develop`を自動ビルドする。`mona`の画面を試す間は、Amplifyの対象ブランチを`mona`にして、このコミットから再ビルドする。コンソール側でビルド定義を上書きしている場合は、`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH`が文字列`true`であることを確認する。
 9. 管理者でそのブランチのURLを開き、先輩チャットでカードの症状語を質問する。返答に「参照したノウハウMarkdown」が出ること、非管理者は入口が出ないこと、通常の`/chat`がこれまでどおり資料検索できることを見る。索引が無い、またはバケットが資料配信と同じだと503になる。
 10. 試してよければ`develop`へマージする。よくなければ`KnowhowEnabled=false`と、デプロイ前の`RagLogicVersion`・モデル・KB IDへ戻してPhase2を再デプロイし、Amplifyの対象を`develop`に戻す。
 
 OneNoteの自動書込はこの試行に含めない。
+
+### 2026-10-20 dev実反映記録と再発防止
+
+> 最終検証: 2026-10-20 — CloudFormation変更セット・スタック完了イベント、RAG Lambda環境変数、Amplifyジョブ、S3オブジェクトを確認。管理者による受入試験は未完了。
+
+- 実際に反映したソースは`origin/mona`の`e54f3fafb4ad`。作業開始時の`5a39b1cef8c2`を一度packageしたが、Amplifyの`mona`ブランチが既に新しいコミットをJob 32で配信していたため、そのpackageはdeployせず、最新コミットを取り直してSAM build/packageからやり直した。**build/packageの前とchangeset実行直前に、Git SHAとAmplifyの対象コミットを再照合する。** 古いpackageを最新コードだと見なさない。
+- 398枚を棚卸しし、索引には320枚だけを選択した。78枚（未対応の出典項目44、適用範囲の`/`が33、出典値の`/`が1）は除外した。カードはすべてdraftで、`cloudApproved`はこの限定用途のクラウド処理許可であり、技術承認ではない。除外カードを修正なしに追加しない。
+- 専用のprivate S3バケットへ`senpai/index.json`を配置した。SSE-S3 AES256、バージョニング、HTTPS必須ポリシーを設定し、オブジェクトの暗号化とバケットポリシー上の非公開状態を確認した。組織SCPにより`put-public-access-block`は拒否された（exit 254）。これは今回の環境で確認済みの制約であり、同APIを再試行したり、公開設定を変えて回避しない。`sam package`には既存のSAM artifacts bucketを明示し、`--resolve-s3`を使わない。
+- Phase2の現行パラメータをすべて取得して引き継ぎ、変更したのは試行SHA・knowhow有効化・専用索引bucket/keyだけ。KB、モデル、法令ゲート、引用URIモード、スロットリング設定をテンプレート既定値で上書きしない。再デプロイ時も、まず稼働スタックの全パラメータを取得し、対象差分以外を維持する。
+- SAM package後に作成したchangesetは24リソース変更、`Replacement=True`は0件。確認後に実行し、`EleKnowledge-dev-phase2`は`UPDATE_COMPLETE`となった。RAG Lambdaでは`KNOWHOW_ENABLED=true`、索引bucket/key、`RAG_LOGIC_VERSION=e54f3fafb4ad`と、既存のKB・モデル・法令設定を確認した。changesetに置換が1件でもあれば実行しない。
+- Amplifyの`mona`ブランチは既存で自動ビルド有効、Job 32が`e54f3fafb4ad`で成功していた。配信ホームのクライアント資産に先輩チャットの表示文言が含まれることを確認した。`amplify.yml`の`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH=true`はビルド時設定なので、環境変数の変更後は必ず新しいビルドを行う。
+- Lambdaを直接呼び出した簡易試験は、合成したadmin claimと検索語`エラー`で`200` / `knowhow.status=not_found`だった。これは該当カードが見つからなかった結果で、API Gateway/Cognito認証や画面操作の成功を示さない。応答にsession/message IDがあったため、テスト用ユーザーのChatLogsが作成された可能性もある。**この直呼び結果を受入済みと記録せず、同じ合成ユーザーで再試験しない。** 管理者ログインから実カードの症状語で検索し、ノウハウ候補表示、通常チャット、法令チャット、非管理者の非表示・拒否を確認する工程が残る。
+
+#### Windowsでの実行時に注意すること
+
+- SAM CLIが同梱Pythonを見つけられるよう、SAM runtimeを`PATH`の先頭に加えてからbuild/packageする。package/buildが動作中なら二重起動せず、プロセス終了と出力を確認してから次へ進む。
+- PowerShell 5.1の`ConvertTo-Json | Set-Content`はUTF-8 BOM付きになり、AWS CLIの`file://` JSON読込で失敗することがある。JSON入力ファイルはUTF-8 BOMなしで保存し、CLIには`file://<path>`で渡す。JSONをコマンドラインへ直接埋め込まない。
+- `--resolve-s3`やバケット公開アクセスブロックAPIの再試行でSCPを回避しようとしない。承認済みのartifacts bucketと、個別の変更セット確認を使う。
 
 ### 2026-10-20 実装検証
 
