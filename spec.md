@@ -4,9 +4,9 @@
 
 **プロジェクト名:** EleKnowledge
 **バージョン:** 1.2.0
-**最終更新日:** 2026-04-24
+**最終更新日:** 2026-10-15
 **作成者:** Development Team
-**ステータス:** Phase 1 完成・Phase 2 完成・Phase 3 開発中
+**ステータス:** Phase 1 / 2 の開発環境 stack は `UPDATE_COMPLETE`（機能仕様書と利用者向け E2E は再検証中）・Phase 3 は開発中（AWS リソースあり、利用者向け E2E 未確認）
 
 ---
 
@@ -28,8 +28,8 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 ### 1.3 システム特徴
 
 - ✅ 社内ネットワーク限定アクセス（IP制限）
-- ✅ Amazon Bedrock Claude 4による高精度AI応答
-- ✅ マルチエージェント協調による複雑な問題解決
+- ✅ Amazon Bedrock を使った RAG 応答（使用モデルは環境設定に従う）
+- 🟡 トラブルシューティング（開発中。AWS リソースの存在は提供確認を意味しない）
 - ✅ セキュアなAWS環境での運用
 
 ---
@@ -38,20 +38,39 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 
 > 仕様詳細はトピック別ドキュメントに分割しています。本ファイルは索引として機能します。
 
-### 🟢 稼働中の機能
+### 🟢 開発環境でリソース稼働を確認した機能
 
-| 機能 | ドキュメント |
-|------|------------|
-| Phase 1: 基盤整備（認証・ホーム画面・WAF） | [docs/features/production/phase1-foundation.md](docs/features/production/phase1-foundation.md) |
-| Phase 2: RAGチャット（Knowledge Base + Claude 4） | [docs/features/production/phase2-rag-chat.md](docs/features/production/phase2-rag-chat.md) |
+| 機能 | 現行契約・状態 | 文書 |
+|------|--------------|------|
+| Phase 1: 認証・基盤 | AWS stack を確認。機能仕様書は全面再検証中 | [認証 API](docs/api/auth.md) ／ [Phase 1 機能仕様（再検証中）](docs/features/production/phase1-foundation.md) |
+| Phase 2: RAG・チャット | AWS stack と開発環境のモデル設定を確認。API 文書を契約の参照先とし、機能仕様書は現行正本にしない | [RAG API](docs/api/rag.md) ／ [チャット API](docs/api/chat.md) ／ [Phase 2 機能仕様（再検証中）](docs/features/production/phase2-rag-chat.md) |
 
 ### 🟡 開発中の機能（Phase 3）
 
 | 機能 | 仕様 | 補足資料 |
 |------|------|---------|
-| トラブルシューティング | [docs/features/development/phase3-troubleshooting-spec.md](docs/features/development/phase3-troubleshooting-spec.md) | PoC 設計: [docs/agent-spec.md](docs/agent-spec.md) ／ 実装ガイド: [docs/features/development/phase3-troubleshooting-implementation-guide.md](docs/features/development/phase3-troubleshooting-implementation-guide.md) |
-| 品質書類チェック（Claude 4 Vision） | [docs/features/development/phase3-quality-check-spec.md](docs/features/development/phase3-quality-check-spec.md) | — |
-| RAG の 2 モード化（通常モード＋じっくりモード。設計段階） | [docs/design-2026-09-24-rag-two-modes.md](docs/design-2026-09-24-rag-two-modes.md) | 決定: [docs/decisions-2026-09-24-rag-two-modes.md](docs/decisions-2026-09-24-rag-two-modes.md) ／ 調査: [docs/survey-2026-09-24-agentic-rag.md](docs/survey-2026-09-24-agentic-rag.md) ／ KB 修正依頼の台帳: [docs/kb-change-requests.md](docs/kb-change-requests.md) |
+| トラブルシューティング | [docs/features/development/phase3-troubleshooting-spec.md](docs/features/development/phase3-troubleshooting-spec.md) | AWS リソースは存在するが利用者向け E2E 未確認。既存の[処理シーケンス](docs/features/production/troubleshooting-sequence.md)は現行との照合が必要。PoC 設計: [docs/agent-spec.md](docs/agent-spec.md) ／ [実装ガイド](docs/features/development/phase3-troubleshooting-implementation-guide.md) |
+| 品質書類チェック（Claude 4 Vision） | [docs/features/development/phase3-quality-check-spec.md](docs/features/development/phase3-quality-check-spec.md) | 開発仕様のみ。実装・E2E は未確認。 |
+| 法令チャット（developプレリリース） | [法令RAG設計](docs/features/development/legal-rag-design.md) ／ [法令API補足](docs/api/legal-chat.md) | Amplify job 64でdevelopへ公開反映済み。法令カードと法令画面への遷移を実確認。itai配信版の実アカウント操作はユーザー確認済み。対象はdev全ユーザー、実費は今後確認。[対象一覧](docs/features/development/legal-rag-target-laws.md) ／ [公開・受入手順](docs/legal-chat-prerelease.md) ／ [確認記録](docs/verification-2026-10-09-legal-chat-prerelease.md) |
+| RAG の 2 モード化（通常モード＋じっくりモード。設計段階） | [設計（合意済み・未実装）](docs/design-2026-09-24-rag-two-modes.md) | 決定: [docs/decisions-2026-09-24-rag-two-modes.md](docs/decisions-2026-09-24-rag-two-modes.md) ／ 調査: [docs/survey-2026-09-24-agentic-rag.md](docs/survey-2026-09-24-agentic-rag.md) ／ [KB 修正依頼台帳](docs/kb-change-requests.md) |
+| Know-how Knowledge Layer（設計段階・未確定） | [docs/design-2026-10-01-knowhow-flywheel.md](docs/design-2026-10-01-knowhow-flywheel.md) | 調査: [docs/survey-2026-10-01-knowhow-flywheel.md](docs/survey-2026-10-01-knowhow-flywheel.md) |
+
+### 📖 利用者向け案内
+
+| 文書 | 状態 |
+| --- | --- |
+| [利用者マニュアル](docs/user-manual/eleknowledge-user-manual.html) | 法令チャットを追加した第2版。クリックできる目次と末尾の改訂履歴を掲載。撮影元は管理者用文書で管理し、利用者本文に開発ブランチ名を記載しない。通常チャットの既存画像は過去の例 |
+| [管理者向け確認表](docs/user-manual/admin-verification-sheet.md) | 法令チャットの反映・実アカウント確認と配布判定を管理 |
+
+### 🔧 運用・改善・評価
+
+| 項目 | 現在の状態 | 参照先 |
+|------|------------|--------|
+| AWS リソース・運用 | 2026-09-30 開発環境の読み取り専用スナップショット。IaC との差・未確認項目を含む | [AWS Resource Map](docs/aws-resource-map.md) ／ [運用ランブック](docs/ops-runbook.md) ／ [文書整備状況の確認記録](docs/verification-2026-09-30-current-state.md) |
+| コスト配分タグ | 2026-10-15に3キーを104リソースへ付与・再読取確認。管理部門での有効化・請求への反映は未確認 | [タグ運用](docs/ops-cost-allocation-tags.md) ／ [リソース別台帳](docs/cost-allocation-resource-register.md) |
+| 日次 KPI v2 | 設計。AWS の毎時ルールは確認したが、現在の aggregator は日次 UTC 集計 | [KPI v2 設計](docs/design-2026-09-10-metrics-v2.md) |
+| 検索トレース | 設計・実装前 | [検索トレース設計](docs/design-2026-09-10-retrieval-trace.md) |
+| RAG 検索評価 | v2 候補はラベル確認前。正解資料・ページ確定前に採点しない | [評価セット v2](docs/eval-2026-09-25-golden-set-v2.md) ／ [評価運用の注意](docs/decisions-2026-07-29-layer1-eval-ops.md) |
 
 ### 📐 アーキテクチャ
 

@@ -74,9 +74,20 @@ export function getAnnouncements(limit = 10): Promise<AnnouncementsResponse> {
   return request<AnnouncementsResponse>(`/announcements?limit=${limit}`);
 }
 
-/** Admin: list every announcement across all statuses. */
-export function listAllAnnouncements(): Promise<{ announcements: Announcement[] }> {
-  return request<{ announcements: Announcement[] }>(`/admin/announcements`);
+/** Admin: いま表示中の全件（公開中かつ未終了）。件数で切らない。「いま表示中」欄の戻し忘れ警告に使う。 */
+export function listActiveAnnouncements(): Promise<{ announcements: Announcement[] }> {
+  return request<{ announcements: Announcement[] }>(`/admin/announcements/active`);
+}
+
+/** Admin: one page of announcements across all statuses (newest publishAt first). nextToken は次ページ、null なら末尾。 */
+export function listAllAnnouncements(
+  options: { limit?: number; nextToken?: string | null } = {},
+): Promise<{ announcements: Announcement[]; nextToken: string | null }> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.nextToken) params.set('nextToken', options.nextToken);
+  const qs = params.toString();
+  return request<{ announcements: Announcement[]; nextToken: string | null }>(`/admin/announcements${qs ? `?${qs}` : ''}`);
 }
 
 /** Admin: create. */

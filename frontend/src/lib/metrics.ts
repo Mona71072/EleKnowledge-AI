@@ -2,7 +2,7 @@ import { getIdToken, authHeaders } from './auth-helpers';
 
 const API_URL = process.env.NEXT_PUBLIC_APP_API_URL || '';
 
-export type HealthStatus = 'good' | 'warning' | 'serious' | 'critical';
+export type HealthStatus = 'good' | 'warning' | 'serious' | 'critical' | 'unknown';
 /** null = 集計行が無い（0 と区別する。設計 §2.7） */
 export type Count = number | null;
 export type TrendDays = 14 | 30 | 90;
@@ -54,6 +54,7 @@ export interface DashboardResponse {
   now: {
     alarms: AlarmNow[];
     status: HealthStatus;
+    cloudwatchAvailable: boolean;
     last60min: { requests: number; http5xx: number; ragP90Ms: number | null; ragMaxMs: number | null; ragCount: number };
     freshness: { yesterdayAggregatedAt: string | null; todayPartialAt: string | null; status: HealthStatus };
     activeNotices: ActiveNotice[];
@@ -148,6 +149,7 @@ export const STATUS_META: Record<
   warning: { label: '注意', icon: '▲', color: '#fab219', className: 'text-amber-800 bg-amber-50 border-amber-300', stripe: 'border-l-amber-400' },
   serious: { label: '悪化', icon: '◆', color: '#ec835a', className: 'text-orange-800 bg-orange-50 border-orange-300', stripe: 'border-l-orange-400' },
   critical: { label: '重大', icon: '■', color: '#d03b3b', className: 'text-red-800 bg-red-50 border-red-300', stripe: 'border-l-red-500' },
+  unknown: { label: '取得不可', icon: '?', color: '#6b7280', className: 'text-gray-700 bg-gray-100 border-gray-300', stripe: 'border-l-gray-500' },
 };
 
 export function formatPct(v: number): string {

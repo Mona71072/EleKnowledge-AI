@@ -66,7 +66,7 @@ category `TEST` の資料が 1 件残っています（パスは付録 A）。�
 `VQV81CNYU4` には s3-data-source 以外に以下の 2 データソースが接続されており、据付業務と無関係な文書が検索結果に混入し得ます。当方アプリ側でフィルタ遮断しますが、KB としても不要であれば削除をご検討ください。
 
 - `7NJIOJDD0Z` web-crawler-data-source（GenU ドキュメントを取り込むクローラー）
-- `A0XLFVSX3P` knowledge-base-quick-start-7duyg-data-source（`s3://rag-data-source-inst-fmp-730972069979-ap-northeast-1` 全体）
+- `A0XLFVSX3P` knowledge-base-quick-start-7duyg-data-source（`s3://rag-data-source-inst-fmp-<DEV_ACCOUNT_ID>-ap-northeast-1` 全体）
 
 ## 確認したい運用事項
 

@@ -32,6 +32,8 @@ import {
   isUnresolved,
 } from '@/lib/improvement-proposals';
 import { isThisWeekJst, periodRange } from '@/lib/failures-period.mjs';
+import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
+import { failureTruncationNotices, isReformulatedFailure } from '@/lib/failures-selection.mjs';
 
 type PeriodKey = '1' | '7' | '30' | 'custom' | 'all';
 type TriageFilter = TriageStatus | 'all';
@@ -52,6 +54,7 @@ const KINDS: { key: FailureKind; label: string }[] = [
 ];
 
 const REASON_CHIP_ORDER: FeedbackReason[] = ['wrong_doc', 'unresolved', 'bad_answer', 'other', 'wrong_page'];
+const REFORMULATED_EMPTY_NOTICE = '言い換えは #111（RAG の記録）のデプロイ後から記録されます';
 
 const REASON_FILTERS: { key: ReasonFilterKey; label: string }[] = [
   { key: 'all', label: '理由: すべて' },
@@ -105,7 +108,7 @@ function triageOf(item: { triage?: Triage }): Triage {
 
 /**
  * 失敗・改善提案 v2（設計 docs/design-2026-09-10-dashboard-v2.md §9）。
- * 期間で絞り、1 件ずつ振り分けを記録する。週次レビューのゴールは「未振り分けを 0 にする」。
+ * 期間で絞り、1 件ずつ振り分けを記録する。週次レビューのゴールは未振り分けを 0 にすること（部分取得時は表示中の範囲）。
  */
 export default function AdminFailuresPage() {
   const [period, setPeriod] = useState<PeriodKey>('7');
@@ -120,6 +123,7 @@ export default function AdminFailuresPage() {
   const [wishesError, setWishesError] = useState<string | null>(null);
   const [scannedCount, setScannedCount] = useState(0);
   const [incomplete, setIncomplete] = useState(false);
+  const [truncationNotices, setTruncationNotices] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -142,7 +146,8 @@ export default function AdminFailuresPage() {
         getChatFailures('reformulated', 100, { since: range.since, until: range.until }),
       ]);
       const seen = new Set<string>();
-      const merged = [...(failRes.failures || []), ...(refRes.failures || [])].filter((it) => {
+      const reformulatedFailures = (refRes.failures || []).filter(isReformulatedFailure);
+      const merged = [...(failRes.failures || []), ...reformulatedFailures].filter((it) => {
         if (seen.has(it.messageId)) return false;
         seen.add(it.messageId);
         return true;
@@ -152,6 +157,7 @@ export default function AdminFailuresPage() {
       setNote(failRes.note || null);
       setScannedCount(failRes.scannedCount || 0);
       setIncomplete(Boolean(failRes.incomplete || refRes.incomplete));
+      setTruncationNotices(failureTruncationNotices(failRes, refRes));
       setDrafts({});
       try {
         const wishRes = await getAdminSuggestions(30);
@@ -164,6 +170,7 @@ export default function AdminFailuresPage() {
       setError((e as Error).message);
       setAllItems([]);
       setIncomplete(false);
+      setTruncationNotices([]);
     } finally {
       setLoading(false);
     }
@@ -381,11 +388,16 @@ export default function AdminFailuresPage() {
       </div>
 
       {/* 作業量の帯 */}
+      {(incomplete || truncationNotices.length > 0) && (
+        <p className="mb-2 text-xs text-amber-800">
+          件数は表示中の範囲（先頭 100 件／走査済みの範囲）の数です。
+        </p>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 rounded-lg border border-gray-200 bg-white divide-x divide-gray-200 mb-6">
         <div className="px-4 py-3 bg-blue-50/60">
           <div className="text-[11px] text-gray-500">未振り分け</div>
           <div className="text-xl font-semibold tabular-nums">
-            {work.open} <span className="text-[11px] font-normal text-gray-500">件 → 0 にするのが週次のゴール</span>
+            {work.open} <span className="text-[11px] font-normal text-gray-500">件 → {(incomplete || truncationNotices.length > 0) ? '表示中の範囲で ' : ''}0 にするのが週次のゴール</span>
           </div>
         </div>
         <div className="px-4 py-3">
@@ -415,7 +427,7 @@ export default function AdminFailuresPage() {
           <div>
             <h3 className="text-sm font-bold text-blue-950">改善提案（ルール v0）</h3>
             <p className="text-xs text-blue-900/80 mt-0.5">
-              {rangeLabel} の未対応 {summary.total} 件（取得 {allItems.length} 件、うち未対応 {unresolvedItems.length}）から集計。件数≥{IMPROVEMENT_PROPOSAL_THRESHOLD} でカード表示（出荷判断は第1層 eval のまま）
+              {rangeLabel} の未対応 {summary.total} 件（取得 {allItems.length} 件、うち未対応 {unresolvedItems.length}。集計は各一覧の先頭 100 件内）から集計。件数≥{IMPROVEMENT_PROPOSAL_THRESHOLD} でカード表示（出荷判断は第1層 eval のまま）
             </p>
           </div>
           <button type="button" onClick={() => setShowOpsGuide((v) => !v)} className="text-xs text-blue-800 underline underline-offset-2">
@@ -548,6 +560,12 @@ export default function AdminFailuresPage() {
         </div>
       )}
 
+      {truncationNotices.length > 0 && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          {truncationNotices.map((notice) => <p key={notice}>{notice}</p>)}
+        </div>
+      )}
+
       {note && (
         <p className="mb-4 text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">
           {note}
@@ -564,6 +582,7 @@ export default function AdminFailuresPage() {
       ) : items.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center text-sm text-gray-500">
           該当する失敗はありません（期間・フィルタ条件を変えるか、現場で 👎 / not_found / 要望フォームを使ってください）。
+          {kind === 'reformulated' && <p className="mt-2">{REFORMULATED_EMPTY_NOTICE}</p>}
         </div>
       ) : (
         <ul className="space-y-3">
@@ -594,7 +613,7 @@ export default function AdminFailuresPage() {
                   </div>
                   <div className="flex gap-2">
                     {item.sessionId && (
-                      <Link href={`/chat?session=${encodeURIComponent(item.sessionId)}`} className="text-xs px-2.5 py-1 rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
+                      <Link href={buildChatSessionHref(item.sessionId, item.ragMode)} className="text-xs px-2.5 py-1 rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
                         チャットで開く
                       </Link>
                     )}
@@ -648,7 +667,7 @@ export default function AdminFailuresPage() {
                     <span className="text-gray-400">トレース実装後に表示</span>
                   )}
                   <span>
-                    資料を開いた <b className="font-mono">{item.opened ? `${item.opened} 件` : '—'}</b>
+                    資料を開いた <b className="font-mono">{item.opened != null ? `${item.opened} 件` : '—'}</b>
                   </span>
                 </div>
 
@@ -738,7 +757,7 @@ export default function AdminFailuresPage() {
                   <p className="text-[11px] text-gray-500 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span>{formatTs(w.timestamp)}</span>
                     {w.contextSessionId && (
-                      <Link href={`/chat?session=${encodeURIComponent(w.contextSessionId)}`} className="text-blue-700 underline">
+                      <Link href={buildChatSessionHref(w.contextSessionId, w.ragMode)} className="text-blue-700 underline">
                         関連セッション
                       </Link>
                     )}

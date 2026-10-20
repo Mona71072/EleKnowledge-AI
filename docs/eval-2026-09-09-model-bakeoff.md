@@ -10,6 +10,40 @@ related-code: scripts/eval/run_model_bakeoff.py, scripts/eval/bakeoff_questions.
 
 # RAG 生成モデル 切替前比較（2026-09-09 21:25）
 
+## 再実行手順（2026-10-01）
+> 最終検証: 2026-10-04 — 料金式・公式単価・API 別キャッシュ仕様・比較記録枠を追記し照合
+
+Anthropic の InvokeModel と Luna の Converse はスクリプトがモデル ID の能力表に従って選択する。同じ質問・同じ Retrieve 結果で比較をやり直す場合は、まず Retrieve を保存し、そのファイルを読み込んで再生成する。
+
+```sh
+python scripts/eval/run_model_bakeoff.py \
+  --questions scripts/eval/bakeoff_questions.jsonl \
+  --models "sonnet5=global.anthropic.claude-sonnet-5,luna=global.openai.gpt-6-luna" \
+  --save-retrieval eval-results/retrieval.json \
+  --out eval-results/luna-bakeoff.md
+
+python scripts/eval/run_model_bakeoff.py \
+  --questions scripts/eval/bakeoff_questions.jsonl \
+  --models "sonnet5=global.anthropic.claude-sonnet-5,luna=global.openai.gpt-6-luna" \
+  --load-retrieval eval-results/retrieval.json \
+  --out eval-results/luna-bakeoff-repeat.md
+```
+
+レポートには通常入力・cache read・cache write・総入力・出力トークン、レイテンシ、参考概算費用を記録する。**金額は参考概算（実請求とは未照合）**。総入力は `inputTokens + cacheReadInputTokens + cacheWriteInputTokens` で算出し、272K 判定も総入力に対して行う。費用は `(通常入力 × 入力単価 + cache read × cache read 単価 + cache write × cache write 単価 + 出力 × 出力単価) / 1,000,000` で求める。Sonnet 5 は Bedrock cache 単価未確認のため、その2項を金額へ含めない。
+
+Global GPT-6 Luna は総入力272,000 token以下で通常入力 / cache write / cache read / 出力をそれぞれ $0.10 / $0.125 / $0.01 / $0.50 per 1M tokens、272,000超では $0.20 / $0.25 / $0.02 / $0.75 per 1M tokens として計算する。ちょうど272,000 tokenは短文脈単価を適用する。
+
+Anthropic 公式の [Sonnet 5 料金](https://platform.claude.com/docs/en/about-claude/pricing) は input / output が $2 / $10、5分 cache write が $2.50、1時間 cache write が $4、cache read が $0.20 per 1M tokens。[Bedrock の Sonnet 5 モデルカード](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html) は bedrock-runtime / bedrock-mantle で暗黙・明示キャッシュに対応すると記載する。ただし同カードは AWS Marketplace 請求を案内しており、Bedrock の cache read / write 単価を確認できていないため、比較レポートの Sonnet 5 金額には cache 料金を含めず、未確認と表示する。Anthropic 公式単価は参考情報として記録し、Bedrock 実請求と同一とは扱わない。料金は変わるため実施時に AWS のモデルカードと料金表を再確認する。
+
+2026-10-02 の開発環境比較で、Converse 応答の usage に `cacheReadInputTokens` が返ったと itai が PR #158 のコメントで報告（生データは未添付）。AWS の [GPT-6 Luna モデルカード](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-luna.html) ではキャッシュは Responses API 限定とされており、公式の記載と食い違うため照合待ち。照合までは Luna のキャッシュ込み金額も参考値とする。
+
+### itai による32問比較の記録枠（未記入）
+
+- 実施日・実行環境・モデル ID: （未記入）
+- 生成しなかった3問の ID と各理由: （未記入）
+- 人による品質評価（評価者・質問 ID・判定・根拠）: （未記入）
+- 実請求との照合（対象期間・AWS請求額・差分・確認者）: （未記入）
+
 同じ質問・同じ検索結果に対する回答を並べたもの。**検索（Retrieve）は共通**なので、差はすべて生成モデルによる。
 
 | ラベル | モデル ID |

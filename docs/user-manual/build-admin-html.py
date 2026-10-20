@@ -5,6 +5,7 @@
 """
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 import markdown
 
@@ -12,6 +13,23 @@ HERE = Path(__file__).parent
 src = (HERE / "admin-verification-sheet.md").read_text(encoding="utf-8")
 src = re.sub(r"^---\n.*?\n---\n", "", src, flags=re.S)  # frontmatter を除去
 body = markdown.markdown(src, extensions=["tables"])
+
+
+def repository_link(match):
+    """Keep PDF links portable without embedding the author's local file path."""
+    target = match.group(1)
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target) or target.startswith("#"):
+        return match.group(0)
+    relative_path, separator, fragment = target.partition("#")
+    repository_path = (HERE / relative_path).resolve().relative_to(HERE.parents[1])
+    url = "https://github.com/yukiworkspace/EleKnowledge-AI/blob/develop/"
+    url += quote(repository_path.as_posix(), safe="/")
+    if separator:
+        url += "#" + quote(fragment, safe="-")
+    return f'href="{url}"'
+
+
+body = re.sub(r'href="([^"]+)"', repository_link, body)
 css = """<style>
 @page{size:A4 landscape;margin:14mm}
 body{font-family:"BIZ UDPGothic","Yu Gothic UI","Yu Gothic","Meiryo",sans-serif;font-size:9.5pt;line-height:1.6;color:#1a1a1a;margin:0}

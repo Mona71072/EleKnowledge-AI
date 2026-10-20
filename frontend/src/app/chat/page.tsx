@@ -16,6 +16,7 @@ import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { documentHref, documentHrefWithPage } from '@/lib/documents';
 import { getAnnouncements, Announcement } from '@/lib/announcements';
 import { NoticeBanner } from '@/components/announcements/NoticeBanner';
+import { resolveInitialChatMode } from '@/lib/chat-session-link.mjs';
 import {
   BadFeedbackReasonId,
   FEEDBACK_COMMENT_MAX,
@@ -120,6 +121,7 @@ export default function ChatPage() {
   const [wishSubmitting, setWishSubmitting] = useState(false);
   const [wishSent, setWishSent] = useState(false);
   const [wishError, setWishError] = useState<string | null>(null);
+  const isLawMode = ragMode === 'law';
   // 表示中の告知（障害中・復旧・メンテナンスなど、チャット画面の帯に出すもの）
   const [notices, setNotices] = useState<Announcement[]>([]);
 
@@ -136,7 +138,6 @@ export default function ChatPage() {
       })
       .catch(() => setNotices([]));
   }, []);
-  const isLawMode = ragMode === 'law';
 
   // value は Knowledge Base の実 category 値に対応する安定キー
   // 並び: 本命（C / TI / 据付基準）を先に、その他は後。
@@ -298,8 +299,7 @@ const normalizeTableMarkdown = (text: string): string => {
   // 初期化：ユーザー情報取得とセッション読み込み
   useEffect(() => {
     const initializeChat = async () => {
-      const requestedMode = new URLSearchParams(window.location.search).get('mode');
-      const initialMode: ChatMode = requestedMode === 'law' ? 'law' : 'normal';
+      const initialMode: ChatMode = resolveInitialChatMode(window.location.search);
       setRagMode(initialMode);
 
       // 開発モード: 認証をスキップする場合
@@ -340,7 +340,7 @@ const normalizeTableMarkdown = (text: string): string => {
   useEffect(() => {
     if (!userId) return;
     const params = new URLSearchParams(window.location.search);
-    const initialMode: ChatMode = params.get('mode') === 'law' ? 'law' : 'normal';
+    const initialMode: ChatMode = resolveInitialChatMode(window.location.search);
     setRagMode(initialMode);
     const q = params.get('q');
     const sessionId = params.get('session');
@@ -352,7 +352,8 @@ const normalizeTableMarkdown = (text: string): string => {
     }
     if (sessionId) {
       dirty = true;
-      fetchSessionMessages(sessionId).catch((err) => {
+      // setRagMode は次の描画まで反映されないため、取得モードは明示的に渡す（既定の ragMode は古い）
+      fetchSessionMessages(sessionId, initialMode).catch((err) => {
         console.error('Failed to open session from URL:', err);
         setError('指定されたセッションを開けませんでした');
       });
@@ -1140,6 +1141,21 @@ const normalizeTableMarkdown = (text: string): string => {
                           </p>
                         )}
                       </div>
+
+                      {isLawMode && message.role === 'assistant' && (
+                        <p className="mt-2 text-xs leading-relaxed text-gray-500">
+                          法令情報の出典は{' '}
+                          <a
+                            href="https://laws.e-gov.go.jp/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            e-Gov法令検索
+                          </a>
+                          です。e-Gov XMLをもとにEle-Knowledgeが検索・回答用に加工しています。法的判断の前にリンク先の原文をご確認ください。
+                        </p>
+                      )}
 
                       {/* Citations */}
                       {message.role === 'assistant' && message.sourceDocuments && message.sourceDocuments.length > 0 && 

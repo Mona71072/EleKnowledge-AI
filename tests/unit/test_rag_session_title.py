@@ -43,7 +43,7 @@ def _stub_invoke(rag, monkeypatch, text, capture=None):
         if capture is not None:
             capture["modelId"] = modelId
             capture["body"] = json.loads(body)
-        return {"body": _Body({"content": [{"type": "text", "text": text}]})}
+        return {"body": _Body({"content": [{"text": text}]})}
 
     monkeypatch.setattr(rag.bedrock_runtime_title, "invoke_model", fake_invoke_model)
 
@@ -71,6 +71,23 @@ def test_title_uses_sonnet5_compatible_request(rag, monkeypatch):
     assert rag.generate_session_title("質問") == "見出し"
     assert "temperature" not in capture["body"]
     assert capture["body"]["thinking"] == {"type": "disabled"}
+
+
+def test_title_uses_effort_low_and_falls_back_when_thinking_uses_budget(rag, monkeypatch):
+    monkeypatch.setattr(rag, "SESSION_TITLE_LLM_ENABLED", True)
+    monkeypatch.setattr(rag, "SESSION_TITLE_MODEL_ID", "global.anthropic.claude-sonnet-5-5")
+    captured = {}
+
+    def thinking_only(modelId=None, body=None):
+        captured.update(json.loads(body))
+        return {"body": _Body({"content": [{"type": "thinking", "thinking": "reason"}]})}
+
+    monkeypatch.setattr(rag.bedrock_runtime_title, "invoke_model", thinking_only)
+
+    assert rag.generate_session_title("溶接の脚長は？") == "溶接の脚長は？"
+    assert "thinking" not in captured
+    assert captured["output_config"] == {"effort": "low"}
+    assert captured["max_tokens"] == 64
 
 
 def test_title_strips_quotes_prefix_and_extra_lines(rag, monkeypatch):
@@ -210,7 +227,7 @@ def test_session_title_budget_allows_boundary(rag):
 
 def test_handler_enqueues_title_after_saving_user_message(rag):
     """通常・聞き返し・該当なしの全経路で、回答を待たずに非同期化する。"""
-    src = inspect.getsource(getattr(rag, "handle_rag_request", rag.lambda_handler))
+    src = inspect.getsource(rag.handle_rag_request)
     assert src.count("enqueue_session_title(session_id, user_message_id, user_id, query)") == 3
     assert src.count("session_title=session_title") == 0
     assert src.count("'sessionTitle': session_title") == 3

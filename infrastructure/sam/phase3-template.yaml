@@ -4,6 +4,15 @@ Transform: AWS::Serverless-2016-10-31
 Description: 'Phase 3 - Troubleshooting Agent Full Stack (Lambda + DynamoDB + API Gateway)'
 
 Parameters:
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+    AllowedValues: [ele-knowledge]
+  CostUsage:
+    Type: String
+    Default: development
+    AllowedValues: [development, user, shared]
+
   Environment:
     Type: String
     Default: dev
@@ -88,6 +97,9 @@ Globals:
         BEDROCK_REGION: !Ref BedrockRegion
         DEFAULT_CONTROL_SYSTEM: !Ref DefaultControlSystem
     Tags:
+      gyoumu012Project: !Ref CostProjectName
+      gyoumu012Component: troubleshooting
+      gyoumu012Usage: !Ref CostUsage
       Project: !Ref ProjectName
       Env: !Ref Environment
       ManagedBy: SAM
@@ -156,6 +168,12 @@ Resources:
                     - BucketName:
                         Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: troubleshooting
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env
@@ -182,6 +200,12 @@ Resources:
         - AttributeName: constructionNumber
           KeyType: HASH
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: troubleshooting
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env
@@ -221,6 +245,12 @@ Resources:
           Projection:
             ProjectionType: ALL
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: troubleshooting
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
         - Key: Env
@@ -236,6 +266,10 @@ Resources:
   OrchestratorFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: troubleshooting
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub orchestrator-${Environment}
       CodeUri: ../../lambda/troubleshooting/orchestrator/
       Handler: app.lambda_handler
@@ -256,6 +290,10 @@ Resources:
   DBSearchFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: troubleshooting
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub db-search-${Environment}
       CodeUri: ../../lambda/troubleshooting/db-search/
       Handler: app.lambda_handler
@@ -264,6 +302,10 @@ Resources:
   KBSearch1Function:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: troubleshooting
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub kb-search-cases-${Environment}
       CodeUri: ../../lambda/troubleshooting/kb-search1/
       Handler: app.lambda_handler
@@ -275,6 +317,10 @@ Resources:
   KBSearch2Function:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: troubleshooting
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub kb-search-manuals-${Environment}
       CodeUri: ../../lambda/troubleshooting/kb-search2/
       Handler: app.lambda_handler
@@ -286,6 +332,10 @@ Resources:
   KBSearch3Function:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: troubleshooting
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub kb-search-materials-${Environment}
       CodeUri: ../../lambda/troubleshooting/kb-search3/
       Handler: app.lambda_handler
@@ -297,6 +347,10 @@ Resources:
   HistoryFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: troubleshooting
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub history-${Environment}
       CodeUri: ../../lambda/troubleshooting/history/
       Handler: app.lambda_handler
@@ -319,6 +373,9 @@ Resources:
       Value: !Ref AgentId
       Description: Bedrock Agent ID for troubleshooting
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: troubleshooting
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         ManagedBy: SAM
@@ -332,6 +389,9 @@ Resources:
       Value: !Ref AgentAliasId
       Description: Bedrock Agent Alias ID for troubleshooting
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: troubleshooting
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         ManagedBy: SAM
@@ -343,6 +403,11 @@ Resources:
   TroubleshootingApi:
     Type: AWS::Serverless::Api
     Properties:
+      PropagateTags: true
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: troubleshooting
+        gyoumu012Usage: !Ref CostUsage
       Name: !Sub troubleshooting-api-${Environment}
       StageName: !Ref Environment
       Auth:

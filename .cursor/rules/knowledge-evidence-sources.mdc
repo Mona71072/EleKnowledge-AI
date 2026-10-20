@@ -1,0 +1,35 @@
+---
+description: 知識地図（knowledge/）の出典3種とスナップショット照合
+globs:
+  - knowledge/**
+alwaysApply: false
+---
+
+# 知識地図 — 出典と照合
+
+正本: `docs/decisions-2026-10-19-knowledge-evidence-sources.md` / `knowledge/CONTRACT.md`
+
+## 出典は3種だけ
+
+Lists（`list_item_id`）・ OneNote（`onenote_id`）・ KB（資料 ID）。`record_id` / draft ファイル名は写しであり出典にしない。
+
+## OneNote ID
+
+- **`source_refs` / registry** → フル `onenote_id`（`uuid:page`）のみ。`:page` だけ禁止。
+- **§3/§6** → 同 uuid が文脈で分かるとき `:156` 等の略称可。**編集前に `onenote-id-index.json` でフル ID を確定**（`:page` は uuid 横断で重複しうる）。
+- **§8** → フル ID または `…:page` 省略可。
+
+## 必ずスナップショットを見る
+
+- Lists: `knowledge/source-snapshots/首都工_不具合情報共有リスト_初期スナップショット.md`
+- OneNote: `knowledge/source-snapshots/onenote/`（frontmatter の `onenote_id`）
+
+カード更新・Wave 追加の前に、該当 `list_item_id` 節と OneNote 検索を行う。
+
+KB: `document_number` を載せ → `python3 scripts/knowledge/build_kb_document_index.py` と `resolve_kb_refs.py` でカタログ突合 → PDF 確認後 `content_reviewed` と要約（`knowledge/KB-REF-WORKFLOW.md`）。C 資料・TI も同様。
+
+## 禁止
+
+- タイトル・H1 に `ID数字` や「Lists ID417」
+- `list_item_id` と `record_id` の混同説明
+- draft だけを「正式資料」と書く

@@ -1,8 +1,11 @@
-"""generate 用リクエスト本文のモデル世代別組み立て（Sonnet 5 切替の互換対応）。
+"""Bedrock InvokeModel payloads follow per-model capabilities."""
 
-経緯: docs/eval-2026-09-09-model-bakeoff.md。Sonnet 5 / Opus 4.7 以降は temperature 等の
-サンプリング指定を 400 で拒否し、既定で適応思考が動くため、旧モデルと本文を分ける。
-"""
+
+def _request(rag_app, model_id, *, apply_generation_settings=True):
+    return rag_app.build_generation_request(
+        "sys", [{"role": "user", "content": "q"}], model_id,
+        apply_generation_settings=apply_generation_settings,
+    )
 
 
 def test_legacy_model_keeps_temperature(rag_app):
@@ -10,78 +13,112 @@ def test_legacy_model_keeps_temperature(rag_app):
         "sys", [{"role": "user", "content": "q"}],
         "jp.anthropic.claude-haiku-4-5-20251001-v1:0")
     assert body["temperature"] == 0.3
-    assert "thinking" not in body
+    assert "thinking" not in body and "output_config" not in body
     assert body["max_tokens"] == 4096
     assert body["system"] == "sys"
     assert body["anthropic_version"] == "bedrock-2023-05-31"
 
 
-def test_sonnet5_drops_sampling_and_disables_thinking(rag_app):
-    body = rag_app.build_generation_request("sys", [], "global.anthropic.claude-sonnet-5")
+def test_sonnet5_disabled_thinking(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "disabled")
+    body = _request(rag_app, "global.anthropic.claude-sonnet-5")
     assert "temperature" not in body
     assert body["thinking"] == {"type": "disabled"}
+    assert "output_config" not in body
 
 
-def test_application_profile_arn_needs_explicit_style(rag_app):
-    # ARN には元モデル名が含まれないため auto では判定できず legacy 扱いになる。
-    arn = "arn:aws:bedrock:ap-northeast-1:123456789012:application-inference-profile/abc"
-    assert not rag_app.is_new_api_model(arn, "auto")
-    assert rag_app.is_new_api_model(arn, "new")
-    assert not rag_app.is_new_api_model("global.anthropic.claude-sonnet-5", "legacy")
+def test_sonnet55_defaults_to_effort_low_without_disabling_thinking(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "disabled")
+    body = _request(rag_app, "global.anthropic.claude-sonnet-5-5")
+    assert "temperature" not in body
+    assert "thinking" not in body
+    assert body["output_config"] == {"effort": "low"}
 
 
-def test_new_api_markers(rag_app):
-    assert rag_app.is_new_api_model("global.anthropic.claude-opus-4-8", "auto")
-    assert rag_app.is_new_api_model("jp.anthropic.claude-opus-4-7", "auto")
-    # Fable は adaptive のみ対応（disabled は 400）のため対象外
-    assert not rag_app.is_new_api_model("anthropic.claude-fable-5-1", "auto")
-    assert not rag_app.is_new_api_model("jp.anthropic.claude-sonnet-4-6", "auto")
-    assert not rag_app.is_new_api_model(None, "auto")
+def test_opus55_and_fable51_follow_always_adaptive_rules(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "disabled")
+    for model_id in (
+        "global.anthropic.claude-opus-5-5",
+        "global.anthropic.claude-fable-5-1",
+    ):
+        body = _request(rag_app, model_id)
+        assert "temperature" not in body
+        assert "thinking" not in body
+        assert body["output_config"] == {"effort": "low"}
 
 
-def test_title_generation_can_override_budget(rag_app):
-    body = rag_app.build_generation_request(None, [], "global.anthropic.claude-sonnet-5", max_tokens=64, temperature=0)
+def test_adaptive_mode_sends_adaptive_and_effort_only_when_supported(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "adaptive")
+    monkeypatch.setattr(rag_app, "GENERATION_EFFORT", "medium")
+
+    for model_id in (
+        "global.anthropic.claude-sonnet-5",
+        "global.anthropic.claude-sonnet-5-5",
+        "global.anthropic.claude-opus-5-5",
+        "global.anthropic.claude-fable-5-1",
+        "global.anthropic.claude-opus-5",
+        "global.anthropic.claude-opus-4-7",
+        "global.anthropic.claude-opus-4-8",
+    ):
+        body = _request(rag_app, model_id)
+        assert body["thinking"] == {"type": "adaptive"}
+        assert body["output_config"] == {"effort": "medium"}
+        assert "temperature" not in body
+
+    legacy = _request(rag_app, "jp.anthropic.claude-haiku-4-5")
+    assert "thinking" not in legacy and "output_config" not in legacy
+    assert legacy["temperature"] == 0.3
+
+
+def test_title_and_query_rewrite_use_safe_disabled_mode(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "adaptive")
+    monkeypatch.setattr(rag_app, "GENERATION_EFFORT", "high")
+
+    for model_id in (
+        "global.anthropic.claude-sonnet-5-5",
+        "global.anthropic.claude-opus-5-5",
+        "global.anthropic.claude-fable-5-1",
+    ):
+        body = _request(rag_app, model_id, apply_generation_settings=False)
+        assert "thinking" not in body
+        assert body["output_config"] == {"effort": "low"}
+        assert "temperature" not in body
+
+    disable_capable = _request(
+        rag_app, "global.anthropic.claude-sonnet-5", apply_generation_settings=False
+    )
+    assert disable_capable["thinking"] == {"type": "disabled"}
+    assert "output_config" not in disable_capable
+
+
+def test_unknown_model_uses_minimal_request(rag_app, capsys):
+    body = _request(rag_app, "global.anthropic.claude-future-6-0")
+    assert "temperature" not in body
+    assert "thinking" not in body and "output_config" not in body
+    events = capsys.readouterr().out
+    assert '"event":"unknown_model_profile"' in events
+    assert "claude-future-6-0" in events
+
+
+def test_title_generation_can_override_budget(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "adaptive")
+    body = rag_app.build_generation_request(
+        None, [], "global.anthropic.claude-sonnet-5", max_tokens=64,
+        temperature=0, apply_generation_settings=False,
+    )
     assert body["max_tokens"] == 64
-    assert "temperature" not in body and body["thinking"] == {"type": "disabled"}
+    assert body["thinking"] == {"type": "disabled"}
     assert "system" not in body
-    legacy = rag_app.build_generation_request(None, [], "jp.anthropic.claude-haiku-4-5-20251001-v1:0", max_tokens=64, temperature=0)
+
+    legacy = rag_app.build_generation_request(
+        None, [], "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+        max_tokens=64, temperature=0,
+    )
     assert legacy["temperature"] == 0 and legacy["max_tokens"] == 64
 
 
 def test_extract_response_text_skips_thinking_block(rag_app):
-    body = {"content": [{"type": "thinking", "thinking": ""}, {"type": "text", "text": "回答"}]}
+    body = {"content": [{"type": "thinking", "thinking": "reason"}, {"type": "text", "text": "回答"}]}
     assert rag_app.extract_response_text(body) == "回答"
     assert rag_app.extract_response_text({"content": []}) == ""
-
-
-def test_adaptive_thinking_uses_output_config_for_new_api_model(rag_app, monkeypatch):
-    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "adaptive")
-    monkeypatch.setattr(rag_app, "GENERATION_EFFORT", "medium")
-
-    body = rag_app.build_generation_request(
-        "sys", [], "global.anthropic.claude-sonnet-5"
-    )
-
-    assert body["thinking"] == {"type": "adaptive"}
-    assert body["output_config"] == {"effort": "medium"}
-
-
-def test_thinking_setting_is_not_added_to_old_model(rag_app, monkeypatch):
-    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "adaptive")
-
-    body = rag_app.build_generation_request("sys", [], "jp.anthropic.claude-haiku-4-5-20251001-v1:0")
-
-    assert "thinking" not in body
-    assert "output_config" not in body
-
-
-def test_session_title_keeps_disabled_thinking_even_when_generation_is_adaptive(rag_app, monkeypatch):
-    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "adaptive")
-    monkeypatch.setattr(rag_app, "GENERATION_EFFORT", "high")
-
-    body = rag_app.build_generation_request(
-        None, [], "global.anthropic.claude-sonnet-5", apply_generation_settings=False
-    )
-
-    assert body["thinking"] == {"type": "disabled"}
-    assert "output_config" not in body
+    assert rag_app.extract_response_text({"content": [{"type": "thinking", "thinking": "only"}]}) == ""

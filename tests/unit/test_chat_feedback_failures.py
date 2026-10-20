@@ -441,3 +441,70 @@ def test_admin_cannot_delete_other_users_session():
     )
     resp = mod.lambda_handler(event, None)
     assert resp["statusCode"] == 404
+
+
+def test_suggestions_route_records_law_mode_of_owned_session():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [
+        {"userId": "user-42", "sessionId": "s-law", "role": "user", "ragMode": "law"},
+    ]}
+    event = _event(
+        "POST",
+        "/chat/suggestions",
+        body={"text": "法令の条文をもっと上に", "sessionId": "s-law"},
+        groups="user",
+        sub="user-42",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 201
+    item = table.put_item.call_args.kwargs["Item"]
+    assert item["contextSessionId"] == "s-law"
+    assert item["contextRagMode"] == "law"
+    # 所有確認とモード取得は同じ Query 1 回で済ませる
+    assert table.query.call_count == 1
+
+
+def test_suggestions_route_skips_mode_of_other_users_session():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [
+        {"userId": "other-user", "sessionId": "s-other", "role": "user", "ragMode": "law"},
+    ]}
+    event = _event(
+        "POST",
+        "/chat/suggestions",
+        body={"text": "他人のセッション", "sessionId": "s-other"},
+        groups="user",
+        sub="user-42",
+    )
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 201
+    item = table.put_item.call_args.kwargs["Item"]
+    assert "contextSessionId" not in item
+    assert "contextRagMode" not in item
+
+
+def test_suggestions_route_without_session_does_not_query():
+    mod, table = load_app()
+    event = _event("POST", "/chat/suggestions", body={"text": "機種を増やして"}, groups="user", sub="user-42")
+    resp = mod.lambda_handler(event, None)
+    assert resp["statusCode"] == 201
+    table.query.assert_not_called()
+    item = table.put_item.call_args.kwargs["Item"]
+    assert "contextRagMode" not in item
+
+
+def test_list_product_wishes_ragmode_law_normal_and_legacy():
+    mod, table = load_app()
+    table.scan.return_value = {
+        "Items": [
+            {"messageId": "wish-3", "userId": "u1", "content": "a", "timestamp": "2026-10-03T00:00:00",
+             "role": "product_wish", "contextSessionId": "s-law", "contextRagMode": "law"},
+            {"messageId": "wish-2", "userId": "u1", "content": "b", "timestamp": "2026-10-02T00:00:00",
+             "role": "product_wish", "contextSessionId": "s-normal", "contextRagMode": "normal"},
+            {"messageId": "wish-1", "userId": "u1", "content": "c", "timestamp": "2026-10-01T00:00:00",
+             "role": "product_wish", "contextSessionId": "s-old"},
+        ],
+        "ScannedCount": 3,
+    }
+    out = mod.list_product_wishes(limit=10)
+    assert [w["ragMode"] for w in out["wishes"]] == ["law", "normal", "normal"]

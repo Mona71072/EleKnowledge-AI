@@ -13,13 +13,14 @@ lint = true
 
 [default.deploy.parameters]
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
-tags = "Project=EleKnowledge Env=dev ManagedBy=SAM"
+tags = "Project=EleKnowledge Env=dev ManagedBy=SAM gyoumu012Project=ele-knowledge gyoumu012Component=shared gyoumu012Usage=shared"
 confirm_changeset = true
 resolve_s3 = true
 s3_prefix = "eleknowledge-ai"
 region = "ap-northeast-1"
 image_repositories = []
 disable_rollback = false
+# RagLogicVersion (phase2) is required: pass the deployed commit SHA via --parameter-overrides, not here (see docs/ops-runbook.md)
 parameter_overrides = [
     "Environment=dev",
     "ProjectName=EleKnowledge"
@@ -43,13 +44,14 @@ stack_name = "EleKnowledge-prd"
 
 [production.deploy.parameters]
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
-tags = "Project=EleKnowledge Env=prd ManagedBy=SAM"
+tags = "Project=EleKnowledge Env=prd ManagedBy=SAM gyoumu012Project=ele-knowledge gyoumu012Component=shared gyoumu012Usage=shared"
 confirm_changeset = true
 resolve_s3 = true
 s3_prefix = "eleknowledge-ai"
 region = "ap-northeast-1"
 image_repositories = []
 disable_rollback = false
+# RagLogicVersion (phase2) is required: pass the deployed commit SHA via --parameter-overrides, not here (see docs/ops-runbook.md)
 parameter_overrides = [
     "Environment=prd",
     "ProjectName=EleKnowledge"

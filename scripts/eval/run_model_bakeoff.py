@@ -6,10 +6,9 @@
 複数の Bedrock モデルで回答を生成し、目視比較用の Markdown と JSON を出力する。
 
 - 検索は lambda/rag/rag-function/app.py を import して本番と同じ手順（run_retrieve_eval と同じ流儀）
-- 生成は app.generate_response_with_claude をそのまま使い、モデル ID だけ差し替える
-- Sonnet 5 / Opus 4.7 以降は temperature 指定を 400 で拒否するため、
-  リクエスト本文から sampling 指定を外し thinking を明示（本番反映時に app.py 側で同じ対応が必要）
-- DynamoDB には書かない。Bedrock の Retrieve と InvokeModel だけを呼ぶ
+- 生成は app.generate_response_with_claude を使い、モデル能力プロファイルに従って API を選ぶ
+- 同じ検索結果を再利用できるよう、Retrieve 結果を JSON に保存・読込できる
+- DynamoDB には書かず、Bedrock の Retrieve と InvokeModel / Converse を呼ぶ
 
 使い方:
   python scripts/eval/run_model_bakeoff.py \
@@ -22,7 +21,6 @@
 
 import argparse
 import importlib.util
-import io
 import json
 import os
 import sys
@@ -33,7 +31,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVAL_SCRIPT = REPO_ROOT / "scripts" / "eval" / "run_retrieve_eval.py"
 
-# 概算用の単価（USD / 1M tokens）。Anthropic 公式単価 × 地域指定プレミアム(jp.=1.1)。請求額は AWS 料金表が正。
+# 概算用の単価（USD / 1M tokens）。Sonnet 5 は Anthropic 公式単価の参考値。
 PRICE_TABLE = [
     ("haiku-4-5", 1.0, 5.0),
     ("sonnet-4-6", 3.0, 15.0),
@@ -44,10 +42,7 @@ PRICE_TABLE = [
     ("opus-5", 5.0, 25.0),
 ]
 
-# 新 API 世代（sampling 指定不可・thinking 明示推奨）
-NEW_API_MARKERS = ("sonnet-5", "opus-4-7", "opus-4-8", "opus-5", "fable")
-
-
+# 生成リクエストの設定と API 選択は app.py のモデル能力プロファイルを共用する。
 def parse_args():
     p = argparse.ArgumentParser(description="RAG 生成モデルの切替前比較")
     p.add_argument("--questions", required=True, help="質問 jsonl")
@@ -58,6 +53,8 @@ def parse_args():
     p.add_argument("--region", default=os.environ.get("AWS_REGION", "ap-northeast-1"))
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--out", default=None, help="Markdown 出力先（省略時 eval-results/model-bakeoff-<時刻>.md）")
+    p.add_argument("--save-retrieval", default=None, help="共通 Retrieve 結果の JSON 保存先")
+    p.add_argument("--load-retrieval", default=None, help="保存済み Retrieve 結果を再利用")
     return p.parse_args()
 
 
@@ -81,12 +78,91 @@ def parse_models(spec: str) -> list:
     return out
 
 
-def price_for(model_id: str):
+def price_for(model_id: str, input_tokens=None):
+    if "gpt-6-luna" in model_id:
+        return (0.20, 0.75) if (input_tokens or 0) > 272000 else (0.10, 0.50)
     premium = 1.1 if model_id.startswith(("jp.", "apac.", "us.", "eu.")) else 1.0
     for marker, pin, pout in PRICE_TABLE:
         if marker in model_id:
             return pin * premium, pout * premium
     return None, None
+
+
+def total_input_tokens(usage: dict) -> int | None:
+    """通常入力・cache read・cache write を合算した入力 token 数。"""
+    keys = ("inputTokens", "cacheReadInputTokens", "cacheWriteInputTokens")
+    if not any(usage.get(key) is not None for key in keys):
+        return None
+    return sum(usage.get(key) or 0 for key in (
+        "inputTokens", "cacheReadInputTokens", "cacheWriteInputTokens",
+    ))
+
+
+def cache_cost_status(model_id: str) -> str:
+    if "sonnet-5" in model_id:
+        return "未確認"
+    if "gpt-6-luna" in model_id:
+        return "AWS公式モデルカードの単価を適用"
+    return "単価未設定"
+
+
+def estimate_cost_usd(model_id: str, usage: dict) -> float | None:
+    input_tokens = usage.get("inputTokens")
+    output_tokens = usage.get("outputTokens")
+    if input_tokens is None or output_tokens is None:
+        return None
+
+    cache_read = usage.get("cacheReadInputTokens") or 0
+    cache_write = usage.get("cacheWriteInputTokens") or 0
+    if "gpt-6-luna" in model_id:
+        total_input = total_input_tokens(usage)
+        if total_input > 272000:
+            input_rate, cache_write_rate, cache_read_rate, output_rate = (0.20, 0.25, 0.02, 0.75)
+        else:
+            input_rate, cache_write_rate, cache_read_rate, output_rate = (0.10, 0.125, 0.01, 0.50)
+        cost = (
+            input_tokens * input_rate
+            + cache_write * cache_write_rate
+            + cache_read * cache_read_rate
+            + output_tokens * output_rate
+        ) / 1e6
+        return cost
+
+    input_rate, output_rate = price_for(model_id, input_tokens=input_tokens)
+    if input_rate is None:
+        return None
+    # Bedrock の Sonnet 5 cache 単価は未確認のため、cache 分を含めない。
+    return (input_tokens * input_rate + output_tokens * output_rate) / 1e6
+
+
+def price_note(model_id: str) -> str:
+    if "sonnet-5" in model_id:
+        return ("Anthropic公式では input/output $2/$10、5分 cache write $2.50、"
+                "1時間 cache write $4、cache read $0.20 / MTok。Bedrock の cache 単価は未確認のため、"
+                "cache料金は金額に含めない（Bedrock 請求額とは未照合）。")
+    if "gpt-6-luna" in model_id:
+        return "Global: 入力 $0.10/$0.50、cache write/read $0.125/$0.01 per 1M tokens。272K超は入力/出力 $0.20/$0.75、cache write/read $0.25/$0.02。"
+    return "Anthropic 公式単価の概算。請求額は AWS 料金表が正"
+
+
+def save_retrieval(path, rows):
+    """生成回答を除いた共通 Retrieve 結果を JSON 保存する。"""
+    retrieval_rows = [{key: value for key, value in row.items() if key != "answers"}
+                      for row in rows]
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(retrieval_rows, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
+def load_retrieval(path):
+    """Retrieve キャッシュを質問 ID キーの辞書で読み込む。"""
+    rows = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(rows, list):
+        raise ValueError("Retrieve キャッシュは JSON 配列である必要があります")
+    return {str(row.get("id")): row for row in rows if isinstance(row, dict)}
 
 
 def load_questions(path: str, limit=None) -> list:
@@ -103,57 +179,38 @@ def load_questions(path: str, limit=None) -> list:
     return rows[:limit] if limit else rows
 
 
-class InvokeRecorder:
-    """app.bedrock_runtime.invoke_model を差し替え、モデル別の互換調整と計測を行う。"""
+class GenerationRecorder:
+    """共通呼び出し関数を包み、API 共通で応答 usage とレイテンシを計測する。"""
 
     def __init__(self, mod):
         self.mod = mod
-        self.real = mod.bedrock_runtime.invoke_model
+        self.real = mod.invoke_generation
         self.last = None
 
     def __enter__(self):
-        self.mod.bedrock_runtime.invoke_model = self._patched
+        self.mod.invoke_generation = self._patched
         return self
 
     def __exit__(self, *exc):
-        self.mod.bedrock_runtime.invoke_model = self.real
+        self.mod.invoke_generation = self.real
 
-    def _patched(self, **kwargs):
-        model_id = kwargs["modelId"]
-        body = json.loads(kwargs["body"])
-        new_api = any(m in model_id for m in NEW_API_MARKERS)
-        if new_api:
-            body.pop("temperature", None)
-            body.pop("top_p", None)
-            body.pop("top_k", None)
-            body.setdefault("thinking", {"type": "disabled"})
+    def _patched(self, client, model_id, *args, **kwargs):
         started = time.time()
-        try:
-            resp = self.real(modelId=model_id, body=json.dumps(body))
-        except Exception as e:  # thinking 指定が通らないモデルへの保険
-            if new_api and "thinking" in body and "ValidationException" in str(type(e).__name__) + str(e):
-                body.pop("thinking", None)
-                resp = self.real(modelId=model_id, body=json.dumps(body))
-            else:
-                raise
-        raw = resp["body"].read()
+        text, usage, stop_reason = self.real(client, model_id, *args, **kwargs)
         elapsed = time.time() - started
-        parsed = json.loads(raw)
-        usage = parsed.get("usage", {})
         self.last = {
             "modelId": model_id,
-            "responseModel": parsed.get("model"),
             "latencySec": round(elapsed, 2),
-            "inputTokens": usage.get("input_tokens"),
-            "outputTokens": usage.get("output_tokens"),
-            "thinkingTokens": (usage.get("output_tokens_details") or {}).get("thinking_tokens"),
-            "stopReason": parsed.get("stop_reason"),
+            "inputTokens": usage.get("inputTokens"),
+            "outputTokens": usage.get("outputTokens"),
+            "cacheReadInputTokens": usage.get("cacheReadInputTokens"),
+            "cacheWriteInputTokens": usage.get("cacheWriteInputTokens"),
+            "stopReason": stop_reason,
         }
-        resp["body"] = io.BytesIO(raw)
-        return resp
+        return text, usage, stop_reason
 
 
-def run_question(mod, helpers, item: dict, models: list) -> dict:
+def run_question(mod, helpers, item: dict, models: list, retrieval_cache=None) -> dict:
     query = item["query"]
     filters = dict(item.get("filters") or {})
     _, filters = mod.normalize_mode_and_filters("normal", filters)
@@ -165,7 +222,20 @@ def run_question(mod, helpers, item: dict, models: list) -> dict:
         row["clarifyQuestions"] = questions
         return row
 
-    merged, priority_expanded, used_abbrev = helpers.run_normal_retrieve(mod, query, filters)
+    cached = (retrieval_cache or {}).get(str(item.get("id")))
+    if retrieval_cache is not None and cached is None:
+        raise ValueError("Retrieve キャッシュに質問 ID がありません")
+    if cached:
+        if cached.get("query") != query or cached.get("filters") != filters:
+            raise ValueError("Retrieve キャッシュの質問またはフィルタが一致しません")
+        if cached.get("gate") != "pages":
+            return dict(cached)
+        row.update({key: value for key, value in cached.items() if key != "answers"})
+        merged = cached.get("retrievalResults") or []
+        priority_expanded = cached.get("priorityExpanded", False)
+        used_abbrev = cached.get("usedAbbrevExpansion", False)
+    else:
+        merged, priority_expanded, used_abbrev = helpers.run_normal_retrieve(mod, query, filters)
     kb_results = {"retrievalResults": merged}
     row["retrieveCount"] = len(merged)
     row["priorityExpanded"] = priority_expanded
@@ -176,6 +246,7 @@ def run_question(mod, helpers, item: dict, models: list) -> dict:
         return row
 
     row["gate"] = "pages"
+    row["retrievalResults"] = merged
     selected = mod.select_retrieval_results(merged, mode="normal")
     row["pageCandidates"] = [
         {k: v for k, v in c.items() if k in ("documentName", "pageNumber", "relevance", "modelType", "category")}
@@ -185,18 +256,22 @@ def run_question(mod, helpers, item: dict, models: list) -> dict:
     row["answers"] = {}
     for label, model_id in models:
         mod.BEDROCK_MODEL_ID = model_id
-        with InvokeRecorder(mod) as rec:
+        with GenerationRecorder(mod) as rec:
             try:
                 text = mod.generate_response_with_claude(query, kb_results, None, "normal", search_query=query)
                 stats = dict(rec.last or {})
             except Exception as e:  # noqa: BLE001 - 比較レポートに残す
                 text = f"[生成エラー] {type(e).__name__}: {e}"
                 stats = {"modelId": model_id, "error": str(e)}
-        pin, pout = price_for(model_id)
-        if pin is not None and stats.get("inputTokens") is not None:
-            stats["estCostUsd"] = round(
-                stats["inputTokens"] / 1e6 * pin + (stats.get("outputTokens") or 0) / 1e6 * pout, 5
-            )
+        est_cost = estimate_cost_usd(model_id, stats)
+        stats["totalInputTokens"] = total_input_tokens(stats)
+        for key in (
+            "inputTokens", "cacheReadInputTokens", "cacheWriteInputTokens", "outputTokens",
+        ):
+            stats.setdefault(key, None)
+        stats["cacheCostStatus"] = cache_cost_status(model_id)
+        if est_cost is not None:
+            stats["estCostUsd"] = est_cost
         row["answers"][label] = {"text": text, **stats}
     return row
 
@@ -204,25 +279,47 @@ def run_question(mod, helpers, item: dict, models: list) -> dict:
 def summarize(rows: list, models: list) -> dict:
     summary = {}
     for label, model_id in models:
-        lat, tin, tout, cost, n = [], [], [], [], 0
+        lat, input_tokens, cache_read, cache_write, total_input, tout, cost, n = (
+            [], [], [], [], [], [], [], 0
+        )
+        usage_count = 0
         for r in rows:
             a = (r.get("answers") or {}).get(label)
             if not a or "error" in a:
                 continue
             n += 1
             lat.append(a.get("latencySec") or 0)
-            tin.append(a.get("inputTokens") or 0)
-            tout.append(a.get("outputTokens") or 0)
-            cost.append(a.get("estCostUsd") or 0)
+            answer_total_input = a.get("totalInputTokens")
+            if answer_total_input is None and "totalInputTokens" not in a:
+                answer_total_input = total_input_tokens(a)
+            if answer_total_input is not None:
+                usage_count += 1
+                input_tokens.append(a.get("inputTokens"))
+                cache_read.append(a.get("cacheReadInputTokens"))
+                cache_write.append(a.get("cacheWriteInputTokens"))
+                total_input.append(answer_total_input)
+                tout.append(a.get("outputTokens"))
+            if answer_total_input is not None and a.get("estCostUsd") is not None:
+                cost.append(a["estCostUsd"])
+
+        def average(values):
+            available = [value for value in values if value is not None]
+            return sum(available) / len(available) if available else None
+
         summary[label] = {
             "modelId": model_id,
             "answered": n,
+            "usageCount": usage_count,
             "avgLatencySec": round(sum(lat) / n, 2) if n else None,
             "maxLatencySec": max(lat) if lat else None,
-            "avgInputTokens": round(sum(tin) / n) if n else None,
-            "avgOutputTokens": round(sum(tout) / n) if n else None,
-            "totalEstCostUsd": round(sum(cost), 4),
-            "avgEstCostUsd": round(sum(cost) / n, 5) if n else None,
+            "avgInputTokens": average(input_tokens),
+            "avgCacheReadInputTokens": average(cache_read),
+            "avgCacheWriteInputTokens": average(cache_write),
+            "avgTotalInputTokens": average(total_input),
+            "avgOutputTokens": average(tout),
+            "totalEstCostUsd": sum(cost),
+            "avgEstCostUsd": sum(cost) / len(cost) if cost else None,
+            "cacheCostStatus": cache_cost_status(model_id),
         }
     return summary
 
@@ -237,12 +334,17 @@ def render_markdown(rows: list, models: list, summary: dict, meta: dict) -> str:
     L.append(f"\nKB: `{meta['kbId']}` / 質問数: {len(rows)} / 生成対象（pages ゲート通過）: {sum(1 for r in rows if r.get('gate') == 'pages')}\n")
 
     L.append("## サマリ\n")
-    L.append("| ラベル | 回答数 | 平均レイテンシ(秒) | 最大(秒) | 平均入力トークン | 平均出力トークン | 1問あたり概算コスト(USD) | 合計概算(USD) |")
-    L.append("|---|---|---|---|---|---|---|---|")
+    L.append("| ラベル | 回答数 | usage対象 | 平均レイテンシ(秒) | 最大(秒) | 平均通常入力 | 平均 cache read | 平均 cache write | 平均総入力 | 平均出力 | 1問あたり参考概算(USD) | 合計参考概算(USD) |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
     for label, _ in models:
         s = summary[label]
-        L.append(f"| {label} | {s['answered']} | {s['avgLatencySec']} | {s['maxLatencySec']} | {s['avgInputTokens']} | {s['avgOutputTokens']} | {s['avgEstCostUsd']} | {s['totalEstCostUsd']} |")
-    L.append("\n※ コストは Anthropic 公式単価 × 地域指定プレミアム（jp. は 1.1 倍）の概算。請求額は AWS 料金表が正。\n")
+        avg_tokens = lambda key: "-" if s[key] is None else str(round(s[key]))
+        avg_cost = "-" if s["avgEstCostUsd"] is None else f"{s['avgEstCostUsd']:.8f}"
+        L.append(f"| {label} | {s['answered']} | {s['usageCount']}/{len(rows)} | {s['avgLatencySec']} | {s['maxLatencySec']} | {avg_tokens('avgInputTokens')} | {avg_tokens('avgCacheReadInputTokens')} | {avg_tokens('avgCacheWriteInputTokens')} | {avg_tokens('avgTotalInputTokens')} | {avg_tokens('avgOutputTokens')} | {avg_cost} | {s['totalEstCostUsd']:.8f} |")
+    L.append("\n※ 金額は参考概算（実請求とは未照合）。単価の根拠・注記:")
+    for label, model_id in models:
+        L.append(f"- {label}: {price_note(model_id)}")
+    L.append("総入力トークンは通常入力 + cache read + cache write。料金は表示時に丸め、集計は丸め前の値で計算。請求額は AWS 料金表が正です。\n")
 
     L.append("## 目視比較の観点\n")
     L.append("- 参照資料に書かれていることだけを述べているか（作文していないか）")
@@ -271,7 +373,19 @@ def render_markdown(rows: list, models: list, summary: dict, meta: dict) -> str:
                 L.append(f"  - {c.get('documentName')} p.{c.get('pageNumber')} (score {round(float(c.get('relevance') or 0), 3)})")
         for label, _ in models:
             a = r["answers"].get(label, {})
-            L.append(f"\n#### {label}  —  {a.get('latencySec', '-')} 秒 / 入力 {a.get('inputTokens', '-')} / 出力 {a.get('outputTokens', '-')} / 概算 {a.get('estCostUsd', '-')} USD\n")
+            tokens = [a.get(key) for key in (
+                "inputTokens", "cacheReadInputTokens", "cacheWriteInputTokens",
+            )]
+            total_input = a.get("totalInputTokens")
+            if total_input is None and "totalInputTokens" not in a:
+                total_input = total_input_tokens(a)
+            token_text = lambda value: "-" if value is None else str(value)
+            cost = a.get("estCostUsd")
+            cost_text = "未算出" if cost is None else f"{cost:.8f} USD"
+            cache_note = ""
+            if a.get("cacheCostStatus") == "未確認":
+                cache_note = "（cache料金未確認・金額に含めず）"
+            L.append(f"\n#### {label} — {a.get('latencySec', '-')} 秒 / 通常入力 {token_text(tokens[0])} / cache read {token_text(tokens[1])} / cache write {token_text(tokens[2])} / 総入力 {token_text(total_input)} / 出力 {token_text(a.get('outputTokens'))} / 停止理由 {a.get('stopReason', '-')} / 参考概算 {cost_text}{cache_note}\n")
             L.append("```text")
             L.append(a.get("text", ""))
             L.append("```")
@@ -286,11 +400,15 @@ def main():
     mod = helpers.load_rag_module(kb_id, args.region)
     models = parse_models(args.models)
     questions = load_questions(args.questions, args.limit)
+    retrieval_cache = load_retrieval(args.load_retrieval) if args.load_retrieval else None
 
     rows = []
     for i, item in enumerate(questions, 1):
         print(f"[{i}/{len(questions)}] {item.get('id')} {item['query'][:40]}", file=sys.stderr)
-        rows.append(run_question(mod, helpers, item, models))
+        rows.append(run_question(mod, helpers, item, models, retrieval_cache=retrieval_cache))
+
+    if args.save_retrieval:
+        save_retrieval(args.save_retrieval, rows)
 
     summary = summarize(rows, models)
     stamp = datetime.now().strftime("%Y%m%d-%H%M")

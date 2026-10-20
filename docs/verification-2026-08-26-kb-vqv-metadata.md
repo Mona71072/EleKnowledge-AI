@@ -39,7 +39,7 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 | Data Source ID | 名称 | 参照先 | 備考 |
 |---|---|---|---|
 | `KHPV3CNKOU` | s3-data-source | `s3://ragknowledgebasestackinst-datasourcebucket9fa93e04-ybbhm1efhyzb/docs/` | **本命**。標準TEXT抽出。最終Sync 2026-07-24 04:26 UTC（3,745件スキャン / メタデータ2,566件更新反映 / 失敗あり→§6） |
-| `A0XLFVSX3P` | knowledge-base-quick-start-7duyg-data-source | `s3://rag-data-source-inst-fmp-730972069979-ap-northeast-1`（バケット全体） | category等のメタデータなし。`KB_SOURCE_BUCKET` 外のため引用presign不能 |
+| `A0XLFVSX3P` | knowledge-base-quick-start-7duyg-data-source | `s3://rag-data-source-inst-fmp-<DEV_ACCOUNT_ID>-ap-northeast-1`（バケット全体） | category等のメタデータなし。`KB_SOURCE_BUCKET` 外のため引用presign不能 |
 | `7NJIOJDD0Z` | web-crawler-data-source | Webクローラー | GenUドキュメント混入源 |
 
 ### 2.2 DF9XUCSPDM（generative-ai-use-cases-jp-inst-fmp）のデータソース

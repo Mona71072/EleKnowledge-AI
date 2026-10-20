@@ -58,7 +58,7 @@ alwaysApply: true
 
 1. 変更内容を提案し、ユーザー（mona）の合意を得る
 2. コミット → push（意図・運用だけのときは feature ブランチ推奨）
-3. `develop` 向け **共同確認専用 PR** を作成し、先頭で `@yukiworkspace`（itai）をメンション
+3. `develop` 向け **共同確認専用 PR** を作成し、先頭で `@yuki-mebs`（itai）をメンション
 4. itai 側の変更も同様に PR で mona に見える形にし、双方で確認する
 
 **共同確認とデプロイは別 PR。** 同種の未マージは不都合が無ければまとめる。  

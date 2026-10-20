@@ -6,7 +6,9 @@ related-code: lambda/metrics/aggregator/app.py, lambda/metrics/read/app.py, infr
 
 # 設計: 日次 KPI（metrics）v2 — JST 境界・毎時集計・新指標・推定コスト
 
-> **状態:** 設計（実装前）。決定の経緯は issue #86（コメント 3・4・16）。実装は初週。
+> **状態:** 設計（v2 は未実装）。2026-09-30 の AWS 観測では日次・毎時 EventBridge ルールが有効だったが、`develop` の IaC は日次ルールのみで、現行 aggregator は前日 UTC の日次集計を行う。毎時ルールの存在だけでは JST 境界・時間別集計・v2 指標の実装を示さない。
+
+> 最終検証: 2026-09-30 — IaC / aggregator コードと開発環境の EventBridge・DynamoDB TTL 観測を部分照合。設計書全体の再検証ではない。
 
 ## 1. 現状と課題（2026-09-09 実測）
 
@@ -22,7 +24,7 @@ related-code: lambda/metrics/aggregator/app.py, lambda/metrics/read/app.py, infr
 
 ## 2. 方針（決定済み）
 
-- 日次確定（02:00 JST）+ **当日は毎時更新**（24 時間、月 1 USD 未満）
+- 目標: 日次確定（02:00 JST）+ **当日は毎時更新**（24 時間、月 1 USD 未満）。AWS には毎時ルールがあるが、現行 aggregator は時間別更新を実装していない。
 - 日次行に加えて **時間帯別の行** を保存し、後から時間帯の分析ができるようにする
 - TTL は無効（PR #93 反映済み）。無期限保持
 - リアルタイム性はアラーム（監視スタック）が担い、ダッシュボードは業務向け

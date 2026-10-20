@@ -306,6 +306,8 @@ echo "BEDROCK_KB_ID=YOUR_KB_ID_HERE" >> .env
 
 ### Step 2: SAMデプロイ
 
+> 最終検証: 2026-10-14 — phase2 のデプロイ例に RagLogicVersion を追加
+
 ```powershell
 cd infrastructure\sam
 
@@ -321,7 +323,8 @@ sam deploy `
   --parameter-overrides `
     "Environment=development" `
     "ProjectName=EleKnowledge-AI" `
-    "Phase1StackName=EleKnowledge-AI-development-phase1"
+    "Phase1StackName=EleKnowledge-AI-development-phase1" `
+    "RagLogicVersion=$(git rev-parse --short HEAD)"
 ```
 
 ---

@@ -12,6 +12,13 @@ from urllib.parse import unquote
 from botocore.exceptions import ClientError
 from decimal import Decimal
 
+# 日別集計用キー（metricDay / metricDayShard）。rag-function と同じ実装（同ディレクトリの chatlog_metric_keys.py）
+import sys as _sys  # noqa: E402
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in _sys.path:
+    _sys.path.insert(0, _HERE)
+import chatlog_metric_keys  # noqa: E402
+
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'ap-northeast-1'))
 
@@ -50,13 +57,47 @@ TRIAGE_REF_MAX = 100
 WEAK_SCORE_THRESHOLD = 0.45
 
 
+def _safe_error_label(error: Exception) -> str:
+    """Return exception metadata without exposing its message or traceback."""
+    label = f"exception_type={type(error).__name__}"
+    if isinstance(error, ClientError):
+        error_data = error.response.get('Error') or {}
+        code = error_data.get('Code') if isinstance(error_data, dict) else None
+        if code:
+            label += f" error_code={code}"
+    return label
+
+
+def _chat_resource(path: str) -> str:
+    """Map a request path to a route template without retaining path identifiers."""
+    route = (path or '').rstrip('/')
+    if route.endswith('/chat/sessions'):
+        return '/chat/sessions'
+    if '/chat/sessions/' in route and route.endswith('/messages'):
+        return '/chat/sessions/{sessionId}/messages'
+    if '/chat/sessions/' in route:
+        return '/chat/sessions/{sessionId}'
+    if '/chat/messages/' in route and route.endswith('/feedback'):
+        return '/chat/messages/{messageId}/feedback'
+    if '/chat/admin/messages/' in route and route.endswith('/triage'):
+        return '/chat/admin/messages/{sessionId}/{messageId}/triage'
+    if route.endswith('/chat/admin/failures'):
+        return '/chat/admin/failures'
+    if route.endswith('/chat/admin/suggestions'):
+        return '/chat/admin/suggestions'
+    if route.endswith('/chat/suggestions'):
+        return '/chat/suggestions'
+    return 'unknown'
+
+
 def jst_day_bounds(since: str = None, until: str = None) -> tuple:
     """JST の日付（YYYY-MM-DD）を chatlogs の timestamp（UTC ISO 文字列）の境界に変換する。"""
     def start_of(day: str) -> datetime:
         d = date.fromisoformat(day)
         return datetime(d.year, d.month, d.day, tzinfo=JST).astimezone(timezone.utc)
     lo = start_of(since).strftime('%Y-%m-%dT%H:%M:%S') if since else None
-    hi = (start_of(until) + timedelta(days=1) - timedelta(microseconds=1)).strftime('%Y-%m-%dT%H:%M:%S.%f') if until else None
+    # 終端は翌日 00:00 の秒まで。timestamp は Z 付きなので、この文字列より前が期間内に入る。
+    hi = (start_of(until) + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%S') if until else None
     return lo, hi
 
 
@@ -144,7 +185,7 @@ def emit_feedback_metric(feedback: str) -> None:
         }
         print(json.dumps(emf))
     except Exception as e:  # noqa: BLE001 - metrics must never break the request
-        print(f"[chat] Failed to emit feedback EMF: {e}")
+        print(f"[chat] method=internal resource=feedback_metric {_safe_error_label(e)}")
 
 
 def get_caller_id(event) -> str:
@@ -185,10 +226,35 @@ def owns_session(session_id: str, user_id: str) -> bool:
             Limit=1
         )
     except ClientError as e:
-        print(f"Error verifying session ownership: {e}")
         return False
     items = response.get('Items', [])
     return bool(items) and items[0].get('userId') == user_id
+
+
+def get_session_owner_and_mode(session_id: str, user_id: str) -> tuple:
+    """owns_session と同じ判定を 1 回の Query で行い、セッションの ragMode も返す。
+
+    戻り値は (所有者か, モード)。所有者でない・存在しない場合は (False, None)。
+    モードは先頭の user/assistant メッセージの ragMode（旧データは normal）。
+    取れなければ None。rag-function の get_session_rag_mode と同じ読み方。
+    """
+    if not session_id or not user_id:
+        return False, None
+    try:
+        response = chatlogs_table.query(
+            KeyConditionExpression='sessionId = :sid',
+            ExpressionAttributeValues={':sid': session_id},
+            Limit=10,
+        )
+    except ClientError:
+        return False, None
+    items = response.get('Items', [])
+    if not items or items[0].get('userId') != user_id:
+        return False, None
+    for item in items:
+        if item.get('role') in ('user', 'assistant'):
+            return True, item.get('ragMode') or 'normal'
+    return True, None
 
 
 # Custom JSON encoder for Decimal
@@ -336,7 +402,6 @@ def get_sessions_by_user(user_id: str, limit: int = 50, mode: str = None) -> lis
         return sessions[:limit]
         
     except ClientError as e:
-        print(f"Error getting sessions: {e}")
         raise
 
 
@@ -391,7 +456,6 @@ def get_session_messages(session_id: str, limit: int = 100, fetch_all: bool = Fa
         return messages
 
     except ClientError as e:
-        print(f"Error getting messages: {e}")
         raise
 
 
@@ -425,7 +489,6 @@ def delete_session(session_id: str) -> int:
         return deleted_count
 
     except ClientError as e:
-        print(f"Error deleting session: {e}")
         raise
 
 
@@ -487,7 +550,6 @@ def update_message_feedback(
     except ClientError as e:
         if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
             return False
-        print(f"Error updating feedback: {e}")
         raise
 
 
@@ -558,8 +620,9 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
         values[':not_found'] = 'not_found'
     elif kind == 'reformulated':
         # 言い換え: 回答直後に次の質問が来て、👍 が無い（資料クリックの有無は項目側で判定）
-        filter_parts.append('attribute_exists(reformulatedAt) AND (attribute_not_exists(feedback) OR feedback <> :good)')
+        filter_parts.append('attribute_exists(reformulatedAt) AND (attribute_not_exists(feedback) OR feedback <> :good) AND (attribute_not_exists(documentOpens) OR documentOpens = :zero)')
         values[':good'] = 'good'
+        values[':zero'] = 0
     else:
         filter_parts.append('(feedback = :bad OR #rt = :not_found)')
         values[':bad'] = 'bad'
@@ -615,6 +678,8 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
 
     incomplete = bool(exclusive_start)
     collected.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
+    matched_count = len(collected)
+    truncated = matched_count > limit
     collected = collected[:limit]
 
     session_cache = {}
@@ -651,6 +716,7 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
             'messageId': item.get('messageId'),
             'timestamp': ts,
             'signals': signal,
+            'ragMode': item.get('ragMode') or 'normal',
             'responseType': item.get('responseType'),
             'feedback': item.get('feedback'),
             'feedbackReason': item.get('feedbackReason'),
@@ -669,6 +735,8 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
     return {
         'failures': failures,
         'count': len(failures),
+        'matchedCount': matched_count,
+        'truncated': truncated,
         'scannedCount': scanned_count,
         'incomplete': incomplete,
         'kind': kind,
@@ -683,15 +751,20 @@ def list_failure_messages(kind: str = 'all', limit: int = FAILURES_DEFAULT_LIMIT
     }
 
 
-def save_product_wish(user_id: str, text: str, context_session_id: str = None) -> dict:
-    """利用者の「こうなってほしい」自由記述を chatlogs に保存（role=product_wish）。"""
+def save_product_wish(user_id: str, text: str, context_session_id: str = None,
+                      context_rag_mode: str = None) -> dict:
+    """利用者の「こうなってほしい」自由記述を chatlogs に保存（role=product_wish）。
+
+    context_rag_mode は関連セッションのモード（normal / law）。不明なら記録しない。
+    """
     text = (text or '').strip()
     if not text:
         raise ValueError('text is required')
     if len(text) > WISH_TEXT_MAX:
         raise ValueError(f'text must be at most {WISH_TEXT_MAX} characters')
 
-    now = datetime.utcnow().isoformat() + 'Z'
+    now_utc = datetime.now(timezone.utc)
+    now = now_utc.isoformat().replace('+00:00', 'Z')
     ttl = int(time.time()) + (60 * 24 * 60 * 60)
     message_id = f'wish-{int(time.time() * 1000)}'
     session_id = f'wish-{user_id}'
@@ -705,8 +778,12 @@ def save_product_wish(user_id: str, text: str, context_session_id: str = None) -
         'timestamp': now,
         'ttl': ttl,
     }
+    # 日別集計用（GSI metricDayShard-timestamp-index）。timestamp と同じ時刻から導く
+    item.update(chatlog_metric_keys.metric_day_keys(now_utc, message_id))
     if context_session_id:
         item['contextSessionId'] = context_session_id
+        if context_rag_mode in ('normal', 'law'):
+            item['contextRagMode'] = context_rag_mode
 
     chatlogs_table.put_item(Item=item)
     return {'messageId': message_id, 'timestamp': now}
@@ -754,6 +831,8 @@ def list_product_wishes(limit: int = FAILURES_DEFAULT_LIMIT) -> dict:
             'text': item.get('content') or '',
             'timestamp': item.get('timestamp'),
             'contextSessionId': item.get('contextSessionId'),
+            # 旧データ（contextRagMode 未記録）は normal 扱い
+            'ragMode': 'law' if item.get('contextRagMode') == 'law' else 'normal',
             'triage': normalize_triage(item),
         })
 
@@ -847,10 +926,13 @@ def lambda_handler(event, context):
         'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
     }
     
+    http_method = 'unknown'
+    resource = 'unknown'
     try:
         # Get route info
         http_method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method'))
         path = event.get('path', event.get('rawPath', ''))
+        resource = _chat_resource(path)
         path_parameters = event.get('pathParameters', {})
         query_parameters = event.get('queryStringParameters', {}) or {}
         
@@ -1139,10 +1221,15 @@ def lambda_handler(event, context):
         elif http_method == 'POST' and path.rstrip('/').endswith('/chat/suggestions'):
             text = (body.get('text') or body.get('content') or '').strip()
             context_session_id = body.get('sessionId') or body.get('contextSessionId')
-            if context_session_id and not owns_session(context_session_id, caller_id):
-                context_session_id = None
+            context_rag_mode = None
+            if context_session_id:
+                # 他人のセッションのモードは読まない（所有者判定と同じ Query で取得）
+                owned, context_rag_mode = get_session_owner_and_mode(context_session_id, caller_id)
+                if not owned:
+                    context_session_id = None
+                    context_rag_mode = None
             try:
-                saved = save_product_wish(caller_id, text, context_session_id)
+                saved = save_product_wish(caller_id, text, context_session_id, context_rag_mode)
             except ValueError as ve:
                 return {
                     'statusCode': 400,
@@ -1194,22 +1281,19 @@ def lambda_handler(event, context):
             }
         
     except ClientError as e:
-        error_code = e.response['Error']['Code']
-        error_message = e.response['Error']['Message']
-        # 500 を返す経路は必ずログに残す（アクセスログの requestId で突き合わせる）
-        print(f"[chat] ClientError {error_code} on {event.get('httpMethod')} {event.get('path')}: {error_message}")
+        print(f"[chat] method={http_method or 'unknown'} resource={resource} {_safe_error_label(e)}")
 
         return {
             'statusCode': 500,
             'headers': headers,
             'body': json.dumps({
-                'error': error_code,
-                'message': error_message
+                'error': 'InternalServerError',
+                'message': 'An unexpected error occurred'
             })
         }
     
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
+        print(f"[chat] method={http_method or 'unknown'} resource={resource} {_safe_error_label(e)}")
         return {
             'statusCode': 500,
             'headers': headers,

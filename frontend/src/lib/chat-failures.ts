@@ -47,6 +47,7 @@ export interface FailureItem {
   messageId: string;
   timestamp: string;
   signals: Array<'bad' | 'not_found' | 'reformulated'>;
+  ragMode?: 'normal' | 'spec' | 'law';
   responseType?: string;
   feedback?: string;
   feedbackReason?: FeedbackReason;
@@ -71,6 +72,8 @@ export interface FailureItem {
 export interface FailuresResponse {
   failures: FailureItem[];
   count: number;
+  matchedCount?: number;
+  truncated?: boolean;
   scannedCount: number;
   incomplete?: boolean;
   kind: string;
@@ -196,6 +199,8 @@ export interface ProductWish {
   text: string;
   timestamp: string;
   contextSessionId?: string;
+  /** 関連セッションのモード（API が返す場合のみ。law ならリンクに mode=law を付ける） */
+  ragMode?: 'normal' | 'spec' | 'law';
   triage?: Triage;
 }
 

@@ -44,7 +44,15 @@ class FakeTable:
         page = [it for it in self.items if it["status"] == "published"]
         page.sort(key=lambda x: x["publishAt"], reverse=True)
         if "FilterExpression" in kw:
-            page = [it for it in page if it["type"] == "maintenance"]
+            expression = kw["FilterExpression"]
+            condition = expression
+            while not hasattr(condition, "name"):
+                condition = condition._values[0]
+            if condition.name == "type":
+                page = [it for it in page if it["type"] == "maintenance"]
+            else:
+                # DynamoDB は Limit 件を評価した後に FilterExpression を適用する。
+                page = [it for it in page if not it.get("endAt") or it["endAt"] >= NOW]
         limit = kw.get("Limit")
         if limit:
             page = page[:limit]
@@ -69,3 +77,68 @@ def test_active_maintenance_excludes_outside_window(monkeypatch):
               "startAt": "2026-09-11T00:00:00.000Z", "endAt": "2026-09-11T01:00:00.000Z"}
     monkeypatch.setattr(mod, "table", FakeTable([ended, future, OLD_MAINT]))
     assert [it["announcementId"] for it in mod.get_active_maintenance(NOW)] == ["m-old"]
+
+
+class PaginatedAnnouncementsTable:
+    """Limit の評価後に FilterExpression を適用する Query の簡易モデル。"""
+
+    def __init__(self, items):
+        self.items = items
+        self.calls = []
+
+    def query(self, **kw):
+        self.calls.append(kw)
+        status_condition = kw["KeyConditionExpression"]._values[0]
+        status = status_condition._values[1]
+        page_items = [it for it in self.items if it["status"] == status]
+        page_items.sort(key=lambda it: it["publishAt"], reverse=True)
+        offset = (kw.get("ExclusiveStartKey") or {}).get("offset", 0)
+        limit = kw.get("Limit", len(page_items))
+        evaluated = page_items[offset:offset + limit]
+        next_offset = offset + len(evaluated)
+        response = {"Items": [it for it in evaluated if "FilterExpression" not in kw or
+                               not it.get("endAt") or it["endAt"] >= NOW]}
+        if next_offset < len(page_items):
+            response["LastEvaluatedKey"] = {"offset": next_offset}
+        return response
+
+
+def test_public_list_pages_past_expired_items_until_limit_is_filled(monkeypatch):
+    mod = _load()
+    expired = [
+        {"announcementId": f"expired-{i}", "type": "notice", "status": "published",
+         "publishAt": f"2026-09-09T{i % 24:02d}:00:00.000Z", "endAt": "2026-09-10T02:59:59.000Z"}
+        for i in range(50)
+    ]
+    current = [
+        {"announcementId": f"current-{i}", "type": "notice", "status": "published",
+         "publishAt": f"2026-09-08T{i % 24:02d}:00:00.000Z"}
+        for i in range(2)
+    ]
+    table = PaginatedAnnouncementsTable(expired + current)
+    monkeypatch.setattr(mod, "table", table)
+
+    result = mod.get_published(2, NOW)
+
+    assert {it["announcementId"] for it in result} == {"current-0", "current-1"}
+    assert len(table.calls) >= 2
+    assert "ExclusiveStartKey" in table.calls[1]
+
+
+def test_public_list_stops_after_page_limit(monkeypatch):
+    mod = _load()
+    expired = [
+        {"announcementId": f"expired-{i}", "type": "notice", "status": "published",
+         "publishAt": f"2026-09-09T{i % 24:02d}:00:00.000Z", "endAt": "2026-09-10T02:59:59.000Z"}
+        for i in range(300)
+    ]
+    table = PaginatedAnnouncementsTable(expired)
+    monkeypatch.setattr(mod, "table", table)
+
+    assert mod.get_published(2, NOW) == []
+    published_calls = [
+        call for call in table.calls
+        if call["KeyConditionExpression"]._values[0]._values[1] == "published"
+    ]
+    assert len(published_calls) == mod.MAX_ANNOUNCEMENT_QUERY_PAGES
+    assert all(call["Limit"] == mod.ANNOUNCEMENT_QUERY_PAGE_SIZE for call in published_calls)

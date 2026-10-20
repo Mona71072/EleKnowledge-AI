@@ -19,11 +19,15 @@ related-issues:
 
 ## 目的と優先順位
 
+> 最終検証: 2026-10-05 — develop の依存設定・SAM 定義、および 2026-09-30 AWS 読み取り専用観測記録と照合
+
 1. Issue #21 で production dependency の critical/high 脆弱性を解消または期限付き例外として管理する。
 2. Issue #86 で WAF の記録・通知と RAG/chat のトレースを段階導入する。
-3. troubleshooting は開発中であり、本計画では設計のみとする。SAM 反映、AWS リソース作成、デプロイはリリース判断後に別タスクで行う。
+3. troubleshooting は開発中。AWS リソースは存在するが、利用者向け E2E は未確認。本計画の監視要件の記載をデプロイ済み・検証済みとはみなさない。
 
 ## 決定事項
+
+> 最終検証: 2026-10-05 — develop の依存設定・SAM 定義、および 2026-09-30 AWS 読み取り専用観測記録と照合
 
 | 論点 | 決定 |
 | --- | --- |
@@ -33,7 +37,15 @@ related-issues:
 | WAF ログ保管 | WAF ログは S3 に直接配信し、Block された要求だけを保存する。ライフサイクルを IaC で管理し、調査用の必要最小限のメトリクスとアラームは CloudWatch に置く。 |
 | 通知先 | WAF Block などの運用通知は itai と mona の両方へ送る。 |
 | X-Ray | RAG/chat を先行対象とし、API Gateway を含む。サンプリング率は実測後に調整する。 |
-| troubleshooting | MethodSettings、ログ項目、アラーム、トレース、受入条件だけを設計する。実装・リソース作成は保留する。 |
+| troubleshooting | MethodSettings、ログ項目、アラーム、トレース、受入条件を設計する。AWS リソースは存在するが、監視受け入れと利用者向け E2E は未確認。 |
+
+## 2026-09-30 開発環境の反映状況
+
+> 最終検証: 2026-09-30 — AWS CLI 読み取り専用確認（WAF Web ACL / LoggingConfiguration / CloudWatch alarms / CloudFormation。通知到達は未確認）
+
+開発環境には EleKnowledge の Web ACL と API 関連付けがあった。一方、同環境に紐づく WAF ログ配信設定、WAF アラーム、専用 SNS 通知トピックは確認できなかった。リージョン内の WAF ログ設定 1 件は別の Web ACL 向けである。`security-waf-template.yaml` はログ用 S3、LoggingConfiguration、2 種類のアラームと通知先を定義しているが、テンプレート上の定義だけではデプロイ済みとみなさない。
+
+X-Ray と検索トレースについては今回 AWS 実査していない。従来の設計・未確認の扱いを維持する。
 
 ## WAF ログのコスト前提
 
@@ -64,9 +76,11 @@ AWS WAF は、100 万 WAF リクエスト当たり 500 MB の WAF ログ配信�
 
 ### 2026-09-18 の再監査結果
 
+> 最終検証: 2026-10-04 — Next.js 16.3.8、production audit、CI 例外撤去、Amplify Node.js 要件を確認
+
 - `npm audit --omit=dev` の更新前は critical 2 件、high 8 件だった。
 - 非破壊更新後は critical 0 件、high 1 件、moderate 1 件まで減少した。build は成功した。
-- 残る high は Next.js が内包する `postcss` で、修正には Next.js 16 系へのメジャー更新が必要である。これは **2026-10-16 まで**の Issue #120 の期限付き例外として追跡し、現行の CI はこの 1 件だけを明示的に例外にして、それ以外の critical/high を失敗させる。Issue #21 は今回の非破壊更新がマージされたら完了として閉じる。
+- Next.js 16 系への移行で `postcss` の high を解消し、Issue #120 で追跡していた **2026-10-16 まで**の期限付き例外を CI から削除する。production dependency に critical/high があれば例外なく CI を失敗させる。Issue #21 は非破壊更新を含む PR #118 のマージにより完了した。
 
 ### B. Issue #86 — WAF logging と Block アラーム
 
@@ -82,6 +96,8 @@ Block 閾値、保存期間、夜間休日の対応水準は実トラフィッ�
 2. 通常回答と障害相当のテストで、Gateway・Lambda・KB 検索・モデル生成の遅延を識別できることを確認する。
 3. サンプリング、保存期間、コストを初月実測し、見直しを記録する。
 
-### D. troubleshooting（設計のみ）
+### D. troubleshooting（受入状態は未確認）
 
-リリース時に必要な MethodSettings（access logging / metrics / throttling）、ログから除外する値、アラーム条件、X-Ray 対象、受入シナリオを別設計として確定する。リリース判断、実装 PR、リソース作成、デプロイはこの計画の完了条件に含めない。
+> 最終検証: 2026-10-05 — develop の troubleshooting SAM 定義と 2026-09-30 AWS 読み取り専用観測記録を照合
+
+開発環境に関連リソースが存在することは確認済みだが、本計画に記載した MethodSettings（access logging / metrics / throttling）、ログから除外する値、アラーム条件、X-Ray 対象、受入シナリオが環境に反映されているかは未確認。リソース存在を機能提供・監視受入の完了とみなさず、必要な確認・変更は別タスクとして扱う。

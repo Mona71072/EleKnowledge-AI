@@ -220,7 +220,7 @@ FAILED tests/unit/test_orchestrator.py::test_extract_user_id_empty_string
 813行。検索・プロンプト構築・引用生成・永続化・HTTP 処理が1ファイルに同居しています。リポジトリ自身のルール（800行上限）に抵触。`retrieval.py` / `prompt.py` / `citations.py` / `handler.py` への分割が妥当です。
 
 ### M-11. 設定値の重複と情報露出
-- `waf-rules.json` に AWS アカウントID `423623870147` と IPSet ARN がハードコード
+- `waf-rules.json` に AWS アカウントID `<LEGACY_US_EAST_1_ACCOUNT_ID>` と IPSet ARN がハードコード
 - `security-waf-template.yaml:14` と `phase2-template.yaml:158` に**社内出口IP 10件が Default 値として二重に**記載
 - `security-waf-template.yaml:17-26` に API Gateway ID 4件がハードコード
 

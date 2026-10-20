@@ -318,6 +318,8 @@ aws cloudformation describe-stacks \
 
 ### Step 3: Phase 2 デプロイ
 
+> 最終検証: 2026-10-14 — phase2 のデプロイ例に RagLogicVersion を追加
+
 ```bash
 # Phase 2 ビルド
 sam build --template phase2-template.yaml --use-container
@@ -328,7 +330,8 @@ sam deploy \
   --profile ${AWS_PROFILE} \
   --region ${REGION} \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-  --parameter-overrides file://parameters-${ENVIRONMENT}.json
+  --parameter-overrides file://parameters-${ENVIRONMENT}.json \
+    "RagLogicVersion=$(git rev-parse --short HEAD)"
 ```
 
 **デプロイ確認:**
@@ -343,6 +346,8 @@ aws cloudformation describe-stacks \
 
 ### Step 4: Knowledge Base 手動設定
 
+> 最終検証: 2026-10-14 — phase2 のデプロイ例に RagLogicVersion を追加
+
 ```bash
 # 1. AWS Bedrock コンソール上で Knowledge Base を作成
 # 2. 作成後、Knowledge Base ID を取得
@@ -356,7 +361,8 @@ sam deploy \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
   --parameter-overrides \
     "BedrockKnowledgeBaseId=KB_ELEKNOWLEDGE_001" \
-    file://parameters-${ENVIRONMENT}.json
+    file://parameters-${ENVIRONMENT}.json \
+    "RagLogicVersion=$(git rev-parse --short HEAD)"
 
 # 注: Knowledge Base ID は環境変数として Lambda 関数に自動設定されます
 # Lambda 関数内では KNOWLEDGE_BASE_ID 環境変数から取得可能です
@@ -421,6 +427,8 @@ aws cloudformation delete-stack \
 
 ### 部分的なリソース更新
 
+> 最終検証: 2026-10-14 — phase2 のデプロイ例に RagLogicVersion を追加
+
 ```bash
 # 特定パラメータのみ更新
 sam deploy \
@@ -430,7 +438,8 @@ sam deploy \
   --no-fail-on-empty-changeset \
   --parameter-overrides \
     "RagLambdaMemory=2048" \
-    "RagApiThrottleRate=10"
+    "RagApiThrottleRate=10" \
+    "RagLogicVersion=$(git rev-parse --short HEAD)"
 ```
 
 ---

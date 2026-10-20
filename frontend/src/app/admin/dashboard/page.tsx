@@ -244,7 +244,8 @@ function Section({ title, sub, right, children }: { title: string; sub?: string;
 function NowStrip({ data }: { data: DashboardResponse }) {
   const now = data.now;
   const meta = STATUS_META[now.status];
-  const heroLabel = now.status === 'good' ? '正常' : now.status === 'warning' ? '注意' : '重大';
+  const cloudwatchUnavailable = now.cloudwatchAvailable === false || now.status === 'unknown';
+  const heroLabel = cloudwatchUnavailable ? '取得できません（CloudWatch）' : now.status === 'good' ? '正常' : now.status === 'warning' ? '注意' : '重大';
   const crit = now.activeNotices.find((n) => n.severity === 'critical');
   const ragLabel =
     now.last60min.ragCount >= 10 && now.last60min.ragP90Ms !== null
@@ -264,7 +265,9 @@ function NowStrip({ data }: { data: DashboardResponse }) {
           <span className="text-2xl font-semibold leading-tight">{heroLabel}</span>
         </div>
         <div className="mt-2 flex flex-wrap gap-1">
-          {now.alarms.length === 0 ? (
+          {cloudwatchUnavailable ? (
+            <span className="text-xs text-gray-700">ALARM を取得できません（CloudWatch）</span>
+          ) : now.alarms.length === 0 ? (
             <span className="text-xs text-gray-500">ALARM なし</span>
           ) : (
             now.alarms.map((a) => (

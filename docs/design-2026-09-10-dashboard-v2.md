@@ -1,13 +1,13 @@
 ---
 status: draft
-last-verified: 2026-09-10
+last-verified: 2026-09-23
 related-code: lambda/metrics/aggregator/app.py, lambda/metrics/read/app.py, frontend/src/app/admin/dashboard/page.tsx, frontend/src/lib/metrics.ts, frontend/src/components/dashboard/charts.tsx, infrastructure/sam/monitoring-template.yaml, infrastructure/sam/phase2-template.yaml, infrastructure/sam/announcements-monitoring-template.yaml, lambda/rag/rag-function/app.py
 ---
 
 # 設計: 運用ダッシュボード v2 — 毎朝の判断・健全性・切り分け・コスト
 
-> **状態:** 設計（実装前・共同確認用）。実装コードは含まない。
-> **前提:** データ源は [telemetry-inventory-2026-09-10.md](./telemetry-inventory-2026-09-10.md) に列挙したものが上限。棚卸しに無いものは「足す提案」として作業量つきで書く。
+> **状態:** 実装は #106 / #110 / #111 / #112 / #114。API の正は `docs/api/`。この骨子と違う箇所は API 文書と実装の型を正とする。
+> **前提:** データ源は telemetry-inventory-2026-09-10.md（このリポジトリには存在しない） に列挙したものが上限。棚卸しに無いものは「足す提案」として作業量つきで書く。
 > **上書き対象:** [design-2026-09-10-metrics-v2.md](./design-2026-09-10-metrics-v2.md) の §6（read API）・§7（UI）・§11（PR 分割）は本書で置き換える。§3〜§5（JST 境界・毎時集計・日次行）は本書の §6 の差分を足したうえで **そのまま生かす**。[design-2026-09-10-retrieval-trace.md](./design-2026-09-10-retrieval-trace.md) は変更しない（§5.1 でコスト算出の役割だけ変える）。
 > **記法:** 外部仕様への言及は ◎ = 公式仕様・実測で確度が高い、△ = 記憶に頼っており実装時に一次情報で確認、の 2 段で書き分ける。
 > **モック:** [design-2026-09-10-dashboard-v2-mock.html](./design-2026-09-10-dashboard-v2-mock.html)（「平穏な朝」「異常がある朝」の切替つき。数字は表示例。§8 の回答と別立て B2 / B3 / B5 を反映済み）
@@ -107,7 +107,7 @@ related-code: lambda/metrics/aggregator/app.py, lambda/metrics/read/app.py, fron
 |---|---|---|---|---|---|
 | Y1 | 障害 | P1 の ALARM 遷移回数 / 5xx 件数 | 5xx の内訳（API 別 + Amplify） | P1 ≥ 1 → 悪化以上。5xx: 0 正常 / 1–5 注意 / 6–20 悪化 / 21〜 重大 | `DescribeAlarmHistory`、API GW `5XXError`（4 API）、`AWS/AmplifyHosting 5xxErrors` |
 | Y2 | 応答時間 | rag-api `Latency` p90（件数 ≥ 10 のとき）。件数 < 10 なら中央値 | 最大値 | p90: ≤ 20 s 正常 / ≤ 25 s 注意 / ≤ 29 s 悪化 / 超 重大。最大 > 25 s なら注意以上 | API GW `Latency`（ApiName=rag-api-dev） |
-| Y3 | 到達できず | `not_found` + 👎 の件数（重複は 1 件） | not_found / 👎 の内訳・言い換え（別立て B2 採用時）・**未振り分け n**（§9.4）。`/admin/failures?since=昨日` へリンク | **色なし**（作業量であって健全性ではない） | chatlogs（`responseType`, `feedback`） |
+| Y3 | 到達できず | `not_found` + 👎 の件数（重複は 1 件） | not_found / 👎 の内訳・再質問（目安）・**未振り分け n**（§9.4）。`/admin/failures?since=昨日` へリンク | **色なし**（作業量であって健全性ではない） | chatlogs（`responseType`, `feedback`） |
 | Y4 | 利用 | 質問数 | ユニーク利用者・初めての利用者・先週同曜日の質問数 | 色なし | chatlogs（`userIds`, `newUsers`） |
 | Y5 | Bedrock 費 | 昨日の推定（トークン × 単価） | 今月の実額（Cost Explorer、D-2 まで）。`/admin/cost` へリンク | 昨日の推定が直近 7 日中央値の 3 倍超 **かつ** 1 USD 超 → 注意 | `AWS/Bedrock InputTokenCount / OutputTokenCount`（トレース実装後はトレース）、Cost Explorer |
 
@@ -223,9 +223,9 @@ SLO は **p90 20 s** と決めた（Q1、itai 2026-09-10）。`AGENTS.md` の「
 
 4xx の一次情報になるはずのものが 3 つとも欠けている。
 
-1. **アクセスログが無い**（G1）。5 ステージすべて未設定で、受け皿のロググループは 0 バイト。誰が・どのパスを・どの結果で叩いたかの 1 行が存在しない
-2. **実行ログには内訳が出ない**。`loggingLevel=INFO` の実行ログは「Method completed with status: 403」は残すが、送信元 IP と失敗種別（WAF ブロック／認可拒否／トークン失効）を 1 行で読めない。△ WAF がブロックした要求は実行ログ自体に残らず、アクセスログにだけ `wafResponseCode` 付きで残る
-3. **Lambda のエラー行にリクエスト ID が無い**。`rag-function` の 500 経路は `ClientError` を握って 500 を返すだけで、API Gateway のリクエスト ID・失敗した段階（retrieve / generate / save）・`messageId` を出さない。アクセスログがあっても Lambda ログと突き合わせられない
+1. **アクセスログが無い**（G1）。5 ステージすべて未設定で、受け皿のロググループは 0 バイト。どのリソース（`resourcePath`）でどの結果になったかを示す 1 行が存在しない
+2. **実行ログには内訳が出ない**。`loggingLevel=INFO` の実行ログは「Method completed with status: 403」は残すが、失敗種別（WAF ブロック／認可拒否／トークン失効）を 1 行で読めない。△ WAF がブロックした要求は実行ログ自体に残らず、アクセスログにだけ `wafResponseCode` 付きで残る
+3. **Lambda のエラー行にリクエスト ID が無い**。`rag-function` の 500 経路は `ClientError` を握って 500 を返すだけで、API Gateway のリクエスト ID・失敗した段階（retrieve / generate / save）を出さない。アクセスログがあっても Lambda ログと突き合わせられない
 
 4xx アラームの閾値は 5 分 30 件なので 5 件は鳴っていない。それでも「後から追える」状態にしておくのが役割 3 の要件で、それにはまず記録が要る。
 
@@ -237,7 +237,7 @@ SLO は **p90 20 s** と決めた（Q1、itai 2026-09-10）。`AGENTS.md` の「
 |---|---|---|---|---|
 | Amplify（画面配信） | 画面が開かない | `AWS/AmplifyHosting 5xxErrors / Requests`（G3、未参照。**アラームも無い**） | Amplify コンソール | **Amplify 5xx アラーム**（P1）、日次行に `amplifyRequests / amplify5xx` |
 | WAF（IP 許可リスト） | 403 | `AWS/WAFV2 BlockedRequests` | — | **アクセスログ `wafResponseCode`** |
-| API Gateway 認可 | 401 / 403 | `4XXError`（内訳なし） | 実行ログ | **アクセスログ `error.responseType`** |
+| API Gateway 認可 | 401 / 403 | `4XXError`（内訳なし） | 実行ログ | **アクセスログ `errorType`** |
 | Lambda rag / chat | 500 | `5XXError`、メトリクスフィルタのエラー行 | 保存クエリ `rag-error-lines` | **構造化エラー行（`apiRequestId`・段階・エラーコード）** |
 | Knowledge Base / OpenSearch | retrieve 失敗・遅延 | `print("Knowledge Base query error")` のみ | 同上 | トレースの `latencyMs.retrieve`（別設計） |
 | Bedrock | スロットル・遅延・5xx | `AWS/Bedrock InvocationThrottles / InvocationServerErrors / InvocationLatency`（G2、未参照） | CloudWatch メトリクス（ModelId） | 日次行に `bedrockThrottles / bedrockServerErrors`。切り分け時は直接見る |
@@ -248,24 +248,24 @@ SLO は **p90 20 s** と決めた（Q1、itai 2026-09-10）。`AGENTS.md` の「
 
 | # | 何を | どこに | 何が分かるようになるか | 作業量 | 優先 |
 |---|---|---|---|---|---|
-| I1 | **API Gateway アクセスログ**（JSON 1 行/リクエスト）を 4 ステージ（rag / chat / auth / app）に設定。項目: リクエスト ID、時刻、メソッド、パス、ステータス、応答時間、統合時間、送信元 IP、UA、`error.responseType`、`error.message`、`wafResponseCode`、`authorizer.claims.sub`（△ 変数名は公式の `$context` 一覧で確認） | 既存の `/aws/apigateway/*-api-dev`（保持 90 日） | 4xx の内訳（WAF / 認可 / 失効 / スロットル）、利用者体感レイテンシ、利用者別の利用、**引用文書を開いた回数**（`GET /rag/document` の件数） | 小（`AccessLogSetting` を Stage に足すだけ。既存ログ群へ流す） | **P0** |
-| I2 | **rag / chat の 1 リクエスト 1 行の構造化ログ**（トレース設計 §4-5 の行に `apiRequestId` = `event.requestContext.requestId` を追加）と、**500 経路の構造化エラー行**（`apiRequestId`, `stage: retrieve / generate / save`, `errorCode`, `messageId`）。あわせて 500 応答本文から AWS のエラーメッセージを外す（現在は `ClientError` の本文をそのまま返している） | Lambda ログ | アクセスログ ↔ Lambda ログ ↔ chatlogs を ID で結べる。アラーム本文だけで「どの段階で何のエラーか」が読める | 小 | **P0** |
+| I1 | **API Gateway アクセスログ**（JSON 1 行/リクエスト）を 4 ステージ（rag / chat / auth / app）に設定。項目: リクエスト ID、時刻、メソッド、`resourcePath`、ステータス、応答時間、統合時間、`errorType`、`wafResponseCode` など。送信元 IP・User-Agent・Cognito `sub`・生の `path`・エラー本文（`$context.error.message`。削除は #139）は記録しない | 既存の `/aws/apigateway/*-api-dev`（保持 90 日） | 4xx の内訳（WAF / 認可 / 失効 / スロットル）、利用者体感レイテンシ、**引用文書を開いた回数**（`GET /rag/document` の件数） | 小（`AccessLogSetting` を Stage に足すだけ。既存ログ群へ流す） | **P0** |
+| I2 | **rag / chat の 1 リクエスト 1 行の構造化ログ**（`apiRequestId`、`responseType`、件数・スコア・トークン数・レイテンシ・モデル ID）と、**500 経路の構造化エラー行**（`apiRequestId`, `stage: retrieve / generate / save`, `errorCode`）。CloudWatch に出す項目は契約（`rag-observability-contract.md`）に従い、`sessionId` / `messageId` は出さない。相関は API Gateway の `requestId` とし、RAG ログでは `apiRequestId` という名前で出す（契約の `requestId` に相当）。あわせて 500 応答本文から AWS のエラーメッセージを外す（現在は `ClientError` の本文をそのまま返している） | Lambda ログ | アクセスログと Lambda ログを `apiRequestId` で照合し、アラーム本文だけで「どの段階で何のエラーか」が読める | 小 | **P0** |
 | I3 | **引用文書を開いた回数を回答の行に加算**。フロントは `/doc?uri=…` に `&s=<sessionId>&m=<messageId>` を足し、`GET /rag/document?uri=&s=&m=` が所有者を確認したうえで該当の assistant 行に `documentOpens` を加算し `lastOpenedAt` を記録する。あわせて `document_open` の構造化行（本文なし）を出す | chatlogs（`documentOpens` 属性）+ Lambda ログ | ファネル F4「資料を開いた」。日次集計は chatlogs の走査で数えるので EMF は要らない（実装時に EMF 案から変更。後付けのクリックも D-1〜D-3 の再集計で回答日の行に乗る） | 小（Lambda に 1 関数、フロントのリンク生成 1 か所、aggregator に集計 1 項目） | **P0** |
 | I4 | **アラーム遷移の保存**（`alarmTransitions: [{alarm, state, at}]`）と **P1 遷移回数**（metrics-v2 §5 の `incidents` を拡張） | 日次行 | 「出来事」の一覧 | 小（metrics-v2 PR-2 に含める） | P1 |
 | I5 | **AlarmDescription にランブック節と保存クエリ名を入れる**（Cognito ルールは既にやっている。28 本に揃える） | monitoring-template | 通知メールだけで「最初に見る場所」に着ける | 小 | P1 |
-| I6 | **アクセスログ用の保存クエリ**を監視スタックに追加: `api-4xx-breakdown`（`stats count() by error.responseType, status, resourcePath`）、`request-by-id`（ID で 3 ロググループ横断）、`slow-requests`（`responseLatency` 降順） | monitoring-template | 切り分けの手順がクエリ名で固定される | 小 | P1 |
+| I6 | **アクセスログ用の保存クエリ**を監視スタックに追加: `api-4xx-breakdown`（`stats count() by errorType, status, resourcePath`）、`request-by-id`（ID で 3 ロググループ横断）、`slow-requests`（`responseLatency` 降順） | monitoring-template | 切り分けの手順がクエリ名で固定される | 小 | P1 |
 | I7 | **デプロイ・設定変更のマーカー**（CloudTrail `LookupEvents` で `UpdateStack` / `UpdateFunctionCode*` / `UpdateFunctionConfiguration*` を EleKnowledge のリソース名で絞る） | 日次行 `changes` | 「出来事」に変更が並び、障害と変更の前後関係が画面で分かる | 中（IAM `cloudtrail:LookupEvents`、名前での絞り込み、2 TPS 制限） | P2 |
 
-I1 の送信元 IP と `sub` は AGENTS.md「ログと秘匿」の禁止対象（トークン・個人情報・引用全文）には当たらないと判断したが、確認事項として §8 Q4 に残す。
+利用者単位の集計が必要なら、CloudWatch ではなく認可済み DynamoDB 側で行う。
 
 ### 4.4 ダッシュボードからの導線
 
 1. アラームのメールが来る → 件名でアラーム名と P1/P2 が分かる（現状どおり）
 2. `/admin/dashboard` を開く → 「いま」に現在の ALARM、「出来事」に遷移時刻が並ぶ
 3. 行の「→ ログ」で Logs Insights を該当ロググループ・前後 15 分で開く。4xx なら `api-4xx-breakdown`、5xx なら `rag-error-lines`、遅延なら `slow-requests`
-4. `apiRequestId` を `request-by-id` に貼れば、アクセスログ・Lambda ログ・（トレース実装後は）`messageId` 経由で chatlogs まで辿れる
+4. `apiRequestId` を `request-by-id` に貼れば、アクセスログと Lambda ログを照合できる。利用者単位の記録は認可済み DynamoDB 側で確認する
 
-**○ 任意の拡張「行内の内訳」**: 出来事の行を開くと、read API がその時間帯（前後 15 分）について Logs Insights の `StartQuery` を 1 本流し（5〜10 秒）、結果の**集計だけ**を行内に出す。4xx なら `error.responseType × status × path`、5xx なら `stage × errorCode`、いずれも影響した `sub` の数と `apiRequestId` の上位 5 件。ログ本文は出さず、本文が要るときは同じ条件で Logs Insights を開く。アプリ内ログビューアを作らずに「どこで何が」の 8 割を画面で済ませられる。費用は走査量課金（△ 1 GB あたり数セント）で、この規模では無視できる。I1・I2 が入った後に足す。
+**○ 任意の拡張「行内の内訳」**: 出来事の行を開くと、read API がその時間帯（前後 15 分）について Logs Insights の `StartQuery` を 1 本流し（5〜10 秒）、結果の**集計だけ**を行内に出す。4xx なら `errorType × status × resourcePath`、5xx なら `stage × errorCode`、いずれも `apiRequestId` の上位 5 件。ログ本文は出さず、本文が要るときは同じ条件で Logs Insights を開く。アプリ内ログビューアを作らずに「どこで何が」の 8 割を画面で済ませられる。費用は走査量課金（△ 1 GB あたり数セント）で、この規模では無視できる。I1・I2 が入った後に足す。
 
 ランブック §2「最初に見る場所」は、I1〜I6 が入った時点で上記に書き換える。
 
@@ -481,7 +481,7 @@ export interface DashboardResponse {
   funnel: { yesterday: FunnelRow; last7d: FunnelRow };
   trend: { days: number; queriesByDay: { date: string; total: number; unreached: number }[];
            latencyByDay: { date: string; p90Ms: number | null; maxMs: number | null }[] };
-  events: { at: string; kind: 'alarm' | 'deploy'; title: string; durationSec?: number;
+  events: { at: string; kind: 'alarm' | 'ok'; title: string; durationSec?: number;
             logGroup?: string; from?: string; to?: string; queryName?: string }[];
   reference: { topDocuments: { name: string; count: number }[]; lastEval: { date: string; hit: number; n: number } | null };
 }
@@ -489,11 +489,11 @@ interface FunnelRow { signIns: Count; queries: Count; pages: Count; opened: Coun
 
 export interface CostResponse {
   month: string; settledThrough: string;          // UTC
-  confirmed: { bedrockSonnet5: { total: number; input: number; output: number; cache: number }; budgetUsd: number };
+  confirmed: { bedrock: { service: string; total: number; input: number; output: number; cache: number; other: number }; budgetUsd: number };
   unattributed: { total: number; byService: Record<string, number>; note: 'tag_pending' };
   shared: { total: number; byService: Record<string, number> };
   checks: { soleUser: { ok: boolean; detail: string }; actualVsEstimate: { actual: number; estimate: number; diffPct: number; status: HealthStatus } };
-  daily: { date: string; sonnet5Usd: number; settled: boolean }[];    // UTC 日
+  daily: { date: string; bedrockUsd: number; totalUsd: number; settled: boolean }[];    // UTC 日
   queriesDaily: { date: string; queries: number }[];                  // JST 日（別チャート）
   perQuery: { actualUsd: number | null; traceMedianUsd: number | null; traceP90Usd: number | null; perAnswerUsd: number | null };
   projection: { queriesPerDay: number; monthlyUsd: number }[];
@@ -506,10 +506,10 @@ export interface CostResponse {
 
 | API | 変更 |
 |---|---|
-| `GET /chat/admin/failures` | `since` / `until`（JST 日付）、`triage=open\|in_progress\|done\|all`、`kind` に `reformulated` を追加。各項目に `traceSummary`・`opened`・`reformulated`・`triage`・`hints` |
+| `GET /chat/admin/failures` | `since` / `until`（JST 日付）、`triage=open\|in_progress\|done\|wontfix\|all`、`kind` に `reformulated` を追加。各項目に `traceSummary`・`opened`・`reformulated`・`triage`・`hints` |
 | `PUT /chat/admin/messages/{sessionId}/{messageId}/triage` | 新設（admin）。`{status, cause?, note?, ref?}` |
 | `GET /chat/admin/messages/{sessionId}/{messageId}/trace` | トレース設計 §5 のまま。一覧のドロワーで使う |
-| `GET /admin/metrics` | `now.activeNotices: [{id, title, severity, since, showInChat}]` を追加 |
+| `GET /admin/metrics/dashboard` | `now.activeNotices: [{id, title, severity, since, showInChat}]`。旧 `GET /admin/metrics` には足さない |
 | `POST` / `PUT /admin/announcements` | `showInChat` を受ける。`endAt` は全種別で既に保存されている（UI 側の変更のみ） |
 | `GET /announcements` | 変更なし（`showInChat` が項目に増えるだけ） |
 
@@ -539,7 +539,7 @@ export interface CostResponse {
 | 5 | `feat(metrics)` read | §6.3 の 2 エンドポイント | announcements-monitoring | 4 |
 | 6 | `feat(dashboard)` UI | `/admin/dashboard` v2、`/admin/cost`、サブナビ | Amplify | 5 |
 | 6b | `feat(announcements)` | §10.4（`showInChat`、表示終了 UI、テンプレート、チャット画面バナー、ダッシュボードの告知導線） | announcements-monitoring + Amplify | なし。**単独で入れられ、今週から障害告知を型にできる** |
-| 6c | `feat(chat)` failures v2 API | §9.5（期間・振り分け・ヒント・トレース要約） | phase2 | 3（構造化ログ）。トレース要約はトレース PR 後 |
+| 6c | `feat(chat)` failures v2 API | §9.6（期間・振り分け・ヒント・トレース要約） | phase2 | 3（構造化ログ）。トレース要約はトレース PR 後 |
 | 6d | `feat(admin)` failures v2 UI | §9.2 | Amplify | 6c |
 | 7 | トレース PR 群 | 別設計のまま。完了後に `estimateSource` を `trace` へ | phase2 ほか | 独立 |
 | 8 | `docs` | `docs/api/`（metrics API 正本）、`docs/data-model.md`（production・事前確認要）、ランブック §2 / §3 / §4 / §9 の書き換え | — | 6 |
@@ -561,7 +561,7 @@ export interface CostResponse {
 | 5 | `feat/metrics-v2-read` | 4 の上 | `/admin/metrics/dashboard`・`/admin/metrics/cost` | pytest |
 | 6 | `feat/dashboard-v2-ui` | 5 の上 | ダッシュボード v2・コスト画面・サブナビ | tsc・node:test・next build |
 | 6b | `feat/announcements-v2` | `fix/announcements-inspection`（PR #95） | §10（showInChat・表示終了・テンプレート・チャット画面の帯・導線） | pytest・tsc・node:test |
-| 6c | `feat/failures-v2-api` | develop | §9.5 API と PUT triage | pytest・cfn-lint |
+| 6c | `feat/failures-v2-api` | develop | §9.6 API と PUT triage | pytest・cfn-lint |
 | 6d | `feat/failures-v2-ui` | 6c の上 | §9.2 画面 | tsc・node:test |
 
 デプロイ順の依存: 6 は 5 と同じ announcements-monitoring スタックのデプロイ後に Amplify へ。6d は 6c の phase2 デプロイ後。3 は phase2。1b は監視スタック。
@@ -577,7 +577,7 @@ export interface CostResponse {
 | Q1 | SLO「p95 < 3 s」と Sonnet 5 の実測が両立しない | **p90 20 s を妥協ライン（SLO）とする** | §2.8 の閾値を 20 / 25 / 29 s に改めた。`AGENTS.md` の SLO は別 PR（AI ルール同期の手順）で「RAG 応答 p90 < 20 s」に改定する |
 | Q2 | WAF・Amplify は EleKnowledge 専用か | **Amplify は専用。WAF は他システムも使うが Web ACL は別（共用ではない）** | Amplify は「実額・確定」へ。WAF は Cost Explorer の使用タイプが Web ACL 単位に分かれないため、タグ有効化までは「推定（構成 × 料金表）」、有効化後に「実額・確定」（§5.2 / §5.3 C10） |
 | Q3 | OpenSearch の OCU を追えるか。EleKnowledge 由来か区別できるか | **取れるなら取りたい。由来の区別ができれば最高** | §5.9 を追加。`AWS/AOSS` の OCU と検索リクエスト数を日次行に取り、EleKnowledge 自身の retrieve 回数（I2）との比で「リクエスト按分」を推定として出す。由来の区別は EleKnowledge 側の回数でしかできない |
-| Q4 | アクセスログに IP と `sub` を残してよいか | **残してよい** | I1 のまま |
+| Q4 | アクセスログに IP と `sub` を残してよいか | **残さない** | I1 は `requestId`、`status`、`resourcePath`、`latency`、`errorType` などで相関・集計する。利用者単位の集計が必要なら、CloudWatch ではなく認可済み DynamoDB 側で行う。2026-09-25 に PR #133 のログ契約へ合わせて変更 |
 | Q5 | `ce:GetCostAndUsage` を Lambda から呼べるかの確認方法 | （質問） | §8.1 |
 | Q6 | 他システムの Sonnet 5 利用の事前連絡 | **打ち合わせで聞く** | C5 の自動検知は前提どおり残す。連絡が取れれば降格時の説明に使う |
 | Q7 | metrics-dev の TTL | **無効化する（またはアーカイブ）** | **TTL 無効化で確定**。**訂正（2026-09-11）**: `origin/develop` のテンプレートは PR #93 で既に `Enabled: false` になっていた。有効に見えたのは設計時の作業ブランチが develop より古かったため。実環境で有効のままなのは未デプロイだから。実装 PR-1 で `METRIC_TTL_DAYS` と `ttl` 属性の書き込みを削除した。テーブルは KB 規模で PITR 有効のため、別途アーカイブは要らない（別立て A5） |
@@ -617,17 +617,17 @@ SCP は原則アクション単位で**アカウント内の全プリンシパ�
 | 欠け | 何が困るか |
 |---|---|
 | 期間で絞れない | ダッシュボードの「昨日 5 件」から飛んでも、同じ 50 件が出る。週次レビューで「今週の分」が切り出せない |
-| 振り分けの記録先が無い | 「unresolved は件ごとに人手で振り分け」が方針だが、結果は issue コメント頼み。先週の 7 件がどうなったかが画面で分からず、同じ件を二度読む |
+| 振り分けの記録先が無い | AI の仮振り分けを週次で確認する方針だが、結果は issue コメント頼み。先週の 7 件がどうなったかが画面で分からず、同じ件を二度読む |
 | 検索の中身が見えない | 候補資料名 5 件だけ。何件取れて何が除外され、上位スコアがいくつだったかが無いので、検索ミスか作文かの当たりが付かない |
-| 暗黙の失敗が見えない | 👎 を押す人は少数。資料が開かれたか、言い換えが起きたかが無い |
+| 暗黙の信号が見えない | 👎 を押す人は少数。資料が開かれたか、再質問が起きたかが無い |
 | 改善提案が「取得した 50 件」の集計 | 期間も対応済みも区別しないので、直した件がいつまでもカードに残る |
 
 ### 9.2 画面構成（上から）
 
 | # | 要素 | 内容 | 推奨度 |
 |---|---|---|---|
-| 1 | 絞り込み | 期間（昨日 / 7 日 / 30 日 / 指定）・状態（未振り分け / 対応中 / 対応済み / すべて）・種類（👎 / not_found / 言い換え）・理由。ダッシュボードからは `?since=` 付きで飛ぶ | ◎ |
-| 2 | 作業量の帯 | 未振り分け n / 対応中 n / 今週対応済み n / 要望（未読）n。**週次レビューのゴールは「未振り分けを 0 にする」** | ◎ |
+| 1 | 絞り込み | 期間（昨日 / 7 日 / 30 日 / 指定）・状態（未振り分け / 対応中 / 対応済み / すべて）・種類（👎 / not_found / 再質問（目安））・理由。ダッシュボードからは `?since=` 付きで飛ぶ | ◎ |
+| 2 | 作業量の帯 | 未振り分け n / AI 提案の未確認 n・最長滞留日数 / 対応中 n / 今週対応済み n / 要望（未読）n。確認上限を超えた未確認分は残件として表示する | ◎ |
 | 3 | 改善提案カード | 期間内・未対応の信号だけを集計。しきい値 3 は据え置き。「該当を見る」で一覧を絞る（既存） | ○ |
 | 4 | 一覧 | 1 件 = 信号・理由・時刻・質問・回答冒頭・フィルタ（既存）+ **ヒント**（§9.3）+ **検索の要約**（トレース設計 §5 の `traceSummary`）+ **振り分け**（§9.4）+ 操作（チャットで開く / ゴールデン候補 / トレース全文） | ◎（ヒント ○、トレース要約はトレース実装後） |
 | 5 | トレース全文のドロワー | 候補 30 件の順位・文書・頁・スコア・機種・選択／除外理由の表。初月は Athena で代替 | △ |
@@ -640,7 +640,7 @@ SCP は原則アクション単位で**アカウント内の全プリンシパ�
 | `excludedByModelScope ≥ 3` かつ 理由 = 資料が違う | 機種スコープで n 件除外 | 取扱機種スコープ表 |
 | `topScore` が弱い（閾値はトレース実装後に実測で決める。仮 0.45）かつ not_found / 資料が違う | 上位スコアが弱い | 検索語・略語展開・正規化 |
 | `opened = true` かつ 理由 = 疑問が解けない / 回答がおかしい | 資料は開かれた | snippet か作文（検索は当たっている） |
-| 言い換えあり かつ 👍 なし | 言い換え後に評価なし | 暗黙の失敗として扱う |
+| 同じ話題の再質問（目安） | 直前の回答後に同じ話題を聞き直した可能性 | AI 仮振り分けで失敗候補かを判定。失敗件数・失敗率には含めない |
 | カテゴリ複数選択 かつ `mergedCount < 5` | カテゴリ過絞り | フィルタの組み合わせ |
 | 直前が clarify | 聞き返し後の結合検索 | `compose_search_query` |
 
@@ -665,9 +665,57 @@ chatlogs の assistant 行と `product_wish` 行に属性を足す。未設定 =
 - ダッシュボード Y3 の「未振り分け n」はこの属性から数える（`status` が無いか `open`）
 - `docs/data-model.md` は production。追加前に事前確認
 
-### 9.5 API
+### 9.5 AI による振り分け支援と改善ループ（提案・2026-09-25）
 
-`GET /chat/admin/failures` に `since` / `until` / `triage` を足し、各項目に `traceSummary`・`opened`（`DocumentOpen` の `messageId` と突合）・`reformulated`・`triage`・`hints` を付ける。Scan は今のままで、`since` は FilterExpression に入るだけ（読み取り量は減らない）。25 ページ打ち切りは据え置き、1 日 1,000 件に近づいたら GSI か Athena（別立て A14）。改善提案の集計はクライアントのまま（期間と `triage` で絞った結果を集計）。
+AI は原因候補と改善先を提案し、人が証拠を見て確定する。AI の自己申告確信度は表示だけに使い、正解率の代わりにしない。
+
+#### 9.5.1 流れ
+
+1. 一覧データの正確さを整える（#142: 資料を開いた回答を除外し、100 件で打ち切った場合は明示）。検索トレースには生成に渡した抜粋、候補資料・順位・score、機種フィルタと除外理由、KB・検索・プロンプトの版を揃える。揃わない項目は AI に「不明」と渡し、原因を断定させない。
+2. Lambda から Bedrock Global 推論プロファイル経由で Sonnet 5 を呼び、1 件ずつ原因候補・改善先・根拠・確信度を仮提案する。
+3. **振り分けの確認**（AI の仮振り分けの承認・修正と盲検の抜き取り判定）に時間の上限は設けず、各人の所要時間を記録する。影響が大きい失敗・新しいパターンのまとまりを優先し、AI 案を隠した失敗候補と失敗一覧にない通常回答から、週各 5 件を無作為抽出する。同じ盲検サンプルを二人が判定し、人どうしの一致（原因別 Cohen の κ）も測る。確認しきれない候補は `open` のまま残す。
+4. 週次レポートに原因別件数、盲検評価、繰り返す失敗、改善提案をまとめる。**振り分けの中身の検討**や**改善の検討**（週次の AI 分析レポートを見て、KB 修正依頼・評価セット・検索設定・プロンプトの何を直すか決める）には時間の上限を設けない。人が採用した提案だけを KB 台帳・issue・PR・評価セットへ回す。
+
+改善提案には、所有部門を 1 つとする KB 台帳 `docs/kb-change-requests.md` への追加候補（KB-xx）、評価セット・検索設定・プロンプトの変更候補を含める。同台帳は mona の PR #136 で新設予定（未マージ）。
+
+#### 9.5.2 AI 仮振り分け
+
+| 入力 | 出力 |
+|---|---|
+| 質問・回答・retrievalTrace・👎 理由とコメント・`responseType`・`queryFilters` | 原因（§9.4 の候補に「判定保留」を追加）・改善先（`kb` / `eval` / `prompt` / `search` / `none`）・根拠の一文・確信度 |
+
+AI 案は正式な `triage` と分けて `triageSuggestion` に保存し、管理者向け API だけで返す。保存項目は cause 候補（「判定保留」を含む）、改善先の種類、根拠の一文、根拠の参照（資料 URI・ページ・ログ項目名）、モデル ID、プロンプト版、作成日時とする。利用者向け履歴 API（`get_session_messages`）からは明示的に除外する。承認・上書きの記録は §9.6 に定める。
+
+#### 9.5.3 人の確認と自動化
+
+- `done`（対応済み）は原因が必須。AI 案を承認すれば埋まる
+- 改善先の参照（KB-xx / issue / PR / 評価セット ID）は、実際に何かを直した場合だけ必須
+- `wontfix`（対応しない）は理由が必須。AI の提案文を流用できる
+- 類似失敗は束ねて重複件数を表示し、影響が大きいもの・新しいパターンから確認する。確認しきれない分は `open` のまま残し、未確認件数と滞留日数を表示して「未振り分け 0」と見なさない。
+
+自動化への移行は原因ごとに判断する。盲検サンプルから適合率・再現率・混同行列・κと信頼区間を確認し、承認率だけで品質を測らない。誤分類 5% 未満を片側 95% で確認する例では、原因ごとに独立した無作為 59 件で誤りゼロが必要であり、複数週かけて蓄積する。モデル・プロンプト・検索設定・KB・機種スコープを変えたら再評価し、自動化後も無作為監査を続ける。重大な誤分類、件数不足、判定保留や不一致の増加、処理能力超過は該当原因の自動化を止める合図とする。こなす作業の所要時間が各人週 2 時間を超えたら「自動化を進める合図」とし、AI に任せる原因を増やすか、確認対象を絞る。
+
+#### 9.5.4 再質問（目安）と取扱外機種
+
+- 再質問は AI が「言い直し / 自然な追加質問 / 新しい話題 / 判定保留」に分類して保存・表示する。失敗候補にするのは「言い直し」だけとし、失敗件数・失敗率と分けて集計する
+- **現行との切替:** #142 の失敗一覧は、資料を開いていない `reformulated === true` を失敗候補として数える。この分類を失敗一覧へ入れる実装が入るまでは、その数え方を維持する。分類を入れた時点で失敗候補は「言い直し」だけに切り替え、それ以外の再質問は失敗件数から外す。切り替え前に #142 の数え方は変えない
+- 検索トレースの `kbId`・`logicVersion` に加え、KB 内容の版（最終 Sync 日時など）とプロンプト版を根拠と照合できるよう記録する。現行トレースで未定義の項目は追加が必要
+- 取扱外機種名は表記ゆれを正規化し、抽出に自信がないものは「機種不明」とする。実際に資料を追加する前に、AGENTS.md「業務スコープ変更の共同確認」に従い、選定根拠・参照元、決定者・確認者・日付、対象と影響件数、対象外データの扱い・影響を受ける利用者や業務を `docs/decisions-*.md` に記録する。mona・itai の共同確認前に追加へ進まない
+
+#### 9.5.5 実装・評価・指標
+
+- AI への入力は、認可済みの DynamoDB（chatlogs）から読む。CloudWatch に本文・`sessionId`・`messageId`・`sub`・AI の入出力・例外本文を出さない（#133 のログ契約）
+- 週次振り分けは EventBridge から Lambda を起動し、管理画面のボタンからも実行できるようにする。呼び出し経路は Bedrock の Global 推論プロファイル（#119 の方針）とし、処理は国外を含む。Bedrock Evaluations の judge 一覧に Sonnet 5 がないため直接呼び出し、Bedrock RAG Evaluations の BYOI は #136 の評価セット比較に使う
+- AI の提案から KB 修正・プロンプト変更・評価セット変更を自動実行しない。「週 500 件で数ドル」は Anthropic 公表単価からの概算で、Bedrock 上の Sonnet 5 の単価は未確認。実トークン数と確認済み単価で置き換える
+- 測る指標: 全回答を分母にした 👎 率・`not_found` 率・重複率、再質問中の同じ話題の割合、原因別の適合率・再現率・κ、週の候補数・束ねた後の件数・確認時間・滞留、機種別需要
+
+根拠: [RAGChecker](https://arxiv.org/abs/2408.08067)、[AWS GenAI Lens の評価データ指針](https://docs.aws.amazon.com/wellarchitected/latest/generative-ai-lens/genops01-bp01.html)、[Bedrock RAG Evaluations](https://docs.aws.amazon.com/bedrock/latest/userguide/evaluation-kb.html)、[Sonnet 5 の Bedrock モデルカード](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html)
+
+### 9.6 API
+
+`GET /chat/admin/failures` に `since` / `until` / `triage` を足し、各項目に `traceSummary`・`opened`（行の `documentOpens`。0 は未開封）・`reformulated`・`triage`・`hints` を付ける。Scan は今のままで、`since` は FilterExpression に入るだけ（読み取り量は減らない）。25 ページ打ち切りは据え置き、1 日 1,000 件に近づいたら GSI か Athena（別立て A14）。改善提案の集計はクライアントのまま（期間と `triage` で絞った結果を集計）。
+
+管理者向け失敗一覧 API は `triageSuggestion` と再質問分類を返し、利用者向け `get_session_messages` からは除外する。triage 更新 API は提案を確定・別 cause で上書き・判定保留のまま、を記録でき、`done` は cause 必須、`wontfix` は理由必須とする。週次処理は EventBridge 起動と管理画面ボタンを用意する。`docs/api/chat.md`（production）は実装 PR で事前確認のうえ更新する。
 
 ---
 
@@ -749,7 +797,7 @@ chatlogs の assistant 行と `product_wish` 行に属性を足す。未設定 =
 | # | やり方 | 確度 | うちでの見立て |
 |---|---|---|---|
 | B1 | **ゼロ件率とクリック率を検索品質の主指標にする**（企業内検索の分析画面で定番の 2 指標） | ◎ 概念として定着。具体的な閾値は製品次第 | ゼロ件率 = not_found 率、クリック率 = 資料を開いた ÷ 候補あり。A1 + A2 で成立。**採用**（§2.4 のファネルがこれ） |
-| B2 | **言い換え（reformulation）を暗黙の失敗信号にする**。同じセッションで、回答直後（例: 10 分以内）に利用者が続けて質問し、直前の回答に 👍 も資料クリックも無い場合を「言い換え」と数える | ◎ 検索分野で古くからある概念。閾値（10 分）は判断 | 👍👎 を押す人は少数で、300 人規模では暗黙信号の方が量が出る。chatlogs だけで計算でき、aggregator に 1 項目足すだけ。**採用を推奨**（日次行 `reformulated`。画面には「到達できず」の副表示として件数） |
+| B2 | **再質問（目安）を状況把握に使う**。同じセッションで回答直後（例: 10 分以内）に続けて質問した場合を数える | △ 同じ話題の聞き直しかは質問文の判定が必要 | 失敗件数・失敗率には含めない。AI が前後の質問の話題を判定し、同じ話題の聞き直しだけを失敗候補にする（§9.5） |
 | B3 | **合成監視（既知クエリの定期実行）**。CloudWatch Synthetics のカナリアや、スケジュール Lambda で本経路を叩く | ◎ 手法として定着 | 制約: API Gateway のリソースポリシーと WAF が IP 許可制で、VPC 外の Lambda は通れない。**Lambda 直接 invoke** に落とせば KB・Bedrock・DynamoDB は検証できる（WAF・API GW・Cognito は検証外）。2 時間おきなら 1 日 12 回 ≒ 月 5 USD（§5.6 の単価前提）。カナリア用ユーザーを aggregator で除外する。**採用を推奨（P1）** |
 | B4 | **LLM による回答評価（faithfulness 等）を 👎 と無作為抽出に週次で掛ける** | 概念は ◎（RAGAS 等の指標定義）。小規模チームでの採用実態は △ | 1 日数件なら全件でも安い。Bedrock 内で完結し、データは外に出ない。ただし判断を変えるのは「👎 の内訳が人手で追い切れなくなってから」。**いまは見送り**、週次レビューが 30 分で終わらなくなったら着手 |
 | B5 | **ゴールデンセット評価を定期実行し、結果を時系列で保存する** | ◎ | スクリプトは既にある（`run_retrieve_eval.py`）。欠けているのは定期実行と保存（`scope=eval`）。ラベル済み N < 10 では率を見ない、という既存ルールを守ったうえで、ダッシュボード最下部に「最終評価: 日付・n/N」の 1 行。**採用（小）** |
@@ -767,3 +815,4 @@ chatlogs の assistant 行と `product_wish` 行に属性を足す。未設定 =
 - 2026-09-10 §8 の回答を反映（SLO p90 20 s、Amplify 確定・WAF 推定、OpenSearch §5.9、TTL 無効化、👍👎 の正本 = chatlogs と D-1〜D-3 再集計）。HTML モックを追加
 - 2026-09-10 §9（失敗・改善提案 v2）と §10（お知らせ管理 v2）を追加。§2.2 に告知導線、§4.4 に行内の内訳（任意）、§6.3 に API 一覧、§7 に PR 6b〜6d。モックを 4 画面に拡張し、各要素に推奨度を付けた
 - 2026-09-11 実装に合わせて更新。I3 は EMF ではなく回答の行の `documentOpens` に変更、read API は新パスを新設して旧パスを一時併存、WAF は当面「帰属未確認」、§5.9 は未実装、Q7 の訂正（develop は既に TTL 無効）。§7.1 に実装状況を追加
+- 2026-09-25: §9.5 を追加（mona 提案）

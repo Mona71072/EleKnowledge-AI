@@ -1,14 +1,26 @@
 ---
 status: draft
 last-verified: 2026-09-10
-related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/chat-archive-template.yaml, scripts/ops/set_log_retention.py, lambda/rag/rag-function/app.py, lambda/metrics/aggregator/app.py
+related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/chat-archive-template.yaml, infrastructure/sam/phase2-template.yaml, scripts/ops/set_log_retention.py, lambda/rag/rag-function/app.py, lambda/rag/rag-function/model_profile.py, lambda/metrics/aggregator/app.py
 ---
 
 # 運用ランブック（試行運用 2026-09-10〜）
 
 正本の経緯は issue #86（監視・改善ループの棚卸し）。本書は「アラームが鳴ったら何を見るか」「毎日何を見るか」「戻すときどうするか」を 1 枚にまとめたもの。設計判断そのものは issue のコメントを参照する。
 
+## 0. 開発環境の確認スナップショット
+
+> 最終検証: 2026-09-30 — AWS CLI 読み取り専用確認（CloudFormation / CloudWatch / SNS / EventBridge / DynamoDB / WAF。通知到達・機能 E2E は未確認）
+
+この節は確認日時点の開発環境の観測記録であり、恒久的な保証ではない。監視スタックには 27 アラームと 6 件の保存クエリがあり、別スタックのアーカイブ失敗アラームを含む EleKnowledge アラーム 28 件はすべて `OK`、アクション有効だった。監視 SNS のメール購読 2 件は確認済みだが、メール到達試験はしていない。AWS Budget 通知も存在したが、IaC 定義外であり通知到達は未確認。
+
+`origin/develop` の `monitoring-template.yaml` は 26 アラーム・クエリ定義 3 件、`announcements-monitoring-template.yaml` は日次集計ルールのみを定義する。AWS では毎時ルールも有効だったが、現行 aggregator は event の `date` がなければ前日の UTC 日付を集計する。毎時ルールの存在を時間単位 KPI の実装・更新とみなさない。`metrics-dev` の DynamoDB TTL は無効だった。
+
+EleKnowledge の WAF ログ配信・WAF アラーム・専用通知 SNS は確認できなかった。テンプレートに定義されているリソースも、環境で確認できるまでは運用手順として利用しない。
+
 ## 1. 体制と通知
+
+> 最終検証: 2026-10-05 — 2026-09-30 の AWS 読み取り専用観測記録と develop の監視テンプレートを照合
 
 | 項目 | 内容 |
 |---|---|
@@ -17,8 +29,11 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 | 件名の読み方 | `ALARM: "EleKnowledge-dev-P1-rag-api-5xx" in Asia Pacific (Tokyo)`。**P1 = 利用者影響あり・気づいたら即対応**、**P2 = 翌営業日でよい**。復旧時は `OK:` で始まる同名メール |
 | 購読の有効化 | SNS の購読は受信者が「AWS Notification - Subscription Confirmation」のリンクを押すまで無効（3 日で失効）。新しい受信者を足したら必ず押してもらう |
 | 通知先の変更 | 監視スタックを `AlertEmailPrimary` / `AlertEmailSecondary` を変えて再デプロイ（アドレスはリポジトリに書かない） |
+| AWS Budget 通知 | 2026-09-30 の開発環境では設定を確認。現在の監視 SAM テンプレート管理外であり、通知到達・閾値は未確認。変更前に AWS Budgets 側を確認する |
 
 ## 2. アラーム一覧と最初に見る場所
+
+> 最終検証: 2026-10-05 — 2026-09-30 の AWS 読み取り専用観測記録と develop の監視テンプレートを照合
 
 | アラーム名（`EleKnowledge-dev-` 以下） | 意味 | 最初に見る場所 | 典型的な原因と対処 |
 |---|---|---|---|
@@ -37,16 +52,19 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 | P2-chatlogs-read/write-throttle / P2-sessions-write-throttle | DynamoDB スロットル | DynamoDB コンソールのメトリクス | オンデマンドのため通常は起きない。起きたら急激な負荷 |
 | **P1-cognito-email-errors** | Cognito のサインアップ・再送・再設定が上限 / 配信失敗 / スロットルで失敗（CloudTrail 経由） | SNS 本文（API 名・エラーコード・本文） | §5.6 |
 | P2-cognito-signups-40 / **P1-cognito-signups-45・50** | その日のサインアップ数が 40 / 45 / 50 に到達（メール 50 通/日の接近） | Cognito ユーザー一覧（作成日） | §5.6。40 で受付停止の告知を検討 |
+| 未設定（WAF Block / per-user rate limit） | Web ACL による遮断。2026-09-30 時点で EleKnowledge 用 CloudWatch アラーム・ログ配信・専用 SNS は未確認 | API Gateway の実行ログと WAF コンソールの Web ACL / メトリクス | 既存手順で S3 WAF ログや WAF 通知を探さない。過去の要求内容を WAF ログから追跡できる状態ではない |
 
 「INSUFFICIENT_DATA」は「その 5 分間にデータが無かった」だけで異常ではない（データ欠損は正常扱いの設定）。
 
 ## 3. 見る場所
 
+> 最終検証: 2026-10-05 — 2026-09-30 の AWS 読み取り専用観測記録と develop の管理画面・監視設定を照合
+
 | 目的 | 場所 |
 |---|---|
 | アラーム状態の一覧 | CloudWatch → アラーム → 名前で `EleKnowledge-dev-` を検索 |
 | エラーログ | CloudWatch Logs Insights → 保存クエリ `EleKnowledge/dev/rag-error-lines` / `chat-error-lines` / `rag-slow-requests` |
-| 利用状況・いいね率・not_found | 管理画面 `/admin/dashboard`（日次集計。当日分は毎時更新の予定、初週は翌日 02:00 反映） |
+| 利用状況・いいね率・not_found | 管理画面 `/admin/dashboard`。現行 aggregator は前日 UTC の日次データを作る。AWS で毎時 EventBridge ルールは確認したが、時間別・当日 KPI の更新は確認していない。 |
 | 失敗した回答・要望 | 管理画面 `/admin/failures` |
 | Bedrock の呼び出し・トークン・遅延 | CloudWatch → メトリクス → `AWS/Bedrock` → ModelId = `global.anthropic.claude-sonnet-5` |
 | 会話ログの長期分析 | Athena ワークグループ `eleknowledge-analytics-dev`、テーブル `eleknowledge_analytics.chatlogs_archive`（`dt=` で日付パーティション） |
@@ -63,8 +81,10 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 ## 5. 切り分け手順
 
 ### 5.1 「使えない」「開けない」と言われたら
+
+> 最終検証: 2026-10-05 — develop の WAF 定義と 2026-09-30 AWS 読み取り専用観測記録を照合
 1. 接続元が社内ネットワーク / VPN か確認。許可リスト外の IP からは **API が 403**（WAF の IP 許可リスト）。画面は開くが質問すると失敗する、が典型
-2. **429** は WAF の利用者レート（数字の正は [docs/api/common.md](./api/common.md)）。WAF ログ用 S3 配信は `security-waf-template.yaml` の `WafLogBucketPolicy`
+2. **403 / 429** は WAF の IP 許可リストまたは利用者レート制限を確認する（閾値の正は [docs/api/common.md](./api/common.md)）。開発環境では EleKnowledge 向け WAF ログの S3 配信と WAF アラームは未確認のため、CloudWatch の専用通知や S3 ログを前提にしない。テンプレート定義は [security-waf-template.yaml](../infrastructure/sam/security-waf-template.yaml) にあるが、デプロイ済みとは扱わない。
 3. ログインして長時間経過していれば **401（トークン失効）**。再ログインで直る
 4. どちらでもなければ 5XX アラームの有無を確認
 
@@ -102,11 +122,13 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 
 ## 6. データ保全と保持期間
 
+> 最終検証: 2026-10-05 — develop の DynamoDB / ログ保持設定と 2026-09-30 AWS 読み取り専用観測記録を照合
+
 | データ | 保持 | 場所 |
 |---|---|---|
 | 会話ログ（利用者に見える） | 60 日（TTL、不変条件） | DynamoDB `chatlogs-dev` |
 | 会話ログの正本 | 無期限（60 日で IA、180 日で Glacier）。バージョニング有効 | S3 アーカイブ + Athena |
-| 日次 KPI | 無期限（TTL 無効） | DynamoDB `metrics-dev` |
+| 日次 KPI | TTL 無効（2026-09-30 の AWS 観測）。aggregator が書く `ttl` 属性だけでは DynamoDB 項目は削除されない | DynamoDB `metrics-dev` |
 | Lambda ログ | 365 日 | CloudWatch Logs |
 | API Gateway 実行ログ | 90 日 | CloudWatch Logs |
 | 保持期間の再設定 | `python scripts/ops/set_log_retention.py --env dev`（対象は EleKnowledge の関数名・API 名に限定） | — |
@@ -114,9 +136,11 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 ## 7. 生成モデルと推論プロファイル
 
 ### 7.1 現在の構成
+> 最終検証: 2026-09-29 — Phase 2 SAM の既定値と生成モデル設定を照合
+
 - 生成モデル: **Sonnet 5**（`global.anthropic.claude-sonnet-5`、2026-09-09 23:02 JST 切替）。環境変数 `BEDROCK_MODEL_ID` で指定。採用条件・見直し条件の正本は PR #119
-- Sonnet 5 / Opus 4.7 以降は `temperature` 指定を 400 で拒否し、既定で適応思考が動くため、`app.py` がモデル世代に応じて本文を組み立てる（`thinking: disabled` 明示）。`BEDROCK_REQUEST_STYLE=auto|new|legacy`
-- Fable 系は対象外（adaptive のみ対応）
+- `model_profile.py` の能力表に基づき、`temperature` / thinking / effort をモデル別に組み立てる。見出し生成・検索語書き換えでは thinking を無効化できない effort 対応モデルに `effort=low` を送る。能力表にも `MODEL_PROFILE_JSON` にもないモデルは、既定で最小リクエストを送りモデル既定に任せる。
+- 本番の既定モデルは Sonnet 5 のまま。モデルを切り替える場合は次の手順で評価する。
 
 ### 7.2 推論プロファイルの仕組み（切替・費用分離のために知っておくこと）
 - Bedrock のモデル呼び出し課金はモデルとトークン数で計上され、Lambda のようにリソース単位でタグを付けられない
@@ -126,11 +150,29 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 - したがって当面は global を直接指定し、**推論コストはトークン数 × 単価で算出**する（P1 の検索トレースで実装）
 
 ### 7.3 モデルを切り替える手順
-1. 候補: 速さ優先なら **Sonnet 4.6（`jp.anthropic.claude-sonnet-4-6`）**（比較記録 `docs/eval-2026-09-09-model-bakeoff-jp.md`）
-2. `sam deploy`（phase2）で `BedrockModelId=<プロファイル ID>` を渡す。Sonnet 4.6 以前なら `BedrockRequestStyle=auto` のままで temperature が付く
-3. 切替日時・モデル・環境変数を issue #86 に記録し、いいね率・not_found 率・レイテンシを前後比較
+> 最終検証: 2026-10-10 — RAG ロールの権限を絞る（種別パラメータ）
+> 最終検証: 2026-10-01 — `MODEL_PROFILE_JSON` の API 指定を追記し実装と照合
+
+1. 新モデルが出たら `lambda/rag/rag-function/model_profile.py` の既知能力表に追加するか、SAM の `ModelProfileJson`（環境変数 `MODEL_PROFILE_JSON`）で能力を指定する。JSON の形式は `{"sonnet-5-5":{"sampling":false,"thinking_disable":false,"adaptive":true,"effort":true},"gpt-6-luna":{"api":"converse"}}`。API は `invoke` / `converse`。モデル名を含まない application inference profile ARN の場合は、JSON キーに ARN 全体を指定する。
+2. 互換用の SAM パラメータ `BedrockRequestStyle`（環境変数 `BEDROCK_REQUEST_STYLE`）は非推奨。既定 `auto` は能力表の判定どおりにし、判定できないモデルでは最小リクエストを送る。`new` は判定できないモデルを新世代扱い（sampling なし、thinking を disabled にできるとは仮定せず最小リクエスト）、`legacy` は判定できないモデルに `temperature` を送る。既知能力表または `MODEL_PROFILE_JSON` で判定できるモデルはこの設定より優先される。新モデルの能力指定には `MODEL_PROFILE_JSON` を推奨する。
+3. `sam deploy`（phase2）で `BedrockModelId=<推論プロファイル ID>` を指定する。application inference profile ARN を渡すときは `BedrockModelIdType=application-profile` も指定する（`QueryRewriteModelId` も同様に `QueryRewriteModelIdType`）。種別と値の組み合わせはテンプレートでは検証されない。推論プロファイルと関連モデルの IAM 許可範囲は Phase 2 テンプレートで管理する（Global Cross-Region は Global foundation model ARN も認可対象）。詳細は [AWS の Global Cross-Region IAM 要件](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html) を参照。
+4. 本番の既定モデルはこの手順では変更しない。評価環境で評価セットを実行し、回答品質・引用・レイテンシ・Bedrock 費用を比較して記録する。採用判断後にだけ運用モデルの切替を別途行う。
+
+### 7.4 GPT-6 Luna を開発環境で試す
+> 最終検証: 2026-10-10 — RAG ロールの権限を絞る（種別パラメータ）
+> 最終検証: 2026-10-01 — Luna モデルカード、Converse API / IAM 要件、濫用検知のデータ保持説明を照合
+
+- デプロイ時に `BedrockModelId=global.openai.gpt-6-luna` を指定する（システム推論プロファイルなので `BedrockModelIdType` は既定の `system-profile` のまま。application inference profile ARN で呼ぶ場合だけ `BedrockModelIdType=application-profile`）。Phase 2 の既定値（Haiku 4.5）は変更しない。能力表で `api=converse` が選ばれ、本文・見出し・検索語書き換えが Converse 経由になる。
+- Lambda 実行ロールには `bedrock:InvokeModel` が必要。Converse は同じアクションで認可される。Global inference の inference-profile ARN、呼出元リージョンの foundation-model ARN、リージョンなし foundation-model ARN を許可する。既存のリージョンワイルドカードがリージョンなし ARN にも一致する。Converse 呼び出しに project/default ARN は追加しない。
+- Luna は画像入力に対応する。Converse で reasoning effort を設定するフィールド名はモデルカードで確認できなかったため、追加フィールドを送らずモデル既定値を使う。
+- `global.` は世界中の対応商用リージョンへ推論を振り分ける。**国内処理は保証されない**。濫用検知では classifier がフラグした入力・出力を自動検知用に最大30日保持する場合があり、Global 推論では処理先リージョンに保持される。投入データを選ぶ前に [AWS の濫用検知とデータ保持](https://docs.aws.amazon.com/bedrock/latest/userguide/abuse-detection.html) を確認する。
+- 比較時は [モデル比較手順](eval-2026-09-09-model-bakeoff.md#再実行手順2026-10-01) の `--save-retrieval` / `--load-retrieval` を使い、同じ Retrieve 結果を再利用する。
 
 ## 8. デプロイとロールバック
+
+> 最終検証: 2026-10-14 — #181のRAGログ版のSAM配線・必須指定をコードとテストで照合。AWS反映は未実施。
+
+phase2を反映するときは`RagLogicVersion=<検証済みソースのGit SHA>`（7〜40桁の小文字16進）を必ず渡し、コード更新のたびに同じソースの版へ更新する。設定値は`RAG_LOGIC_VERSION`としてログへ出る。`--parameter-overrides`を使う場合は、現在のモデル・KB・法令ゲートなど維持する値も全て渡す。反映後にCloudWatchの`ragLogicVersion`が指定値であり、`unknown`でないことを確認する。
 
 - **ルール**: develop へのマージ（＝Amplify が自動配信）と本番スタックの deploy は **定時後** に行う（AGENTS.md）
 - 手順: 統合ブランチを作る → `sam build` → `sam deploy --no-execute-changeset` で changeset を作る → 内容（Add / Modify / Replace）を確認 → `execute-change-set`。Replace が出たら止まって確認
@@ -138,12 +180,77 @@ related-code: infrastructure/sam/monitoring-template.yaml, infrastructure/sam/ch
 - 配信構成の記録は issue #86 のデプロイ記録に残す（Lambda の CodeSha256、環境変数、KB ID、モデル ID、フロントの commit）
 - ロールバック: 旧コードだけでなく **モデル ID と環境変数の組合せ** を指定して phase2 を再デプロイする（例: `BedrockModelId=jp.anthropic.claude-haiku-4-5-20251001-v1:0` + 当時の commit）
 
+### 8.1 chatlogs 日別 GSI への移行（issue #130）
+
+> 最終検証: 2026-10-14 — 手順・コードとdevのテーブル定義・本文を取得しない件数/容量を照合。GSI未作成・未デプロイ。書込み・集計の統合検証は合成データ専用テーブルで行い、実データの移行は別途実施する。期限2026-10-23。
+
+目的: 集計の全件 Scan を廃止する。順序を守らないと、キーの無い行が集計から漏れる（欠損）。
+
+1. **GSI 追加（phase1 / `chatlogs-<env>`）**: `sam deploy --no-execute-changeset` で changeset を作り、`ChatLogsTable` が **Modify のみ**（Replace なし）で、追加される GSI が `metricDayShard-timestamp-index` の 1 つだけであることを確認してから execute する。CloudFormation は 1 回の更新で GSI を 1 つしか追加できない（AWS の仕様）。
+   - 確認: `aws dynamodb describe-table --table-name chatlogs-<env>` で該当 GSI の `IndexStatus` が `ACTIVE` になるまで待つ（作成は非同期で、ACTIVE までは Query 結果が不完全）。
+2. **書込み側（phase2 / rag-function・chat-management）**: 新規行に `metricDay` / `metricDayShard` を付けるようになる。この時点で旧集計（Scan）は従来どおり動く。
+   - 確認: 送信後に chatlogs の新しい行に `metricDayShard` が付いていること（本文は見ない）。
+3. **バックフィル（ローカル実行。Lambda には入れない）**:
+   - `python scripts/ops/backfill_chatlogs_metric_day.py --table chatlogs-<env>`（dry-run。件数だけ出る）
+   - 件数を確認してから `--apply --rps 20`。既にキーのある行は条件付き更新で上書きしない。再実行しても二重付与にならない。
+   - 完了後に dry-run を再実行し、`would_update`・`skipped_bad_timestamp`・`errors`がすべて0であることを確認する。不正timestampを黙って移行完了扱いにしない。
+   - 注意: 更新は DynamoDB Stream に出る（MODIFY）。chat-archive が S3 へ追記するため、行数ぶんのアーカイブ書込みが増える（一回限り）。
+4. **照合**: `python scripts/ops/backfill_chatlogs_metric_day.py --table chatlogs-<env> --verify-days 3`。直近 3 日について、全件 Scan の数え上げと GSI 全シャードの Query 件数が一致すること（`match: true`）。不一致なら、書込み中の差かを見て再実行する。
+5. **集計の切替（announcements-monitoring）**: 集計コードと IAM（Scan 削除、Query 追加）を同じデプロイで出す。切替前に、直近 3 日の `overall` 行の値（`queries` / `feedbackGood` / `feedbackBad` / `notFound` など）を控える。切替後に `{"date": "YYYY-MM-DD"}` で 3 日を再集計し、chatlogs 由来の値が控えと一致することを確認する（CloudWatch 由来の値は時間帯で変わり得るので対象外）。
+6. **比較の記録**: 読取り容量（`chatlogs-<env>` の GSI `ConsumedReadCapacityUnits`）、`metrics-aggregator-<env>` の実行時間、スロットル（`P2-chatlogs-read-throttle`）を移行前後で比べ、issue #130 に一行残す。
+
+ロールバック: 集計コードと IAM を旧版（Scan）に戻す。GSI と書込み側のキーは残してよい（旧コードは未使用の属性を無視する）。
+
+シャード数（`CHATLOGS_METRIC_SHARDS`、既定10）は書込み側（phase2）と集計側（announcements-monitoring）で必ず一致させ、移行後は固定する。このバックフィルは未設定行だけを更新するため、`--shards`を変えて再実行しても既存キーは再配置されない。シャード数変更には旧キーの再配置と読取り切替を含む別の移行計画が必要。
+
+統合検証は`python -m pytest tests/integration/test_chatlogs_metric_day.py -q`で合成データとDynamoDB互換エミュレーターを使う。実DynamoDBでの検証は運用者の`AWS_PROFILE`・`AWS_DEFAULT_REGION`を設定し、`RUN_AWS_DYNAMODB_INTEGRATION=1`を指定して同じテストを実行する。実行ごとの専用テーブルだけを作成・削除し、既存chatlogs・metricsには書き込まない。JST境界、既存行の移行、2つの書込み側、ページング、論理削除、集計値一致、再実行の冪等性を確認する。これは移行後の実データ照合の代わりではない。直近3日が空または少数の場合は、データのある日も照合対象に含める。
+
+### SAMのデプロイ用ローカル設定
+
+> 最終検証: 2026-10-14 — SAM設定ファイルとAWS公式CLIの`--config-file`・`--resolve-s3`・`--kms-key-id`を照合。AWSバケット設定・組織SCPの再検証は含まない。
+
+`infrastructure/sam/samconfig-monitoring.example.toml`と`samconfig-announcements-monitoring.example.toml`を、それぞれ同じディレクトリの`.local.toml`へコピーし、既存のデプロイ成果物バケット名を各自のローカル設定から記入する。`.local.toml`はGit追跡対象外とし、共有する例には実アカウントID・メール・認証情報を入れない。既存設定を移すときはスタック名・リージョン・パラメータを保持し、バケットを新しく作らない。
+
+`infrastructure/sam`で、`sam deploy --config-file samconfig-monitoring.local.toml --profile <profile>`または`sam deploy --config-file samconfig-announcements-monitoring.local.toml --profile <profile>`を使う。旧ファイル名でのコマンドを使い続けない。`--parameter-overrides`は設定内の一覧全体を置き換えるため、追加値だけでなく維持する値もすべて渡す。
+
+`resolve_s3 = true`はSAMがデプロイ成果物を置くS3バケットを用意する機能であり、設定値や認証情報を保管する機能ではない。既存の移行記録では組織SCPが`PutBucketPublicAccessBlock`を拒否しているため、今回は既存バケットを維持する。将来の自動作成への移行は組織制御と権限を別途確認する。
+
+成果物の暗号化はS3の暗号化設定と、必要ならSAMの`--kms-key-id`で管理する。KMSキーは暗号化・復号の権限を制御する鍵であり設定ファイルの保管先ではない。将来AWS内に設定を集約する場合、通常の設定はSSM Parameter Store、秘匿情報はSecrets Managerを候補とし、実行ロール・CIの認証とともに別途設計する。今回KMSキー・バケット・Secrets ManagerのAWS変更は行わない。
+
+- 根拠: [SAM設定ファイル](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-config.html)、[sam deploy](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-cli-command-reference-sam-deploy.html)、[既存のSCP確認記録](aws-migration-runbook.md)。
+
 ## 9. コストの追い方
 
-- リソース費: Cost Explorer で `Project=EleKnowledge` タグ（**コスト配分タグの有効化は管理アカウント側の作業**。有効化前の利用には遡及しない）
+> 最終検証: 2026-10-15 — コスト配分タグ3軸の採用とAWSタグ棚卸し。Bedrockモデル設定を読取確認。請求データでの帰属確認は未実施。
+
+- リソース費: `gyoumu012Project=ele-knowledge` で絞り、`gyoumu012Component` / `gyoumu012Usage` で分類する。**コスト配分タグの有効化は管理アカウント側の作業で、現時点では未確認**。定義・反映結果・有効化依頼文の正本は [コスト配分タグの運用](ops-cost-allocation-tags.md)。旧 `Project` / `Env` は互換性のため保持する。
+- 過去費用: 管理部門は最大12か月のバックフィルを申請できるが、当時のタグ付与が条件となる。新キー付与前の費用を新キーで復元済みとは扱わない。
 - Bedrock 費: 検索トレースのトークン数 × 単価（SSM パラメータ）を日次集計し、管理画面に「今月の推定 Bedrock 費」（P1 で実装）。CloudWatch の ModelId 別トークンは他システム混在のため参考値
 - 共有 KB（OpenSearch Serverless）は他システムと共有のため按分しない
 
-## 10. 変更履歴
+## 10. 開発用依存のhigh脆弱性（#173）
+
+> 最終検証: 2026-10-14 — npm auditとNext ESLintプラグインの依存・呼出し箇所を照合。後続PRでの変更であり、#179のcritical修正とは分離する。
+
+`@next/eslint-plugin-next`がルートディレクトリ探索に使う`fast-glob`は、`micromatch`経由で未修正版の`braces`を取り込む（[GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)）。この依存経路だけをnpmのscoped overrideで`glob@13.0.6`へ置き換える。Nextプラグインが使う`globSync`の絶対パス・配列・braceパターン・Windowsパスと、内部リンクのlint検出が維持されることを合成ディレクトリと実ESLintで検証する。lint規則は削除・無効化しない。
+
+これはfast-glob全APIの互換置換ではない。`glob`は`onlyDirectories`を解釈せず一致ファイルも返すが、Nextの呼出し側は存在するpages/appディレクトリだけを利用する。ファイルが混在するrootDirパターンでも内部リンク違反を検出できることをテストする。Nextプラグイン更新時は`get-root-dirs`の呼出しAPIと利用側を再確認する。他の依存へこのoverrideを広げない。
+
+受入条件は、`npm ci`後の全依存auditでhigh・criticalが0件、production audit成功、互換性テスト・lint・typecheck・既存テスト・build成功。修正版のない脆弱性を例外登録したり、audit対象から除外したりして解消扱いにしない。
+
+> 最終検証: 2026-10-15 — 全依存監査の期限付き例外スキーマ・推移依存への適用・期限切れの拒否をテストで照合。台帳は空で、実際の例外は追加していない。
+
+全依存の監査は`npm run audit:all`で行う。`scripts/dependency-audit-exceptions.json`にはアドバイザリID・理由・期限（JSTの日末）・追跡Issue・人の明示承認へのリンクを必須とする。未登録・期限切れ・形式不正・分類できないhigh/criticalは失敗させる。推移依存も根本のアドバイザリ単位で判定し、別のアドバイザリまで一括免除しない。npm取得失敗やJSON不正を脆弱性0件として扱わない。
+
+今回の台帳は空。仕組みの追加自体は脆弱性の使用許可ではなく、将来の実例外の登録にはAGENTS.mdとの整合と人の明示承認を別途確認する。例外中は修正済みと表示せず、修正版採用後に台帳から削除する。本番依存の監査は別途従来どおり実行する。
+
+## 11. 変更履歴
 
 - 2026-09-10 初版（issue #86 の P0 反映後）
+- 2026-10-10 §8.1 を追加（chatlogs 日別 GSI への移行。issue #130。未デプロイ）
+
+## 11. 法令チャットのdevelopプレリリース
+
+> 最終検証: 2026-10-09 — #155 / #156、developコード、Amplify job 64、RAG有効化設定と実配信画面を照合。developカード表示と法令画面への遷移を確認。実費は今後確認。
+
+法令チャットの反映・受入・計測・停止は[専用手順](legal-chat-prerelease.md)を参照する。フロントの公開フラグとバックエンドのdevゲートを別々に確認し、通常RAGのKB・モデル設定を保持する。追加同期・本番有効化・範囲拡大・削除は今回の試行反映に含めない。法令のe-Govリンクは`GET /rag/document`を通らないため、同APIのPDF閲覧数を法令原文の到達件数に流用しない。現在の集計で区別できない値は未計測として[確認記録](verification-2026-10-09-legal-chat-prerelease.md)へ残す。

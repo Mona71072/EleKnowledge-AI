@@ -4,7 +4,7 @@
 ## プロファイル
 - パーテーションキー：sitesNumber (S)
 - ソートキー：constructionNumber (S)
-- ARN：arn:aws:dynamodb:us-east-1:423623870147:table/sites
+- ARN：arn:aws:dynamodb:us-east-1:<LEGACY_US_EAST_1_ACCOUNT_ID>:table/sites
 
 ## データ概要
 {

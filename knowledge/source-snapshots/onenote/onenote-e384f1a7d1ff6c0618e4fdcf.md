@@ -1,0 +1,26 @@
+---
+snapshot_type: "onenote_source_page"
+source_system: "OneNote"
+onenote_id: "9bf25b80-b8f3-0cbe-0e12-19cbc6da25b7:1"
+knowledge_domain: "unknown"
+organizational_scope: "unknown"
+classification: "unknown"
+review_status: "unreviewed"
+publication_status: "not_published"
+cloud_approval: "not_reviewed"
+source_links_resolved: false
+attachments_included: false
+---
+
+> Source snapshot for EleKnowledge-side organization. Not curated, not verified, and not RAG-eligible.
+
+## OneNote content
+| 接点ﾌｫﾛｰｱｯﾌﾟが確保されている事。(2.5±1㍉) |
+| --- |
+| ﾗｯﾁと掛け金の隙間が良好である事。(2±1㍉) |
+| 錠外しワイヤーが結束ﾊﾞﾝﾄﾞで固定されている事。（小田急物件のみ） |
+| ﾄﾞｱﾛｯｸを確認して接点が外れない事。 |
+
+| [OneNote attachment reference omitted; attachment not copied] [OneNote attachment reference omitted; attachment not copied] |
+| --- |
+| 乗場ドアインターロックのA,B,Cの寸法を確認する。 C寸法のフォローアップは、ラッチと板バネが完全に接触している状態から離れるまでの板バネの移動量を、錠スイッチのカバーのメモリで測定します。 乗場ドアのボルトの締め付けが緩いと閉じ込め等の原因につながるため、インターロックに関係するボルトをトルクチェックする。 |\n

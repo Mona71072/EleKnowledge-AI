@@ -1,0 +1,194 @@
+{
+  "generated_on": "2026-10-19",
+  "lists": {
+    "total": 390,
+    "matched_primary": 283,
+    "unmatched_primary": 107,
+    "duplicate_matches_primary": 23,
+    "matched_extended_with_source_id_suffix": 293,
+    "unmatched_extended_with_source_id_suffix": 97,
+    "duplicate_matches_extended": 24
+  },
+  "onenote": {
+    "total_pages": 1039,
+    "matched": 340,
+    "unmatched": 699,
+    "emptyish_pages": 240
+  },
+  "drafts_scanned": 633,
+  "high_importance_unmatched_lists": 13,
+  "unmatched_theme_buckets": {
+    "door": 14,
+    "power": 6,
+    "clock_sets": 1,
+    "other": 62,
+    "comm": 2,
+    "install_dim": 6,
+    "group_call": 10,
+    "safety": 2,
+    "display": 4
+  },
+  "duplicate_list_matches": [
+    {
+      "list_item_id": "411",
+      "record_ids": [
+        "elv-temporary-slow-issues",
+        "elv-vfglf-resolver-wiring-break-id411"
+      ],
+      "title": "巻上機レゾルバ線が断線しており、空回しが出来ない件"
+    },
+    {
+      "list_item_id": "319",
+      "record_ids": [
+        "case-elv-new-axiez-first-maintenance-as-door-open-portable-unavailable-id172",
+        "elv-vfgr-manual-operation-disabled-run-state-id319"
+      ],
+      "title": "VFGR機種かご上STのRUNトグルスイッチがOFF側に倒れており、運転ができない件"
+    },
+    {
+      "list_item_id": "240",
+      "record_ids": [
+        "case-elv-mbs-connection-car-indicator-off-id240",
+        "catalog-elv-sensors-reference"
+      ],
+      "title": "ＭBS接続するとカゴ内インジ消灯する件"
+    },
+    {
+      "list_item_id": "233",
+      "record_ids": [
+        "elv-scu20-flash-rewrite-tool-compatibility-id233",
+        "elv-sw-change-reference"
+      ],
+      "title": "SCU-20書換方法"
+    },
+    {
+      "list_item_id": "221",
+      "record_ids": [
+        "case-elv-health-air-aircon-relay-misselection-damage-id221",
+        "catalog-elv-health-air-reference"
+      ],
+      "title": "ヘルスエア併設エアコン動作不良の件"
+    },
+    {
+      "list_item_id": "192",
+      "record_ids": [
+        "case-elv-emergency-junction-box-grommet-size-id192",
+        "catalog-elv3-emergency-elevator-reference"
+      ],
+      "title": "昇降路中間JBに取り付けるゴムブッシュサイズが不足する件"
+    },
+    {
+      "list_item_id": "189",
+      "record_ids": [
+        "case-elv-vfglb-group-call-role-setting-id189",
+        "elv-group-operation-issues"
+      ],
+      "title": "（識別情報を含む可能性があるため情報管理確認まで保留）"
+    },
+    {
+      "list_item_id": "187",
+      "record_ids": [
+        "case-elv-mrl-sets-position-write-direction-spec-id187",
+        "catalog-elv-sets-failure-reference"
+      ],
+      "title": "SETS基準位置書き込みが完了しない件"
+    },
+    {
+      "list_item_id": "179",
+      "record_ids": [
+        "case-elv-emergency-broadcast-low-volume-bgm-wiring-mismatch-id179",
+        "catalog-elv-bgm-emergency-broadcast-reference"
+      ],
+      "title": "BGM結線ミスで非常放送の音量が小さい件"
+    },
+    {
+      "list_item_id": "178",
+      "record_ids": [
+        "case-elv-signage-video-noise-signal-conversion-id178",
+        "catalog-elv-signage-case-reference"
+      ],
+      "title": "デジタルサイネージ映像にノイズが発生する件"
+    },
+    {
+      "list_item_id": "176",
+      "record_ids": [
+        "case-elv-normal-slow-unavailable-ground-connection-id176",
+        "elv-normal-slow-issues"
+      ],
+      "title": "アースが結線されておらず、本スローがでない件"
+    },
+    {
+      "list_item_id": "174",
+      "record_ids": [
+        "case-elv-vfglb-low-battery-meld-failure-entrapment-id174",
+        "elv-battery-issues-reference",
+        "elv-meld-operation-reference"
+      ],
+      "title": "バッテリー電圧が低く、MELD動作に移行せず閉じ込めになってしまう。"
+    },
+    {
+      "list_item_id": "171",
+      "record_ids": [
+        "case-elv-e-can-special-operation-hall-call-failure-id171",
+        "elv-group-operation-issues"
+      ],
+      "title": "E-CAN通信不良によるNS動作しない件（+α＜群管理盤エラー見かた＞）"
+    },
+    {
+      "list_item_id": "167",
+      "record_ids": [
+        "case-elv-meld-contactor-damage-id167",
+        "elv-meld-operation-reference"
+      ],
+      "title": "MELD の繋ぎ込み時、CP遮断をせずコンダクタが焼損した件"
+    },
+    {
+      "list_item_id": "165",
+      "record_ids": [
+        "case-elv-new-axiez-loop-wire-removal-constraint-id165",
+        "catalog-elv-panel-terminal-wiring-reference"
+      ],
+      "title": "制御盤内ねじ式ターミナル変更でループ線が外せない件"
+    },
+    {
+      "list_item_id": "162",
+      "record_ids": [
+        "case-elv-insulation-test-fire-alarm-panel-board-damage-id162",
+        "elv-insulation-resistance-test-review-hold"
+      ],
+      "title": "絶縁抵抗試験によって火報盤内基板が焼ける件"
+    },
+    {
+      "list_item_id": "158",
+      "record_ids": [
+        "case-elv-aiphone-ha-panel-error-elecall-id158",
+        "catalog-elv-elecall-troubleshooting-reference"
+      ],
+      "title": "HA（アイホン）の制御盤エラーでエレコールが動作しない件"
+    },
+    {
+      "list_item_id": "149",
+      "record_ids": [
+        "case-elv-vfglf-scu20-gs3-setting-mismatch-id149",
+        "elv-group-operation-issues"
+      ],
+      "title": "エレベーターとSCU-20盤との通信ができない件"
+    },
+    {
+      "list_item_id": "132",
+      "record_ids": [
+        "case-elv-vfglf-meld-connector-omission-id132",
+        "elv-meld-operation-reference"
+      ],
+      "title": "コネクタの差し忘れにて、客先ブレーカー遮断時にMELDが実動作しない件"
+    },
+    {
+      "list_item_id": "113",
+      "record_ids": [
+        "case-elv-vfglf-resolver-board-free-run-unavailable-id113",
+        "elv-temporary-slow-issues"
+      ],
+      "title": "レゾルバ基板不具合による空回し不能"
+    }
+  ]
+}

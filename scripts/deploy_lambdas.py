@@ -7,7 +7,7 @@ import json
 import sys
 
 BASE = os.path.join(os.path.dirname(__file__), '..', 'lambda', 'troubleshooting')
-ROLE_ARN = 'arn:aws:iam::423623870147:role/troubleshooting-lambda-poc-role'
+ROLE_NAME = 'troubleshooting-lambda-poc-role'
 KB_IDS = {
     'kb-search1': 'GKCWPMZUD0',
     'kb-search2': 'OCLVRJDMAH',
@@ -43,6 +43,20 @@ def run(cmd):
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
+def get_role_arn():
+    """Lambda 実行ロールの ARN を組み立てる。
+    アカウント ID は環境変数 AWS_ACCOUNT_ID、未設定なら現在の認証情報（sts）から取得する。
+    """
+    account_id = os.environ.get('AWS_ACCOUNT_ID', '').strip()
+    if not account_id:
+        r = run(['aws', 'sts', 'get-caller-identity', '--query', 'Account', '--output', 'text'])
+        account_id = r.stdout.strip()
+    if not account_id:
+        print('ERROR: AWS アカウント ID を取得できません（AWS_ACCOUNT_ID を設定してください）', file=sys.stderr)
+        sys.exit(1)
+    return f'arn:aws:iam::{account_id}:role/{ROLE_NAME}'
+
+
 def deploy(func_name, dir_name):
     tmp = os.environ.get('TEMP', '/tmp')
     zip_path = os.path.join(tmp, f'{func_name}.zip')
@@ -76,7 +90,7 @@ def deploy(func_name, dir_name):
         r = run(['aws', 'lambda', 'create-function',
                  '--function-name', func_name,
                  '--runtime', 'python3.11',
-                 '--role', ROLE_ARN,
+                 '--role', get_role_arn(),
                  '--handler', 'app.lambda_handler',
                  '--timeout', '60',
                  '--memory-size', '512',
@@ -146,7 +160,7 @@ def deploy_authorizer():
         r = run(['aws', 'lambda', 'create-function',
                  '--function-name', func_name,
                  '--runtime', 'python3.11',
-                 '--role', ROLE_ARN,
+                 '--role', get_role_arn(),
                  '--handler', 'app.lambda_handler',
                  '--timeout', '10',
                  '--memory-size', '256',

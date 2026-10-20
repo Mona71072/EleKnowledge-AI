@@ -26,6 +26,10 @@ related-issues:
 
 ## イベント契約
 
+> 最終検証: 2026-10-14 — 共通項目の版指定をSAMパラメータから渡す仕様を追加。デプロイごとに検証済みソースのGit SHAを指定し、実環境の反映は別途確認する。
+
+`ragLogicVersion`はphase2の`RagLogicVersion`から環境変数`RAG_LOGIC_VERSION`へ渡す。デプロイ時に検証済みソースのGit SHA（7〜40桁の小文字16進）を指定する。SAMには既定値を置かず、版不明のまま新しい配信を進めない。アプリの`unknown`は旧配信や環境変数未設定時の互換フォールバックとして残す。
+
 すべての RAG ログ行は JSON とし、`schemaVersion` と `event` を持つ。イベントは `rag_request`、`rag_error`、`document_open`、`reformulation` の 4 種とする。
 
 | 分類 | 取得する項目 | 意図 |
@@ -45,12 +49,16 @@ related-issues:
 | 質問文、回答文、プロンプト | 個人情報・業務情報を含み得る | responseType、候補数、スコア帯、評価 |
 | 引用本文、KB チャンク本文 | ナレッジ引用全文を CloudWatch に出さない | 運用者が必要時にアクセス制御済み retrievalTrace／アーカイブを参照 |
 | JWT、Cognito `sub`、生 IP、User-Agent | 利用者又は端末を追跡可能にする | requestId、集約メトリクス |
-| 生 `errorMessage`、スタックトレース | 入力・内部 URL・AWS 資源情報を含み得る | errorCode、exceptionClass、stage、HMAC 指紋 |
+| 生 `errorMessage`、スタックトレース | 入力・内部 URL・AWS 資源情報を含み得る | errorCode、exceptionClass、stage、errorFingerprint（SHA-256 先頭 16 桁） |
 | `sessionId`、`messageId` | CloudWatch では利用者行動の連結を避ける | 認可済みの DynamoDB／アーカイブでのみ参照 |
 
 ## エラー指紋
 
-`errorFingerprint` は、メモリ上で正規化した `exceptionClass`、`errorCode`、エラーメッセージから Secrets Manager の鍵で HMAC-SHA-256 を計算し、先頭 16 文字だけを記録する。鍵、元メッセージ、ハッシュ入力は記録しない。同一原因を集計できる一方、本文は復元できない。
+> 最終検証: 2026-10-10 — telemetry.py の `error_fingerprint` と単体テスト（同一原因の一致・文面の不混入）に照合。鍵は使わない実装
+
+`errorFingerprint` は、`stage`・`exceptionClass`・`errorCode` を `|` で連結した文字列の SHA-256 の先頭 16 桁とする。鍵は使わず、Secrets Manager や環境変数の設定も要らない。入力は運用上の固定値だけで、利用者のデータ・例外の文面・ID を含まないため、本番でも常に値が入る。
+
+同じ段階・例外の型・エラーコードなら、エラーメッセージの文面が違っても同じ値になる。メッセージは入力に含めないので、指紋から本文は復元できない。指紋は同一原因の集約キーであり、秘匿の手段ではない（入力の候補は既知の固定値の組に限られるため、秘匿性は求めない）。
 
 ## 判断経緯と追跡
 
@@ -65,6 +73,6 @@ related-issues:
 
 1. `telemetry.py` にイベント契約を実装し、生 `errorMessage` を廃止する。
 2. `app.py` で検索・生成の計測値を収集して telemetry に渡す。例外をテレメトリで発生させない。
-3. HMAC 鍵は本番では Secrets Manager、ローカルでは `.env.local` から取得する。鍵をコミットしない。
+3. `errorFingerprint` は鍵を使わない（上記）。HMAC 鍵・Secrets Manager の配線は不要。
 4. 単体テストで、イベント必須項目、本文・JWT・`sub`・IP・例外本文が出力されないこと、同一エラーの指紋一致を検証する。
 5. 開発環境で `requestId` により API Gateway と Lambda を照合し、検索失敗・生成失敗・保存失敗をそれぞれ安全に確認する。

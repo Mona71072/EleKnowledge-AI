@@ -7,6 +7,15 @@ Description: >
   Additive stack; does not modify phase1/2/3 resources.
 
 Parameters:
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+    AllowedValues: [ele-knowledge]
+  CostUsage:
+    Type: String
+    Default: shared
+    AllowedValues: [development, user, shared]
+
   Environment:
     Type: String
     Default: dev
@@ -70,6 +79,9 @@ Globals:
         ENVIRONMENT: !Ref Environment
         ADMIN_GROUP_NAME: !Ref AdminGroupName
     Tags:
+      gyoumu012Project: !Ref CostProjectName
+      gyoumu012Component: shared
+      gyoumu012Usage: !Ref CostUsage
       Project: !Ref ProjectName
       Env: !Ref Environment
       ManagedBy: SAM
@@ -109,6 +121,12 @@ Resources:
           Projection:
             ProjectionType: ALL
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: announcements
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - { Key: Project, Value: !Ref ProjectName }
         - { Key: Env, Value: !Ref Environment }
         - { Key: ManagedBy, Value: SAM }
@@ -145,6 +163,12 @@ Resources:
           Projection:
             ProjectionType: ALL
       Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
         - { Key: Project, Value: !Ref ProjectName }
         - { Key: Env, Value: !Ref Environment }
         - { Key: ManagedBy, Value: SAM }
@@ -170,6 +194,13 @@ Resources:
   AnnouncementsReadRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: announcements
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub announcements-read-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -194,6 +225,13 @@ Resources:
   AnnouncementsWriteRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: announcements
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub announcements-write-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -210,12 +248,23 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Scan]
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem]
                 Resource: !GetAtt AnnouncementsTable.Arn
+              # 管理一覧は status-publishAt-index を Query する（全件 Scan は使わない。issue #94 R9）
+              - Effect: Allow
+                Action: [dynamodb:Query]
+                Resource: !Sub ${AnnouncementsTable.Arn}/index/status-publishAt-index
 
   AnnouncementsPublisherRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: announcements
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub announcements-publisher-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -240,6 +289,13 @@ Resources:
   MetricsReadRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub metrics-read-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -258,11 +314,11 @@ Resources:
               - Effect: Allow
                 Action: [dynamodb:Query]
                 Resource:
-                  - !GetAtt MetricsTable.Arn
-                  - !Sub ${MetricsTable.Arn}/index/*
-                  # 表示中の告知（ダッシュボードの「いま」）
-                  - !GetAtt AnnouncementsTable.Arn
-                  - !Sub ${AnnouncementsTable.Arn}/index/*
+                  - !Sub ${MetricsTable.Arn}/index/scope-metricDate-index
+              # ダッシュボードの「いま」に表示する告知は status-publishAt GSI のみ読む
+              - Effect: Allow
+                Action: [dynamodb:Query]
+                Resource: !Sub ${AnnouncementsTable.Arn}/index/status-publishAt-index
               # 「いま」の値は表示のたびに CloudWatch を直接読む（設計 §2.2）
               - Effect: Allow
                 Action: [cloudwatch:DescribeAlarms, cloudwatch:DescribeAlarmHistory, cloudwatch:GetMetricData]
@@ -271,6 +327,13 @@ Resources:
   MetricsAggregatorRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: monitoring
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
       RoleName: !Sub metrics-aggregator-${Environment}
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -287,21 +350,24 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [dynamodb:Scan, dynamodb:Query]
+                # 日別集計は日別 GSI の全シャードだけを Query する（Scan は廃止。issue #130）。
+                # 新規利用者集計は userId-timestamp-index の最古レコードだけを参照
+                Action: [dynamodb:Query]
                 Resource:
                   - !Sub
-                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}
+                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/metricDayShard-timestamp-index
                     - TableName:
                         Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
                   - !Sub
-                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/*
+                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/userId-timestamp-index
                     - TableName:
                         Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
               - Effect: Allow
                 Action: [dynamodb:PutItem]
                 Resource: !GetAtt MetricsTable.Arn
               - Effect: Allow
-                Action: [cloudwatch:GetMetricStatistics, cloudwatch:GetMetricData, cloudwatch:DescribeAlarmHistory]
+                # aggregator は履歴アラームを集計するが、GetMetricData は呼び出さない
+                Action: [cloudwatch:GetMetricStatistics, cloudwatch:DescribeAlarmHistory]
                 Resource: '*'
               # 実額（Cost Explorer）。SCP で拒否される場合は CostExplorerEnabled=false にする（設計 §8.1）
               - Effect: Allow
@@ -317,6 +383,10 @@ Resources:
   AnnouncementsReadFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: announcements
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub announcements-read-${Environment}
       CodeUri: ../../lambda/announcements/read/
       Handler: app.lambda_handler
@@ -335,6 +405,10 @@ Resources:
   AnnouncementsWriteFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: announcements
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub announcements-write-${Environment}
       CodeUri: ../../lambda/announcements/write/
       Handler: app.lambda_handler
@@ -348,6 +422,13 @@ Resources:
           Properties:
             RestApiId: !Ref AppApi
             Path: /admin/announcements
+            Method: GET
+        # いま表示中の全件（件数で切らない。issue #94 R9 の追補）
+        ListActive:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AppApi
+            Path: /admin/announcements/active
             Method: GET
         Create:
           Type: Api
@@ -373,6 +454,10 @@ Resources:
   AnnouncementsPublisherFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: announcements
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub announcements-publisher-${Environment}
       CodeUri: ../../lambda/announcements/publisher/
       Handler: app.lambda_handler
@@ -392,6 +477,10 @@ Resources:
   MetricsReadFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: monitoring
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub metrics-read-${Environment}
       CodeUri: ../../lambda/metrics/read/
       Handler: app.lambda_handler
@@ -428,6 +517,10 @@ Resources:
   MetricsAggregatorFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: monitoring
+        gyoumu012Usage: !Ref CostUsage
       FunctionName: !Sub metrics-aggregator-${Environment}
       CodeUri: ../../lambda/metrics/aggregator/
       Handler: app.lambda_handler
@@ -442,6 +535,8 @@ Resources:
           REAGGREGATE_DAYS: "3"
           CHATLOGS_TABLE:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          # 日別 GSI のシャード数（書き込み側 phase2-template の CHATLOGS_METRIC_SHARDS と一致させる）
+          CHATLOGS_METRIC_SHARDS: "10"
           RAG_FUNCTION_NAME: !Sub rag-${Environment}
           CHAT_FUNCTION_NAME: !Sub chat-${Environment}
           RAG_API_NAME: !Sub rag-api-${Environment}
@@ -481,6 +576,7 @@ Resources:
   AppApi:
     Type: AWS::Serverless::Api
     Properties:
+      PropagateTags: true
       Name: !Sub announcements-monitoring-api-${Environment}
       StageName: !Ref Environment
       Cors:
@@ -523,11 +619,11 @@ Resources:
               Access-Control-Allow-Origin: "'*'"
               Access-Control-Allow-Headers: "'Content-Type,Authorization'"
               Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
-      # アクセスログ（JSON 1 行/リクエスト）。実行ログと違い、4xx の種別（errorType）・送信元 IP・利用者（sub）・
-      # 体感レイテンシ（responseLatency）が 1 行で読める。本文は含まない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
+      # アクセスログ（JSON 1 行/リクエスト）。requestId・時刻・resourcePath・status・latency・errorType 等を記録する。
+      # IP / userAgent / sub / 実リクエスト path / errorMessage / 本文は記録しない（設計 docs/design-2026-09-10-dashboard-v2.md §4.3 I1）
       AccessLogSetting:
         DestinationArn: !GetAtt AppApiLogGroup.Arn
-        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","path":"$context.path","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","ip":"$context.identity.sourceIp","userAgent":"$context.identity.userAgent","sub":"$context.authorizer.claims.sub","errorType":"$context.error.responseType","errorMessage":"$context.error.message","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
+        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId"}'
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
@@ -536,6 +632,9 @@ Resources:
           DataTraceEnabled: false
           MetricsEnabled: true
       Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: shared
+        gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
         Env: !Ref Environment
         Feature: announcements-monitoring

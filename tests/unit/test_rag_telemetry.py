@@ -55,8 +55,23 @@ def test_error_response_hides_aws_message_and_logs_structured_line(capsys):
     assert "Rate exceeded" not in resp["body"]
     line = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert line["event"] == "rag_error" and line["stage"] == "generate"
-    assert line["errorCode"] == "ThrottlingException" and line["apiRequestId"] == "req-123"
+    assert line["errorCode"] == "ThrottlingException" and line["requestId"] == "req-123"
+    assert line["exceptionClass"] == "ClientError"
+    assert "errorMessage" not in line and "Rate exceeded" not in json.dumps(line)
     assert "latencyMs" in line
+
+
+def test_error_response_omits_non_client_exception_text(capsys):
+    event = {"requestContext": {"requestId": "req-456"}}
+    secret = "引用チャンクの本文"
+    resp = telemetry.error_response({"h": "1"}, ValueError(secret), time.perf_counter(), event)
+    body = json.loads(resp["body"])
+    assert body["error"] == "InternalServerError" and secret not in resp["body"]
+    logged = capsys.readouterr().out
+    assert secret not in logged
+    line = json.loads(logged.strip().splitlines()[-1])
+    assert line["errorCode"] == "ValueError" and line["exceptionClass"] == "ValueError"
+    assert "errorMessage" not in line
 
 
 def test_log_request_emits_counts_not_bodies(capsys):
@@ -66,8 +81,9 @@ def test_log_request_emits_counts_not_bodies(capsys):
     telemetry.log_request(event, {"statusCode": 200, "body": json.dumps(body)}, time.perf_counter())
     out = capsys.readouterr().out
     line = json.loads(out.strip().splitlines()[-1])
-    assert line["event"] == "rag_request" and line["apiRequestId"] == "req-9"
-    assert line["messageId"] == "m2" and line["responseType"] == "pages"
+    assert line["event"] == "rag_request" and line["requestId"] == "req-9"
+    assert "sessionId" not in line and "messageId" not in line
+    assert line["responseType"] == "pages"
     assert line["pageCandidates"] == 3 and line["sourceDocuments"] == 1
     assert "秘密の本文" not in out and "content" not in line
 
@@ -89,6 +105,7 @@ def test_record_document_open_updates_owned_assistant_message(capsys):
     assert "#role = :assistant" in kw["ConditionExpression"]
     line = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert line["event"] == "document_open" and line["documentName"] == "C-591124.pdf"
+    assert "sessionId" not in line and "messageId" not in line
 
 
 def test_record_document_open_refuses_foreign_session_and_missing_ids():
@@ -111,7 +128,7 @@ def _history(answered_at, **kw):
     return [{"role": "user", "sessionId": "s1", "messageId": "u1"}, row]
 
 
-def test_stamp_reformulation_marks_recent_unrated_pages_answer():
+def test_stamp_reformulation_marks_recent_unrated_pages_answer(capsys):
     table = MagicMock()
     now = datetime(2026, 9, 23, 1, 3, tzinfo=timezone.utc)
     assert telemetry.stamp_reformulation(table, _history("2026-09-23T01:00:00Z"), now) is True
@@ -119,6 +136,8 @@ def test_stamp_reformulation_marks_recent_unrated_pages_answer():
     assert kw["Key"] == {"sessionId": "s1", "messageId": "a1"}
     assert "attribute_not_exists(reformulatedAt)" in kw["ConditionExpression"]
     assert kw["ExpressionAttributeValues"][":now"] == "2026-09-23T01:03:00Z"
+    line = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert line["event"] == "reformulation" and line["requestId"] == ""
 
 
 @pytest.mark.parametrize("history", [
@@ -151,17 +170,146 @@ def test_document_endpoint_passes_session_and_message_to_telemetry(monkeypatch):
 
 def test_handler_500_returns_generic_body_with_request_id(monkeypatch, capsys):
     monkeypatch.setattr(rag, "get_caller_id", lambda event: "user-1")
-    monkeypatch.setattr(rag, "owns_session", lambda s, u: (_ for _ in ()).throw(_client_error("Query", code="ProvisionedThroughputExceededException", msg="internal detail")))
-    event = {"httpMethod": "POST", "requestContext": {"requestId": "req-500"},
-             "body": json.dumps({"sessionId": "s1", "query": "x"})}
+    monkeypatch.setattr(rag, "owns_session", lambda s, u: (_ for _ in ()).throw(_client_error("Query", code="ProvisionedThroughputExceededException", msg="s3://secret/path private question internal detail")))
+    event = {"httpMethod": "POST", "requestContext": {"requestId": "req-500", "authorizer": {"claims": {"sub": "sensitive-sub"}}},
+             "body": json.dumps({"sessionId": "sensitive-session-id", "query": "private question"})}
     resp = rag.lambda_handler(event, None)
     assert resp["statusCode"] == 500
     body = json.loads(resp["body"])
     assert body["requestId"] == "req-500" and "internal detail" not in resp["body"]
-    lines = [json.loads(l) for l in capsys.readouterr().out.strip().splitlines() if l.startswith("{")]
+    output = capsys.readouterr().out
+    for sensitive in ("s3://secret/path", "private question", "sensitive-session-id", "sensitive-sub"):
+        assert sensitive not in output
+        assert sensitive not in resp["body"]
+    lines = [json.loads(l) for l in output.strip().splitlines() if l.startswith("{")]
     kinds = [l["event"] for l in lines]
     assert "rag_error" in kinds and "rag_request" in kinds
     err = next(l for l in lines if l["event"] == "rag_error")
     assert err["stage"] == "history" and err["errorCode"] == "ProvisionedThroughputExceededException"
     req = next(l for l in lines if l["event"] == "rag_request")
-    assert req["statusCode"] == 500 and req["apiRequestId"] == "req-500"
+    assert req["statusCode"] == 500 and req["requestId"] == "req-500"
+
+
+@pytest.mark.parametrize("template_name, expected_count", [
+    ("phase1-template.yaml", 1),
+    ("phase2-template.yaml", 2),
+    ("announcements-monitoring-template.yaml", 1),
+])
+def test_api_gateway_access_logs_omit_user_and_device_identifiers(template_name, expected_count):
+    template = (ROOT / "infrastructure" / "sam" / template_name).read_text()
+    lines = template.splitlines()
+    format_lines = []
+    for index, line in enumerate(lines):
+        if line.strip() != "AccessLogSetting:":
+            continue
+        format_line = next((candidate for candidate in lines[index:index + 5] if "Format:" in candidate), None)
+        assert format_line is not None
+        format_lines.append(format_line)
+
+    assert len(format_lines) == expected_count
+    for format_line in format_lines:
+        assert "$context.identity.sourceIp" not in format_line
+        assert "$context.identity.userAgent" not in format_line
+        assert "$context.authorizer.claims.sub" not in format_line
+        assert "$context.path" not in format_line
+        assert "$context.error.message" not in format_line
+
+
+# ------------------------------------------------------------------ 共通項目（ログ契約）
+COMMON_KEYS = {"schemaVersion", "event", "requestId", "route", "statusCode", "latencyMs", "ragLogicVersion"}
+
+
+def _json_lines(out):
+    return [json.loads(line) for line in out.strip().splitlines() if line.startswith("{")]
+
+
+def test_every_rag_event_carries_common_fields(capsys, monkeypatch):
+    monkeypatch.setenv("RAG_LOGIC_VERSION", "abc1234")
+    query_event = {"httpMethod": "POST", "requestContext": {"requestId": "req-c1", "resourcePath": "/rag/query"}}
+    document_event = {"httpMethod": "GET", "requestContext": {"requestId": "req-c2", "resourcePath": "/rag/document"}}
+    started = time.perf_counter()
+    telemetry.log_request(query_event, {"statusCode": 200, "body": "{}"}, started)
+    telemetry.error_response({"h": "1"}, _client_error("InvokeModel"), started, query_event)
+    telemetry.record_document_open(MagicMock(), "s1", "m1", "u1", lambda s, u: True, "s3://b/docs/a.pdf",
+                                   document_event, started_at=started)
+    telemetry.stamp_reformulation(MagicMock(), _history("2026-09-23T01:00:00Z"),
+                                  datetime(2026, 9, 23, 1, 3, tzinfo=timezone.utc),
+                                  event=query_event, started_at=started)
+    lines = _json_lines(capsys.readouterr().out)
+    assert [line["event"] for line in lines] == ["rag_request", "rag_error", "document_open", "reformulation"]
+    for line in lines:
+        assert COMMON_KEYS <= line.keys(), line
+        assert line["schemaVersion"] == 1
+        assert line["ragLogicVersion"] == "abc1234"
+        assert isinstance(line["latencyMs"], int) and line["latencyMs"] >= 0
+    request, error, opened, reformulated = lines
+    assert request["requestId"] == "req-c1" and request["route"] == "/rag/query" and request["statusCode"] == 200
+    assert error["requestId"] == "req-c1" and error["statusCode"] == 500
+    assert opened["requestId"] == "req-c2" and opened["route"] == "/rag/document" and opened["statusCode"] == 200
+    assert reformulated["requestId"] == "req-c1" and reformulated["statusCode"] is None
+    assert "apiRequestId" not in json.dumps(lines)
+
+
+def test_rag_logic_version_defaults_to_unknown(capsys, monkeypatch):
+    monkeypatch.delenv("RAG_LOGIC_VERSION", raising=False)
+    telemetry.log_request({"httpMethod": "POST"}, {"statusCode": 200, "body": "{}"}, time.perf_counter())
+    line = _json_lines(capsys.readouterr().out)[-1]
+    assert line["ragLogicVersion"] == "unknown" and line["requestId"] == "" and line["route"] == ""
+
+
+def test_law_reference_coverage_line_carries_common_fields(capsys, monkeypatch):
+    monkeypatch.setenv("RAG_LOGIC_VERSION", "abc1234")
+    unit = {
+        "score": 0.9, "content": {"text": "検索断片"},
+        "metadata": {
+            "source_type": "law", "status": "current", "document_granularity": "provision_unit",
+            "law_id": "123", "law_title": "検証法令", "law_number": "法律第一号",
+            "provision_reference": "第1条", "provision_type": "main",
+            "source_url": "https://laws.e-gov.go.jp/law/123#Mp-At_1",
+            rag.KB_PROFILE.source_uri_key: "s3://law-bucket/kb/egov/123/123_20260101_ABC/main/00001.txt",
+        },
+    }
+    rag.prepare_law_references([unit], request_id="req-law", route="/rag/query", started_at=time.perf_counter())
+    line = next(l for l in _json_lines(capsys.readouterr().out) if l["event"] == "law_reference_coverage")
+    assert COMMON_KEYS <= line.keys()
+    assert line["requestId"] == "req-law" and line["route"] == "/rag/query"
+    assert line["statusCode"] is None and line["ragLogicVersion"] == "abc1234"
+    assert "apiRequestId" not in line
+
+
+# ------------------------------------------------------------------ errorFingerprint
+def _fingerprint_of(capsys, error):
+    resp = telemetry.error_response({"h": "1"}, error, time.perf_counter(), {"requestContext": {"requestId": "r"}})
+    assert resp["statusCode"] == 500
+    return _json_lines(capsys.readouterr().out)[-1]
+
+
+def test_error_fingerprint_is_stable_for_same_cause_and_ignores_message(capsys):
+    first = _fingerprint_of(capsys, _client_error("InvokeModel", msg="Rate exceeded for account 111122223333"))
+    second = _fingerprint_of(capsys, _client_error("InvokeModel", msg="Rate exceeded for account 999988887777 at 10:00"))
+    assert first["errorFingerprint"] == second["errorFingerprint"]
+    assert len(first["errorFingerprint"]) == 16
+    int(first["errorFingerprint"], 16)  # 16 進数
+
+
+def test_error_fingerprint_differs_by_stage_class_or_code(capsys):
+    base = _fingerprint_of(capsys, _client_error("InvokeModel", code="ThrottlingException"))["errorFingerprint"]
+    other_code = _fingerprint_of(capsys, _client_error("InvokeModel", code="AccessDeniedException"))["errorFingerprint"]
+    other_stage = _fingerprint_of(capsys, _client_error("Retrieve", code="ThrottlingException"))["errorFingerprint"]
+    other_class = _fingerprint_of(capsys, ValueError("x"))["errorFingerprint"]
+    assert len({base, other_code, other_stage, other_class}) == 4
+
+
+def test_error_fingerprint_is_plain_sha256_of_stable_fields(capsys, monkeypatch):
+    import hashlib
+    secret = "引用チャンクの本文 s3://secret/path"
+    line = _fingerprint_of(capsys, ValueError(secret))
+    assert secret not in json.dumps(line, ensure_ascii=False)
+    expected = hashlib.sha256("unknown|ValueError|ValueError".encode("utf-8")).hexdigest()[:16]
+    assert line["errorFingerprint"] == expected
+
+
+def test_error_fingerprint_present_without_any_configuration(capsys, monkeypatch):
+    line = _fingerprint_of(capsys, ValueError("x"))
+    assert isinstance(line["errorFingerprint"], str) and len(line["errorFingerprint"]) == 16
+    assert line["event"] == "rag_error"

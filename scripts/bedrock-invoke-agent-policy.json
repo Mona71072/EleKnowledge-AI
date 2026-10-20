@@ -7,7 +7,7 @@
         "bedrock:InvokeAgent",
         "bedrock-agent-runtime:InvokeAgent"
       ],
-      "Resource": "arn:aws:bedrock:us-east-1:423623870147:agent-alias/D6FAGLJPPO/*"
+      "Resource": "arn:aws:bedrock:us-east-1:<ACCOUNT_ID>:agent-alias/D6FAGLJPPO/*"
     }
   ]
 }

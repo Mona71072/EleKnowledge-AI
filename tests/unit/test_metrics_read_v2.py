@@ -32,6 +32,22 @@ def test_today_is_jst(monkeypatch):
     assert start == date(2026, 9, 18) and end == date(2026, 9, 24)
 
 
+def test_query_rows_follows_last_evaluated_key(monkeypatch):
+    calls = []
+
+    class _Table:
+        def query(self, **kw):
+            calls.append(kw)
+            if "ExclusiveStartKey" not in kw:
+                return {"Items": [{"metricDate": "a"}], "LastEvaluatedKey": {"k": 1}}
+            return {"Items": [{"metricDate": "b"}]}
+
+    monkeypatch.setattr(read, "table", _Table())
+    rows = read.query_rows("overall", "2026-09-01", "2026-09-30")
+    assert [r["metricDate"] for r in rows] == ["a", "b"]
+    assert calls[1]["ExclusiveStartKey"] == {"k": 1}
+
+
 def test_unique_users_union_with_legacy_fallback():
     items = [
         {"activeUsers": 3, "userIds": ["a", "b", "c"]},

@@ -37,9 +37,8 @@ function LoginContent() {
         }
         
         setCacheClearAttempted(true);
-        console.log('Auth cache cleared successfully');
       } catch (err) {
-        console.log('Cache clear completed (already signed out or first visit)');
+        // 未ログイン・初回訪問ではサインアウトが失敗するが問題ない
         setCacheClearAttempted(true);
       }
     };

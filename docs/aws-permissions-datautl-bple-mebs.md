@@ -1,7 +1,7 @@
 # AWS 権限調査レポート — `datautl-bple-mebs` / `datautl-bple-mebs-gyoumu012` プロファイル
 
 > 調査日: 2026-06-04  
-> アカウント ID: `730972069979`  
+> アカウント ID: `<DEV_ACCOUNT_ID>`（実際の値は各自のローカル設定・AWS コンソールで確認する）  
 > リージョン: `ap-northeast-1`（東京）
 
 ---
@@ -11,8 +11,8 @@
 | 項目 | 値 |
 |------|-----|
 | UserId | `AROA2UMKUUBNZM2FCI5OR:itai-yu` |
-| Account | `730972069979` |
-| ARN | `arn:aws:sts::730972069979:assumed-role/AWSReservedSSO_datautl-bple-mebs_16773c9fde39ceeb/itai-yu` |
+| Account | `<DEV_ACCOUNT_ID>`（実際の値は各自のローカル設定・AWS コンソールで確認する） |
+| ARN | `arn:aws:sts::<DEV_ACCOUNT_ID>:assumed-role/AWSReservedSSO_datautl-bple-mebs_16773c9fde39ceeb/itai-yu` |
 | 認証方式 | AWS SSO (SAML フェデレーション) |
 | セッション最大時間 | 43,200 秒（12 時間） |
 
@@ -116,10 +116,10 @@ datautl-prd-security-iam-policy-share（条件付き Deny: *）
 
 | バケット名 | 用途 |
 |-----------|------|
-| `aws-glue-libs-730972069979-ap-northeast-1` | Glue ライブラリ |
-| `cdk-hnb659fds-assets-730972069979-ap-northeast-1` | CDK アセット（東京） |
-| `cdk-hnb659fds-assets-730972069979-us-east-1` | CDK アセット（バージニア） |
-| `chat-history-data-inst-730972069979-ap-northeast-1` | チャット履歴 |
+| `aws-glue-libs-<DEV_ACCOUNT_ID>-ap-northeast-1` | Glue ライブラリ |
+| `cdk-hnb659fds-assets-<DEV_ACCOUNT_ID>-ap-northeast-1` | CDK アセット（東京） |
+| `cdk-hnb659fds-assets-<DEV_ACCOUNT_ID>-us-east-1` | CDK アセット（バージニア） |
+| `chat-history-data-inst-<DEV_ACCOUNT_ID>-ap-northeast-1` | チャット履歴 |
 | `codepipeline-ap-northeast-1-*` | CodePipeline アーティファクト |
 | `datautl-prd-gyoumu012-apne1-s3-bucket-accesslog` | アクセスログ（gyoumu012） |
 | `datautl-prd-gyoumu012-apne1-s3-bucket-cloudformation` | CloudFormation テンプレート |
@@ -200,7 +200,7 @@ datautl-prd-security-iam-policy-share（条件付き Deny: *）
 |------|---------------------|-------------------------------|
 | UserId | `AROA2UMKUUBNZM2FCI5OR:itai-yu` | `AROA2UMKUUBNYJFODFIVJ:itai-yu` |
 | ARN | `.../AWSReservedSSO_datautl-bple-mebs_.../itai-yu` | `.../AWSReservedSSO_datautl-bple-mebs-gyoumu012_.../itai-yu` |
-| アカウント | `730972069979` | `730972069979`（同一） |
+| アカウント | `<DEV_ACCOUNT_ID>` | `<DEV_ACCOUNT_ID>`（同一） |
 | セッション最大時間 | 43,200 秒 | 43,200 秒 |
 
 ### 5-2. ポリシー比較
@@ -223,7 +223,7 @@ datautl-prd-security-iam-policy-share（条件付き Deny: *）
 ### 5-4. 結論：両プロファイルの実効権限は同一
 
 ```
-同一アカウント (730972069979) 上の異なる SSO ロール
+同一アカウント (<DEV_ACCOUNT_ID>) 上の異なる SSO ロール
   → AdministratorAccess（共通）
   → IP 制限 Deny（共通・同一ポリシー）
   → カスタムポリシーは名前違いのノーオプ（実質差なし）
@@ -241,7 +241,7 @@ datautl-prd-security-iam-policy-share（条件付き Deny: *）
 
 1. **IP ホワイトリスト必須**: 許可リスト外 IP（社外ネット等）からは全操作が Deny される。VPN 接続または社内ネットワーク経由が必須。
 2. **セッショントークン有効期限**: `aws_session_token` は一時クレデンシャル。有効期限（最大 12 時間）後は再認証が必要。
-3. **Organizations SCP**: 管理アカウント（`841162687537`）レベルで SCP が適用されている可能性があるが、メンバーアカウントからは確認不可。
+3. **Organizations SCP**: 管理アカウント（`<ORG_MANAGEMENT_ACCOUNT_ID>`）レベルで SCP が適用されている可能性があるが、メンバーアカウントからは確認不可。
 4. **グローバルリソース**: IAM はグローバルサービスのため、`--region` 指定不要。
 5. **Athena データベース**: `datautl-prd-gyoumu012-wg` ワークグループに紐づくデータベースは現時点で未作成（空）。
 

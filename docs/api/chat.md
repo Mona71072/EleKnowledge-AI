@@ -5,7 +5,15 @@ last-verified: 2026-09-09
 related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failures/, frontend/src/lib/chat-failures.ts
 ---
 
+> **frontmatter の `status: production`:** 2026-09-10 以前から運用中の節を指す。2026-09-11 以降に追加した節は develop マージと SAM デプロイ前 — 各節の「最終検証」行を正とする。
+
 # チャット管理API
+
+## develop 法令チャットの追加仕様
+
+> 最終検証: 2026-10-09 — #155 / #156を含むdevelop `b8070f56`のコードとPRコメントを照合。AWS反映・利用者向けE2Eは未確認。
+
+法令モード（`mode=law`）、法令出典、モード別履歴の追加契約は[法令チャットAPI補足](legal-chat.md)を参照する。この追加は既存devのプレリリース向けであり、本番提供を意味しない。通常モードの既存契約は以下を参照する。
 
 > Phase 2 のチャットセッション管理エンドポイント。
 
@@ -72,12 +80,12 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 
 ## GET /chat/admin/failures
 
-> 最終検証: 2026-09-11 — 設計 design-2026-09-10-dashboard-v2.md と実装 PR #110 / #111 / #112 / #114 のコードと突合（実環境は未デプロイ）
+> 最終検証: 2026-10-02 — #104レビュー指摘を反映し、言い換え条件に資料クリックなし（`documentOpens = 0`）を追記（未デプロイ）
 
 失敗一覧（**admin グループのみ**。UI ガードだけでは不十分・サーバー側 403）
 
 **Query:**
-- `kind` = `all` \| `bad` \| `not_found` \| `reformulated`（既定 `all` = bad + not_found。`reformulated` は「言い換え」＝回答直後に次の質問が来て 👍 が無いもの）
+- `kind` = `all` \| `bad` \| `not_found` \| `reformulated`（既定 `all` = bad + not_found。`reformulated` は「言い換え」＝回答直後に次の質問が来て 👍 が無く、資料クリック（`documentOpens`）が 0 のもの）
 - `limit` = 1〜100（既定 50）
 - `since` / `until` = `YYYY-MM-DD`（**JST の日付**、両端含む。不正な形式は 400）
 - `triage` = `open` \| `in_progress` \| `done` \| `wontfix` \| `all`（既定 `all`。`open` は triage 未設定も含む）
@@ -106,7 +114,10 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
     }
   ],
   "count": 1,
+  "matchedCount": 1,
+  "truncated": false,
   "scannedCount": 120,
+  "incomplete": false,
   "kind": "all",
   "since": "2026-09-23",
   "until": "2026-09-23",
@@ -120,13 +131,15 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 | `signals` | `bad` / `not_found` に `reformulated` が加わることがある |
 | `opened` | 引用文書を開いた回数（chatlogs `documentOpens`） |
 | `reformulated` | `reformulatedAt` があり、👍 も資料クリックも無い |
-| `triage` | 振り分け。未設定は `{ "status": "open" }` |
+| `triage` | 振り分け。未設定は `{ "status": "open", "cause": null, "note": null, "ref": null, "by": null, "at": null }` |
 | `traceSummary` | `retrievalTrace`（別設計、未実装）の要約。無ければ `null` |
 | `hints` | 機械的な手がかり（判断ではない）。機種スコープ除外 / 上位スコアが弱い（仮 0.45）/ 資料は開かれた / 言い換え後に評価なし / カテゴリ過絞り / 聞き返し後 |
 
+`count` は返却件数、`matchedCount` は今回の Scan で得た一致件数（`limit` 適用前）です。`truncated` は一致件数が `limit` を超えたこと、`incomplete` は25ページ上限で未走査分が残ることを示します。`incomplete=true` の場合、`matchedCount` は全件数ではありません。
+
 実装メモ: chatlogs に失敗専用 GSI は無いため Scan + Filter。試用初期向け。`queryFilters` は RAG Lambda が assistant 行に保存する（2026-07-29〜）。
 
-**改善提案パネル（v0）:** `/admin/failures` 上部で failures レスポンスをクライアント集計し定型提案を表示。`GET /chat/admin/improvement-summary` は**未実装**（後続）。設計: [design-2026-07-29-improvement-proposals.md](./design-2026-07-29-improvement-proposals.md)
+**改善提案パネル（v0）:** `/admin/failures` 上部で failures レスポンスをクライアント集計し定型提案を表示。`GET /chat/admin/improvement-summary` は**未実装**（後続）。設計: [design-2026-07-29-improvement-proposals.md](../design-2026-07-29-improvement-proposals.md)
 
 ## PUT /chat/admin/messages/{sessionId}/{messageId}/triage
 
@@ -153,6 +166,8 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 - 設計: [design-2026-09-10-dashboard-v2.md](../design-2026-09-10-dashboard-v2.md) §9.4
 
 ## POST /chat/suggestions
+> 最終検証: 2026-10-09 — product wish の ragMode を追加
+
 利用者の「こうなってほしい」自由記述（認証必須）。👎 とは別系統。
 
 **Request:**
@@ -169,9 +184,12 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 | `sessionId` | no | 関連チャットセッション（所有する場合のみ保存） |
 
 - chatlogs に `role=product_wish` として保存（`sessionId=wish-{sub}`）
+- `sessionId` が所有セッションのときは、そのセッションのモードを `contextRagMode`（`normal` / `law`）として併せて保存する。他人のセッションや取得できない場合は保存しない（一覧では `normal` 扱い）
 - チャット履歴一覧には出さない
 
 ## GET /chat/admin/suggestions
+> 最終検証: 2026-10-09 — product wish の ragMode を追加
+
 改善要望一覧（**admin のみ**）
 
 **Query:** `limit` = 1〜100（既定 50）
@@ -187,6 +205,7 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
       "text": "機種なしでも検索してほしい",
       "timestamp": "2026-07-29T12:00:00",
       "contextSessionId": "session_xxxxx",
+      "ragMode": "law",
       "triage": { "status": "open" }
     }
   ],
@@ -194,5 +213,5 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 }
 ```
 
+- `ragMode` は関連セッションのモード（`law` のみ `law`、それ以外・記録なしは `normal`）。法令モードのセッションを開くリンクに `mode=law` を付けるために使う
 - `sessionId` と `triage` は 2026-09-11 に追加（PR #114）。要望の既読 / 対応済みは上記 PUT triage で保存する（`in_progress` = 既読）
-
