@@ -17,6 +17,16 @@ function freezeCopy(value) {
   return Object.freeze(copy);
 }
 
+// SYNC: must equal kbModelTypes.ts ALL_MODEL_TYPES values and RAG UI_MODEL_FILTERS keys (tests/knowledge-senpai-model-types-sync.test.mjs).
+export const SENPAI_MODEL_TYPES = new Set(['AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター']);
+
+/** Return a saved model filter only when it is one of the known UI keys; otherwise undefined. */
+export function normalizeSavedModelType(value) {
+  if (typeof value !== 'string' || !value || value.length > 64
+    || /[\u0000-\u001f\u007f-\u009f]/u.test(value) || !SENPAI_MODEL_TYPES.has(value)) return undefined;
+  return value;
+}
+
 function cloneTurn(turn) {
   return Object.freeze({
     id: turn.id,
@@ -77,9 +87,11 @@ function validateRestore(input) {
     }
     const id = Number.isSafeInteger(turn.id) && turn.id > 0 ? turn.id : index + 1;
     if (id >= nextTurnId) nextTurnId = id + 1;
+    const modelType = normalizeSavedModelType(turn.modelType);
     return {
       id,
       senpaiTurnId: turn.senpaiTurnId,
+      ...(modelType ? { modelType } : {}),
       query: turn.query,
       normal: turn.normal.status === 'success'
         ? { status: 'success', answer: turn.normal.answer }

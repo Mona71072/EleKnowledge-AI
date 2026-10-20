@@ -1,0 +1,3 @@
+# lambda/rag/rag-function/app.py は develop 時点から CRLF。全行変換は他ブランチと衝突するため、
+# CRLF のまま維持し、git diff --check で行末の CR を空白エラー扱いしない。
+lambda/rag/rag-function/app.py whitespace=cr-at-eol

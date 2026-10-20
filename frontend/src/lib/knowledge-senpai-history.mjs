@@ -1,4 +1,5 @@
 import { KnowledgeResearchError, normalizeStoredResearchAnswer } from './knowledge-research.mjs';
+import { normalizeSavedModelType } from './knowledge-senpai-chat.mjs';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
@@ -158,7 +159,9 @@ export async function readSenpaiConversation({ baseUrl, getToken, fetchImpl = fe
       fail('invalid_response', '相談履歴の質問を確認できませんでした');
     }
     seenQueries.add(`${group.senpaiTurnId}\0${query}`);
-    const turn = { id: index + 1, senpaiTurnId: group.senpaiTurnId, query };
+    // The model filter is only ever sent with (and saved on) the technical lane.
+    const modelType = normalizeSavedModelType(group.byMode.normal.assistant?.modelType);
+    const turn = { id: index + 1, senpaiTurnId: group.senpaiTurnId, ...(modelType ? { modelType } : {}), query };
     for (const mode of MODES) {
       const user = group.byMode[mode].user;
       const assistant = group.byMode[mode].assistant;

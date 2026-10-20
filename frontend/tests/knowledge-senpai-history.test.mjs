@@ -194,3 +194,31 @@ test('keeps an unpaired saved lane paused and rejects mismatched or incomplete h
     }), (error) => error.code === 'invalid_response');
   }
 });
+
+async function readWithNormalAssistant(overrides) {
+  return readSenpaiConversation({
+    baseUrl: BASE, getToken: async () => TOKEN, conversationId,
+    fetchImpl: historyFetch({
+      context: 'senpai', conversationId, complete: true, readOnly: false,
+      messages: [row('user', 'normal'), row('assistant', 'normal', overrides), row('user', 'law'), row('assistant', 'law', { modelType: 'AXIEZ' })],
+    }),
+  });
+}
+
+test('carries a known saved model filter from the normal lane onto the restored turn', async () => {
+  const result = await readWithNormalAssistant({ modelType: 'メルシティ' });
+  assert.equal(result.turns[0].modelType, 'メルシティ');
+});
+
+test('drops a missing, unknown, or malformed saved model filter without failing the restore', async () => {
+  for (const bad of [undefined, '未知の機種', '', 'AXIEZ\n', 'A'.repeat(65), 7, ['AXIEZ'], null]) {
+    const result = await readWithNormalAssistant(bad === undefined ? {} : { modelType: bad });
+    assert.equal(result.turns.length, 1);
+    assert.equal('modelType' in result.turns[0], false, `unexpected modelType for ${JSON.stringify(bad)}`);
+  }
+});
+
+test('ignores a model filter that only appears on the law lane', async () => {
+  const result = await readWithNormalAssistant({});
+  assert.equal('modelType' in result.turns[0], false);
+});

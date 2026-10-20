@@ -206,13 +206,13 @@
     {
       "id": "SE-019",
       "category": "excludes_not_boost",
-      "query": "WOS 単体の現場で、DL・DP のコネクタが無くても問題ないでしょうか。",
+      "query": "LV5K-2S の G寸法まわりから異音がします。原因の当たりを教えてください。",
       "expect": {
         "mustInclude": [],
-        "mustNotInclude": ["KH-LINKS-WOS-DLDP-345"],
+        "mustNotInclude": ["KH-VFGLF-ACTUATOR-HANGER-400"],
         "status": "any"
       },
-      "rationale": "345 の excludes（足場工法・WOS 単体のみは対象外）の語だけでは上がらないかを見る。本文にも DL/DP の語があるため判定が難しく、要確認。"
+      "rationale": "2026-10-20 実カード簡易索引で不合格: 旧質問（WOS 単体・DL/DP）は 345 本文に同じ語と「問題にならない」の結論があるため、excludes 無しでも正当に一致していた。excludes 検証にならないので、400 の excludes「LV5K-2S G寸法異音（433）」の語だけを使い、400 本文に語が無い質問に差し替えた。400 が上がらないことで excludes が一致を押し上げないことを見る。"
     },
     {
       "id": "SE-020",

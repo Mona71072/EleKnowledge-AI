@@ -404,6 +404,64 @@ def test_senpai_detail_returns_only_self_owned_explicitly_tagged_rows():
     assert table.query.call_args.kwargs["IndexName"] == "userId-timestamp-index"
 
 
+def _read_detail(mod, table, items):
+    table.query.return_value = {"Items": items}
+    conversation_id = "11111111-1111-4111-8111-111111111111"
+    response = mod.lambda_handler(
+        _chat_event(
+            f"/chat/sessions/{conversation_id}/messages",
+            qs={"context": "senpai"},
+            path_params={"sessionId": conversation_id},
+        ), None,
+    )
+    assert response["statusCode"] == 200
+    return json.loads(response["body"])["messages"]
+
+
+def test_senpai_model_types_match_rag_ui_model_filters(rag_app):
+    mod, _table = _load_chat_app()
+
+    assert set(mod.SENPAI_MODEL_TYPES) == set(rag_app.UI_MODEL_FILTERS)
+
+
+def test_senpai_detail_exposes_saved_model_type_on_normal_assistant_row():
+    mod, table = _load_chat_app()
+    messages = _read_detail(mod, table, [
+        _tagged_message(),
+        _tagged_message(role="assistant", content="回答", queryFilters={"modelType": "AXIEZ-LINKs"}),
+    ])
+
+    by_role = {row["role"]: row for row in messages}
+    assert by_role["assistant"]["modelType"] == "AXIEZ-LINKs"
+    assert "modelType" not in by_role["user"]
+
+
+@pytest.mark.parametrize("bogus", [
+    "未知の機種", "", "AXIEZ\n", "A" * 65, 123, ["AXIEZ"], None,
+])
+def test_senpai_detail_drops_unknown_or_malformed_saved_model_type(bogus):
+    mod, table = _load_chat_app()
+    messages = _read_detail(mod, table, [
+        _tagged_message(),
+        _tagged_message(role="assistant", content="回答", queryFilters={"modelType": bogus}),
+    ])
+
+    assert all("modelType" not in row for row in messages)
+
+
+def test_senpai_detail_ignores_model_type_without_filters_and_in_law_lane():
+    mod, table = _load_chat_app()
+    messages = _read_detail(mod, table, [
+        _tagged_message(),
+        _tagged_message(role="assistant", content="回答"),
+        _tagged_message("law-1", ragMode="law"),
+        _tagged_message("law-1", role="assistant", ragMode="law", queryFilters={"modelType": "AXIEZ"}),
+    ])
+
+    assert len(messages) == 4
+    assert all("modelType" not in row for row in messages)
+
+
 def test_senpai_detail_drops_orphan_assistants_and_marks_partial_turns():
     mod, table = _load_chat_app()
     conversation_id = "11111111-1111-4111-8111-111111111111"

@@ -345,3 +345,37 @@ test('rejects a non-string model type before creating a turn', async () => {
   assert.equal(chat.getSnapshot().turns.length, 0);
   chat.dispose();
 });
+
+function restoredTurn(overrides = {}) {
+  const conversationId = '10000000-0000-4000-8000-000000000001';
+  const senpaiTurnId = '20000000-0000-4000-8000-000000000001';
+  return {
+    conversationId,
+    complete: true,
+    turns: [{
+      id: 1, senpaiTurnId, query: '保存済みの質問', ...overrides,
+      normal: { status: 'success', answer: { ...answer('normal', 'normal-restored', '保存済みの質問'), senpaiConversationId: conversationId, senpaiTurnId } },
+      law: { status: 'success', answer: { ...answer('law', 'law-restored', '保存済みの質問'), senpaiConversationId: conversationId, senpaiTurnId } },
+    }],
+  };
+}
+
+test('restore keeps a valid modelType on the turn so the model badge shows', () => {
+  const chat = createSenpaiChat({ querySource: async () => answer('normal', 'x') });
+  chat.restore(restoredTurn({ modelType: 'NEXCUBE' }));
+  assert.equal(chat.getSnapshot().turns[0].modelType, 'NEXCUBE');
+  chat.dispose();
+});
+
+test('restore drops an invalid modelType and still restores old history without one', () => {
+  const chat = createSenpaiChat({ querySource: async () => answer('normal', 'x') });
+  for (const bad of ['未知の機種', '', 'AXIEZ\n', 'A'.repeat(65), 5, null, ['AXIEZ']]) {
+    chat.restore(restoredTurn({ modelType: bad }));
+    assert.equal(chat.getSnapshot().turns.length, 1);
+    assert.equal('modelType' in chat.getSnapshot().turns[0], false);
+  }
+  chat.restore(restoredTurn());
+  assert.equal(chat.getSnapshot().turns.length, 1);
+  assert.equal('modelType' in chat.getSnapshot().turns[0], false);
+  chat.dispose();
+});

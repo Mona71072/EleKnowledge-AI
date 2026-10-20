@@ -467,6 +467,24 @@ def _visible_senpai_item(item: dict, now: int) -> bool:
     )
 
 
+# Senpai UI model filter keys (mirrors UI_MODEL_FILTERS in the RAG Lambda).
+# SYNC: tests/unit/test_senpai_history.py::test_senpai_model_types_match_rag_ui_model_filters
+SENPAI_MODEL_TYPES = frozenset({
+    'AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター',
+})
+
+
+def _saved_senpai_model_type(row: dict):
+    """Return the saved normal-lane model filter only when it is a known UI key."""
+    if row.get('role') != 'assistant' or (row.get('ragMode') or 'normal') != 'normal':
+        return None
+    filters = row.get('queryFilters')
+    value = filters.get('modelType') if isinstance(filters, dict) else None
+    if isinstance(value, str) and value in SENPAI_MODEL_TYPES:
+        return value
+    return None
+
+
 def get_senpai_sessions_by_user(user_id: str) -> tuple[list, bool]:
     """Group a bounded set of the caller's live tagged messages by conversation."""
     items, complete = _query_user_history(user_id)
@@ -550,6 +568,9 @@ def get_senpai_messages_by_user(user_id: str, conversation_id: str) -> tuple[lis
         for row in rows:
             if 'ttl' in row:
                 row['daysUntilDeletion'] = calculate_days_until_deletion(row['ttl'])
+            model_type = _saved_senpai_model_type(row)
+            if model_type:
+                row['modelType'] = model_type
         newest_time = max((row.get('timestamp') or '') for row in rows)
         turn_groups.append((newest_time, key, rows))
 

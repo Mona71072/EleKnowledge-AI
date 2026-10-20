@@ -52,3 +52,8 @@ export function createSenpaiChat(options: {
   /** Injectable UUID generator for deterministic tests. */
   createId?: () => string;
 }): SenpaiChatController;
+
+export const SENPAI_MODEL_TYPES: ReadonlySet<string>;
+
+/** Returns a saved model filter only when it is one of the known UI keys; otherwise undefined. */
+export function normalizeSavedModelType(value: unknown): string | undefined;
