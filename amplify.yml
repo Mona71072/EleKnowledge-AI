@@ -40,6 +40,8 @@ env:
     NEXT_PUBLIC_API_URL: "https://mqsyka1v9j.execute-api.ap-northeast-1.amazonaws.com/dev"
     NEXT_PUBLIC_RAG_API_URL: "https://lwi9g3kzik.execute-api.ap-northeast-1.amazonaws.com/dev"
     NEXT_PUBLIC_LAW_RAG_ENABLED: "true"
+    # dev配信で管理者用の先輩チャットを表示する。NEXT_PUBLIC_* はビルド時に固定される。
+    NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH: "true"
     NEXT_PUBLIC_CHAT_API_URL: "https://92pdw6k1o4.execute-api.ap-northeast-1.amazonaws.com/dev"
     NEXT_PUBLIC_TROUBLESHOOTING_API_URL: "https://zh4kbz8bb1.execute-api.ap-northeast-1.amazonaws.com/dev/troubleshooting"
     # Announcements & monitoring API (announcements-monitoring-dev スタック出力 AppApiUrl より設定)

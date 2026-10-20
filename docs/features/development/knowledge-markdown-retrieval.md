@@ -98,7 +98,7 @@ AWS導入には`Environment=dev`、`KnowhowEnabled=true`、`KnowhowIndexBucket`�
 
 先輩チャットと管理者の編集メニューは、ビルド時の`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH=true`とログイン利用者のadmin所属がそろった場合に表示する。環境変数を追加する前の成果物を再配信するだけでは表示は変わらない。
 
-今回の設定漏れを修正し、dev APIを参照する既存`amplify.yml`に表示フラグを指定する。未指定のローカル設定や別環境での既定値は無効のまま、非管理者の入口も非表示を維持する。これは画面の表示設定であり、Lambdaの`KNOWHOW_ENABLED`、私有索引、実資料の取込許可を有効にするものではない。
+今回の設定漏れを修正し、dev APIを参照する既存`amplify.yml`に表示フラグを指定する。このビルド定義を使うブランチに適用されるため、別環境へ流用するときは対象APIと表示フラグを明示的に設定する。フラグ未指定のローカル設定では無効のまま、非管理者の入口も非表示を維持する。これは画面の表示設定であり、Lambdaの`KNOWHOW_ENABLED`、私有索引、実資料の取込許可を有効にするものではない。
 
 再デプロイ時は次を確認する。
 
@@ -108,3 +108,5 @@ AWS導入には`Environment=dev`、`KnowhowEnabled=true`、`KnowhowIndexBucket`�
 4. 画面が表示されても、Markdown検索にはバックエンドの反映・固定索引・認可設定が別途必要。フロントだけの更新を検索機能全体の稼働確認としない。
 
 `NEXT_PUBLIC_`はビルド時にブラウザー用コードへ固定される。[Next.js公式仕様](https://nextjs.org/docs/app/guides/environment-variables#bundling-environment-variables-for-the-browser)を参照する。
+
+設定漏れにより管理者の入口が空になるREDテストを確認し、修正後は管理者に表示・非管理者には非表示となることを確認した。フロント152テスト、型検査・最適化ビルド・依存監査が成功し、lintは既存の警告4件のみ。`amplify.yml`の環境変数を実際に渡した静的ビルドで、先輩チャットのコードが含まれ、無効専用の案内が除かれることも確認した。実際のAmplifyの接続ブランチ、コンソール側の上書き設定、配信結果は未確認である。
