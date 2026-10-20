@@ -1,0 +1,102 @@
+'use client';
+
+import { Children, isValidElement, type ReactNode } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { linkResearchRefs } from '@/lib/knowledge-senpai-research-view.mjs';
+
+// SECURITY: 回答本文はモデルの出力。生の HTML は react-markdown が描画せず、画像は出さず、
+// リンクは同じ画面内の出典アンカーだけを許す（外部へ送る追跡リンクを作らない）。
+const REF_ANCHOR = /^#[A-Za-z0-9-]+-ref-([TLK])(\d{1,3})$/u;
+
+// 引用の番号: 技術=技、法令=法、ノウハウ=ノ。色は文字にうっすら付けるだけ。
+export const REF_PREFIX: Record<string, string> = { T: '技', L: '法', K: 'ノ' };
+export const REF_TONES: Record<string, string> = {
+  T: 'bg-blue-50 text-blue-700 hover:bg-blue-100',
+  L: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+  K: 'bg-violet-50 text-violet-700 hover:bg-violet-100',
+};
+
+const TRAILING_PUNCTUATION = /^[。、．，）」』】,.!?！？)]+/u;
+
+function isRefPill(node: ReactNode) {
+  return isValidElement<{ href?: unknown }>(node) && typeof node.props.href === 'string' && REF_ANCHOR.test(node.props.href);
+}
+
+/**
+ * 連続する引用の番号と、そのすぐ後ろの句読点を改行させない1かたまりにする
+ * （文末で「。」だけが次の行に落ちるのを防ぐ）。番号の前後の余分な空白も取る。
+ */
+export function keepRefRunsTogether(children: ReactNode): ReactNode[] {
+  const nodes = Children.toArray(children);
+  const out: ReactNode[] = [];
+  for (let index = 0; index < nodes.length; index += 1) {
+    if (!isRefPill(nodes[index])) { out.push(nodes[index]); continue; }
+    const run: ReactNode[] = [];
+    while (index < nodes.length && (isRefPill(nodes[index]) || (typeof nodes[index] === 'string' && !(nodes[index] as string).trim() && isRefPill(nodes[index + 1])))) {
+      if (isRefPill(nodes[index])) run.push(nodes[index]);
+      index += 1;
+    }
+    const next = nodes[index];
+    if (typeof next === 'string') {
+      const punctuation = TRAILING_PUNCTUATION.exec(next)?.[0] ?? '';
+      if (punctuation) { run.push(punctuation); nodes[index] = next.slice(punctuation.length); }
+    }
+    const previous = out.at(-1);
+    if (typeof previous === 'string') out[out.length - 1] = previous.replace(/\s+$/u, '');
+    out.push(<span key={`refs-${out.length}`} className="whitespace-nowrap">{run}</span>);
+    index -= 1;
+  }
+  return out;
+}
+
+export type SenpaiMarkdownVariant = 'default' | 'plain';
+
+function makeComponents(refTitles: Readonly<Record<string, string>>): Components {
+  return {
+    a: ({ href, children }) => {
+      const match = typeof href === 'string' ? REF_ANCHOR.exec(href) : null;
+      if (!match || typeof href !== 'string') return <span>{children}</span>;
+      const refId = `${match[1]}${match[2]}`;
+      return (
+        <a href={href} title={refTitles[refId]} className={`relative mx-0.5 inline-block rounded px-1 align-super text-[10px] font-medium leading-4 no-underline before:absolute before:-inset-x-1 before:-inset-y-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${REF_TONES[match[1]]}`}>{`${REF_PREFIX[match[1]]}${match[2]}`}</a>
+      );
+    },
+    img: ({ alt }) => <span>{alt ? `（画像: ${alt}）` : ''}</span>,
+    h1: ({ children }) => <h5 className="mt-5 text-sm font-semibold text-gray-900 first:mt-0">{children}</h5>,
+    h2: ({ children }) => <h5 className="mt-5 text-sm font-semibold text-gray-900 first:mt-0">{children}</h5>,
+    h3: ({ children }) => <h6 className="mt-4 text-sm font-semibold text-gray-900 first:mt-0">{children}</h6>,
+    h4: ({ children }) => <h6 className="mt-4 text-sm font-semibold text-gray-900 first:mt-0">{children}</h6>,
+    h5: ({ children }) => <h6 className="mt-4 text-sm font-semibold text-gray-900 first:mt-0">{children}</h6>,
+    h6: ({ children }) => <h6 className="mt-4 text-sm font-semibold text-gray-900 first:mt-0">{children}</h6>,
+    p: ({ children }) => <p className="mt-2 break-words first:mt-0">{keepRefRunsTogether(children)}</p>,
+    ul: ({ children }) => <ul className="mt-2 list-disc space-y-1 pl-5 marker:text-gray-400">{children}</ul>,
+    ol: ({ children }) => <ol className="mt-2 list-decimal space-y-1 pl-5 marker:text-gray-400">{children}</ol>,
+    li: ({ children }) => <li>{keepRefRunsTogether(children)}</li>,
+    blockquote: ({ children }) => <blockquote className="mt-2 border-l-2 border-gray-300 pl-3 text-gray-600">{children}</blockquote>,
+    pre: ({ children }) => <pre className="mt-2 overflow-x-auto rounded-lg bg-gray-100 p-3 text-xs">{children}</pre>,
+    code: ({ children }) => <code className="rounded bg-gray-100 px-1 font-mono text-[13px]">{children}</code>,
+    table: ({ children }) => <div className="mt-2 overflow-x-auto"><table className="min-w-full border-collapse text-xs">{children}</table></div>,
+    th: ({ children }) => <th className="border border-gray-200 bg-gray-50 px-2 py-1 text-left font-medium">{children}</th>,
+    td: ({ children }) => <td className="border border-gray-200 px-2 py-1 align-top">{keepRefRunsTogether(children)}</td>,
+  };
+}
+
+/** 統一回答の本文。[T1] [L1] [K1] を出典一覧へ飛ぶ小さな番号（技1・法1・ノ1）にして表示する。 */
+export function SenpaiMarkdown({ markdown, knownRefs, anchorPrefix, refTitles = {}, variant = 'default', className = '' }: {
+  markdown: string;
+  knownRefs: ReadonlySet<string>;
+  anchorPrefix: string;
+  refTitles?: Readonly<Record<string, string>>;
+  /** `plain` は小さめの文字で、補足ブロック（食い違い・次に確認すること）用。 */
+  variant?: SenpaiMarkdownVariant;
+  className?: string;
+}) {
+  return (
+    <div className={`min-w-0 break-words [overflow-wrap:anywhere] ${variant === 'plain' ? 'text-sm leading-6 text-gray-700' : 'text-[15px] leading-7 text-gray-900'} ${className}`}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(refTitles)}>
+        {linkResearchRefs(markdown, knownRefs, anchorPrefix)}
+      </ReactMarkdown>
+    </div>
+  );
+}

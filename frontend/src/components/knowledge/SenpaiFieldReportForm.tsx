@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
+import { NoteIcon } from './SenpaiIcons';
 import { getIdToken } from '@/lib/auth-helpers';
 import type { SenpaiChatTurn } from '@/lib/knowledge-senpai-chat.mjs';
 import {
@@ -21,12 +22,16 @@ import {
 } from '@/lib/knowledge-senpai-field-report.mjs';
 
 const REACTIONS: FieldReportReaction[] = ['matched', 'not_matched', 'unsure'];
-const fieldClass = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200';
+// 3択の切り替えに収まる短い表示。送信前の確認では FIELD_REPORT_REACTION_LABELS を使う。
+const SEGMENT_LABELS: Record<FieldReportReaction, string> = { matched: '当てはまった', not_matched: '当てはまらなかった', unsure: '分からない' };
+const fieldClass = 'w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500';
+const primaryButton = 'min-h-9 rounded-full bg-gray-900 px-4 text-xs font-medium text-white hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-50';
+const quietButton = 'min-h-9 rounded-full px-3 text-xs font-medium text-gray-600 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-50';
 const modelLabel = (value?: string) => ALL_MODEL_TYPES.find((model) => model.value === value)?.label ?? '指定しない';
 
 function SentReport({ report }: { report: FieldReport }) {
   return (
-    <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-950">
+    <p role="status" className="basis-full text-xs leading-5 text-gray-500">
       この相談の結果を送信済みです（{FIELD_REPORT_REVIEW_STATE_LABELS[report.reviewState]}）。担当者が確認するまで、ノウハウには反映されません。
     </p>
   );
@@ -34,7 +39,7 @@ function SentReport({ report }: { report: FieldReport }) {
 
 function Preview({ payload, titles }: { payload: FieldReportPayload; titles: Record<string, string> }) {
   return (
-    <dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-2 gap-y-1 rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-800">
+    <dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-2 gap-y-1 rounded-xl bg-white p-3 text-xs text-gray-800">
       <dt className="text-gray-500">何が分かったか</dt><dd className="whitespace-pre-wrap break-words">{payload.finding}</dd>
       <dt className="text-gray-500">どの条件か</dt><dd className="whitespace-pre-wrap break-words">{payload.condition || '（未記入）'}</dd>
       <dt className="text-gray-500">機種</dt><dd>{modelLabel(payload.modelType)}</dd>
@@ -69,8 +74,8 @@ export function SenpaiFieldReportForm({ conversationId, turn, sent, onSent }: {
 
   if (!open) {
     return (
-      <button type="button" onClick={() => { setDraft(createFieldReportDraft(turn)); setOpen(true); }} className="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-400">
-        結果を残す
+      <button type="button" aria-label="結果を残す" title="結果を残す" onClick={() => { setDraft(createFieldReportDraft(turn)); setOpen(true); }} className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+        <NoteIcon />
       </button>
     );
   }
@@ -107,41 +112,43 @@ export function SenpaiFieldReportForm({ conversationId, turn, sent, onSent }: {
   }
 
   return (
-    <section aria-label="結果を残す" className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+    <section aria-label="結果を残す" className="my-2 w-full basis-full space-y-3 rounded-2xl bg-gray-50 p-4">
       <div>
-        <h4 className="text-sm font-bold text-emerald-950">結果を残す（未確認の報告として保存）</h4>
-        <p className="mt-1 text-xs leading-5 text-emerald-900">実際に分かったことだけを短く残してください。相談や回答の本文は送りません。担当者が確認するまでノウハウには反映されません。顧客名・個人名・物件名は書かないでください。</p>
+        <h4 className="text-sm font-semibold text-gray-900">結果を残す（未確認の報告として保存）</h4>
+        <p className="mt-1 text-xs leading-5 text-gray-500">実際に分かったことだけを短く残してください。相談や回答の本文は送りません。担当者が確認するまでノウハウには反映されません。顧客名・個人名・物件名は書かないでください。</p>
       </div>
       <div className="space-y-1">
-        <label htmlFor={`${idPrefix}-finding`} className="block text-xs font-semibold text-gray-800">何が分かったか（必須）</label>
+        <label htmlFor={`${idPrefix}-finding`} className="block text-xs font-medium text-gray-700">何が分かったか（必須）</label>
         <textarea id={`${idPrefix}-finding`} rows={3} maxLength={FIELD_REPORT_FINDING_MAX} value={draft.finding} onChange={(event) => update({ finding: event.target.value })} placeholder="例: 記載の手順で症状が変わった／別の確認が必要だった" className={fieldClass} />
       </div>
       <div className="space-y-1">
-        <label htmlFor={`${idPrefix}-condition`} className="block text-xs font-semibold text-gray-800">どの条件か（任意）</label>
+        <label htmlFor={`${idPrefix}-condition`} className="block text-xs font-medium text-gray-700">どの条件か（任意）</label>
         <textarea id={`${idPrefix}-condition`} rows={2} maxLength={FIELD_REPORT_CONDITION_MAX} value={draft.condition} onChange={(event) => update({ condition: event.target.value })} placeholder="例: 制御方式、ドアの種類、作業の段階など" className={fieldClass} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor={`${idPrefix}-model`} className="text-xs font-semibold text-gray-800">機種</label>
-        <select id={`${idPrefix}-model`} value={draft.modelType} onChange={(event) => update({ modelType: event.target.value })} className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900">
+        <label htmlFor={`${idPrefix}-model`} className="text-xs font-medium text-gray-700">機種</label>
+        <select id={`${idPrefix}-model`} value={draft.modelType} onChange={(event) => update({ modelType: event.target.value })} className="rounded-xl border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
           <option value="">指定しない</option>
           {ALL_MODEL_TYPES.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
         </select>
       </div>
       {cards.length > 0 && (
         <fieldset className="space-y-2">
-          <legend className="text-xs font-semibold text-gray-800">参照したノウハウは、この条件で当てはまりましたか（任意）</legend>
+          <legend className="text-xs font-medium text-gray-700">参照したノウハウは、この条件で当てはまりましたか（任意）</legend>
           {cards.map((card) => (
-            <div key={card.knowledgeId} className="rounded-lg border border-gray-200 bg-white p-2 text-xs">
+            <div key={card.knowledgeId} className="rounded-xl bg-white p-2 text-xs">
               <p className="font-semibold text-gray-900">{card.title} <span className="font-normal text-gray-500">v{card.cardVersion}</span></p>
-              <div className="mt-1 flex flex-wrap gap-3" role="radiogroup" aria-label={`${card.title}への反応`}>
-                {REACTIONS.map((reaction) => (
-                  <label key={reaction} className="inline-flex items-center gap-1">
-                    <input type="radio" name={`${idPrefix}-${card.knowledgeId}`} value={reaction} checked={draft.reactions[card.knowledgeId] === reaction} onChange={() => update({ reactions: { ...draft.reactions, [card.knowledgeId]: reaction } })} />
-                    {FIELD_REPORT_REACTION_LABELS[reaction]}
-                  </label>
-                ))}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div role="radiogroup" aria-label={`${card.title}への反応`} className="inline-flex overflow-hidden rounded-full border border-gray-300 bg-white">
+                  {REACTIONS.map((reaction) => (
+                    <label key={reaction} className="relative flex min-h-8 cursor-pointer items-center border-l border-gray-200 px-3 text-xs text-gray-700 first:border-l-0 has-[:checked]:bg-gray-900 has-[:checked]:text-white has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-violet-500">
+                      <input type="radio" className="sr-only" name={`${idPrefix}-${card.knowledgeId}`} value={reaction} checked={draft.reactions[card.knowledgeId] === reaction} onChange={() => update({ reactions: { ...draft.reactions, [card.knowledgeId]: reaction } })} />
+                      {SEGMENT_LABELS[reaction]}
+                    </label>
+                  ))}
+                </div>
                 {draft.reactions[card.knowledgeId] && (
-                  <button type="button" onClick={() => update({ reactions: { ...draft.reactions, [card.knowledgeId]: '' } })} className="text-gray-600 underline">選択を外す</button>
+                  <button type="button" onClick={() => update({ reactions: { ...draft.reactions, [card.knowledgeId]: '' } })} className="min-h-8 rounded px-2 text-xs text-gray-500 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">選択を外す</button>
                 )}
               </div>
             </div>
@@ -157,9 +164,9 @@ export function SenpaiFieldReportForm({ conversationId, turn, sent, onSent }: {
       {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
       <div className="flex flex-wrap gap-2">
         {preview
-          ? <button type="button" onClick={send} disabled={sending} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">{sending ? '送信しています…' : 'この内容で送る'}</button>
-          : <button type="button" onClick={confirm} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800">内容を確認する</button>}
-        <button type="button" onClick={() => { setOpen(false); setPreview(null); setError(''); }} disabled={sending} className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-100 disabled:opacity-50">やめる</button>
+          ? <button type="button" onClick={send} disabled={sending} className={primaryButton}>{sending ? '送信しています…' : 'この内容で送る'}</button>
+          : <button type="button" onClick={confirm} className={primaryButton}>内容を確認する</button>}
+        <button type="button" onClick={() => { setOpen(false); setPreview(null); setError(''); }} disabled={sending} className={quietButton}>やめる</button>
       </div>
     </section>
   );

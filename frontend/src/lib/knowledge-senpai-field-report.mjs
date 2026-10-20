@@ -41,9 +41,12 @@ function cleanText(value) {
  */
 export function fieldReportCards(turn) {
   const matches = turn?.normal?.status === 'success' ? turn.normal.answer?.knowhow?.matches : undefined;
+  // A research turn names the cards of its unified answer: the ones it used, then the ones it only received.
+  const research = turn?.research?.status === 'completed' ? turn.research.result?.sources?.knowhow : undefined;
+  const candidates = [...(Array.isArray(matches) ? matches : []), ...(research?.used ?? []), ...(research?.candidates ?? [])];
   const seen = new Set();
   const cards = [];
-  for (const match of Array.isArray(matches) ? matches : []) {
+  for (const match of candidates) {
     if (typeof match?.knowledgeId !== 'string' || !Number.isSafeInteger(match.cardVersion) || seen.has(match.knowledgeId)) continue;
     seen.add(match.knowledgeId);
     cards.push({ knowledgeId: match.knowledgeId, cardVersion: match.cardVersion, title: typeof match.title === 'string' ? match.title : match.knowledgeId });

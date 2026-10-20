@@ -25,6 +25,10 @@ function loadTsx(path, mocks) {
     if (name === '@/lib/knowledge-senpai-synthesis.mjs') return { requestSenpaiSynthesis: async () => ({}) };
     if (name === '@/lib/knowledge-senpai-field-report.mjs') return require('../src/lib/knowledge-senpai-field-report.mjs');
     if (name === './SenpaiFieldReportForm') return loadTsx('../src/components/knowledge/SenpaiFieldReportForm.tsx', { '@/lib/auth-helpers': { getIdToken: async () => 'test-token' } });
+    // 調査ジョブ表示の部品と、画面に依存しない lib は実物を読み込む。
+    if (/^\.\/Senpai[A-Za-z]+$/u.test(name)) return loadTsx(`../src/components/knowledge/${name.slice(2)}.tsx`, {});
+    if (name === 'next/link') return Link;
+    if (name.startsWith('@/lib/') && name.endsWith('.mjs')) return require(`../src/lib/${name.slice(6)}`);
     if (name === '@/hooks/useSenpaiHistory') return { useSenpaiHistory: () => ({ entries: [], loading: false, error: '', complete: true, opening: false, openError: '', openConversation: async () => {}, resetSelection() {}, refresh() {} }) };
     return require(name);
   };
@@ -35,19 +39,34 @@ function loadTsx(path, mocks) {
 const Link = ({ children, href, ...props }) => createElement('a', { href, ...props }, children);
 
 function findElement(root, predicate) {
+  return findExpanded(expandTree(root), predicate);
+}
+
+function findExpanded(root, predicate) {
   if (!root || typeof root !== 'object') return null;
   if (Array.isArray(root)) {
-    for (const item of root) { const found = findElement(item, predicate); if (found) return found; }
+    for (const item of root) { const found = findExpanded(item, predicate); if (found) return found; }
     return null;
   }
   if (typeof root.type === 'string' && predicate(root)) return root;
   const children = root.props?.children;
   const list = Array.isArray(children) ? children : [children];
   for (const child of list) {
-    const found = findElement(child, predicate);
+    const found = findExpanded(child, predicate);
     if (found) return found;
   }
   return null;
+}
+
+
+// 画面は props だけで描く部品の組み合わせなので、フックを使わない部品は展開して中の要素を探す。
+function expandTree(node) {
+  if (Array.isArray(node)) return node.map(expandTree);
+  if (!node || typeof node !== 'object' || !node.props) return node;
+  if (typeof node.type === 'function') {
+    try { return expandTree(node.type(node.props)); } catch { return node; }
+  }
+  return { ...node, props: { ...node.props, children: expandTree(node.props.children) } };
 }
 
 function loadInteractiveChat({ initialSnapshot, createController }) {
@@ -423,8 +442,9 @@ test('a turn shows the model it was filtered by only when one was chosen', () =>
   render();
   const html = renderToStaticMarkup(render());
 
-  assert.equal((html.match(/機種: /g) || []).length, 1);
-  assert.match(html, /機種: AXIEZ/);
+  // 入力欄の機種の選択（「機種: 指定なし」）とは別に、機種を選んだ相談だけに小さな表示が付く。
+  assert.equal((html.match(/機種: AXIEZ/g) || []).length, 1);
+  assert.equal((html.match(/機種: /g) || []).length, 2);
 });
 
 test('safe lane errors are shown and a healthy lane answer remains visible', () => {
@@ -508,15 +528,19 @@ test('history sidebar selects the requested consultation, escapes titles, and di
 
 
 function findAnyElement(root, predicate) {
+  return findAnyExpanded(expandTree(root), predicate);
+}
+
+function findAnyExpanded(root, predicate) {
   if (!root || typeof root !== 'object') return null;
   if (Array.isArray(root)) {
-    for (const item of root) { const found = findAnyElement(item, predicate); if (found) return found; }
+    for (const item of root) { const found = findAnyExpanded(item, predicate); if (found) return found; }
     return null;
   }
   if (root.props && predicate(root)) return root;
   const children = root.props?.children;
   for (const child of Array.isArray(children) ? children : [children]) {
-    const found = findAnyElement(child, predicate);
+    const found = findAnyExpanded(child, predicate);
     if (found) return found;
   }
   return null;
@@ -579,9 +603,9 @@ test('offers a manual synthesis button only when both lanes settled and one succ
 
 test('the synthesis button asks the controller to synthesize that turn', () => {
   const { render, calls } = synthesisChat();
-  const element = findAnyElement(render(), (node) => typeof node.props.onSynthesize === 'function');
+  const element = findAnyElement(render(), (node) => node.type === 'button' && node.props.children === '工技先輩のまとめを作る');
   assert.ok(element);
-  element.props.onSynthesize(1);
+  element.props.onClick();
   assert.deepEqual(calls, [1]);
 });
 
@@ -701,7 +725,7 @@ test('the field report form starts closed, copies nothing, and shows a sent repo
   };
   const conversationId = '10000000-0000-4000-8000-000000000001';
   const closed = renderToStaticMarkup(createElement(SenpaiFieldReportForm, { conversationId, turn, onSent() {} }));
-  assert.match(closed, /<button[^>]*>結果を残す<\/button>/);
+  assert.match(closed, /<button[^>]*aria-label="結果を残す"/);
   assert.doesNotMatch(closed, /相談本文ZZZ|textarea/);
   const sent = renderToStaticMarkup(createElement(SenpaiFieldReportForm, {
     conversationId, turn, onSent() {},

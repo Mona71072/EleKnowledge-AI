@@ -1,5 +1,6 @@
 import { KnowledgeResearchError, normalizeStoredResearchAnswer } from './knowledge-research.mjs';
 import { normalizeSavedModelType } from './knowledge-senpai-chat.mjs';
+import { normalizeSenpaiResearchResult } from './knowledge-senpai-research.mjs';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
@@ -8,7 +9,10 @@ const MAX_MESSAGES = 1_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MODES = ['normal', 'law'];
 const SYNTHESIS_MODE = 'senpai_synthesis';
+const RESEARCH_MODE = 'senpai_research';
 const MAX_SYNTHESIS_LENGTH = 32_000;
+const MAX_RESEARCH_LENGTH = 64_000;
+const RESEARCH_LANE_MESSAGE = 'この相談は調査ジョブで実行されたため、技術KB・法令KBの個別回答はありません。続けるには新しい相談を始めてください';
 
 function fail(code, message) {
   throw new KnowledgeResearchError(code, message);
@@ -44,11 +48,11 @@ function validateSession(item) {
 function validateMessage(row, conversationId) {
   if (!row || typeof row !== 'object' || row.senpaiConversationId !== conversationId
     || !UUID.test(row.senpaiTurnId) || !['user', 'assistant'].includes(row.role)
-    || !MODES.includes(row.ragMode) || typeof row.sessionId !== 'string' || !row.sessionId.trim() || row.sessionId.length > 128
+    || !(MODES.includes(row.ragMode) || row.ragMode === RESEARCH_MODE) || typeof row.sessionId !== 'string' || !row.sessionId.trim() || row.sessionId.length > 128
     || typeof row.messageId !== 'string' || !row.messageId.trim() || row.messageId.length > 128
     || typeof row.userId !== 'string' || !row.userId.trim() || row.userId.length > 256
-    || typeof row.content !== 'string' || row.content.length > 32_000 || !validIso(row.timestamp)
-    || !Number.isSafeInteger(row.ttl) || row.ttl < 0) {
+    || typeof row.content !== 'string' || row.content.length > (row.ragMode === RESEARCH_MODE ? MAX_RESEARCH_LENGTH : 32_000)
+    || !validIso(row.timestamp) || !Number.isSafeInteger(row.ttl) || row.ttl < 0) {
     fail('invalid_response', '相談履歴の発言を安全に読み込めませんでした');
   }
 }
@@ -72,6 +76,15 @@ function savedSynthesis(row) {
     status: 'success', content: row.content, messageId: row.messageId,
     ...(validInputs ? { inputs: { normal: inputs.normal, law: inputs.law, knowhowCount: inputs.knowhowCount } } : {}),
   };
+}
+
+/** The saved research answer of one turn: the status `result` object, stored under `researchResult`. */
+function savedResearchResult(row) {
+  try {
+    return normalizeSenpaiResearchResult(row.researchResult);
+  } catch {
+    return fail('invalid_response', '相談履歴の調査結果を安全に読み込めませんでした');
+  }
 }
 
 async function requestJson({ baseUrl, getToken, fetchImpl, signal, timeoutMs, path }) {
@@ -164,13 +177,13 @@ export async function readSenpaiConversation({ baseUrl, getToken, fetchImpl = fe
     if (messageIds.has(row.messageId)) fail('invalid_response', '相談履歴に重複した発言があります');
     messageIds.add(row.messageId);
     if (row.ragMode === SYNTHESIS_MODE) {
-      const owner = groups.get(row.senpaiTurnId) || { senpaiTurnId: row.senpaiTurnId, byMode: { normal: {}, law: {} }, firstTime: row.timestamp };
+      const owner = groups.get(row.senpaiTurnId) || { senpaiTurnId: row.senpaiTurnId, byMode: { normal: {}, law: {}, [RESEARCH_MODE]: {} }, firstTime: row.timestamp };
       if (owner.synthesis) fail('invalid_response', '相談履歴のまとめが重複しています');
       owner.synthesis = row;
       groups.set(row.senpaiTurnId, owner);
       continue;
     }
-    const group = groups.get(row.senpaiTurnId) || { senpaiTurnId: row.senpaiTurnId, byMode: { normal: {}, law: {} }, firstTime: row.timestamp };
+    const group = groups.get(row.senpaiTurnId) || { senpaiTurnId: row.senpaiTurnId, byMode: { normal: {}, law: {}, [RESEARCH_MODE]: {} }, firstTime: row.timestamp };
     if (row.timestamp < group.firstTime) group.firstTime = row.timestamp;
     const lane = group.byMode[row.ragMode];
     if (lane[row.role]) fail('invalid_response', '相談履歴の発言が重複しています');
@@ -180,7 +193,9 @@ export async function readSenpaiConversation({ baseUrl, getToken, fetchImpl = fe
   const ordered = [...groups.values()].sort((a, b) => a.firstTime.localeCompare(b.firstTime));
   const seenQueries = new Set();
   let complete = data.complete;
-  const turns = ordered.map((group, index) => {
+  const rawTurns = ordered.map((group, index) => {
+    const research = group.byMode[RESEARCH_MODE];
+    if (research.user || research.assistant) return researchTurn(group, research, index, seenQueries);
     const userRows = MODES.map((mode) => group.byMode[mode].user).filter(Boolean);
     if (userRows.length === 0 || new Set(userRows.map((row) => row.content)).size !== 1) {
       fail('invalid_response', '相談履歴の質問が一致しないため、表示できません');
@@ -211,5 +226,27 @@ export async function readSenpaiConversation({ baseUrl, getToken, fetchImpl = fe
     }
     return turn;
   });
+  // A research question whose job never saved an answer has nothing to show, so its slot is dropped.
+  const turns = rawTurns.filter(Boolean).map((turn, index) => ({ ...turn, id: index + 1 }));
   return { conversationId, turns, complete };
+
+  function researchTurn(group, research, index, seen) {
+    if (MODES.some((mode) => group.byMode[mode].user || group.byMode[mode].assistant)) {
+      fail('invalid_response', '相談履歴の調査結果と個別回答が混在しているため、表示できません');
+    }
+    if (!research.assistant) return null;
+    // The question is the saved user row; step events and debug are never stored.
+    const query = typeof research.user?.content === 'string' ? research.user.content.trim() : '';
+    if (!query || Array.from(query).length > 2_000 || seen.has(`${group.senpaiTurnId}\0${query}`)) {
+      fail('invalid_response', '相談履歴の質問を確認できませんでした');
+    }
+    seen.add(`${group.senpaiTurnId}\0${query}`);
+    const modelType = normalizeSavedModelType(research.assistant.modelType);
+    return {
+      id: index + 1, senpaiTurnId: group.senpaiTurnId, ...(modelType ? { modelType } : {}), query,
+      research: { status: 'completed', steps: [], result: savedResearchResult(research.assistant) },
+      normal: { status: 'paused', message: RESEARCH_LANE_MESSAGE },
+      law: { status: 'paused', message: RESEARCH_LANE_MESSAGE },
+    };
+  }
 }

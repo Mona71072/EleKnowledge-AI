@@ -1,4 +1,6 @@
 import { KnowledgeResearchError } from './knowledge-research.mjs';
+import { mergeResearchSteps, normalizeSenpaiResearchResult } from './knowledge-senpai-research.mjs';
+import { composeClarifyQuestion } from './knowledge-senpai-research-view.mjs';
 
 const MODES = ['normal', 'law'];
 const MAX_QUERY_LENGTH = 2_000;
@@ -6,6 +8,9 @@ const MAX_RESTORED_TURNS = 500;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const LANE_STATUSES = new Set(['success', 'error', 'cancelled', 'paused']);
 const MAX_SYNTHESIS_LENGTH = 32_000;
+const RESEARCH_LANE_MESSAGE = 'この相談は調査ジョブで実行されたため、技術KB・法令KBの個別回答はありません。続けるには新しい相談を始めてください';
+const RESEARCH_FAILED_MESSAGE = '調査に失敗しました。時間をおいて再度お試しください';
+const RESEARCH_SETTLED = new Set(['completed', 'failed', 'cancelled']);
 
 function chatError(message) {
   return new KnowledgeResearchError('validation', message);
@@ -50,7 +55,32 @@ function cloneTurn(turn) {
     normal: Object.freeze({ ...turn.normal, ...(turn.normal.answer ? { answer: freezeCopy(turn.normal.answer) } : {}) }),
     law: Object.freeze({ ...turn.law, ...(turn.law.answer ? { answer: freezeCopy(turn.law.answer) } : {}) }),
     ...(turn.synthesis ? { synthesis: freezeCopy(turn.synthesis) } : {}),
+    ...(turn.research ? { research: freezeCopy(turn.research) } : {}),
+    ...(turn.supplement ? { supplement: turn.supplement, supplementOf: turn.supplementOf } : {}),
   });
+}
+
+function researchLane() {
+  return { status: 'paused', message: RESEARCH_LANE_MESSAGE };
+}
+
+/** A saved research answer: only the validated result is restored; step events are never saved. */
+function restoreResearchTurn(turn, id, modelType) {
+  const research = turn.research;
+  if (!research || typeof research !== 'object' || research.status !== 'completed') {
+    throw chatError('相談履歴の調査結果を確認できないため、復元できません');
+  }
+  let result;
+  try {
+    result = normalizeSenpaiResearchResult(research.result);
+  } catch {
+    throw chatError('相談履歴の調査結果を確認できないため、復元できません');
+  }
+  return {
+    id, senpaiTurnId: turn.senpaiTurnId, ...(modelType ? { modelType } : {}), query: turn.query,
+    research: { status: 'completed', steps: [], result },
+    normal: researchLane(), law: researchLane(),
+  };
 }
 
 function defaultCreateId() {
@@ -80,6 +110,11 @@ function validateRestore(input) {
       throw chatError('相談履歴の質問識別情報を確認できないため、復元できません');
     }
     turnIds.add(turn.senpaiTurnId);
+    if (turn.research !== undefined) {
+      const savedId = Number.isSafeInteger(turn.id) && turn.id > 0 ? turn.id : index + 1;
+      if (savedId >= nextTurnId) nextTurnId = savedId + 1;
+      return restoreResearchTurn(turn, savedId, normalizeSavedModelType(turn.modelType));
+    }
     for (const mode of MODES) {
       const lane = turn[mode];
       if (!lane || !LANE_STATUSES.has(lane.status)) {
@@ -134,9 +169,15 @@ function validateRestore(input) {
   return { conversationId: input.conversationId, complete: input.complete, turns: restored, sessions, pausedReasons, nextTurnId };
 }
 
-/** Manage isolated technical/law sessions and restore server-backed Senpai history. */
-export function createSenpaiChat({ querySource, synthesisSource, onChange = () => {}, createId = defaultCreateId }) {
-  if (typeof querySource !== 'function') throw chatError('検索サービスの設定を確認してください');
+/**
+ * Manage isolated technical/law sessions and restore server-backed Senpai history.
+ * With `researchSource`, a sent question runs one research job (steps, then one unified answer)
+ * instead of the two lanes.
+ */
+export function createSenpaiChat({
+  querySource, synthesisSource, researchSource, onChange = () => {}, createId = defaultCreateId, now = Date.now,
+}) {
+  if (typeof querySource !== 'function' && typeof researchSource !== 'function') throw chatError('検索サービスの設定を確認してください');
   if (typeof createId !== 'function') throw chatError('相談履歴の識別情報を作成できませんでした');
 
   let turns = [];
@@ -222,6 +263,65 @@ export function createSenpaiChat({ querySource, synthesisSource, onChange = () =
     notify();
   }
 
+  function updateResearch(run, change) {
+    if (!isCurrent(run)) return;
+    turns = turns.map((turn) => (turn.id === run.turnId && turn.research ? { ...turn, research: change(turn.research) } : turn));
+    notify();
+  }
+
+  function applyResearchUpdate(research, update) {
+    if (RESEARCH_SETTLED.has(research.status)) return research;
+    const steps = mergeResearchSteps(research.steps, update.steps);
+    const running = update.status === 'running' || steps.length > 0 || research.status === 'running';
+    return { ...research, jobId: update.jobId ?? research.jobId, steps, status: running ? 'running' : 'queued' };
+  }
+
+  function applyResearchFinal(research, final) {
+    const done = { ...research, jobId: final.jobId ?? research.jobId, steps: mergeResearchSteps(research.steps, final.steps), endedAt: now() };
+    if (final.status === 'completed' && final.result) {
+      return { ...done, status: 'completed', result: final.result, ...(final.debug ? { debug: final.debug } : {}) };
+    }
+    const error = final.status === 'failed' && final.error
+      ? final.error : { code: 'ClientError', message: RESEARCH_FAILED_MESSAGE };
+    return { ...done, status: 'failed', error, ...(final.debug ? { debug: final.debug } : {}) };
+  }
+
+  async function sendResearch(run, query, modelType, supplement) {
+    turns = [...turns, {
+      id: run.turnId, senpaiTurnId: run.senpaiTurnId, query,
+      ...(supplement ?? {}),
+      ...(modelType ? { modelType } : {}),
+      research: { status: 'queued', steps: [], startedAt: now() },
+      normal: researchLane(), law: researchLane(),
+    }];
+    active = run;
+    running = true;
+    notify();
+    try {
+      const final = await researchSource({
+        question: query,
+        ...(modelType ? { modelType } : {}),
+        senpaiConversationId: conversationId,
+        senpaiTurnId: run.senpaiTurnId,
+        clientRequestId: createId(),
+        signal: run.controller.signal,
+        onUpdate: (update) => updateResearch(run, (research) => applyResearchUpdate(research, update)),
+      });
+      updateResearch(run, (research) => (RESEARCH_SETTLED.has(research.status) ? research : applyResearchFinal(research, final || {})));
+    } catch (error) {
+      const cancelled = run.controller.signal.aborted || error?.code === 'cancelled';
+      const message = error instanceof KnowledgeResearchError && !cancelled ? error.message : RESEARCH_FAILED_MESSAGE;
+      updateResearch(run, (research) => (RESEARCH_SETTLED.has(research.status) ? research : cancelled
+        ? { ...research, status: 'cancelled', endedAt: now() }
+        : { ...research, status: 'failed', endedAt: now(), error: { code: 'ClientError', message } }));
+    }
+    if (isCurrent(run)) {
+      running = false;
+      active = null;
+      notify();
+    }
+  }
+
   async function send(query, options = {}) {
     if (disposed) return;
     if (running) throw chatError('回答を待ってから、次の質問を送信してください');
@@ -243,6 +343,16 @@ export function createSenpaiChat({ querySource, synthesisSource, onChange = () =
     conversationId = nextConversationId;
     const turnId = nextTurnId++;
     const run = { turnId, senpaiTurnId, generation, controller: new AbortController() };
+    if (typeof researchSource === 'function') {
+      // A reply right after a clarify result is searched together with the question it answers.
+      const previous = turns.at(-1);
+      const answering = !options?.fresh && previous?.research?.status === 'completed'
+        && previous.research.result?.kind === 'clarify';
+      await sendResearch(run, answering ? composeClarifyQuestion(previous.query, normalizedQuery) : normalizedQuery,
+        modelType ?? (answering ? previous.modelType : undefined),
+        answering ? { supplement: normalizedQuery, supplementOf: previous.query } : undefined);
+      return;
+    }
     turns = [...turns, {
       id: turnId, senpaiTurnId, query: normalizedQuery,
       ...(modelType ? { modelType } : {}),
@@ -325,6 +435,10 @@ export function createSenpaiChat({ querySource, synthesisSource, onChange = () =
     pausedReasons = { ...pausedReasons };
     turns = turns.map((turn) => {
       if (turn.id !== run.turnId) return turn;
+      if (turn.research) {
+        return RESEARCH_SETTLED.has(turn.research.status)
+          ? turn : { ...turn, research: { ...turn.research, status: 'cancelled', endedAt: now() } };
+      }
       const next = { ...turn };
       for (const mode of MODES) if (next[mode].status === 'loading') {
         pausedReasons[mode] = message;
