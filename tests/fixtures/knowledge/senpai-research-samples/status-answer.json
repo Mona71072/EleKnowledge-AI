@@ -1,0 +1,310 @@
+{
+  "body": {
+    "debug": {
+      "budget": {
+        "elapsedMaxMs": 60000,
+        "elapsedMs": 499,
+        "modelCallsMax": 4,
+        "modelCallsUsed": 3,
+        "searchesMax": 6,
+        "searchesUsed": 4
+      },
+      "queries": {
+        "knowhow": "ドア 異音",
+        "law": [
+          "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか",
+          "昇降機 構造 基準"
+        ],
+        "tech": [
+          "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか TI-2024-017",
+          "AXIEZ-LINKs ドア 開閉 異音"
+        ]
+      },
+      "tools": [
+        {
+          "filters": {
+            "modelType": "AXIEZ-LINKs"
+          },
+          "hits": 2,
+          "ms": 50,
+          "query": "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか TI-2024-017",
+          "selected": 2,
+          "seq": 5,
+          "tool": "tech_search",
+          "topScores": [
+            0.82,
+            0.64
+          ]
+        },
+        {
+          "filters": {
+            "modelType": "AXIEZ-LINKs"
+          },
+          "hits": 2,
+          "ms": 50,
+          "query": "AXIEZ-LINKs ドア 開閉 異音",
+          "selected": 2,
+          "seq": 5,
+          "tool": "tech_search",
+          "topScores": [
+            0.82,
+            0.64
+          ]
+        },
+        {
+          "filters": {},
+          "hits": 1,
+          "ms": 50,
+          "query": "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか",
+          "selected": 1,
+          "seq": 7,
+          "tool": "law_search",
+          "topScores": [
+            0.71
+          ]
+        },
+        {
+          "filters": {},
+          "hits": 1,
+          "ms": 49,
+          "query": "昇降機 構造 基準",
+          "selected": 1,
+          "seq": 7,
+          "tool": "law_search",
+          "topScores": [
+            0.71
+          ]
+        }
+      ],
+      "understandingRaw": {
+        "controlMethod": null,
+        "fallback": false,
+        "intent": "cause",
+        "lawRelevant": true,
+        "missing": [],
+        "modelType": "AXIEZ-LINKs",
+        "part": "ドア",
+        "queries": {
+          "knowhow": "ドア 異音",
+          "law": "昇降機 構造 基準",
+          "tech": "AXIEZ-LINKs ドア 開閉 異音"
+        },
+        "situation": "開閉時",
+        "symptom": "異音"
+      }
+    },
+    "jobId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "pollAfterMs": 0,
+    "result": {
+      "answerMarkdown": "## 結論の候補\nドアの調整状態を確認してください[T1][T2]。\n\n## 技術資料から\n戸の開閉調整の手順が記載されています[T1]。\n\n## 法令から\n昇降機の構造は政令で定める基準によります[L1]。\n\n## ノウハウ（未承認・参考）\n同機種の事例[K1]。別機種の事例[K2]（機種が異なる可能性があります）。\n\n## 食い違い・不足\n階数と製造年が不明です。\n\n## 次に確認すること\n異音が出るタイミング。",
+      "clarifyQuestions": [],
+      "kind": "answer",
+      "sources": {
+        "knowhow": {
+          "candidates": [
+            {
+              "cardVersion": 2,
+              "knowledgeId": "KH-GEN-003",
+              "title": "ドア全般の点検メモ"
+            }
+          ],
+          "used": [
+            {
+              "cardVersion": 2,
+              "knowledgeId": "KH-AX-001",
+              "modelFit": "matched",
+              "ref": "K1",
+              "status": "draft",
+              "title": "ドア開閉時の異音"
+            },
+            {
+              "cardVersion": 2,
+              "knowledgeId": "KH-NX-014",
+              "modelFit": "other_product",
+              "ref": "K2",
+              "status": "draft",
+              "title": "戸の擦り音（別機種）"
+            }
+          ]
+        },
+        "law": [
+          {
+            "effectiveDate": "2025-04-01",
+            "lawTitle": "建築基準法",
+            "provision": "第三十五条",
+            "ref": "L1",
+            "sourceUrl": "https://laws.e-gov.go.jp/第三十五条"
+          }
+        ],
+        "tech": [
+          {
+            "documentName": "TI-1.pdf",
+            "pageNumber": 3,
+            "ref": "T1",
+            "sourceUri": "s3://kb-docs-bucket/docs/TI-1.pdf",
+            "title": "TI-1.pdf"
+          },
+          {
+            "documentName": "TI-2.pdf",
+            "pageNumber": 5,
+            "ref": "T2",
+            "sourceUri": "s3://kb-docs-bucket/docs/TI-2.pdf",
+            "title": "TI-2.pdf"
+          }
+        ]
+      },
+      "stopReason": "sufficient",
+      "understanding": {
+        "controlMethod": null,
+        "intent": "cause",
+        "lawRelevant": true,
+        "modelType": "AXIEZ-LINKs",
+        "part": "ドア",
+        "situation": "開閉時",
+        "symptom": "異音"
+      },
+      "unverifiedRefs": [
+        "T9"
+      ]
+    },
+    "status": "completed",
+    "steps": [
+      {
+        "endedAt": null,
+        "labelJa": "質問を整理中",
+        "seq": 1,
+        "startedAt": "2027-01-15T08:00:01Z",
+        "status": "running",
+        "step": "understand"
+      },
+      {
+        "detailJa": "AXIEZ-LINKs / ドア / 異音 / 開閉時",
+        "endedAt": "2027-01-15T08:00:02Z",
+        "labelJa": "質問を整理中",
+        "seq": 2,
+        "startedAt": "2027-01-15T08:00:01Z",
+        "status": "done",
+        "step": "understand"
+      },
+      {
+        "endedAt": null,
+        "labelJa": "ノウハウを確認中",
+        "seq": 3,
+        "startedAt": "2027-01-15T08:00:03Z",
+        "status": "running",
+        "step": "knowhow"
+      },
+      {
+        "counts": {
+          "documents": 3,
+          "hits": 3,
+          "selected": 3
+        },
+        "detailJa": "3件の事例メモ",
+        "endedAt": "2027-01-15T08:00:04Z",
+        "labelJa": "ノウハウを確認中",
+        "seq": 4,
+        "startedAt": "2027-01-15T08:00:03Z",
+        "status": "done",
+        "step": "knowhow"
+      },
+      {
+        "detailJa": "『AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要です』など2件の検索語で検索",
+        "endedAt": null,
+        "labelJa": "技術資料を検索中",
+        "seq": 5,
+        "startedAt": "2027-01-15T08:00:05Z",
+        "status": "running",
+        "step": "tech_search"
+      },
+      {
+        "counts": {
+          "documents": 2,
+          "hits": 4,
+          "selected": 2
+        },
+        "detailJa": "『AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要です』など2件の検索語で検索",
+        "endedAt": "2027-01-15T08:00:06Z",
+        "labelJa": "技術資料を検索中",
+        "seq": 6,
+        "startedAt": "2027-01-15T08:00:05Z",
+        "status": "done",
+        "step": "tech_search"
+      },
+      {
+        "detailJa": "『AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要です』など2件の検索語で検索",
+        "endedAt": null,
+        "labelJa": "法令を確認中",
+        "seq": 7,
+        "startedAt": "2027-01-15T08:00:07Z",
+        "status": "running",
+        "step": "law_search"
+      },
+      {
+        "counts": {
+          "documents": 1,
+          "hits": 2,
+          "selected": 1
+        },
+        "detailJa": "『AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要です』など2件の検索語で検索",
+        "endedAt": "2027-01-15T08:00:08Z",
+        "labelJa": "法令を確認中",
+        "seq": 8,
+        "startedAt": "2027-01-15T08:00:07Z",
+        "status": "done",
+        "step": "law_search"
+      },
+      {
+        "endedAt": null,
+        "labelJa": "足りない点を確認中",
+        "seq": 9,
+        "startedAt": "2027-01-15T08:00:09Z",
+        "status": "running",
+        "step": "sufficiency"
+      },
+      {
+        "detailJa": "十分な根拠が揃っています",
+        "endedAt": "2027-01-15T08:00:10Z",
+        "labelJa": "足りない点を確認中",
+        "seq": 10,
+        "startedAt": "2027-01-15T08:00:09Z",
+        "status": "done",
+        "step": "sufficiency"
+      },
+      {
+        "endedAt": null,
+        "labelJa": "回答をまとめています",
+        "seq": 11,
+        "startedAt": "2027-01-15T08:00:11Z",
+        "status": "running",
+        "step": "synthesize"
+      },
+      {
+        "endedAt": "2027-01-15T08:00:12Z",
+        "labelJa": "回答をまとめています",
+        "seq": 12,
+        "startedAt": "2027-01-15T08:00:11Z",
+        "status": "done",
+        "step": "synthesize"
+      },
+      {
+        "endedAt": null,
+        "labelJa": "根拠を照合中",
+        "seq": 13,
+        "startedAt": "2027-01-15T08:00:13Z",
+        "status": "running",
+        "step": "verify"
+      },
+      {
+        "detailJa": "実在しない参照 1 件を除去",
+        "endedAt": "2027-01-15T08:00:14Z",
+        "labelJa": "根拠を照合中",
+        "seq": 14,
+        "startedAt": "2027-01-15T08:00:13Z",
+        "status": "done",
+        "step": "verify"
+      }
+    ]
+  },
+  "statusCode": 200
+}

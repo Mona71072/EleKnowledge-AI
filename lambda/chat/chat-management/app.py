@@ -474,9 +474,14 @@ SENPAI_MODEL_TYPES = frozenset({
 })
 
 
+# Lanes whose assistant rows keep the model filter in queryFilters: the normal lane and the
+# research job (ragMode=senpai_research). The law lane never has a model filter.
+SENPAI_MODEL_FILTER_MODES = frozenset({'normal', 'senpai_research'})
+
+
 def _saved_senpai_model_type(row: dict):
-    """Return the saved normal-lane model filter only when it is a known UI key."""
-    if row.get('role') != 'assistant' or (row.get('ragMode') or 'normal') != 'normal':
+    """Return the saved model filter only when it is a known UI key on a lane that has one."""
+    if row.get('role') != 'assistant' or (row.get('ragMode') or 'normal') not in SENPAI_MODEL_FILTER_MODES:
         return None
     filters = row.get('queryFilters')
     value = filters.get('modelType') if isinstance(filters, dict) else None

@@ -845,3 +845,146 @@ def test_senpai_list_counts_turns_not_synthesis_rows():
     sessions = json.loads(response["body"])["sessions"]
     assert sessions[0]["messageCount"] == 1
     assert sessions[0]["title"] == "最初の質問"
+
+
+# ---------------------------------------------------------------- 調査ジョブ（senpai_research）の行
+
+RESEARCH_TURN = "77777777-7777-4777-8777-777777777777"
+RESEARCH_JOB = "88888888-8888-4888-8888-888888888888"
+RESEARCH_RESULT = {
+    "kind": "answer",
+    "answerMarkdown": "## 結論の候補\nドアの調整[T1]",
+    "clarifyQuestions": [],
+    "sources": {
+        "tech": [{"ref": "T1", "title": "TI-1", "documentName": "TI-1.pdf", "pageNumber": 3,
+                  "sourceUri": "s3://kb/docs/TI-1.pdf"}],
+        "law": [],
+        "knowhow": {"used": [], "candidates": [{"knowledgeId": "KH-1", "cardVersion": 2, "title": "事例"}]},
+    },
+    "understanding": {"modelType": "AXIEZ-LINKs", "intent": "cause", "lawRelevant": False},
+    "unverifiedRefs": [],
+    "stopReason": "sufficient",
+}
+
+
+def _research_rows(turn_id=RESEARCH_TURN, job_id=RESEARCH_JOB, model_filter=True):
+    base = {
+        "sessionId": f"senpai-research-{job_id}",
+        "userId": "owner-1",
+        "ragMode": "senpai_research",
+        "ttl": 1_800_000_000,
+        "senpaiConversationId": "11111111-1111-4111-8111-111111111111",
+        "senpaiTurnId": turn_id,
+    }
+    user = {**base, "messageId": f"senpai-research-q-{job_id}", "role": "user",
+            "content": "調査の質問", "timestamp": "2026-10-20T02:00:00Z"}
+    assistant = {**base, "messageId": f"senpai-research-a-{job_id}", "role": "assistant",
+                 "content": RESEARCH_RESULT["answerMarkdown"], "timestamp": "2026-10-20T02:00:30Z",
+                 "responseType": "pages", "clarifyQuestions": [], "researchResult": RESEARCH_RESULT}
+    if model_filter:
+        assistant["queryFilters"] = {"modelType": "AXIEZ-LINKs"}
+    return user, assistant
+
+
+def _senpai_detail(mod):
+    return mod.lambda_handler(
+        _chat_event(
+            "/chat/sessions/11111111-1111-4111-8111-111111111111/messages",
+            qs={"context": "senpai"},
+            path_params={"sessionId": "11111111-1111-4111-8111-111111111111"},
+        ), None
+    )
+
+
+def test_research_rows_never_appear_in_ordinary_session_list():
+    mod, table = _load_chat_app()
+    regular = _tagged_message("regular-1")
+    regular.pop("senpaiConversationId")
+    regular.pop("senpaiTurnId")
+    table.query.return_value = {"Items": [*_research_rows(), regular]}
+
+    response = mod.lambda_handler(_chat_event("/chat/sessions"), None)
+
+    assert response["statusCode"] == 200
+    sessions = json.loads(response["body"])["sessions"]
+    assert [row["sessionId"] for row in sessions] == ["regular-1"]
+
+
+def test_non_admin_cannot_read_research_session_through_generic_detail_route():
+    mod, table = _load_chat_app()
+    table.query.return_value = {"Items": list(_research_rows())}
+
+    response = mod.lambda_handler(
+        _chat_event(
+            f"/chat/sessions/senpai-research-{RESEARCH_JOB}/messages",
+            sub="owner-1", groups="users",
+            path_params={"sessionId": f"senpai-research-{RESEARCH_JOB}"},
+        ), None
+    )
+
+    assert response["statusCode"] == 404
+
+
+def test_senpai_detail_restores_research_answer_and_sources_with_its_question():
+    mod, table = _load_chat_app()
+    table.query.return_value = {"Items": list(reversed(_research_rows()))}
+
+    response = _senpai_detail(mod)
+
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 200 and body["complete"] is True
+    assert [(row["role"], row["ragMode"]) for row in body["messages"]] == [
+        ("user", "senpai_research"), ("assistant", "senpai_research")]
+    answer = body["messages"][1]
+    assert answer["content"] == RESEARCH_RESULT["answerMarkdown"]
+    assert answer["researchResult"]["sources"]["tech"][0]["documentName"] == "TI-1.pdf"
+    assert answer["researchResult"]["sources"]["knowhow"]["candidates"][0]["knowledgeId"] == "KH-1"
+    assert answer["researchResult"]["stopReason"] == "sufficient"
+    assert "steps" not in answer and "researchResult" in answer  # 段階イベントは復元しない
+
+
+def test_senpai_detail_exposes_saved_model_type_of_research_answer():
+    mod, table = _load_chat_app()
+    table.query.return_value = {"Items": list(_research_rows())}
+
+    body = json.loads(_senpai_detail(mod)["body"])
+
+    assistant = next(row for row in body["messages"] if row["role"] == "assistant")
+    assert assistant["modelType"] == "AXIEZ-LINKs"
+
+
+def test_research_answer_without_model_filter_has_no_model_type():
+    mod, table = _load_chat_app()
+    table.query.return_value = {"Items": list(_research_rows(model_filter=False))}
+
+    body = json.loads(_senpai_detail(mod)["body"])
+
+    assert all("modelType" not in row for row in body["messages"])
+
+
+def test_research_turn_and_two_lane_turn_coexist_in_one_conversation():
+    mod, table = _load_chat_app()
+    table.query.return_value = {"Items": [
+        _tagged_message(role="user", content="二レーンの質問"),
+        _tagged_message(role="assistant", content="技術回答", timestamp="2026-10-20T01:01:00Z"),
+        *_research_rows(),
+    ]}
+
+    body = json.loads(_senpai_detail(mod)["body"])
+
+    assert body["complete"] is True
+    assert [row["ragMode"] for row in body["messages"]] == [
+        "normal", "normal", "senpai_research", "senpai_research"]
+
+
+def test_senpai_list_counts_research_turn_and_uses_its_question_as_title():
+    mod, table = _load_chat_app()
+    table.query.return_value = {"Items": list(_research_rows())}
+
+    response = mod.lambda_handler(
+        _chat_event("/chat/sessions", qs={"context": "senpai"}), None
+    )
+
+    sessions = json.loads(response["body"])["sessions"]
+    assert sessions[0]["messageCount"] == 1
+    assert sessions[0]["title"] == "調査の質問"

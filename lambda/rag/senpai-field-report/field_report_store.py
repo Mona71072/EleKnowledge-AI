@@ -86,26 +86,64 @@ def _product_scope(scope: dict) -> list:
     return seen
 
 
+def _card_key(entry):
+    try:
+        return str(entry["knowledgeId"]), int(entry["cardVersion"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _normal_cards(row: dict) -> dict:
+    """Cards of a two-lane technical answer: the saved match payload carries the card scope."""
+    knowhow = row.get("knowhow")
+    matches = knowhow.get("matches") if isinstance(knowhow, dict) else None
+    cards = {}
+    for match in matches or []:
+        key = _card_key(match) if isinstance(match, dict) else None
+        if key is None:
+            continue
+        scope = match.get("modelScope") if isinstance(match.get("modelScope"), dict) else {}
+        cards[key] = {
+            "cardScopeStatus": "verified" if scope.get("scope_status") == "verified" else "unverified",
+            "cardProductScope": _product_scope(scope),
+        }
+    return cards
+
+
+def _research_cards(row: dict) -> dict:
+    """Cards shown with a research answer (result.sources.knowhow used + candidates).
+
+    The saved result keeps no card scope, so these are always 'unverified' with an empty product
+    scope. modelFit is deliberately not turned into a scope: it is a per-answer judgement against
+    the model chosen then, not a person-verified property of the card.
+    """
+    result = row.get("researchResult")
+    sources = result.get("sources") if isinstance(result, dict) else None
+    knowhow = sources.get("knowhow") if isinstance(sources, dict) else None
+    if not isinstance(knowhow, dict):
+        return {}
+    cards = {}
+    for field in ("used", "candidates"):
+        entries = knowhow.get(field)
+        for entry in entries if isinstance(entries, list) else []:
+            key = _card_key(entry) if isinstance(entry, dict) else None
+            if key is not None:
+                cards[key] = {"cardScopeStatus": "unverified", "cardProductScope": []}
+    return cards
+
+
 def referenced_cards(rows: list) -> dict:
     """Map (knowledgeId, cardVersion) to the card scope saved with this turn's technical answers."""
     cards = {}
     for row in rows:
-        if row.get("role") != "assistant" or (row.get("ragMode") or "normal") != "normal":
+        if row.get("role") != "assistant":
             continue
-        knowhow = row.get("knowhow")
-        matches = knowhow.get("matches") if isinstance(knowhow, dict) else None
-        for match in matches or []:
-            if not isinstance(match, dict):
-                continue
-            try:
-                key = (str(match["knowledgeId"]), int(match["cardVersion"]))
-            except (KeyError, TypeError, ValueError):
-                continue
-            scope = match.get("modelScope") if isinstance(match.get("modelScope"), dict) else {}
-            cards[key] = {
-                "cardScopeStatus": "verified" if scope.get("scope_status") == "verified" else "unverified",
-                "cardProductScope": _product_scope(scope),
-            }
+        mode = row.get("ragMode") or "normal"
+        if mode == "normal":
+            cards.update(_normal_cards(row))
+        elif mode == "senpai_research":
+            # Never downgrade a card whose scope a person verified.
+            cards = {**_research_cards(row), **cards}
     return cards
 
 

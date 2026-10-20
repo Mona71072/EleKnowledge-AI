@@ -1,0 +1,8 @@
+{
+  "body": {
+    "jobId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "pollAfterMs": 1500,
+    "status": "queued"
+  },
+  "statusCode": 202
+}

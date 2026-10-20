@@ -1,0 +1,115 @@
+{
+  "body": {
+    "complete": true,
+    "context": "senpai",
+    "conversationId": "11111111-1111-4111-8111-111111111111",
+    "messages": [
+      {
+        "content": "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか",
+        "daysUntilDeletion": 60,
+        "messageId": "senpai-research-q-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "ragMode": "senpai_research",
+        "role": "user",
+        "senpaiConversationId": "11111111-1111-4111-8111-111111111111",
+        "senpaiTurnId": "22222222-2222-4222-8222-222222222222",
+        "sessionId": "senpai-research-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "timestamp": "2027-01-15T08:00:00Z",
+        "ttl": 4102444800.0,
+        "userId": "owner-1"
+      },
+      {
+        "clarifyQuestions": [],
+        "content": "## 結論の候補\nドアの調整状態を確認してください[T1][T2]。\n\n## 技術資料から\n戸の開閉調整の手順が記載されています[T1]。\n\n## 法令から\n昇降機の構造は政令で定める基準によります[L1]。\n\n## ノウハウ（未承認・参考）\n同機種の事例[K1]。別機種の事例[K2]（機種が異なる可能性があります）。\n\n## 食い違い・不足\n階数と製造年が不明です。\n\n## 次に確認すること\n異音が出るタイミング。",
+        "daysUntilDeletion": 60,
+        "messageId": "senpai-research-a-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "modelType": "AXIEZ-LINKs",
+        "queryFilters": {
+          "modelType": "AXIEZ-LINKs"
+        },
+        "ragMode": "senpai_research",
+        "researchResult": {
+          "answerMarkdown": "## 結論の候補\nドアの調整状態を確認してください[T1][T2]。\n\n## 技術資料から\n戸の開閉調整の手順が記載されています[T1]。\n\n## 法令から\n昇降機の構造は政令で定める基準によります[L1]。\n\n## ノウハウ（未承認・参考）\n同機種の事例[K1]。別機種の事例[K2]（機種が異なる可能性があります）。\n\n## 食い違い・不足\n階数と製造年が不明です。\n\n## 次に確認すること\n異音が出るタイミング。",
+          "clarifyQuestions": [],
+          "kind": "answer",
+          "sources": {
+            "knowhow": {
+              "candidates": [
+                {
+                  "cardVersion": 2.0,
+                  "knowledgeId": "KH-GEN-003",
+                  "title": "ドア全般の点検メモ"
+                }
+              ],
+              "used": [
+                {
+                  "cardVersion": 2.0,
+                  "knowledgeId": "KH-AX-001",
+                  "modelFit": "matched",
+                  "ref": "K1",
+                  "status": "draft",
+                  "title": "ドア開閉時の異音"
+                },
+                {
+                  "cardVersion": 2.0,
+                  "knowledgeId": "KH-NX-014",
+                  "modelFit": "other_product",
+                  "ref": "K2",
+                  "status": "draft",
+                  "title": "戸の擦り音（別機種）"
+                }
+              ]
+            },
+            "law": [
+              {
+                "effectiveDate": "2025-04-01",
+                "lawTitle": "建築基準法",
+                "provision": "第三十五条",
+                "ref": "L1",
+                "sourceUrl": "https://laws.e-gov.go.jp/第三十五条"
+              }
+            ],
+            "tech": [
+              {
+                "documentName": "TI-1.pdf",
+                "pageNumber": 3.0,
+                "ref": "T1",
+                "sourceUri": "s3://kb-docs-bucket/docs/TI-1.pdf",
+                "title": "TI-1.pdf"
+              },
+              {
+                "documentName": "TI-2.pdf",
+                "pageNumber": 5.0,
+                "ref": "T2",
+                "sourceUri": "s3://kb-docs-bucket/docs/TI-2.pdf",
+                "title": "TI-2.pdf"
+              }
+            ]
+          },
+          "stopReason": "sufficient",
+          "understanding": {
+            "controlMethod": null,
+            "intent": "cause",
+            "lawRelevant": true,
+            "modelType": "AXIEZ-LINKs",
+            "part": "ドア",
+            "situation": "開閉時",
+            "symptom": "異音"
+          },
+          "unverifiedRefs": [
+            "T9"
+          ]
+        },
+        "responseType": "pages",
+        "role": "assistant",
+        "senpaiConversationId": "11111111-1111-4111-8111-111111111111",
+        "senpaiTurnId": "22222222-2222-4222-8222-222222222222",
+        "sessionId": "senpai-research-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "timestamp": "2027-01-15T08:05:00Z",
+        "ttl": 4102444800.0,
+        "userId": "owner-1"
+      }
+    ],
+    "readOnly": false
+  },
+  "statusCode": 200
+}

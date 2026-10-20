@@ -1,0 +1,92 @@
+[
+  {
+    "body": {
+      "error": "FeatureUnavailable",
+      "message": "先輩チャットの調査は開発環境の管理者のみ利用できます"
+    },
+    "name": "feature_unavailable",
+    "request": "POST (prod, または無効、または管理者でない)",
+    "statusCode": 403
+  },
+  {
+    "body": {
+      "error": "Unauthorized",
+      "message": "ログインが必要です"
+    },
+    "name": "unauthorized",
+    "request": "POST (sub なし)",
+    "statusCode": 401
+  },
+  {
+    "body": {
+      "error": "ValidationError",
+      "message": "質問と相談の識別情報を確認してください"
+    },
+    "name": "validation_error_post",
+    "request": "POST (question が空)",
+    "statusCode": 400
+  },
+  {
+    "body": {
+      "error": "ValidationError",
+      "message": "afterSeq は 0 以上の整数で指定してください"
+    },
+    "name": "validation_error_after_seq",
+    "request": "GET ?afterSeq=x",
+    "statusCode": 400
+  },
+  {
+    "body": {
+      "error": "JobNotFound",
+      "message": "調査が見つかりません"
+    },
+    "name": "job_not_found",
+    "request": "GET (他人のジョブ・存在しない・UUID でない jobId は同じ)",
+    "statusCode": 404
+  },
+  {
+    "body": {
+      "error": "MethodNotAllowed",
+      "message": "許可されていないメソッドです"
+    },
+    "name": "method_not_allowed",
+    "request": "DELETE",
+    "statusCode": 405
+  },
+  {
+    "body": {
+      "error": "JobInProgress",
+      "message": "前の調査が実行中です。完了してからお試しください"
+    },
+    "name": "job_in_progress",
+    "request": "POST (前のジョブが実行中)",
+    "statusCode": 409
+  },
+  {
+    "body": {
+      "error": "DailyLimitExceeded",
+      "message": "本日の調査回数の上限に達しました"
+    },
+    "name": "daily_limit_exceeded",
+    "request": "POST (1日の上限超過)",
+    "statusCode": 429
+  },
+  {
+    "body": {
+      "error": "StartFailed",
+      "message": "調査を開始できませんでした。時間をおいて再度お試しください"
+    },
+    "name": "start_failed",
+    "request": "POST (ワーカーを起動できない)",
+    "statusCode": 502
+  },
+  {
+    "body": {
+      "error": "InternalError",
+      "message": "処理中にエラーが発生しました"
+    },
+    "name": "internal_error",
+    "request": "POST (想定外の例外)",
+    "statusCode": 500
+  }
+]

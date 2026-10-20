@@ -527,3 +527,115 @@ def test_saved_reports_exported_as_json_reorder_the_scope_review_queue(env, tmp_
     aggregate = (root / "queues" / "scope-review" / "field-reports.json").read_text(encoding="utf-8")
     for secret in (FINDING, CONDITION, USER_ID, TURN_ID, CONVERSATION_ID):
         assert secret not in aggregate and secret not in out.read_text(encoding="utf-8")
+
+
+# --- 調査ジョブ（ragMode=senpai_research）の回答に対する「結果を残す」 ---------------
+
+def _research_assistant(used=(("KH-R1", 2),), candidates=(("KH-R2", 1),), model_type="AXIEZ-LINKs", **extra):
+    def entry(pair, extra_keys):
+        return {"knowledgeId": pair[0], "cardVersion": Decimal(pair[1]), "title": "調査のカード", **extra_keys}
+
+    result = {
+        "kind": "answer", "answerMarkdown": "回答本文ZZZ-ANSWER",
+        "sources": {"tech": [], "law": [], "knowhow": {
+            "used": [{**entry(p, {"ref": f"K{i}", "status": "draft", "modelFit": "matched"})}
+                     for i, p in enumerate(used, start=1)],
+            "candidates": [entry(p, {}) for p in candidates]}},
+        "understanding": {"modelType": model_type},
+    }
+    filters = {"modelType": model_type} if model_type else {}
+    return _row("assistant", "senpai_research", researchResult=result, queryFilters=filters,
+                responseType="pages", **extra)
+
+
+def _research_body(*pairs, **overrides):
+    reactions = [{"knowledgeId": k, "cardVersion": v, "reaction": "not_matched"} for k, v in pairs]
+    return _body(cardReactions=reactions, modelType="AXIEZ-LINKs", **overrides)
+
+
+def test_research_turn_accepts_used_and_candidate_cards(env):
+    app, chatlogs, reports = env
+    _seed(chatlogs, _row("user", "senpai_research", timestamp="2026-10-20T01:00:00Z"), _research_assistant())
+    status, payload = _call(app, _event(_research_body(("KH-R1", 2), ("KH-R2", 1))))
+    assert status == 200
+    item = reports.scan()["Items"][0]
+    reactions = {r["knowledgeId"]: r for r in item["cardReactions"]}
+    assert set(reactions) == {"KH-R1", "KH-R2"}
+    for reaction in reactions.values():
+        # 調査結果には範囲情報が無いので、確認済みとは扱わない
+        assert reaction["cardScopeStatus"] == "unverified"
+        assert reaction["cardProductScope"] == []
+    assert item["turnModelType"] == "AXIEZ-LINKs"
+    assert "ZZZ-ANSWER" not in json.dumps(item, default=str, ensure_ascii=False)
+
+
+@pytest.mark.parametrize("pair", [("KH-OTHER", 1), ("KH-R1", 9)])
+def test_research_turn_rejects_unreferenced_card_or_wrong_version(env, pair):
+    app, chatlogs, reports = env
+    _seed(chatlogs, _research_assistant())
+    status, payload = _call(app, _event(_research_body(pair)))
+    assert status == 400 and payload["error"] == "UnknownCard"
+    assert reports.scan()["Items"] == []
+
+
+def test_research_cards_of_another_turn_cannot_be_borrowed(env):
+    app, chatlogs, _ = env
+    _seed(chatlogs, _research_assistant(used=(), candidates=()),
+          _research_assistant(turn=OTHER_TURN_ID, timestamp="2026-10-20T01:00:09Z"))
+    assert _call(app, _event(_research_body(("KH-R1", 2))))[1]["error"] == "UnknownCard"
+
+
+@pytest.mark.parametrize("result", [None, "text", {"sources": None}, {"sources": {"knowhow": []}},
+                                    {"sources": {"knowhow": {"used": [5, {"knowledgeId": "KH-R1"}],
+                                                             "candidates": "x"}}}])
+def test_malformed_research_result_yields_no_cards_and_does_not_crash(env, result):
+    app, chatlogs, _ = env
+    _seed(chatlogs, _row("assistant", "senpai_research", researchResult=result))
+    assert _call(app, _event(_research_body(("KH-R1", 2))))[1]["error"] == "UnknownCard"
+
+
+def test_research_user_row_cards_are_ignored(env):
+    app, chatlogs, _ = env
+    row = _research_assistant()
+    row["role"] = "user"
+    _seed(chatlogs, row)
+    assert _call(app, _event(_research_body(("KH-R1", 2))))[1]["error"] == "UnknownCard"
+
+
+def test_research_rows_do_not_downgrade_a_verified_normal_card(env):
+    app, _chatlogs, _ = env
+    module = app.field_report_store
+    rows = [_technical(cards=[_card("KH-R1", 2)]), _research_assistant()]
+    assert module.referenced_cards(rows)[("KH-R1", 2)]["cardScopeStatus"] == "verified"
+    assert module.referenced_cards(list(reversed(rows)))[("KH-R1", 2)]["cardScopeStatus"] == "verified"
+
+
+def test_research_turn_report_flows_through_the_scope_review_queue(env, tmp_path):
+    app, chatlogs, reports = env
+    _seed(chatlogs, _research_assistant())
+    assert _call(app, _event(_research_body(("KH-R1", 2))))[0] == 200
+    export = tmp_path / "export.json"
+    items = json.loads(json.dumps(reports.scan()["Items"], default=int, ensure_ascii=False))
+    export.write_text(json.dumps({"items": items}, ensure_ascii=False), encoding="utf-8")
+
+    root = tmp_path / "knowledge"
+    cards = root / "cards" / "practice-guides"
+    cards.mkdir(parents=True)
+    (cards / "KH-R1.md").write_text(
+        "---\nknowledge_id: KH-R1\nkind: practice_guide\nstatus: approved\ntitle: \"調査のカード\"\n"
+        "model_scope:\n  product_lines: [\"AXIEZ\"]\n  scope_status: verified\n"
+        "  scope_verified_by: reviewer\n  scope_verified_at: \"2026-10-20\"\n---\n\n# body\n",
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location(
+        "scope_queue_research", REPO / "scripts" / "knowledge" / "build_scope_review_queue.py")
+    queue_module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = queue_module
+    spec.loader.exec_module(queue_module)
+    out = tmp_path / "QUEUE.md"
+    assert queue_module.main(["--knowledge-root", str(root), "--output", str(out),
+                              "--field-reports", str(export)]) == 0
+    text = out.read_text(encoding="utf-8")
+    row = next(line for line in text.splitlines() if line.startswith("| [KH-R1]"))
+    cells = [cell.strip() for cell in row.split("|")]
+    assert cells[4] == "1"  # 当てはまらなかった（調査の回答に対する報告も数える）
