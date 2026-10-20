@@ -9,10 +9,12 @@ const KNOWHOW_SOURCE_IDS = Object.freeze({
   kb_document: 'document_number',
   law_rag: 'law_id',
 });
+// SYNC: must equal SOURCE_REF_KEYS in knowhow_retrieval.py and build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
 const KNOWHOW_SOURCE_FIELDS = new Set([
   'ref_type', 'source_id', 'list_item_id', 'onenote_id', 'document_number',
   'kb_filename', 'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator',
 ]);
+// SYNC: must equal MODEL_SCOPE_KEYS in knowhow_retrieval.py and build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
 const KNOWHOW_SCOPE_FIELDS = new Set([
   'control_methods', 'door_families', 'door_types', 'excludes', 'guide_systems',
   'lists_model_label', 'machine_room', 'may_apply_to', 'model_abbreviations',

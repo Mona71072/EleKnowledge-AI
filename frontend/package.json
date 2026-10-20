@@ -18,6 +18,7 @@
     "audit:all": "node scripts/check-all-audit.mjs",
     "test:lint-dependencies": "node --test tests/dependencies/*.test.mjs",
     "test:announcements": "node --test tests/announcement-publish.test.mjs",
+    "knowledge:regen-contract-fixture": "node ../scripts/knowledge/regenerate-contract-fixture.mjs",
     "test:safe-next-path": "node --test tests/safe-next-path.test.mjs"
   },
   "dependencies": {

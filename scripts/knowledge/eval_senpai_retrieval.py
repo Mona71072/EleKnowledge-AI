@@ -7,6 +7,11 @@ because the case set is still a draft.
 
 Usage:
     python scripts/knowledge/eval_senpai_retrieval.py --index <path> [--cases <path>]
+    python scripts/knowledge/eval_senpai_retrieval.py --from-cards <repo_root> [--cases <path>]
+
+``--from-cards`` runs ``build-senpai-index.mjs check <repo_root> --eval-index <tmp>`` so the
+eval uses the real build output (never a hand-made index), then deletes the temporary,
+unapproved index. Cards that fail the build check are listed and left out of the eval.
 """
 from __future__ import annotations
 
@@ -14,13 +19,17 @@ import argparse
 import importlib.util
 import inspect
 import json
+import shutil
+import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RETRIEVAL_PATH = REPO_ROOT / "lambda" / "rag" / "rag-function" / "knowhow_retrieval.py"
+BUILD_SCRIPT = REPO_ROOT / "scripts" / "knowledge" / "build-senpai-index.mjs"
 DEFAULT_CASES = REPO_ROOT / "tests" / "fixtures" / "knowledge" / "senpai-eval-cases.json"
 MAX_MATCHES = 3
 
@@ -65,11 +74,45 @@ def evaluate(case: dict, result: dict, notes: list[str]) -> tuple[list[str], lis
     return reasons, ids
 
 
+def build_eval_index(cards_root: Path, index_path: Path) -> None:
+    """Run the real build ``check`` and write a local-only eval index (raises on setup failure)."""
+    node = shutil.which("node")
+    if node is None:
+        raise RuntimeError("node が見つかりません")
+    completed = subprocess.run(
+        [node, str(BUILD_SCRIPT), "check", str(cards_root), "--eval-index", str(index_path)],
+        capture_output=True, text=True, check=False,
+    )
+    sys.stdout.write(completed.stdout)
+    if not index_path.exists():
+        raise RuntimeError(f"評価用索引を作れませんでした: {completed.stderr.strip()[:300]}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Senpai knowhow retrieval eval report (read-only).")
-    parser.add_argument("--index", required=True, type=Path, help="private index JSON (read only)")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--index", type=Path, help="private index JSON (read only)")
+    source.add_argument("--from-cards", type=Path, metavar="REPO_ROOT",
+                        help="build a temporary index from knowledge/cards via the real build check, then delete it")
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES, help="eval case JSON")
     args = parser.parse_args(argv)
+    if args.from_cards is not None:
+        work_dir = Path(tempfile.mkdtemp(prefix="senpai-eval-"))
+        try:
+            index_path = work_dir / "index.json"
+            try:
+                build_eval_index(args.from_cards, index_path)
+            except (OSError, RuntimeError) as exc:
+                print(f"読み込みに失敗: {type(exc).__name__}: {exc}", file=sys.stderr)
+                return 0
+            args.index = index_path
+            return _run(args)
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+    return _run(args)
+
+
+def _run(args: argparse.Namespace) -> int:
     try:
         retrieval = load_retrieval(RETRIEVAL_PATH)
         index = retrieval.parse_index(args.index.read_bytes())

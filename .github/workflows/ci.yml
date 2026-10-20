@@ -48,6 +48,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+      # 全カードが索引生成と同じ検証を通ることを確認する（承認一覧は不要・何も書き出さない）。
+      - name: Check every knowledge card builds
+        run: node scripts/knowledge/build-senpai-index.mjs check .
       # YAML解析・React描画を使うテストも含むため、依存導入後に実行する。
       - name: Run frontend logic tests
         working-directory: frontend

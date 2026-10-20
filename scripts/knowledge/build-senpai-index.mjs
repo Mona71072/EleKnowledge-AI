@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, unlink } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseKnowledgeMarkdown } from '../../frontend/src/lib/knowledge-workbench.mjs';
@@ -20,6 +21,8 @@ const ALLOWED_PREFIXES = [
   `${CARD_ROOT}/practice-guides/`,
 ];
 const SOURCE_REF_TYPES = new Set(['lists_item', 'onenote_page', 'kb_document', 'law_rag']);
+// SYNC: keys must equal SOURCE_REF_KEYS in knowhow_retrieval.py and KNOWHOW_SOURCE_FIELDS in
+// knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 const SOURCE_REF_KEYS = new Set([
   'ref_type', 'list_item_id', 'onenote_id', 'source_id', 'document_number', 'kb_filename',
   'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator',
@@ -30,6 +33,8 @@ const SOURCE_REF_ANNOTATION_KEYS = new Set([
 ]);
 // Free-text ref fields may contain "/" as ordinary notation (e.g. "D14 DCB/DOB").
 const SOURCE_REF_FREE_TEXT_KEYS = new Set(['law_title', 'locator']);
+// SYNC: must equal MODEL_SCOPE_KEYS in knowhow_retrieval.py and KNOWHOW_SCOPE_FIELDS in
+// knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 const MODEL_SCOPE_KEYS = new Set([
   'conditions', 'control_methods', 'door_families', 'door_types', 'excludes', 'guide_systems',
   'lists_model_label', 'machine_room', 'may_apply_to', 'model_abbreviations', 'observed_on',
@@ -37,11 +42,13 @@ const MODEL_SCOPE_KEYS = new Set([
 ]);
 // Only scope fields stating where a card DOES apply become search terms (mirrors
 // POSITIVE_SCOPE_KEYS in knowhow_retrieval.py); excludes / may_apply_to / scope_note never do.
+// SYNC: must equal POSITIVE_SCOPE_KEYS in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
 const POSITIVE_SCOPE_KEYS = new Set([
   'conditions', 'control_methods', 'door_families', 'door_types', 'guide_systems',
   'lists_model_label', 'machine_room', 'model_abbreviations', 'observed_on', 'product_lines',
 ]);
 // Verification marks decide only the Senpai model filter; they are not scoring input or search terms.
+// SYNC: must equal SCOPE_VERIFICATION_KEYS in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
 const SCOPE_VERIFICATION_KEYS = new Set(['scope_status', 'scope_verified_by', 'scope_verified_at']);
 const SCOPE_STATUSES = new Set(['verified', 'unverified']);
 const SCOPE_DATE = /^\d{4}-\d{2}-\d{2}$/u;
@@ -307,6 +314,31 @@ function stableJson(value) {
   return JSON.stringify(value);
 }
 
+function indexCard({ parsed, metadata, sha256 }) {
+  const refs = sourceRefs(metadata);
+  const scope = modelScope(metadata);
+  return {
+    knowledgeId: parsed.id,
+    cardVersion: parsed.version,
+    sha256,
+    title: parsed.title,
+    status: metadata.status,
+    usage: 'navigation_only',
+    body: parsed.body,
+    searchTerms: searchTerms(parsed, scope),
+    sourceRefs: refs,
+    modelScope: scope,
+  };
+}
+
+function assembleIndex(cards, generatedAt) {
+  const selected = [...cards].sort((left, right) => left.knowledgeId.localeCompare(right.knowledgeId, 'en') || left.cardVersion - right.cardVersion);
+  const indexVersion = `sha256:${digest(stableJson(selected))}`;
+  const result = { schemaVersion: 1, indexVersion, generatedAt, cards: selected };
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_INDEX_BYTES) fail('The generated index exceeds the 8 MiB limit.');
+  return result;
+}
+
 export async function buildKnowhowIndex({ root, manifest, generatedAt = new Date().toISOString() }) {
   validateManifest(manifest);
   if (!validIsoDate(generatedAt)) fail('generatedAt must be an ISO timestamp.');
@@ -317,26 +349,9 @@ export async function buildKnowhowIndex({ root, manifest, generatedAt = new Date
     if (parsed.id !== entry.knowledgeId || parsed.version !== entry.cardVersion || sha256 !== entry.sha256) {
       fail('A selected card does not match its approved ID, version, and hash.');
     }
-    const refs = sourceRefs(metadata);
-    const scope = modelScope(metadata);
-    selected.push({
-      knowledgeId: parsed.id,
-      cardVersion: parsed.version,
-      sha256,
-      title: parsed.title,
-      status: metadata.status,
-      usage: 'navigation_only',
-      body: parsed.body,
-      searchTerms: searchTerms(parsed, scope),
-      sourceRefs: refs,
-      modelScope: scope,
-    });
+    selected.push(indexCard({ parsed, metadata, sha256 }));
   }
-  selected.sort((left, right) => left.knowledgeId.localeCompare(right.knowledgeId, 'en') || left.cardVersion - right.cardVersion);
-  const indexVersion = `sha256:${digest(stableJson(selected))}`;
-  const result = { schemaVersion: 1, indexVersion, generatedAt, cards: selected };
-  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_INDEX_BYTES) fail('The generated index exceeds the 8 MiB limit.');
-  return result;
+  return assembleIndex(selected, generatedAt);
 }
 
 async function writePrivateOutput(root, filename, value) {
@@ -365,7 +380,99 @@ async function writePrivateOutput(root, filename, value) {
   }
 }
 
+async function resolveEvalIndexPath(rootResolved, evalIndexPath) {
+  const target = path.resolve(evalIndexPath);
+  const parent = await realpath(path.dirname(target)).catch(() => fail('The eval index folder does not exist.'));
+  const resolvedTarget = path.join(parent, path.basename(target));
+  const tmpRoot = await realpath(os.tmpdir());
+  const inside = (base, candidate) => candidate === base || candidate.startsWith(`${base}${path.sep}`);
+  if (inside(rootResolved, resolvedTarget)) fail('The eval index must not be written inside the repository root.');
+  if (!inside(tmpRoot, resolvedTarget)) fail('The eval index must be written inside the OS temporary directory.');
+  try {
+    if ((await lstat(resolvedTarget)).isSymbolicLink()) fail('The eval index path must not be a symbolic link.');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  return resolvedTarget;
+}
+
+async function writeEvalIndex(outputPath, value) {
+  const handle = await open(outputPath, 'w', 0o600);
+  try {
+    await handle.chmod(0o600);
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Validate every inventoried card individually through the same code path as `build`.
+ * Needs no manifest and writes nothing unless `evalIndexPath` is given. SECURITY: that
+ * index holds unapproved card bodies for local evaluation only and must never be uploaded.
+ */
+export async function checkKnowhowCards(root, { evalIndexPath, generatedAt = new Date().toISOString() } = {}) {
+  const { resolved } = await rootInfo(root);
+  const outputPath = evalIndexPath === undefined ? undefined : await resolveEvalIndexPath(resolved, evalIndexPath);
+  const paths = (await Promise.all(ALLOWED_PREFIXES.map((prefix) => listMarkdownFiles(resolved, prefix)))).flat().sort();
+  if (paths.length > MAX_CARDS) fail('The knowledge inventory exceeds 1,000 cards.');
+  const ids = new Set();
+  const cards = [];
+  const failures = [];
+  for (const relativePath of paths) {
+    try {
+      const { parsed, metadata, sha256 } = await readCard(resolved, relativePath);
+      if (ids.has(parsed.id)) fail('The inventory contains a duplicate knowledge ID.');
+      cards.push(indexCard({ parsed, metadata, sha256 }));
+      ids.add(parsed.id);
+    } catch (error) {
+      failures.push({ path: relativePath, reason: String(error?.message ?? error) });
+    }
+  }
+  const result = { total: paths.length, valid: cards.length, failures };
+  if (outputPath) {
+    await writeEvalIndex(outputPath, assembleIndex(cards, generatedAt));
+    result.evalIndexPath = outputPath;
+  }
+  return result;
+}
+
+function parseCheckArgs(args) {
+  const options = { root: undefined, evalIndexPath: undefined, json: false };
+  for (let position = 0; position < args.length; position += 1) {
+    const arg = args[position];
+    if (arg === '--json') options.json = true;
+    else if (arg === '--eval-index') {
+      options.evalIndexPath = args[position + 1];
+      position += 1;
+      if (!options.evalIndexPath) fail('--eval-index requires a path.');
+    } else if (arg.startsWith('--') || options.root !== undefined) fail('Usage: build-senpai-index.mjs check <root> [--eval-index <path>] [--json]');
+    else options.root = arg;
+  }
+  return { ...options, root: options.root ?? process.cwd() };
+}
+
+async function runCheck(args) {
+  const options = parseCheckArgs(args);
+  const result = await checkKnowhowCards(options.root, { evalIndexPath: options.evalIndexPath });
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } else {
+    process.stdout.write(`Check: ${result.valid}/${result.total} cards valid; ${result.failures.length} failed. Body text was not printed.\n`);
+    for (const failure of result.failures) process.stdout.write(`  FAIL ${failure.path}: ${failure.reason}\n`);
+    if (result.evalIndexPath) {
+      process.stdout.write(`評価用索引を書き出しました: ${result.evalIndexPath}\n`);
+      process.stdout.write('警告: この索引は未承認の全有効カード本文を含むローカル評価専用です。アップロード・共有・コミットしないでください。\n');
+    }
+  }
+  if (result.failures.length > 0) process.exitCode = 1;
+}
+
 async function main(args) {
+  if (args[0] === 'check') {
+    await runCheck(args.slice(1));
+    return;
+  }
   const [command, root = process.cwd(), manifestPath] = args;
   if (command === 'inventory' && !manifestPath) {
     const inventory = await inventoryKnowhowCards(root);
@@ -381,7 +488,7 @@ async function main(args) {
     process.stdout.write(`Index built: ${index.cards.length} explicitly selected cards; index ${index.indexVersion}. No upload was performed.\n`);
     return;
   }
-  fail('Usage: build-senpai-index.mjs inventory <root> | build <root> <manifest.json>');
+  fail('Usage: build-senpai-index.mjs inventory <root> | build <root> <manifest.json> | check <root> [--eval-index <path>] [--json]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

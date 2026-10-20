@@ -25,6 +25,7 @@ SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 BODY_HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 SOURCE_TYPES = frozenset({"lists_item", "onenote_page", "kb_document", "law_rag"})
+# SYNC: must equal SOURCE_REF_KEYS in build-senpai-index.mjs and KNOWHOW_SOURCE_FIELDS in knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 SOURCE_REF_KEYS = frozenset({
     "ref_type", "source_id", "list_item_id", "onenote_id", "document_number",
     "kb_filename", "kb_verify_status", "page_role", "law_id", "law_title",
@@ -36,17 +37,20 @@ SOURCE_ID_KEYS = {
     "kb_document": "document_number",
     "law_rag": "law_id",
 }
+# SYNC: must equal MODEL_SCOPE_KEYS in build-senpai-index.mjs and KNOWHOW_SCOPE_FIELDS in knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 MODEL_SCOPE_KEYS = frozenset({
     "control_methods", "door_families", "door_types", "excludes",
     "guide_systems", "lists_model_label", "machine_room", "may_apply_to",
     "model_abbreviations", "observed_on", "product_lines", "scope_note",
     "conditions", "scope_status", "scope_verified_by", "scope_verified_at",
 })
+# SYNC: must equal SCOPE_VERIFICATION_KEYS in build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
 SCOPE_VERIFICATION_KEYS = frozenset({"scope_status", "scope_verified_by", "scope_verified_at"})
 SCOPE_STATUSES = frozenset({"verified", "unverified"})
 SCOPE_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # Only fields stating where a card DOES apply may influence ranking; excludes,
 # may_apply_to and scope_note describe exclusions or unconfirmed scope.
+# SYNC: must equal POSITIVE_SCOPE_KEYS in build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
 POSITIVE_SCOPE_KEYS = (
     "control_methods", "door_families", "door_types", "guide_systems",
     "lists_model_label", "machine_room", "model_abbreviations", "observed_on",
