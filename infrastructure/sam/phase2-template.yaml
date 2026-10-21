@@ -1500,6 +1500,14 @@ Resources:
   # ============================================================================
   RagApi:
     Type: AWS::Serverless::Api
+    # W1028 は、条件付き関数（先輩のまとめ・現場報告・調査ジョブ）の API イベントから SAM が自動生成する
+    # paths の二重の Fn::If（同じ条件の内側の false 側）に出る。テンプレートに書いた Fn::If ではないため、
+    # この API だけ W1028 を止める。自分で書く Fn::If は、条件付きリソースの中で同じ条件を使わないこと。
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W1028
     Properties:
       PropagateTags: true
       Name: !Sub rag-api-${Environment}
