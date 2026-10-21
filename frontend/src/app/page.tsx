@@ -14,6 +14,7 @@ import { AnnouncementsSection } from '@/components/announcements/AnnouncementsSe
 import { MaintenanceBanner } from '@/components/announcements/MaintenanceBanner';
 import { AdminViewToggle } from '@/components/admin/AdminViewToggle';
 import { KnowledgeChatEntry } from '@/components/knowledge/KnowledgeChatEntry';
+import { CommonKnowledgeEntry } from '@/components/knowledge/CommonKnowledgeEntry';
 
 const GUIDE_COLLAPSED_KEY = 'home:guideCollapsed';
 
@@ -371,6 +372,7 @@ export default function HomePage() {
             )}
 
             <KnowledgeChatEntry isAdmin={isAdmin} enabled={process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH === 'true'} />
+            <CommonKnowledgeEntry enabled={process.env.NEXT_PUBLIC_ENABLE_COMMON_KNOWLEDGE === 'true'} />
           </div>
         </section>
 

@@ -72,7 +72,11 @@ export function CommonKnowledgeInbox() {
 
   async function perform(action: () => Promise<void>) {
     setBusy(true); setMessage(''); setPublished(null);
-    try { await action(); } catch (error) {
+    try {
+      // Buttons follow the caller's live grants, so load them before the first operation.
+      if (!synthetic && !me) await loadMe();
+      await action();
+    } catch (error) {
       setMessage(error instanceof Error ? error.message : '操作できませんでした。');
     } finally { setBusy(false); }
   }
@@ -209,6 +213,7 @@ export function CommonKnowledgeInbox() {
     {synthetic && <label className="block text-sm">合成の操作者<select className={INPUT_CLASS} value={actor} onChange={(event) => {
       setActor(event.target.value); setPublished(null); setMessage(''); setItems([]); setCursor(null); setPending([]);
     }}>{Object.entries(ACTORS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+    {!synthetic && !me && <p className="text-sm text-gray-600">最初の操作時に自分の権限を読み込み、権限に応じた操作ボタンを表示します。</p>}
     <fieldset disabled={busy} className="space-y-4 disabled:opacity-60">
       {canContribute && <div className="space-y-2 rounded border p-3">
         <h3 className="font-semibold">共有する候補を投函</h3>
@@ -248,6 +253,8 @@ export function CommonKnowledgeInbox() {
         <label className="block text-sm">単元のMarkdown<textarea className={`${INPUT_CLASS} min-h-40 font-mono`} value={markdown} readOnly={!canEdit} onChange={(event) => setMarkdown(event.target.value)} /></label>
         {card && <p className="break-all text-xs text-gray-600">作業版 {card.workingRevision} · {card.versions[String(card.workingRevision)].status} · 承認束 {card.versions[String(card.workingRevision)].bundleHash}</p>}
         {receipt && <p className="break-all text-xs">作業用バケットの版: {receipt.workVersionId}</p>}
+        {canEdit && ['unconfirmed', 'held'].includes(selected.state) && <p className="text-xs text-gray-600">編集するには、先に「編集を引き受ける／再開」を押してください。</p>}
+        {canReview && !card?.review && <p className="text-xs text-gray-600">技術承認・差し戻しは、編集担当が「この版の技術確認を依頼」した版だけに行えます。</p>}
         <div className="flex flex-wrap gap-2">
           {canEdit && <><button className={BUTTON_CLASS} onClick={() => void perform(save)}>作業版を保存</button>
             <button className={BUTTON_CLASS} disabled={!card} onClick={() => void perform(requestReview)}>この版の技術確認を依頼</button></>}
