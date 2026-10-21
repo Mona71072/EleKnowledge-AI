@@ -43,8 +43,16 @@ test('model fit notice is shared with the Senpai chat wording', () => {
 
 import {
   EXAMPLE_QUESTIONS, buildCopyText, clarifyAsksModel, composeClarifyQuestion, copyText, modelMismatch,
-  structureAnswer, stepRowLabel,
+  sourceSummary, structureAnswer, stepRowLabel,
 } from '../src/lib/knowledge-senpai-research-view.mjs';
+
+test('sourceSummary counts the used sources per kind for the closed sources toggle', () => {
+  const sources = (tech, law, used) => ({ sources: { tech: Array(tech).fill({}), law: Array(law).fill({}), knowhow: { used: Array(used).fill({}), candidates: [{}] } } });
+  assert.equal(sourceSummary(sources(2, 1, 3)), '出典 6件（技術資料 2・法令 1・ノウハウ 3）');
+  assert.equal(sourceSummary(sources(1, 0, 0)), '出典 1件（技術資料 1）');
+  assert.equal(sourceSummary(sources(0, 0, 2)), '出典 2件（ノウハウ 2）');
+  assert.equal(sourceSummary(sources(0, 0, 0)), null);
+});
 
 test('finished steps use past-tense labels; running keeps the server label', () => {
   const row = (step, status, labelJa) => ({ step, status, labelJa });

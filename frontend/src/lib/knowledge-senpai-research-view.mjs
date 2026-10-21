@@ -174,6 +174,18 @@ export function modelMismatch(result, selectedModel, knownModels) {
   return { detected, selected: selectedModel };
 }
 
+/**
+ * 閉じた出典の開閉ボタンに出す1行。「出典 6件（技術資料 2・法令 1・ノウハウ 3）」。0件の種類は出さない。
+ * 使わなかったノウハウ候補は数えない。出典が1件も無ければ null。
+ */
+export function sourceSummary(result) {
+  const { tech, law, knowhow } = result.sources;
+  const counts = [['技術資料', tech.length], ['法令', law.length], ['ノウハウ', knowhow.used.length]].filter(([, count]) => count > 0);
+  if (counts.length === 0) return null;
+  const total = counts.reduce((sum, [, count]) => sum + count, 0);
+  return `出典 ${total}件（${counts.map(([label, count]) => `${label} ${count}`).join('・')}）`;
+}
+
 /** 回答と、番号（[T1] など）つきの出典を、そのまま貼れるプレーンテキストにする。 */
 export function buildCopyText(result) {
   const { tech, law, knowhow } = result.sources;

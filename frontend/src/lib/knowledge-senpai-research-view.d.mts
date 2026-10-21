@@ -22,6 +22,7 @@ export function modelMismatch(
   selectedModel: string | undefined,
   knownModels: ReadonlySet<string>,
 ): { detected: string; selected: string } | null;
+export function sourceSummary(result: Pick<SenpaiResearchResult, 'sources'>): string | null;
 export function buildCopyText(result: SenpaiResearchResult): string;
 export function copyText(text: string, clipboard?: { writeText(text: string): Promise<void> }): Promise<boolean>;
 export const EXAMPLE_QUESTIONS: readonly string[];

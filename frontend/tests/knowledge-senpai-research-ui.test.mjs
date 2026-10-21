@@ -550,6 +550,13 @@ test('inline refs are coloured chips with the source title, and unverified refs 
   assert.doesNotMatch(page, /ref-T9/);
 });
 
+test('the sources are gathered under one closed toggle, opened only when wanted', () => {
+  const page = view(completed());
+  assert.match(page, /<section aria-label="出典"[^>]*><details(?![^>]*\bopen\b)[^>]*><summary[^>]*>[\s\S]*?出典 \d+件（技術資料 \d+・法令 \d+・ノウハウ \d+）[\s\S]*?<\/summary>[\s\S]*id="senpai-turn-1-ref-T1"[\s\S]*id="senpai-turn-1-ref-K1"[\s\S]*<\/details><\/section>/);
+  assert.equal(page.match(/<section aria-label="出典"/g).length, 1);
+  assert.doesNotMatch(view(completed({}, { answerMarkdown: '本文', sources: NO_SOURCES })), /aria-label="出典"/);
+});
+
 test('source rows carry a tinted number pill and keep the knowhow cards split', () => {
   const page = view(completed());
   assert.match(page, /id="senpai-turn-1-ref-T1"[^>]*>[\s\S]*?bg-blue-50[^>]*>技1</);

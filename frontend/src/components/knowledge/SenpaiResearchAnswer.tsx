@@ -14,6 +14,7 @@ import {
   clarifyAsksModel,
   modelMismatch,
   researchRefAnchor,
+  sourceSummary,
   structureAnswer,
 } from '@/lib/knowledge-senpai-research-view.mjs';
 import { modelFitNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
@@ -92,11 +93,21 @@ function KnowhowUsed({ result, prefix, selectedModel }: { result: SenpaiResearch
   );
 }
 
+/**
+ * 技術資料・法令・ノウハウの出典を、1つの閉じた開閉にまとめる（回答はすでに全部をまとめた1本）。
+ * 見たいときだけ開く。本文の番号（技1・法1・ノ1）を押したときは、該当の行まで開いて移動する。
+ */
 function Sources({ result, prefix, selectedModel }: { result: SenpaiResearchResult; prefix: string; selectedModel?: string }) {
   const { tech, law } = result.sources;
-  if (tech.length === 0 && law.length === 0 && result.sources.knowhow.used.length === 0) return null;
+  const summary = sourceSummary(result);
+  if (!summary) return null;
   return (
-    <section aria-label="出典" className="space-y-1 border-t border-gray-100 pt-3">
+    <section aria-label="出典" className="border-t border-gray-100 pt-1"><details className="group">
+      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 [&::-webkit-details-marker]:hidden">
+        <span aria-hidden="true" className="inline-block transition-transform group-open:rotate-90 motion-reduce:transition-none">▸</span>
+        <span className="underline-offset-2 group-hover:underline">{summary}</span>
+      </summary>
+      <div className="space-y-1 pb-1">
       {tech.length > 0 && (
         <section aria-label="技術資料の出典">
           <h5 className={groupLabel}>技術資料</h5>
@@ -126,7 +137,8 @@ function Sources({ result, prefix, selectedModel }: { result: SenpaiResearchResu
         </section>
       )}
       <KnowhowUsed result={result} prefix={prefix} selectedModel={selectedModel} />
-    </section>
+      </div>
+    </details></section>
   );
 }
 
