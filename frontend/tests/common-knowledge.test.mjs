@@ -19,6 +19,17 @@ test('synthetic claims cannot travel to production or non-loopback endpoints', (
   }
 });
 
+test('authenticated API keeps one HTTPS stage segment and rejects anything wider', () => {
+  const remote = { synthetic: false, development: false, hostname: 'itai.example.com' };
+  assert.equal(validateConnection({ ...remote, baseUrl: 'https://api.example.com/dev' }), 'https://api.example.com/dev');
+  assert.equal(validateConnection({ ...remote, baseUrl: 'https://api.example.com/dev/' }), 'https://api.example.com/dev');
+  assert.equal(validateConnection({ ...remote, baseUrl: 'https://api.example.com' }), 'https://api.example.com');
+  for (const baseUrl of ['http://api.example.com/dev', 'https://api.example.com/dev/knowledge',
+    'https://api.example.com//dev', 'https://api.example.com/dev?x=1', 'https://api.example.com/d%20v']) {
+    assert.throws(() => validateConnection({ ...remote, baseUrl }), baseUrl);
+  }
+});
+
 test('retries preserve actor-bound request key; publication CAS and no-store are explicit', async () => {
   const sent = [];
   const options = { baseUrl: 'http://127.0.0.1:8765', token: 'synthetic-publisher', actor: 'publisher',

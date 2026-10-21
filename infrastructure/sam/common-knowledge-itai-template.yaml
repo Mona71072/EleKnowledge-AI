@@ -1,0 +1,711 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  EleKnowledge common knowledge (know-how + terms/foundations) - itai-only validation stack.
+  Separate candidate ledger, protected policy table, private distribution bucket and
+  responsibility-split API/Lambda/IAM. Feature flag defaults off; company Git is not configured.
+  See docs/features/development/common-knowledge-itai-aws-contract.md.
+
+Parameters:
+  CognitoExportPrefix:
+    Type: String
+    Default: EleKnowledge-dev
+    AllowedPattern: '^[A-Za-z0-9-]+$'
+    Description: Prefix of the existing phase1 exports. Only the User Pool ARN is read (no change).
+  AllowedIPList:
+    Type: CommaDelimitedList
+    Description: Office egress CIDRs (pass the current value of the existing itai stack explicitly)
+  WebAclArn:
+    Type: String
+    AllowedPattern: '^arn:aws:wafv2:[a-z0-9-]+:[0-9]{12}:regional/webacl/[A-Za-z0-9_-]+/[a-f0-9-]+$'
+    Description: Existing Regional WebACL. Only an association is created; the ACL is not modified.
+  CorsAllowedOrigin:
+    Type: String
+    AllowedPattern: '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'
+    Description: Single HTTPS browser origin allowed by CORS (no wildcard)
+  CommonKnowledgeEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+    Description: Feature gate. Stays false until real roles, retention and test principals are decided.
+  GitMode:
+    Type: String
+    Default: unconfigured
+    AllowedValues: [unconfigured]
+    Description: Company Git is undecided; Git-dependent operations are refused (503 GitNotConfigured).
+  ApiThrottleBurst:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 100
+  ApiThrottleRate:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 50
+  LogRetentionInDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+  CostUsage:
+    Type: String
+    Default: development
+    AllowedValues: [development]
+
+Globals:
+  Function:
+    # Single DynamoDB/S3 calls only (Git is not configured). Revisit with the Git integration plan.
+    Timeout: 10
+    MemorySize: 256
+    Runtime: python3.13
+    Architectures:
+      - x86_64
+    CodeUri: ../../lambda/knowledge/common-knowledge/
+    Handler: app.lambda_handler
+    Environment:
+      Variables:
+        COMMON_KNOWLEDGE_ENABLED: !Ref CommonKnowledgeEnabled
+        COMMON_KNOWLEDGE_GIT_MODE: !Ref GitMode
+        COMMON_KNOWLEDGE_ALLOWED_ORIGIN: !Ref CorsAllowedOrigin
+        COMMON_KNOWLEDGE_POLICY_TABLE: !Ref PolicyTable
+        COMMON_KNOWLEDGE_LEDGER_TABLE: !Ref LedgerTable
+        COMMON_KNOWLEDGE_DISTRIBUTION_BUCKET: !Ref DistributionBucket
+    Tags:
+      gyoumu012Project: !Ref CostProjectName
+      gyoumu012Component: rag
+      gyoumu012Usage: !Ref CostUsage
+      Purpose: itai-common-knowledge-validation
+      ManagedBy: SAM
+
+Resources:
+  # ---------- Durable stores (Retain: never removed by a stack update/rollback) ----------
+  LedgerTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: gsiState
+          AttributeType: S
+        - AttributeName: gsiSubmitterState
+          AttributeType: S
+        - AttributeName: gsiPendingActor
+          AttributeType: S
+        - AttributeName: gsiSort
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      # KEYS_ONLY: no candidate text, context or names in any index. Results are re-read strongly.
+      GlobalSecondaryIndexes:
+        - IndexName: StateIndex
+          KeySchema:
+            - AttributeName: gsiState
+              KeyType: HASH
+            - AttributeName: gsiSort
+              KeyType: RANGE
+          Projection:
+            ProjectionType: KEYS_ONLY
+        - IndexName: SubmitterIndex
+          KeySchema:
+            - AttributeName: gsiSubmitterState
+              KeyType: HASH
+            - AttributeName: gsiSort
+              KeyType: RANGE
+          Projection:
+            ProjectionType: KEYS_ONLY
+        - IndexName: PendingIndex
+          KeySchema:
+            - AttributeName: gsiPendingActor
+              KeyType: HASH
+            - AttributeName: gsiSort
+              KeyType: RANGE
+          Projection:
+            ProjectionType: KEYS_ONLY
+      # Business retention is undecided: only synthetic acceptance items carry this attribute.
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: acceptancePurgeAt
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+        - Key: Purpose
+          Value: itai-common-knowledge-validation
+
+  # Grants (actors / sharing permissions / evidence registry). Functions only GetItem it.
+  # Left empty on creation: every operation is denied until the owners decide real roles.
+  PolicyTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+        - Key: Purpose
+          Value: itai-common-knowledge-validation
+
+  DistributionBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      # SCP denies PutBucketPublicAccessBlock, so it is not set here. New buckets default to all
+      # four Block Public Access settings; verify them after creation (same as phase1 / KB v2).
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          # Synthetic acceptance runs only. Published artifacts/manifests have no expiry (undecided).
+          - Id: ExpireSyntheticAcceptance
+            Status: Enabled
+            Prefix: acceptance/
+            ExpirationInDays: 7
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+          - Id: AbortIncompleteUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+        - Key: Purpose
+          Value: itai-common-knowledge-validation
+
+  DistributionBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Bucket: !Ref DistributionBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt DistributionBucket.Arn
+              - !Sub ${DistributionBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  # HMAC key for list cursors only (not a credential to any external system).
+  CursorSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: EleKnowledge itai common-knowledge list cursor HMAC key
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+        - Key: Purpose
+          Value: itai-common-knowledge-validation
+
+  # ---------- API ----------
+  CommonKnowledgeApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      OpenApiVersion: '3.0.1'
+      EndpointConfiguration:
+        Type: REGIONAL
+      Cors:
+        AllowMethods: "'GET,POST,PUT,PATCH,OPTIONS'"
+        AllowHeaders: "'Authorization,Content-Type,If-Match,Idempotency-Key'"
+        AllowOrigin: !Sub "'${CorsAllowedOrigin}'"
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: !Sub "'${CorsAllowedOrigin}'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: !Sub "'${CorsAllowedOrigin}'"
+      Auth:
+        AddDefaultAuthorizerToCorsPreflight: false
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn:
+              Fn::ImportValue: !Sub ${CognitoExportPrefix}-CognitoUserPoolArn
+        ResourcePolicy:
+          IpRangeWhitelist: !Ref AllowedIPList
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","wafResponseCode":"$context.wafResponseCode"}'
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          ThrottlingBurstLimit: !Ref ApiThrottleBurst
+          ThrottlingRateLimit: !Ref ApiThrottleRate
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+        Purpose: itai-common-knowledge-validation
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: !Ref LogRetentionInDays
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+
+  ApiWebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      WebACLArn: !Ref WebAclArn
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${CommonKnowledgeApi}/stages/${CommonKnowledgeApi.Stage}
+
+  # ---------- Roles (one per responsibility) ----------
+  IntakeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LedgerTransactionsAndLists
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource:
+                  - !GetAtt LedgerTable.Arn
+                  - !GetAtt PolicyTable.Arn
+              # Writes only inside TransactWriteItems. No Scan, no single-item writes.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:ConditionCheckItem
+                Resource: !GetAtt LedgerTable.Arn
+                Condition:
+                  ForAnyValue:StringEquals:
+                    dynamodb:EnclosingOperation: TransactWriteItems
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource:
+                  - !Sub ${LedgerTable.Arn}/index/StateIndex
+                  - !Sub ${LedgerTable.Arn}/index/SubmitterIndex
+                  - !Sub ${LedgerTable.Arn}/index/PendingIndex
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref CursorSecret
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+
+  EditorialRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # Git credentials are not granted: GitMode=unconfigured refuses Git-dependent work.
+        - PolicyName: LedgerTransactions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource:
+                  - !GetAtt LedgerTable.Arn
+                  - !GetAtt PolicyTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:ConditionCheckItem
+                Resource: !GetAtt LedgerTable.Arn
+                Condition:
+                  ForAnyValue:StringEquals:
+                    dynamodb:EnclosingOperation: TransactWriteItems
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+
+  PublicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LedgerTransactionsAndDistribution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource:
+                  - !GetAtt LedgerTable.Arn
+                  - !GetAtt PolicyTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:ConditionCheckItem
+                Resource: !GetAtt LedgerTable.Arn
+                Condition:
+                  ForAnyValue:StringEquals:
+                    dynamodb:EnclosingOperation: TransactWriteItems
+              # If-Match needs GetObject + PutObject. No DeleteObject: versions are kept.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub ${DistributionBucket.Arn}/artifacts/*
+                  - !Sub ${DistributionBucket.Arn}/manifests/*
+              # Lets a missing manifest answer 404 instead of 403. The code never lists keys.
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt DistributionBucket.Arn
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+
+  ReaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # No ledger access at all: published reads use the distribution store and grants only.
+        - PolicyName: PublishedReadOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !GetAtt PolicyTable.Arn
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub ${DistributionBucket.Arn}/artifacts/*
+                  - !Sub ${DistributionBucket.Arn}/manifests/*
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt DistributionBucket.Arn
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+
+  # Resumes only saved requests, re-authorised as the original action, so it needs the union of
+  # editorial and publication grants (still no Query, no Scan, no Delete of objects).
+  RecoveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LedgerTransactionsAndDistribution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource:
+                  - !GetAtt LedgerTable.Arn
+                  - !GetAtt PolicyTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:ConditionCheckItem
+                Resource: !GetAtt LedgerTable.Arn
+                Condition:
+                  ForAnyValue:StringEquals:
+                    dynamodb:EnclosingOperation: TransactWriteItems
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub ${DistributionBucket.Arn}/artifacts/*
+                  - !Sub ${DistributionBucket.Arn}/manifests/*
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt DistributionBucket.Arn
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+
+  # ---------- Functions ----------
+  IntakeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt IntakeRole.Arn
+      Environment:
+        Variables:
+          COMMON_KNOWLEDGE_RESPONSIBILITY: intake
+          COMMON_KNOWLEDGE_CURSOR_SECRET_ARN: !Ref CursorSecret
+      Events:
+        Contribute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/contributions
+            Method: post
+        List:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/contributions
+            Method: get
+        Detail:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/contributions/{id}
+            Method: get
+        Transition:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/contributions/{id}
+            Method: patch
+        Pending:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/operations
+            Method: get
+        Operation:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/operations/{id}
+            Method: get
+
+  EditorialFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt EditorialRole.Arn
+      Environment:
+        Variables:
+          COMMON_KNOWLEDGE_RESPONSIBILITY: editorial
+      Events:
+        Card:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/cards/{id}
+            Method: get
+        Draft:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/cards/{id}/draft
+            Method: put
+        ReviewRequest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/cards/{id}/review-requests
+            Method: post
+        Decision:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/cards/{id}/decisions
+            Method: post
+
+  PublicationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt PublicationRole.Arn
+      Environment:
+        Variables:
+          COMMON_KNOWLEDGE_RESPONSIBILITY: publication
+      Events:
+        Publish:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/cards/{id}/publish
+            Method: post
+        Withdraw:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/cards/{id}/withdraw
+            Method: post
+
+  ReaderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt ReaderRole.Arn
+      Environment:
+        Variables:
+          COMMON_KNOWLEDGE_RESPONSIBILITY: reader
+      Events:
+        Published:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/published/{id}
+            Method: get
+
+  RecoveryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt RecoveryRole.Arn
+      Environment:
+        Variables:
+          COMMON_KNOWLEDGE_RESPONSIBILITY: recovery
+      Events:
+        Retry:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/operations/{id}/retry
+            Method: post
+
+  IntakeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${IntakeFunction}
+      RetentionInDays: !Ref LogRetentionInDays
+  EditorialFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${EditorialFunction}
+      RetentionInDays: !Ref LogRetentionInDays
+  PublicationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${PublicationFunction}
+      RetentionInDays: !Ref LogRetentionInDays
+  ReaderFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ReaderFunction}
+      RetentionInDays: !Ref LogRetentionInDays
+  RecoveryFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${RecoveryFunction}
+      RetentionInDays: !Ref LogRetentionInDays
+
+Outputs:
+  CommonKnowledgeApiUrl:
+    Description: HTTPS stage base URL (not connected to any frontend yet)
+    Value: !Sub https://${CommonKnowledgeApi}.execute-api.${AWS::Region}.amazonaws.com/${CommonKnowledgeApi.Stage}
+  LedgerTableName:
+    Value: !Ref LedgerTable
+  PolicyTableName:
+    Value: !Ref PolicyTable
+  DistributionBucketName:
+    Value: !Ref DistributionBucket

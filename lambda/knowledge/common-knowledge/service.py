@@ -1,5 +1,6 @@
 """Common candidate, exact-version review, publication and guarded read service."""
 import copy
+import json
 import re
 import time
 import uuid
@@ -8,6 +9,7 @@ from storage import digest, encode
 
 
 ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$')
+POSITION = re.compile(r'^[0-9]{12}#[A-Za-z0-9][A-Za-z0-9_-]{0,79}$')
 STATES = {'unconfirmed', 'in_review', 'awaiting_review', 'reflected', 'held', 'rejected'}
 KINDS = {'case_summary', 'practice_guide', 'term_foundation'}
 BUNDLE_KEYS = ('candidateId', 'candidateRevision', 'kind', 'applicability', 'sourceRefs',
@@ -52,9 +54,15 @@ def to_git(value):
 
 class Service:
     def __init__(self, store, git, distribution, policy, *, enabled=False,
-                 clock=time.time, fault=lambda stage: None):
+                 clock=time.time, fault=lambda stage: None, policy_source=None):
         self.store, self.git, self.distribution = store, git, distribution
         self.policy, self.enabled, self.clock, self.fault = policy, enabled, clock, fault
+        self.policy_source = policy_source
+
+    def begin_request(self):
+        """Deployed grants are re-read per request so revocation applies without redeploying."""
+        if self.policy_source is not None:
+            self.policy = self.policy_source()
 
     def principal(self, claims):
         require(self.enabled, 403, 'FeatureUnavailable')
@@ -75,17 +83,21 @@ class Service:
                 and permission in assignment.get('permissions', []), 403, 'Forbidden')
         return actor
 
+    def require_git(self):
+        """Refuse Git-dependent work before an operation is accepted, so nothing is locked or saved."""
+        require(getattr(self.git, 'configured', True), 503, 'GitNotConfigured')
+
     def alive(self, item):
         require(item is not None and item['expiresAt'] > self.clock(), 404, 'NotFound')
         return item
 
     def candidate(self, db, identifier, claims, permission='view'):
-        item = self.alive(self.store.get(db, 'candidate', identifier))
+        item = self.alive(db.get('candidate', identifier))
         self.authorize(claims, permission, item['domain'], item['audience'])
         return item
 
     def card(self, db, identifier, claims, permission):
-        card = self.store.get(db, 'card', identifier)
+        card = db.get('card', identifier)
         require(card is not None, 404, 'NotFound')
         self.candidate(db, card['candidateId'], claims, permission)
         return card
@@ -94,54 +106,47 @@ class Service:
         actor = self.principal(claims)
         require(isinstance(key, str) and ID.fullmatch(key))
         request_hash = digest({'target': target, 'request': request})
-        with self.store.transaction() as db:
-            row = db.execute('SELECT * FROM operations WHERE actor=? AND key=?',
-                             (actor, key)).fetchone()
+        with self.store.unit() as db:
+            row = db.operation_by_key(actor, key)
             if row:
-                require(row['request_hash'] == request_hash, 409, 'IdempotencyConflict')
+                require(row['requestHash'] == request_hash, 409, 'IdempotencyConflict')
                 if row['status'] == 'rejected':
-                    saved = __import__('json').loads(row['result'])
-                    raise Failure(saved['status'], saved['code'])
+                    raise Failure(row['result']['status'], row['result']['code'])
                 if row['status'] == 'completed':
-                    return __import__('json').loads(row['result'])
+                    return row['result']
                 operation = row['id']
             else:
-                require(not db.execute('SELECT 1 FROM operations WHERE target=? '
-                                       "AND status IN ('accepted','git_written')", (target,)).fetchone(),
-                        409, 'OperationPending')
+                require(not db.target_pending(target), 409, 'OperationPending')
                 operation = str(uuid.uuid4())
-                db.execute('INSERT INTO operations VALUES (?,?,?,?,?,?,NULL)',
-                           (operation, actor, key, request_hash, target, 'accepted'))
-                self.store.put(db, 'operation-intent', operation, {'at': int(self.clock()), 'request': request})
+                db.accept_operation(operation, actor, key, request_hash, target)
+                db.put('operation-intent', operation, {'at': int(self.clock()), 'request': request})
         # Acceptance survives Git failures and process death. All projections, events,
         # manifest CAS and completion commit together, after the external Git write.
+        # A lost ledger race (Contention) is not a Failure: the operation stays accepted.
         try:
-            with self.store.transaction() as db:
-                row = db.execute('SELECT * FROM operations WHERE id=?', (operation,)).fetchone()
+            with self.store.unit() as db:
+                row = db.operation(operation)
                 if row['status'] == 'completed':
-                    return __import__('json').loads(row['result'])
+                    return row['result']
                 if row['status'] == 'rejected':
-                    saved = __import__('json').loads(row['result'])
-                    raise Failure(saved['status'], saved['code'])
+                    raise Failure(row['result']['status'], row['result']['code'])
                 result = execute(db, operation)
                 self.fault('before_projection_commit')
                 action = request[0] if isinstance(request, list) else 'contribute'
                 role = {'decision': 'approve', 'publish': 'publish', 'withdraw': 'publish',
                         'contribute': 'contribute'}.get(action, 'edit')
                 detail = request[-1] if isinstance(request, list) and isinstance(request[-1], dict) else {}
-                self.store.put(db, 'event', operation, {
+                db.put('event', operation, {
                     'operationId': operation, 'actor': actor, 'target': target,
                     'requestHash': request_hash, 'at': int(self.clock()), 'result': result,
                     'role': role, 'reason': detail.get('reason')})
-                db.execute("UPDATE operations SET status='completed', result=? WHERE id=?",
-                           (encode(result), operation))
-                intent = self.store.get(db, 'operation-intent', operation)
-                self.store.put(db, 'operation-intent', operation, {'at': intent['at']})
-                return result
+                db.finish_operation(operation, 'completed', result)
+                intent = db.get('operation-intent', operation)
+                db.put('operation-intent', operation, {'at': intent['at']})
+            return result
         except Failure as error:
-            with self.store.transaction() as db:
-                db.execute("UPDATE operations SET status='rejected',result=? WHERE id=?",
-                           (encode({'status': error.status, 'code': error.code}), operation))
+            with self.store.unit() as db:
+                db.finish_operation(operation, 'rejected', {'status': error.status, 'code': error.code})
             raise
 
     def contribute(self, claims, key, data):
@@ -160,8 +165,8 @@ class Service:
             require(isinstance(data.get('targetKnowledgeId'), str)
                     and ID.fullmatch(data['targetKnowledgeId']))
             require(type(data.get('targetRevision')) is int and data['targetRevision'] > 0)
-            with self.store.transaction() as db:
-                target = self.store.get(db, 'card', data['targetKnowledgeId'])
+            with self.store.unit() as db:
+                target = db.get('card', data['targetKnowledgeId'])
                 require(target is not None, 404, 'NotFound')
                 version = target['versions'].get(str(data['targetRevision']))
                 require(version and version['status'] == 'approved', 409, 'VersionConflict')
@@ -178,7 +183,7 @@ class Service:
                 and permission.get('retentionPolicyId'), 403, 'SharingNotPermitted')
         origin_key = digest([actor, data['candidateType'], data['originRef']])
         def create(db, operation):
-            previous = self.store.get(db, 'origin', origin_key)
+            previous = db.get('origin', origin_key)
             if previous:
                 require(previous['hash'] == digest(confirmed), 409, 'OriginConflict')
                 return previous['result']
@@ -189,54 +194,48 @@ class Service:
                     'retentionPolicyId': permission['retentionPolicyId'],
                     'revisions': [{'revision': 1, 'context': data['context'], 'actor': actor}],
                     'targetLinks': []}
-            self.store.put(db, 'candidate', identifier, item)
+            db.put('candidate', identifier, item)
             result = {'candidateId': identifier, 'candidateRevision': 1, 'state': 'unconfirmed'}
-            self.store.put(db, 'origin', origin_key, {'hash': digest(confirmed), 'result': result})
+            db.put('origin', origin_key, {'hash': digest(confirmed), 'result': result})
             return result
         return self.mutate(claims, key, 'origin:' + origin_key, data, create)
 
-    def list_candidates(self, claims, scope, state, offset=0, limit=20):
+    def list_candidates(self, claims, scope, state, after=None, limit=20):
         actor = self.principal(claims)
         require(scope in {'mine', 'inbox'} and state in STATES)
-        require(type(offset) is int and offset >= 0 and type(limit) is int and 1 <= limit <= 50)
-        with self.store.transaction() as db:
-            groups = claims.get('cognito:groups', [])
-            if isinstance(groups, str):
-                groups = groups.split(',')
+        require((after is None or (isinstance(after, str) and POSITION.fullmatch(after)))
+                and type(limit) is int and 1 <= limit <= 50)
+        groups = claims.get('cognito:groups', [])
+        if isinstance(groups, str):
+            groups = groups.split(',')
+        if scope == 'inbox':
+            require('admin' in groups, 403, 'Forbidden')
+            assignment = self.policy.get('actors', {}).get(actor, {})
+            require(assignment.get('domains') and assignment.get('audiences')
+                    and 'view' in assignment.get('permissions', [])
+                    and assignment.get('expiresAt', 0) > self.clock(), 403, 'Forbidden')
+        # One bounded index page. Index order is not authority: every row was re-read from the
+        # base records and is re-checked here, so a short page plus cursor is expected.
+        page, following = self.store.candidates(state, actor if scope == 'mine' else None, after, limit)
+        rows = []
+        for item in page:
+            if item['state'] != state or item['expiresAt'] <= self.clock():
+                continue
+            if scope == 'mine' and item['submittedBy'] != actor:
+                continue
             if scope == 'inbox':
-                require('admin' in groups, 403, 'Forbidden')
-            sql = "SELECT value FROM records WHERE kind='candidate' AND json_extract(value,'$.state')=? AND json_extract(value,'$.expiresAt')>?"
-            params = [state, self.clock()]
-            if scope == 'mine':
-                sql += " AND json_extract(value,'$.submittedBy')=?"
-                params.append(actor)
-            else:
-                assignment = self.policy.get('actors', {}).get(actor, {})
-                domains, audiences = assignment.get('domains', []), assignment.get('audiences', [])
-                require(domains and audiences and 'view' in assignment.get('permissions', [])
-                        and assignment.get('expiresAt', 0) > self.clock(), 403, 'Forbidden')
-                sql += " AND json_extract(value,'$.domain') IN (" + ','.join('?' for _ in domains) + ')'
-                sql += " AND json_extract(value,'$.audience') IN (" + ','.join('?' for _ in audiences) + ')'
-                params += domains + audiences
-            sql += " ORDER BY json_extract(value,'$.submittedAt'),id LIMIT ? OFFSET ?"
-            params += [limit + 1, offset]
-            raw_rows = db.execute(sql, params).fetchall()
-            rows = []
-            for row in raw_rows[:limit]:
-                item = __import__('json').loads(row[0])
-                if scope == 'inbox':
-                    try:
-                        self.authorize(claims, 'view', item['domain'], item['audience'])
-                    except Failure:
-                        continue
-                rows.append({k: item[k] for k in ('candidateId', 'candidateRevision',
-                             'candidateType', 'state', 'submittedAt')})
-            return {'items': rows, 'nextOffset': offset + limit if len(raw_rows) > limit else None}
+                try:
+                    self.authorize(claims, 'view', item['domain'], item['audience'])
+                except Failure:
+                    continue
+            rows.append({k: item[k] for k in ('candidateId', 'candidateRevision',
+                         'candidateType', 'state', 'submittedAt')})
+        return {'items': rows, 'next': following}
 
     def detail(self, claims, identifier):
         actor = self.principal(claims)
-        with self.store.transaction() as db:
-            item = self.alive(self.store.get(db, 'candidate', identifier))
+        with self.store.unit() as db:
+            item = self.alive(db.get('candidate', identifier))
             if item['submittedBy'] == actor:
                 return {k: item[k] for k in ('candidateId', 'candidateRevision', 'state',
                                              'summary', 'context', 'candidateType', 'expiresAt')}
@@ -248,7 +247,7 @@ class Service:
         text(data['reason'])
         if data['state'] == 'held':
             text(data.get('resumeCondition'))
-        with self.store.transaction() as db:
+        with self.store.unit() as db:
             self.candidate(db, identifier, claims, 'edit')
         def change(db, operation):
             item = self.candidate(db, identifier, claims, 'edit')
@@ -257,7 +256,7 @@ class Service:
             item.update(data)
             item['candidateRevision'] += 1
             item['assignee'] = claims['sub']
-            self.store.put(db, 'candidate', identifier, item)
+            db.put('candidate', identifier, item)
             return {'candidateId': identifier, 'candidateRevision': item['candidateRevision'],
                     'state': item['state']}
         return self.mutate(claims, key, 'candidate:' + identifier, [revision, data], change)
@@ -302,9 +301,10 @@ class Service:
         self.evidence_authorized(version)
 
     def save_draft(self, claims, key, identifier, working_revision, data):
+        self.require_git()
         require(ID.fullmatch(identifier))
         self.validate_draft(data)
-        with self.store.transaction() as db:
+        with self.store.unit() as db:
             self.candidate(db, data['candidateId'], claims, 'edit')
         def save(db, operation):
             item = self.candidate(db, data['candidateId'], claims, 'edit')
@@ -312,7 +312,7 @@ class Service:
             require(item['state'] in {'in_review', 'awaiting_review'}, 409, 'InvalidTransition')
             require(data['domain'] == item['domain'] and data['audience'] == item['audience']
                     and data['expiresAt'] <= item['expiresAt'], 403, 'ScopeDenied')
-            card = self.store.get(db, 'card', identifier) or {
+            card = db.get('card', identifier) or {
                 'knowledgeId': identifier, 'workingRevision': 0, 'candidateId': item['candidateId'],
                 'versions': {}, 'review': None}
             correction = (item['candidateType'] == 'correction'
@@ -341,8 +341,8 @@ class Service:
             card.update({'workingRevision': version, 'review': None})
             item.update({'state': 'in_review', 'candidateRevision': item['candidateRevision'] + 1})
             item['targetLinks'] = sorted(set([*item['targetLinks'], identifier]))
-            self.store.put(db, 'candidate', item['candidateId'], item)
-            self.store.put(db, 'card', identifier, card)
+            db.put('candidate', item['candidateId'], item)
+            db.put('card', identifier, card)
             return {'knowledgeId': identifier, 'workingRevision': version,
                     'candidateRevision': item['candidateRevision'], 'bundleHash': bundle_hash,
                     'rawSha256': digest(raw), 'gitCommit': commit}
@@ -350,9 +350,10 @@ class Service:
                            ['draft', identifier, working_revision, data], save)
 
     def review(self, claims, key, identifier, revision, data):
+        self.require_git()
         exact(data, ('bundleHash', 'reason'))
         text(data['reason'])
-        with self.store.transaction() as db:
+        with self.store.unit() as db:
             self.card(db, identifier, claims, 'edit')
         def request(db, operation):
             card = self.card(db, identifier, claims, 'edit')
@@ -367,7 +368,7 @@ class Service:
             current_raw = self.git.read('HEAD', version['draftPath'])
             require(digest(current_raw) == version['rawSha256'], 409, 'GitVersionConflict')
             current_metadata = self.git.read('HEAD', f'proposals/{identifier}/{revision}.json')
-            require(digest(__import__('json').loads(current_metadata)) == version['bundleHash'],
+            require(digest(json.loads(current_metadata)) == version['bundleHash'],
                     409, 'GitVersionConflict')
             card['review'] = {'reviewRequestId': operation, 'revision': revision,
                               'bundleHash': version['bundleHash'], 'reason': data['reason'],
@@ -375,23 +376,24 @@ class Service:
             item = self.candidate(db, card['candidateId'], claims, 'edit')
             require(item['state'] == 'in_review', 409, 'InvalidTransition')
             item.update({'state': 'awaiting_review', 'candidateRevision': item['candidateRevision'] + 1})
-            self.store.put(db, 'candidate', card['candidateId'], item)
-            self.store.put(db, 'card', identifier, card)
+            db.put('candidate', card['candidateId'], item)
+            db.put('card', identifier, card)
             return card['review']
         return self.mutate(claims, key, 'candidate:' + self._candidate_id(identifier),
                            ['review', identifier, revision, data], request)
 
     def _candidate_id(self, identifier):
-        with self.store.transaction() as db:
-            card = self.store.get(db, 'card', identifier)
+        with self.store.unit() as db:
+            card = db.get('card', identifier)
             require(card is not None, 404, 'NotFound')
             return card['candidateId']
 
     def decide(self, claims, key, identifier, revision, data):
+        self.require_git()
         exact(data, ('reviewRequestId', 'bundleHash', 'reason', 'decision'))
         require(data['decision'] in {'approve', 'return'})
         text(data['reason'])
-        with self.store.transaction() as db:
+        with self.store.unit() as db:
             self.card(db, identifier, claims, 'approve')
         def decide(db, operation):
             card = self.card(db, identifier, claims, 'approve')
@@ -416,7 +418,7 @@ class Service:
                 canonical = f'cards/{identifier}/{revision}.md'
                 # Approval time must survive retries after Git succeeds but DB does not.
                 # Use the durable acceptance timestamp stored in the operation metadata.
-                stamp = self.store.get(db, 'operation-intent', operation)
+                stamp = db.get('operation-intent', operation)
                 if stamp:
                     approval['at'] = stamp['at']
                 commit = self.git.write(operation, {canonical: raw,
@@ -429,8 +431,8 @@ class Service:
                 item['state'] = 'in_review'
             card['review'] = None
             item['candidateRevision'] += 1
-            self.store.put(db, 'candidate', card['candidateId'], item)
-            self.store.put(db, 'card', identifier, card)
+            db.put('candidate', card['candidateId'], item)
+            db.put('card', identifier, card)
             return {'knowledgeId': identifier, 'revision': revision, 'state': item['state'],
                     'approvalId': version.get('approvalId'), 'gitCommit': version.get('canonicalCommit')}
         # Pin server time durably before the external Git write.
@@ -439,9 +441,11 @@ class Service:
                            ['decision', identifier, revision, data], decide)
 
     def publish(self, claims, key, identifier, generation, data, withdraw=False):
+        if not withdraw:
+            self.require_git()  # Withdrawal never needs Git and must stay available.
         exact(data, ('reason',) if withdraw else ('reason', 'revision', 'approvalId'))
         text(data['reason'])
-        with self.store.transaction() as db:
+        with self.store.unit() as db:
             self.card(db, identifier, claims, 'publish')
         def change(db, operation):
             card = self.card(db, identifier, claims, 'publish')
@@ -456,9 +460,9 @@ class Service:
                 require(digest(raw) == version['rawSha256'], 409, 'HashMismatch')
                 artifact = {**version, 'markdown': raw.decode('utf-8'), 'knowledgeId': identifier}
                 active = f'{identifier}/{data["revision"]}/{version["bundleHash"]}'
-                self.distribution.artifact(db, self.store, active, artifact)
+                self.distribution.artifact(active, artifact)
                 self.fault('after_artifact')
-            manifest = self.distribution.compare_swap(db, self.store, identifier, generation, active, operation)
+            manifest = self.distribution.compare_swap(identifier, generation, active, operation)
             require(manifest is not None, 409, 'ManifestConflict')
             self.fault('after_manifest')
             return {'knowledgeId': identifier, **manifest}
@@ -466,21 +470,20 @@ class Service:
                            ['withdraw' if withdraw else 'publish', generation, data], change)
 
     def published(self, claims, identifier):
+        # Reads touch only the distribution store and the protected policy, never the ledger.
         self.principal(claims)
-        with self.store.transaction() as db:
-            manifest = self.distribution.manifest(db, self.store, identifier)
-            require(manifest['active'] is not None, 404, 'NotPublished')
-            artifact = self.distribution.read_artifact(manifest['active'])
-            require(artifact is not None, 503, 'ArtifactUnavailable')
-            self.authorize(claims, 'read', artifact['domain'], artifact['audience'])
-            self.verify_bundle(artifact)
-            require(artifact['expiresAt'] > self.clock(), 404, 'Expired')
-            require(digest(artifact['markdown'].encode()) == artifact['rawSha256'], 503, 'HashMismatch')
-            require(self.distribution.manifest(db, self.store, identifier) == manifest,
-                    409, 'PublicationChanged')
-            return {k: artifact[k] for k in ('knowledgeId', 'workingRevision', 'bundleHash',
-                    'rawSha256', 'markdown', 'kind', 'applicability', 'sourceRefs', 'expiresAt')} | {
-                        'generation': manifest['generation']}
+        manifest = self.distribution.manifest(identifier)
+        require(manifest['active'] is not None, 404, 'NotPublished')
+        artifact = self.distribution.read_artifact(manifest['active'])
+        require(artifact is not None, 503, 'ArtifactUnavailable')
+        self.authorize(claims, 'read', artifact['domain'], artifact['audience'])
+        self.verify_bundle(artifact)
+        require(artifact['expiresAt'] > self.clock(), 404, 'Expired')
+        require(digest(artifact['markdown'].encode()) == artifact['rawSha256'], 503, 'HashMismatch')
+        require(self.distribution.manifest(identifier) == manifest, 409, 'PublicationChanged')
+        return {k: artifact[k] for k in ('knowledgeId', 'workingRevision', 'bundleHash',
+                'rawSha256', 'markdown', 'kind', 'applicability', 'sourceRefs', 'expiresAt')} | {
+                    'generation': manifest['generation']}
 
     def guarded_use(self, claims, identifier, consumer):
         """Both AI adapters revalidate before input and before returning/citing output."""
@@ -492,7 +495,8 @@ class Service:
         return result
 
     def card_detail(self, claims, identifier):
-        with self.store.transaction() as db:
+        self.require_git()
+        with self.store.unit() as db:
             card = self.card(db, identifier, claims, 'view')
             version = card['versions'][str(card['workingRevision'])]
             raw = self.git.read(version['draftCommit'], version['draftPath'])
@@ -500,29 +504,27 @@ class Service:
 
     def operation(self, claims, identifier):
         actor = self.principal(claims)
-        with self.store.transaction() as db:
-            row = db.execute('SELECT * FROM operations WHERE id=? AND actor=?',
-                             (identifier, actor)).fetchone()
-            require(row is not None, 404, 'NotFound')
+        with self.store.unit() as db:
+            row = db.operation(identifier)
+            require(row is not None and row['actor'] == actor, 404, 'NotFound')
             return {'operationId': identifier, 'status': row['status'],
                     'retrySameKey': row['status'] == 'accepted'}
 
     def pending_operations(self, claims):
         actor = self.principal(claims)
-        with self.store.transaction() as db:
-            return {'items': [{'operationId': row['id'], 'status': row['status']} for row in
-                    db.execute("SELECT id,status FROM operations WHERE actor=? AND status='accepted' LIMIT 50",
-                               (actor,))]}
+        return {'items': [{'operationId': row['id'], 'status': row['status']}
+                          for row in self.store.pending_operations(actor, 50)
+                          if row['actor'] == actor and row['status'] == 'accepted']}
 
     def resume(self, claims, identifier):
         actor = self.principal(claims)
-        with self.store.transaction() as db:
-            row = db.execute('SELECT * FROM operations WHERE id=? AND actor=?', (identifier, actor)).fetchone()
-            require(row is not None, 404, 'NotFound')
+        with self.store.unit() as db:
+            row = db.operation(identifier)
+            require(row is not None and row['actor'] == actor, 404, 'NotFound')
             if row['status'] == 'completed':
                 return {'operationId': identifier, 'status': 'completed'}
             require(row['status'] == 'accepted', 409, 'OperationNotPending')
-            request = self.store.get(db, 'operation-intent', identifier)['request']
+            request = db.get('operation-intent', identifier)['request']
             target, key = row['target'], row['key']
         # Original action revalidates live grants, ownership, versions and publication CAS.
         if isinstance(request, dict):

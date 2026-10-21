@@ -14,10 +14,15 @@ export async function inputHash(value) {
   return [...new Uint8Array(result)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/** Reject synthetic authentication anywhere except an explicit local development URL. */
+/**
+ * Reject synthetic authentication anywhere except an explicit local development URL.
+ * An authenticated API may carry one API Gateway stage segment (e.g. `/dev`); nothing else.
+ */
 export function validateConnection({ baseUrl, synthetic, development, hostname }) {
   const url = new URL(baseUrl);
-  if (url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+  const stage = url.pathname.replace(/\/$/u, '');
+  if (url.username || url.password || url.search || url.hash
+    || (stage !== '' && (synthetic || !/^\/[A-Za-z0-9_-]{1,64}$/u.test(stage)))) {
     throw new Error('共通知識APIの接続先を確認してください。');
   }
   if (synthetic) {
@@ -28,7 +33,7 @@ export function validateConnection({ baseUrl, synthetic, development, hostname }
   } else if (url.protocol !== 'https:') {
     throw new Error('認証付きAPIにはHTTPSの設定が必要です。');
   }
-  return url.origin;
+  return url.origin + stage;
 }
 
 /** Use a deterministic idempotency key for retries of the same exact actor/request. */

@@ -1,4 +1,4 @@
-"""Local synthetic durability adapters; no AWS or remote Git access."""
+"""Shared encoding plus local synthetic durability adapters; no AWS or remote Git access."""
 import contextlib
 import hashlib
 import json
@@ -14,6 +14,62 @@ def encode(value):
 def digest(value):
     data = value if isinstance(value, bytes) else encode(value).encode('utf-8')
     return hashlib.sha256(data).hexdigest()
+
+
+def sort_key(item):
+    """Stable list position shared by every ledger adapter and the signed cursor."""
+    return f'{int(item["submittedAt"]):012d}#{item["candidateId"]}'
+
+
+class Contention(Exception):
+    """A concurrent write won. The accepted operation stays retryable; it is not rejected."""
+
+
+class SqliteUnit:
+    """One BEGIN IMMEDIATE transaction exposing the ledger's domain operations."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def get(self, kind, identifier):
+        row = self.db.execute('SELECT value FROM records WHERE kind=? AND id=?',
+                              (kind, identifier)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def put(self, kind, identifier, value):
+        self.db.execute('INSERT INTO records VALUES (?,?,?) ON CONFLICT(kind,id) '
+                        'DO UPDATE SET value=excluded.value', (kind, identifier, encode(value)))
+
+    def delete(self, kind, identifier):
+        self.db.execute('DELETE FROM records WHERE kind=? AND id=?', (kind, identifier))
+
+    @staticmethod
+    def _operation(row):
+        if row is None:
+            return None
+        return {'id': row['id'], 'actor': row['actor'], 'key': row['key'],
+                'requestHash': row['request_hash'], 'target': row['target'], 'status': row['status'],
+                'result': json.loads(row['result']) if row['result'] else None}
+
+    def operation_by_key(self, actor, key):
+        return self._operation(self.db.execute(
+            'SELECT * FROM operations WHERE actor=? AND key=?', (actor, key)).fetchone())
+
+    def operation(self, identifier):
+        return self._operation(self.db.execute(
+            'SELECT * FROM operations WHERE id=?', (identifier,)).fetchone())
+
+    def target_pending(self, target):
+        return self.db.execute("SELECT 1 FROM operations WHERE target=? AND status IN "
+                               "('accepted','git_written')", (target,)).fetchone() is not None
+
+    def accept_operation(self, identifier, actor, key, request_hash, target):
+        self.db.execute('INSERT INTO operations VALUES (?,?,?,?,?,?,NULL)',
+                        (identifier, actor, key, request_hash, target, 'accepted'))
+
+    def finish_operation(self, identifier, status, result):
+        self.db.execute('UPDATE operations SET status=?, result=? WHERE id=?',
+                        (status, encode(result), identifier))
 
 
 class Store:
@@ -50,16 +106,42 @@ class Store:
         finally:
             db.close()
 
+    @contextlib.contextmanager
+    def unit(self):
+        with self.transaction() as db:
+            yield SqliteUnit(db)
+
+    def candidates(self, state, submitter=None, after=None, limit=20):
+        """Index-order page by state (and owner). Callers re-check scope and expiry."""
+        sql = ("SELECT value FROM records WHERE kind='candidate' AND json_extract(value,'$.state')=?")
+        params = [state]
+        if submitter is not None:
+            sql += " AND json_extract(value,'$.submittedBy')=?"
+            params.append(submitter)
+        if after is not None:
+            stamp, identifier = after.split('#', 1)
+            sql += (" AND (json_extract(value,'$.submittedAt')>? OR "
+                    "(json_extract(value,'$.submittedAt')=? AND id>?))")
+            params += [int(stamp), int(stamp), identifier]
+        sql += " ORDER BY json_extract(value,'$.submittedAt'),id LIMIT ?"
+        params.append(limit + 1)
+        with self.transaction() as db:
+            rows = [json.loads(row[0]) for row in db.execute(sql, params)]
+        page = rows[:limit]
+        return page, sort_key(page[-1]) if len(rows) > limit else None
+
+    def pending_operations(self, actor, limit=50):
+        with self.transaction() as db:
+            return [SqliteUnit._operation(row) for row in db.execute(
+                "SELECT * FROM operations WHERE actor=? AND status='accepted' LIMIT ?", (actor, limit))]
+
     @staticmethod
     def get(db, kind, identifier):
-        row = db.execute('SELECT value FROM records WHERE kind=? AND id=?',
-                         (kind, identifier)).fetchone()
-        return json.loads(row[0]) if row else None
+        return SqliteUnit(db).get(kind, identifier)
 
     @staticmethod
     def put(db, kind, identifier, value):
-        db.execute('INSERT INTO records VALUES (?,?,?) ON CONFLICT(kind,id) '
-                   'DO UPDATE SET value=excluded.value', (kind, identifier, encode(value)))
+        SqliteUnit(db).put(kind, identifier, value)
 
     @staticmethod
     def items(db, kind):
@@ -121,42 +203,42 @@ class LocalGit:
 
 
 class LocalDistribution:
-    """Immutable artifact + CAS manifest adapter, persisted in the I1 ledger."""
+    """Immutable artifact + CAS manifest adapter in its own SQLite file, apart from the ledger."""
 
     available = True
 
     def __init__(self, store):
         self.store = store
 
-    def manifest(self, db, store, identifier):
+    def manifest(self, identifier):
         if not self.available:
             raise OSError('manifest unavailable')
-        with self.store.transaction() as distribution_db:
-            return self.store.get(distribution_db, 'manifest', identifier) or {'generation': 0, 'active': None}
+        with self.store.unit() as unit:
+            return unit.get('manifest', identifier) or {'generation': 0, 'active': None}
 
-    def artifact(self, db, store, key, value):
-        with self.store.transaction() as distribution_db:
-            previous = self.store.get(distribution_db, 'artifact', key)
+    def artifact(self, key, value):
+        with self.store.unit() as unit:
+            previous = unit.get('artifact', key)
             if previous is not None and previous != value:
                 raise ValueError('immutable artifact conflict')
-            self.store.put(distribution_db, 'artifact', key, value)
+            unit.put('artifact', key, value)
 
     def read_artifact(self, key):
-        with self.store.transaction() as db:
-            return self.store.get(db, 'artifact', key)
+        with self.store.unit() as unit:
+            return unit.get('artifact', key)
 
-    def compare_swap(self, db, store, identifier, expected, active, operation):
+    def compare_swap(self, identifier, expected, active, operation):
         if not self.available:
             raise OSError('manifest unavailable')
-        with self.store.transaction() as distribution_db:
-            current = self.store.get(distribution_db, 'manifest', identifier) or {'generation': 0, 'active': None}
-            receipt = self.store.get(distribution_db, 'publication-operation', operation)
+        with self.store.unit() as unit:
+            current = unit.get('manifest', identifier) or {'generation': 0, 'active': None}
+            receipt = unit.get('publication-operation', operation)
             if receipt:
                 # A later withdrawal/publication cannot be undone by an older retry.
                 return receipt if receipt == current else None
             if current['generation'] != expected:
                 return None
             value = {'generation': expected + 1, 'active': active}
-            self.store.put(distribution_db, 'manifest', identifier, value)
-            self.store.put(distribution_db, 'publication-operation', operation, value)
+            unit.put('manifest', identifier, value)
+            unit.put('publication-operation', operation, value)
             return value
