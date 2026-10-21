@@ -16,9 +16,9 @@ related-code:
 
 管理者用の先輩チャットで質問すると、サーバーが許可されたテーマカードを自動検索し、関連カードの条件・出典・調査の手掛かりを読んで技術KBを検索する。利用者が毎回ファイルを選ぶ操作は不要とする。法令KBは独立した会話のままとし、下書きの記述を法令の根拠にはしない。
 
-これはユーザーが依頼した検索機能の実装であり、カードの技術承認、全カードのクラウド投入、デプロイ、OneNote/Listsへのアクセス追加を成立させるものではない。現在の397カードはすべて下書きである。カードの既存状態を書き換えず、クラウド処理を許可された特定版だけを別の一覧で指定する。実データをAWSへ送る操作は今回行わない。
+カードは下書きのままである。技術承認や、一般利用者向けKBへの投入、OneNoteへの自動書込は、この経路では行わない。クラウドで読む枚は、取込一覧で`cloudApproved: true`にした特定版だけである。カード本文の`status`は書き換えない。
 
-元資料・写し棚・修復待ちを含む知識データと、その管理文書は資料ブランチ`feature/knowledge-reconcile-prep`で管理し、実装・デプロイ用の`mona`には取り込まない。新しい開発用の検索経路はこの文書を仕様とする。一般利用者向けの承認済みカードKBとは区別する。
+2026-10-20時点の`mona`には、事例カードと実践ガイド、OneNoteスナップショット、この検索経路の実装が同じブランチに入っている。devでの試行は別端末から行い、問題がなければその後に`develop`へマージする。一般利用者向けの承認済みカードKBとは区別する。
 
 ## 読み込む範囲と取込一覧
 
@@ -52,12 +52,62 @@ knowhow: {
 
 これはclarify、not_found、pagesの各応答で同じ契約とする。該当カードが0件なら「該当なし」とKB検索のみの状態を表示する。索引が利用不可であることとカードが見つからないことを混同しない。
 
+## 先輩の検索ルールと機種フィルタ（2026-10-20 方針）
+
+> 最終検証: 2026-10-21 — 評価ケースの終了コード（eval_senpai_retrieval.py:121-125 と `--index`）を照合し文書を修正。点数の付け方の改訂は単体テスト（tests/unit/test_knowhow_scoring.py）と、実カード 398 枚から作った評価用の索引（評価後に削除）で確認。2026-10-20 の合成カードの単体テスト（検索・索引検証・キュー生成）、合成索引での評価ケース実行、実カード398枚でのキュー生成、`modelFit` の判定・API・フロント（検証と画面の注意表示）の合成テストの結果は変更なし。AWS上・実画面の動作は未確認。
+
+Lists の機種欄は信頼できない（例: VFGH と書かれたカードが実際は全エレベーターに当てはまる）ため、機種で自動的にカードを落とさない。製品判断は「**適用範囲を人が確認したカードだけを機種フィルタで除外する**」とする。
+
+- **順位付け**: `excludes` / `may_apply_to` / `scope_note` は点数に使わない。点数に効くのは `control_methods` / `door_families` / `door_types` / `guide_systems` / `lists_model_label` / `machine_room` / `model_abbreviations` / `observed_on` / `product_lines` / `conditions` とタイトル・検索語・本文だけ。検証用の3キー（`scope_status` / `scope_verified_by` / `scope_verified_at`）は点数にも検索語にも入れない。
+- **点数の付け方（2026-10-21 改訂）**: 質問の文字の並び（2・3 文字）と英数字の語ごとに、カードの項目（タイトル 1.0・検索語 1.0・適用範囲 0.8・本文 0.6）のうち最も重い一致を 1 回だけ数え、カード全体での出現の少なさ（IDF）で重み付けした 0〜1 の点数にする。英数字の語は 4 倍、数字を含む語（エラーコードなど）が完全一致すれば +0.3（上限 1）。長い文の質問では、一致した量そのもの（量／(量＋100)）が高ければそちらを使う。カードと質問は NFKC・大文字小文字・カタカナ→ひらがな・長音記号を揃え、質問側だけ口語の言い回し（できない・ください・教えて など）を除き、別名（リンクス→links など）を足す。返すのは 0.2 以上かつ 1 位の 0.7 倍以上のカードで、最大 3 件。実カード由来の質問 85 件と無関係な質問 16 件の評価で、1 位正解率 0.88→0.92、無関係な質問への誤ヒット 12/16→2/16、返したカードの適合率 0.51→0.77。評価ケース 23 件はすべて合格。
+- **機種フィルタ（画面の「機種（任意）」）**: 未選択なら何も除外しない。選択時は、`scope_status: verified` のカードのうち、`product_lines` / `model_abbreviations` / `lists_model_label` / `observed_on` で認識できる機種が**選んだ機種以外だけ**のものを除外する。`未検証`（省略を含む）のカード、認識できる機種が1つもないカード、選んだ機種・汎用ラベル（全エレ機種 等）を含むカードは除外しない。
+- **制御コード**: VFGH・CM-MA などの未知のコードは判定に使わない。
+- **別製品の注意（`modelFit`）**: 機種を選んだときだけ、サーバーが返す各カードに応答専用の `modelFit`（`matched` 選択機種に一致 / `general` 全エレ機種などの汎用 / `other_product` 認識できる機種が他製品だけ / `unknown` 認識できる機種なし）を付ける。`other_product` には該当製品名（UI の機種キー）を `modelFitProducts` で添える。索引のフィールドではなく、順位・除外も変えない。`other_product` は未検証カードで起きる（検証済みの場合は除外される）。画面は `other_product` のカードにだけ「AXIEZ-LINKs（VFGLF・巻上機上部）の事例です。選択中の AXIEZ（VFGLB・巻上機下部）でも当てはまるかは要確認です。」のように表示し、`matched` / `general` / `unknown` と保存済みの古い回答（`modelFit` なし）には何も出さない。制御方式・巻上機の位置の表示は AXIEZ（VFGLB・巻上機下部）と AXIEZ-LINKs（VFGLF・巻上機上部）だけで、他の機種は製品名のみ。AXIEZ と AXIEZ-LINKs は別製品である（[APPLICABILITY-TAXONOMY.md](../../../knowledge/registry/APPLICABILITY-TAXONOMY.md)）。
+- **検証済みの付け方**: `model_scope` に `scope_status: verified` / `scope_verified_by` / `scope_verified_at`（YYYY-MM-DD）を書く。`verified` で確認者・確認日が欠ける、または形式が不正だと、取込ツールとLambdaの索引検証のどちらも失敗する。定義は [knowledge/CONTRACT.md](../../../knowledge/CONTRACT.md)、訂正の仕方は [APPLICABILITY-TAXONOMY.md](../../../knowledge/registry/APPLICABILITY-TAXONOMY.md) の「適用範囲の訂正と検証」。
+- **確認キュー**: `python scripts/knowledge/build_scope_review_queue.py` が [knowledge/queues/scope-review/QUEUE.md](../../../knowledge/queues/scope-review/QUEUE.md) を生成する。P1 矛盾の疑い（機種名があるのに適用範囲が広い）、P2 機種名あり・未検証、P3 制御方式・略称のみ（機種フィルタ対象外。全機種対応なら全エレ機種へ）、P4 汎用ラベル／空。件数は `QUEUE.md` の「件数」表を正とする（この文書に手で写さない。CI が `QUEUE.md` の鮮度を検査する）。
+- **評価ケース**: `tests/fixtures/knowledge/senpai-eval-cases.json`。実カードは未検証のため SE-021・SE-022 は「除外されず返ること」を確認する。検証済みカードが除外される動作は `tests/unit/test_knowhow_retrieval.py` の合成カードで確認する。実行は次のとおり（結果の表示のみ。`--index` は終了コード 0。`--from-cards` は無効カードがあると 2、評価ケースの FAIL だけなら 0）。
+
+```sh
+python scripts/knowledge/eval_senpai_retrieval.py --index .private-knowhow/index.json
+# 実カードから一時索引を作って評価し、終了時に削除する（取込一覧は不要）
+python scripts/knowledge/eval_senpai_retrieval.py --from-cards .
+```
+
+## 改善の回し方（2026-10-20）
+
+> 最終検証: 2026-10-20 — `check`（実カード398枚で全件成功・台帳一致）、`eval_senpai_retrieval.py --from-cards .` の実カード実行、キュー鮮度・語彙同期・合成契約索引のテスト、下記ガードを破る変異（誤字・語彙のずれ・フォルダー外・版上げ忘れ・重複除去の削除・未来日・ファイル名・重複ID・無効カード・title の URL）がすべて検出されることの再確認。CI での実行結果は未確認。
+
+手書きの合成索引だけで評価すると、取込ツールが本物の索引に何を入れるかのずれを見逃す（実際に、`excludes` / `may_apply_to` が検索語へ混入して順位修正を無効にしていた）。そこで、実カードと同じ生成コードを通る検査を回す。
+
+1. **カードを直す**。内容（本文・frontmatter）を変えたら **`card_version` を上げる**。
+2. **台帳を再生成**する（`node scripts/knowledge/build-senpai-index.mjs ledger .`）。`knowledge/registry/card-versions.jsonl` に、カードごとの `card_version` と内容 sha256 を記録する（版を上げずに内容だけ変えた場合は再生成を拒否する）。台帳もコミットする。
+3. **`node scripts/knowledge/build-senpai-index.mjs check .`**。取込一覧なし・何も書き出さず、全カードを索引生成と同じ検証で1枚ずつ確認し、失敗カードと理由を出す（1枚でも失敗なら終了コード1）。台帳との照合（版上げ忘れ・台帳の再生成忘れ）もここで検出する。CI でも実行する。
+4. **確認キューを再生成**する（`python scripts/knowledge/build_scope_review_queue.py`）。古いままだと CI の鮮度テストが失敗する。
+5. **`python scripts/knowledge/eval_senpai_retrieval.py --from-cards .`** で評価ケースを実カードの本物の検索語で流す。無効なカードがあると WARNING を出して終了コード2（評価ケースの FAIL だけなら 0）。評価は台帳を見ない（`--no-ledger`）。
+6. **先輩チャットで利用する**。
+7. （今後）利用者の結果入力を確認キューへ反映し、優先度付けに使う。未実装。
+
+補足:
+- `check --eval-index <path>` は未承認の全有効カード本文を含む評価用索引を出す。OS の一時フォルダ内（リポジトリ内は拒否）に権限0600でのみ書き、アップロード・共有・コミットしない。`--from-cards` が自動で作り、評価後に削除する。
+- 同じ語彙一覧（適用範囲キー・順位に使うキー・出典キー）が Lambda・取込ツール・フロントの3か所にあるため、`tests/unit/test_knowhow_contract_sync.py` が一致を検査する。一覧を変えるときは3か所を同時に直す。
+- **変異テストで確認済みのガード**（それぞれ、破ると `check` かテストが失敗する。`frontend/tests/knowledge-index-guards.test.mjs` と `tests/unit/test_knowhow_contract_sync.py`）:
+  - `verified` なのに4つの分類キーに認識できる機種名・全機種ラベルが無い（誤字 `AXEIZ` 等）→ 失敗し、認識される値を表示
+  - 出典キー・出典種別・`SOURCE_ID_KEYS`・`scope_status` の値・日付の正規表現・`MODEL_ALIASES`・全エレ/全エスラベルが Lambda と取込ツールでずれる
+  - 承認済みフォルダー外（`knowledge/cards/newdir/` 等）のカード
+  - 内容を変えたのに `card_version` が同じ／版を上げたのに台帳を再生成していない
+  - 検索語の重複除去の削除（重複する検索語を持つ合成カード `KH-SYN-DUPTERMS`）
+  - `scope_verified_at` が未来日・実在しない日付（分かりやすい文言で失敗）
+  - ファイル名と `knowledge_id` の不一致、重複した `knowledge_id`（両方のパスを表示）
+  - `title` に URL・制御文字・`\` を含む
+  - `--from-cards` で無効カードがあるのに終了コード0になる
+- 取込ツールの出力は合成カードから生成した `tests/fixtures/knowledge/synthetic/built-index.json` に固定し、JS（再生成結果と一致）と Python（Lambda が受理し、`excludes` 等だけの語で出ないこと）の両方で検査する。取込ツールの出力を変えたら `npm --prefix frontend run knowledge:regen-contract-fixture` で再生成する。
+
 ## 画面と記録
 
 - 通常側の返答に「参照したノウハウMarkdown」を表示し、タイトル・安定ID・版・ハッシュ・元の状態を確認できる。折り畳み内の本文は文字表示とし、画像・生HTML・外部埋込を実行しない。適用範囲・除外条件・元情報の識別子も確認できる。
 - 検索で使ったカードは未承認の探索候補と明示する。選んだだけでKB確認・技術承認・OneNote転記済みにはしない。OneNoteへの自動書込みは追加しない。
 - リクエストにローカルMarkdown本文やファイル名を送らない。一方でサーバー側の取込済みカードが検索・AI処理に使われることは説明する。本文・トークン・内部URLをログに出さない。
-- 今回のカード参照メタデータは先輩チャットの現在の返答に表示する。既存の通常チャット履歴へ新しい参照構造を保存・復元する変更は含めない。既存APIに保存されるAI本文には、その時点で与えたカードの影響が含まれ得る。
+- 相談ID・発言IDが付いた先輩チャットの回答では、カード参照情報も既存ChatLogsへ保存する。左側の相談履歴から開き直す際は、保存当時の版・本文・出典を復元し、現在の索引へ差し替えない。一般ユーザーの通常履歴経路からはこの情報を返さない。保存と取得の契約は[先輩チャットの相談履歴](knowledge-research-workspace.md#先輩チャットの相談履歴)を参照する。
 
 ## 検証と導入の境界
 
@@ -78,6 +128,72 @@ node scripts/knowledge/build-senpai-index.mjs build <知識リポジトリ> <取
 
 AWS導入には`Environment=dev`、`KnowhowEnabled=true`、`KnowhowIndexBucket`、`KnowhowIndexKey`、既存adminグループ、画面の`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH=true`を対応させる。索引のS3配置はこのツールの機能に含めない。配置先を通常の資料配信へ公開しない。フラグを無効にすると先輩チャットの技術側は利用不可を案内するため、完全に停止する場合は画面のフラグも無効にする。
 
+## 別端末から mona の dev を試す
+
+> 最終検証: 2026-10-20 — Phase2のAWS反映、Lambda設定、Amplifyのビルド履歴を確認。管理者ログイン後の画面・認証付き検索は未確認。
+
+正本の試行順はこれだけである。Phase2の一般手順は[運用ランブック](../../ops-runbook.md)の「デプロイとロールバック」と[移行ランブック](../../aws-migration-runbook.md)の Phase 2 を使う。ここには先輩チャットを足すときの差分だけを書く。
+
+1. 別端末で`git fetch origin`し、`git checkout mona`、`git pull origin mona`する。先端に事例カードと`amplify.yml`の`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH=true`があることを確認する。
+2. `cd frontend && npm ci`のあと、リポジトリルートで棚卸しする。
+
+```sh
+node scripts/knowledge/build-senpai-index.mjs inventory .
+```
+
+3. 棚卸しに出たカードのうち、索引生成が通るものだけを取込一覧にする。カード数と索引に入れられる枚数の最新は`check`の出力（`node scripts/knowledge/build-senpai-index.mjs check .`）を正とする。失敗するカードを1枚でも一覧に入れると索引ファイルはできない。2026-10-20に、法令の出典に`law_id`が欠けていた`KH-ALL-CABIN-ILLUMINANCE-62LX-282`へ、他カードと同じ建築基準法施行令の`law_id`を補い、版を2に上げた（`law_rag_status: pending`のまま）。
+   - 編集者用の注記項目（`note`など6種）は`build`が索引へ出さずに捨てる。
+   - 適用範囲の値と出典の`locator`・`law_title`に`/`があってもよい。`..`区間、先頭の`/`、`\`、URL形式は引き続き拒否する。
+   - 確認（2026-10-20）: 実カード398枚を1枚ずつ`build`し、282の補修前は397枚が成功、成功分でPython `parse_index`も通過（索引は検証後に削除）。
+4. 取込一覧の`approvedBy`と`approvedAt`（UTCの`YYYY-MM-DDTHH:mm:ss.sssZ`）を担当者が記入し、各entryの`cloudApproved`を`true`にする。その後に索引を作る。
+
+```sh
+node scripts/knowledge/build-senpai-index.mjs build . <取込一覧.json>
+```
+
+生成先は`.private-knowhow/index.json`である。Gitには入れない。
+
+5. そのJSONを、資料配信用バケットともKB取込バケットとも違うprivateバケットの固定キーへ置く。同じバケットだとLambdaは503にする。既存の専用privateバケットを優先し、無ければ組織ポリシーに従ってprivate専用バケットを用意する。公開バケットは作らない。暗号化・TLS必須・非公開状態を確認する。オブジェクトの中身はカード全文を含む。
+6. いま動いている`EleKnowledge-dev-phase2`のパラメータを読み、同じ値をすべて`--parameter-overrides`へ戻す。`KnowledgeBaseId`、モデルID、法令ゲートをテンプレート既定のままにすると、devの通常チャットの接続先が変わる。そのうえで次だけを試行値にする。
+   - `RagLogicVersion`は`git rev-parse --short=12 HEAD`（7〜40桁の小文字16進）
+   - `Environment=dev`
+   - `KnowhowEnabled=true`
+   - `KnowhowIndexBucket`と`KnowhowIndexKey`は手順5の置き場所
+7. 対象SHAを確認して`infrastructure/sam`で`sam build`する。SCPでSAMの自動S3解決が許可されない環境では、承認済みartifacts bucketを明示して`sam package`し、パッケージ済みtemplateからCloudFormation changesetを作る。`--resolve-s3`に頼らない。changesetのAdd/Modify/RemoveとReplacementを確認し、Replaceが出たら実行しない。問題なければchangesetを実行する。このデプロイはdevのRAG Lambda全体を`mona`のコードへ替える。カード索引を読まない通常質問でも、`mona`に入っている他のLambda変更は同じスタックに入る。
+8. Amplifyは`develop`を自動ビルドする。`mona`の画面を試す間は、Amplifyの対象ブランチを`mona`にして、このコミットから再ビルドする。コンソール側でビルド定義を上書きしている場合は、`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH`が文字列`true`であることを確認する。
+9. 管理者でそのブランチのURLを開き、先輩チャットでカードの症状語を質問する。返答に「参照したノウハウMarkdown」が出ること、非管理者は入口が出ないこと、通常の`/chat`がこれまでどおり資料検索できることを見る。索引が無い、またはバケットが資料配信と同じだと503になる。
+10. 試してよければ`develop`へマージする。よくなければ`KnowhowEnabled=false`と、デプロイ前の`RagLogicVersion`・モデル・KB IDへ戻してPhase2を再デプロイし、Amplifyの対象を`develop`に戻す。
+
+OneNoteの自動書込はこの試行に含めない。
+
+### 2026-10-20 dev実反映記録と再発防止
+
+> 最終検証: 2026-10-20 — CloudFormation変更セット・スタック完了イベント、RAG Lambda環境変数、Amplifyジョブ、S3オブジェクトを確認。管理者による受入試験は未完了。
+
+- 実際に反映したソースは`origin/mona`の`e54f3fafb4ad`。作業開始時の`5a39b1cef8c2`を一度packageしたが、Amplifyの`mona`ブランチが既に新しいコミットをJob 32で配信していたため、そのpackageはdeployせず、最新コミットを取り直してSAM build/packageからやり直した。**build/packageの前とchangeset実行直前に、Git SHAとAmplifyの対象コミットを再照合する。** 古いpackageを最新コードだと見なさない。
+- 398枚を棚卸しし、索引には320枚だけを選択した。78枚（未対応の出典項目44、適用範囲の`/`が33、出典値の`/`が1）は除外した。カードはすべてdraftで、`cloudApproved`はこの限定用途のクラウド処理許可であり、技術承認ではない。除外カードを修正なしに追加しない。
+- 専用のprivate S3バケットへ`senpai/index.json`を配置した。SSE-S3 AES256、バージョニング、HTTPS必須ポリシーを設定し、オブジェクトの暗号化とバケットポリシー上の非公開状態を確認した。組織SCPにより`put-public-access-block`は拒否された（exit 254）。これは今回の環境で確認済みの制約であり、同APIを再試行したり、公開設定を変えて回避しない。`sam package`には既存のSAM artifacts bucketを明示し、`--resolve-s3`を使わない。
+- Phase2の現行パラメータをすべて取得して引き継ぎ、変更したのは試行SHA・knowhow有効化・専用索引bucket/keyだけ。KB、モデル、法令ゲート、引用URIモード、スロットリング設定をテンプレート既定値で上書きしない。再デプロイ時も、まず稼働スタックの全パラメータを取得し、対象差分以外を維持する。
+- SAM package後に作成したchangesetは24リソース変更、`Replacement=True`は0件。確認後に実行し、`EleKnowledge-dev-phase2`は`UPDATE_COMPLETE`となった。RAG Lambdaでは`KNOWHOW_ENABLED=true`、索引bucket/key、`RAG_LOGIC_VERSION=e54f3fafb4ad`と、既存のKB・モデル・法令設定を確認した。changesetに置換が1件でもあれば実行しない。
+- Amplifyの`mona`ブランチは既存で自動ビルド有効、Job 32が`e54f3fafb4ad`で成功していた。配信ホームのクライアント資産に先輩チャットの表示文言が含まれることを確認した。`amplify.yml`の`NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH=true`はビルド時設定なので、環境変数の変更後は必ず新しいビルドを行う。
+- Lambdaを直接呼び出した簡易試験は、合成したadmin claimと検索語`エラー`で`200` / `knowhow.status=not_found`だった。これは該当カードが見つからなかった結果で、API Gateway/Cognito認証や画面操作の成功を示さない。応答にsession/message IDがあったため、テスト用ユーザーのChatLogsが作成された可能性もある。**この直呼び結果を受入済みと記録せず、同じ合成ユーザーで再試験しない。** 管理者ログインから実カードの症状語で検索し、ノウハウ候補表示、通常チャット、法令チャット、非管理者の非表示・拒否を確認する工程が残る。
+
+#### 反映記録の照合と、次回反映で変わること
+
+> 最終検証: 2026-10-20 — 上の反映記録を、反映SHA `e54f3fa` と現在の `mona` のコード・SAMテンプレート・カード差分で照合し、テンプレートを cfn-lint で検査。AWS上の実状態（スタック・Lambda環境変数・S3・Amplify）は、この照合端末にAWS CLIがないため未照合。
+
+- **devに入っているのは `e54f3fa` まで。** それ以降の `mona`（検索で除外条件を加点しない修正と機種フィルタ、取込の許容拡大と282補修、機種欄の確認状態と確認キュー、まとめ試作、結果を残す、CIの検査）はdev未反映。devの先輩チャットは、`excludes` などの語で候補が上がる不具合が残る版で動いている。
+- **SAMの差分は追加だけ。** 新パラメータ`SenpaiSynthesisEnabled`・`SenpaiFieldReportsEnabled`（既定`false`）も、手順6のとおり明示して引き継ぐ。両機能のLambda・IAMロール・`senpai-field-reports-<env>`テーブル・API経路は、`Environment=dev`かつ有効化したときだけ作られる。既定のままなら関数・ロール・テーブルのAddは出ない想定。有効化するとAddとRagApiのデプロイ更新が出る。どちらの場合も変更セットで`Replacement`が0件であることを確認する。
+- **画面が先に変わる。** Amplifyの`mona`はpushで自動ビルドされる。まとめ・結果を残すのボタンは`NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS`・`NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS`が`"true"`のときだけ出る（`amplify.yml`未設定なら非表示）。SAMで有効化した後に`amplify.yml`へ追加して再ビルドする。機種選択は旧Lambdaでも技術KB検索の絞り込みとして効くが、ノウハウ候補は絞られない。
+- **索引の取込一覧は作り直す。** 反映時に除外した78枚のうち77枚は、カード本文を変えずに取込ツールの変更で`check`を通るようになった。282は内容を変えて版2にした（反映時の索引には入っていない）。追加する場合は`check`と`card-versions.jsonl`で版・ハッシュを確認し、新しい取込一覧で担当者がクラウド処理許可（`cloudApproved`）を改めて確認する。取込ツールが通すことは、索引に入れてよいという許可ではない。
+- **直呼び試験の記録。** 合成ユーザーで作られた可能性のあるChatLogsはTTL（60日）で消える。早く消す必要がある場合は、対象ユーザーを確認したうえで別途行う。
+
+#### Windowsでの実行時に注意すること
+
+- SAM CLIが同梱Pythonを見つけられるよう、SAM runtimeを`PATH`の先頭に加えてからbuild/packageする。package/buildが動作中なら二重起動せず、プロセス終了と出力を確認してから次へ進む。
+- PowerShell 5.1の`ConvertTo-Json | Set-Content`はUTF-8 BOM付きになり、AWS CLIの`file://` JSON読込で失敗することがある。JSON入力ファイルはUTF-8 BOMなしで保存し、CLIには`file://<path>`で渡す。JSONをコマンドラインへ直接埋め込まない。
+- `--resolve-s3`やバケット公開アクセスブロックAPIの再試行でSCPを回避しようとしない。承認済みのartifacts bucketと、個別の変更セット確認を使う。
+
 ### 2026-10-20 実装検証
 
 > 最終検証: 2026-10-20 — 合成Markdownの実取込・実検索処理・ローカルHTTP・ブラウザー。AWSと会社KBへの実接続は未実施。
@@ -87,8 +203,8 @@ AWS導入には`Environment=dev`、`KnowhowEnabled=true`、`KnowhowIndexBucket`�
 - 質問クライアントの行カバレッジ98.36%、分岐90.99%。取込処理の行92.61%、新規Python検索モジュールの行・分岐合算82%。全体のアプリに対する80%保証ではない。
 - 実際の取込ツールで架空のカード1枚を索引化し、実際のRAGハンドラー・私有S3読取・検索・KBへの手掛かり追加・プロンプトのデータ境界・画面表示をローカルで確認した。Cognito、Bedrock、DynamoDBなどのクラウド接続部分はテスト用に置き換え、実AI回答品質の検証とは区別した。
 - 追加質問の文脈、本文・出典・適用除外の展開表示、関連カードなし、索引欠落時の503案内と法令側の継続、非管理者403を確認した。
-- 実カードのローカル棚卸しは397件、読取エラー0件。すべてdraft、取込許可一覧なしの選択は0件。実カードのアップロード・技術承認・OneNoteへの追記は実施していない。
-- `mona`反映用に最新developへ実装だけを移した後も、フロントエンド151件・Python680件と11 subtests、型検査・依存監査が成功した。元の687件には資料処理専用の7件も含まれる。実装ブランチには業務資料とその取り込み履歴を含めない。
+- 実カードのローカル棚卸し・索引生成の可否は`check`の出力を正とする（2026-10-20時点で、読取エラー0件・全件が索引生成まで通る）。すべてdraft、取込許可一覧なしの選択は0件。実カードのアップロード・技術承認・OneNoteへの追記は実施していない。
+- 2026-10-20に、事例カードと実践ガイドを含む`mona`を別端末のdev試行に使う方針とした。実装だけを資料なしで移す、という以前の分離は、この試行では使わない。
 
 現在の順位付けは文字列・検索語による候補探索であり、意味検索や技術的な適用判定ではない。会社ネットで、同義語・機種違い・適用除外・根拠不足を含む実質問と、担当者が選んだ期待カード・KB資料を照合して評価する。実際の検索品質、認証・IAM、資料閲覧、AWSデプロイの受入は残る。
 

@@ -2,6 +2,8 @@
 
 ## テーマカード（`knowledge/cards/`）
 
+> 最終検証: 2026-10-21 — `model_scope` のキー一覧を lambda/rag/rag-function/knowhow_retrieval.py（MODEL_SCOPE_KEYS・POSITIVE_SCOPE_KEYS）と scripts/knowledge/build-senpai-index.mjs と照合（`conditions` を追加）。本節のみ。
+
 ```yaml
 knowledge_id: KH-XXXX          # 安定ID
 kind: case_summary | practice_guide
@@ -21,7 +23,11 @@ model_scope:
   observed_on: []              # 発生確認の要約（従来互換・検索用）
   may_apply_to: []             # 適用可能性（未確認可）
   excludes: []
+  conditions: []               # 機種・制御以外の適用条件（例: 「LINKs ドア 開閉」）。正の条件として順位付けに使う（除外は excludes）
   scope_note: ""               # 全エレ機種・複数制御など短文
+  scope_status: unverified     # verified | unverified（省略時 unverified）。verified のカードだけ Senpai の機種フィルタで除外されうる
+  scope_verified_by: ""        # verified のとき必須: 適用範囲を確認した人の名前
+  scope_verified_at: ""        # verified のとき必須: 確認日 YYYY-MM-DD
 source_refs:
   # 参照元（利用者・AIが辿る原情報）は次の4種類を「出典」と呼ぶ（draft_record は写し索引）
   - ref_type: lists_item      # Microsoft Lists の list_item_id（スナップショット上の項目番号）
@@ -49,6 +55,28 @@ review_status: in_review
 publication_status: not_published
 cloud_approval: not_reviewed
 ```
+
+### 適用範囲の検証（`scope_status`）
+
+> 最終検証: 2026-10-20 — `check` の合成カードテスト（誤字・未来日・ファイル名・フォルダー外・ledger）と実カード398枚での `check` 成功。AWS 上の動作は未確認。
+
+Lists の機種欄は信頼できない（例: VFGH と書かれたカードが実は全エレベーターに当てはまる）。そのため Senpai の機種フィルタ（UI「機種（任意）」）は、**人が適用範囲を確認したカードだけ**を除外対象にする。
+
+- `scope_status: verified` のカードだけが、`product_lines` / `model_abbreviations` / `lists_model_label` / `observed_on` の認識済み機種がすべて「選んだ機種以外」のとき除外される。
+- `unverified`（省略を含む）のカードは、機種欄が何であっても除外されない。
+- `verified` には `scope_verified_by`（名前）と `scope_verified_at`（YYYY-MM-DD）が**両方必須**。欠ける、または形式が不正なカードはインデックスのビルドと検証で失敗する。
+- `verified` のカードは、上の4キーのどれかに**認識できる機種名か `全エレ機種` / `全エス機種`** が1つ以上必要。誤字（例: `AXEIZ`）だけだと機種フィルタが何も判定できず、確認が無効になるため、`check` / ビルドが失敗し、認識される値の一覧を表示する。認識される機種名は UI の機種キーと同じ **AXIEZ / AXIEZ-LINKs / NEXCUBE / メルシティ / メルワイド / エスカレーター**（別名: `AXIEZ(KE-WF・KE-HF)`、駅舎エレ、`Nexcube Limited`、特注機械室レスエレベーター、escalator）。**AXIEZ と AXIEZ-LINKs は別の機種**として扱われる（AXIEZ を選んでも AXIEZ-LINKs だけのカードは除外される）。
+- `scope_verified_at` は実在する日付で、**本日（UTC）より後は不可**。
+- 3 つのキーは検索スコアにも検索語にも使われない。
+- 確認手順: 原情報（Lists / OneNote / KB）で適用範囲を確かめ、`model_scope` を直してから 3 キーを記入する。直し方は [APPLICABILITY-TAXONOMY.md](registry/APPLICABILITY-TAXONOMY.md) の「適用範囲の訂正」、確認待ちの一覧は [queues/scope-review/QUEUE.md](queues/scope-review/QUEUE.md)。
+
+### カードの保守規則（`check` が検査する）
+
+- **ファイル名 = `knowledge_id`**（`KH-XXX.md`）。違うと失敗する。
+- カードは `knowledge/cards/case-summaries/` か `practice-guides/` にだけ置く。`knowledge/cards/` 配下のそれ以外の場所の `*.md` は（`INDEX.md` / `README.md` / `TEMPLATE.md` / `_SOURCE-LEGEND.md` を除き）失敗する。
+- **`card_version` 台帳**: `registry/card-versions.jsonl`（1行1カード: `knowledgeId` / `cardVersion` / `sha256`。sha256 は索引生成と同じ）。内容（本文・frontmatter）を直したら **`card_version` を上げ**、`node scripts/knowledge/build-senpai-index.mjs ledger .` で台帳を再生成してコミットする。版を上げずに内容を変えた場合・版を上げて台帳を再生成していない場合・台帳に無い／残っているカードは `check`（CI）が失敗する。`ledger` コマンドも、版を上げていない内容変更の台帳化は拒否する。
+- `title` は他の項目と同じく URL・制御文字・`\` を含められない（`/` は可）。
+- 重複した `knowledge_id` は、両方のファイルパスを出して失敗する。
 
 整理軸（機種略称・制御方式・Vault 棚・エスカ）: [registry/APPLICABILITY-TAXONOMY.md](./registry/APPLICABILITY-TAXONOMY.md)
 
@@ -100,6 +128,7 @@ cloud_approval: not_reviewed
 - OneNote §3 同期・拡張 hit: `sync_onenote_sections.py` → `lists-onenote-extended-hits.jsonl`。**カード書込は `--apply` のみ**
 - frontmatter 閉じ `---` 修復: `scripts/knowledge/fix_card_frontmatter_closing.py`
 - draft 経由 OneNote: `attach_onenote_from_drafts.py` → `lists-onenote-draft-hits.jsonl`。**カード書込は `--apply` のみ**
+- `registry/card-versions.jsonl`: `knowledge_id` → `card_version` + 内容 sha256 の台帳（`build-senpai-index.mjs ledger .` が生成。カードを直したら版を上げて再生成）
 - `registry/card-source-links.jsonl`: `knowledge_id` → 上記 `source_refs` の展開
 - `registry/onenote-id-index.json`: 生成物（`scripts/knowledge/build_registry.py`）
 

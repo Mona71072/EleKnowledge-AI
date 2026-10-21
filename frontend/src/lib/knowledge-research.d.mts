@@ -40,6 +40,8 @@ export type ResearchCitationSource = {
 export type ResearchSource = ResearchCitationSource;
 export type ResearchPageCandidate = ResearchCitationSource & { lowConfidence?: boolean };
 
+export type ResearchKnowhowModelFit = 'matched' | 'general' | 'other_product' | 'unknown';
+
 export type ResearchKnowhowMatch = {
   knowledgeId: string;
   cardVersion: number;
@@ -51,6 +53,10 @@ export type ResearchKnowhowMatch = {
   searchTerms: string[];
   sourceRefs: Array<Record<string, string>>;
   modelScope: Record<string, string | string[]>;
+  /** Response-only fit to the selected model; absent without a model filter or in older stored answers. */
+  modelFit?: ResearchKnowhowModelFit;
+  /** UI model keys the card is scoped to; present only with `modelFit: 'other_product'`. */
+  modelFitProducts?: string[];
 };
 
 export type ResearchKnowhow = {
@@ -77,12 +83,24 @@ export type ResearchAnswer = {
   clarifyQuestions: string[];
   /** Present only when the caller explicitly requested Markdown retrieval. */
   knowhow?: ResearchKnowhow;
+  /** Present only for Senpai history requests. */
+  senpaiConversationId?: string;
+  /** Present only for Senpai history requests. */
+  senpaiTurnId?: string;
 };
 
 export class KnowledgeResearchError extends Error {
   readonly code: KnowledgeResearchErrorCode;
   constructor(code: KnowledgeResearchErrorCode, message: string);
 }
+
+export function normalizeStoredResearchAnswer(options: {
+  record: Record<string, unknown>;
+  mode: KnowledgeResearchMode;
+  query: string;
+  conversationId: string;
+  turnId: string;
+}): ResearchAnswer;
 
 export function queryKnowledgeSource(options: {
   baseUrl: string;
@@ -96,6 +114,11 @@ export function queryKnowledgeSource(options: {
   timeoutMs?: number;
   /** Retrieve the server-authorized Markdown index for normal mode only. */
   includeKnowhow?: boolean;
+  /** UI model key sent as a filter in normal mode; ignored in law mode. */
+  modelType?: string;
+  /** Paired UUID tags used only by the Senpai conversation. */
+  senpaiConversationId?: string;
+  senpaiTurnId?: string;
 }): Promise<ResearchAnswer>;
 
 export function researchSourceHref(

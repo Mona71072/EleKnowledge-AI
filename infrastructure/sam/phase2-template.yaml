@@ -92,6 +92,98 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: Enable the admin-only development Markdown navigation feature
 
+  SenpaiSynthesisEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Enable the admin-only prototype "工技先輩のまとめ" (POST /rag/senpai/synthesis).
+      Effective only when Environment is dev. Each call invokes BedrockModelId once.
+
+  SenpaiFieldReportsEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Enable the admin-only 先輩チャット「結果を残す」 (/rag/senpai/field-reports).
+      Effective only when Environment is dev; the table, role and function are created only then.
+
+  SenpaiResearchEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Enable the admin-only prototype 先輩チャットの調査ジョブ (POST /rag/senpai/research and
+      GET /rag/senpai/research/{jobId}). Effective only when Environment is dev; the jobs table,
+      roles and both functions are created only then. Each job calls Bedrock up to
+      SenpaiResearchMaxModelCalls times and the Knowledge Bases up to SenpaiResearchMaxSearches times.
+
+  SenpaiResearchDailyLimit:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    MaxValue: 1000
+    Description: Maximum research jobs one user may start per day (JST). One job runs at a time per user.
+
+  SenpaiResearchMaxSearches:
+    Type: Number
+    Default: 18
+    MinValue: 1
+    MaxValue: 60
+    Description: Emergency limit including Managed knowhow, technical, law and abbreviation searches.
+
+  SenpaiResearchMaxModelCalls:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 20
+    Description: Maximum model calls per research job (understand, sufficiency, synthesis, ...). One is always kept for synthesis.
+
+  SenpaiResearchJobBudgetMs:
+    Type: Number
+    Default: 90000
+    MinValue: 5000
+    MaxValue: 90000
+    Description: >-
+      Soft time budget per research job in milliseconds. After it, the worker starts no new search or judgement
+      and answers with what it has (stopReason=budget). Every search and model call is also limited to the
+      remaining budget (plus 45 seconds reserved for the answer) and to the Lambda remaining time minus a
+      10 second margin; when too little time is left the worker returns a list of the sources found instead
+      of calling the model. The worker Lambda timeout is fixed at 145 seconds.
+
+  SenpaiResearchMaxInputBytes:
+    Type: Number
+    Default: 120000
+    MinValue: 1000
+    MaxValue: 120000
+    Description: Maximum UTF-8 input bytes including system per model call; not a token or currency limit.
+
+  SenpaiResearchNoProgressLimit:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 3
+    Description: Consecutive retry rounds with new candidates but no new evidence exposed to the judge.
+
+  SenpaiUnderstandModelId:
+    Type: String
+    Default: ''
+    # BedrockModelId と同じ形式に限る（IAM の許可範囲をこの値から組み立てるため）
+    AllowedPattern: '^$|^((global|jp|apac|us|eu|au|ca|us-gov)\.[a-z0-9-]+\.[a-z0-9:-]+|arn:aws:bedrock:[a-z0-9-]+:[0-9]{12}:application-inference-profile/[A-Za-z0-9_-]+)$'
+    Description: >-
+      Optional smaller Bedrock model for the research job's question-understanding and sufficiency steps.
+      Empty falls back to BedrockModelId (no extra IAM).
+
+  SenpaiUnderstandModelIdType:
+    Type: String
+    Default: system-profile
+    AllowedValues:
+      - system-profile
+      - application-profile
+    Description: >-
+      SenpaiUnderstandModelId の種別（BedrockModelIdType と同じ意味）。空なら無視される。
+      種別と値の組み合わせはテンプレートでは検証できないため、運用で必ず合わせる。
+
   KnowhowIndexBucket:
     Type: String
     Default: ''
@@ -372,6 +464,20 @@ Conditions:
     - !Equals [!Ref KnowhowEnabled, 'true']
     - !Not [!Equals [!Ref KnowhowIndexBucket, '']]
     - !Not [!Equals [!Ref KnowhowIndexKey, '']]
+  SenpaiSynthesisDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref SenpaiSynthesisEnabled, 'true']
+  SenpaiFieldReportsDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref SenpaiFieldReportsEnabled, 'true']
+  SenpaiResearchDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref SenpaiResearchEnabled, 'true']
+  HasSenpaiUnderstandModelId: !Not [!Equals [!Ref SenpaiUnderstandModelId, '']]
+  SenpaiUnderstandModelIdIsApplicationProfile: !Equals [!Ref SenpaiUnderstandModelIdType, application-profile]
+  SenpaiResearchReadsS3: !Or
+    - !Condition KnowhowIndexDevEnabled
+    - !Condition LawFullTextDevEnabled
 
 Globals:
   Function:
@@ -727,6 +833,603 @@ Resources:
             Path: /rag/document
             Method: GET
 
+  # ============================================================================
+  # Lambda Functions - Senpai synthesis (dev-only prototype, off by default)
+  # ============================================================================
+  SenpaiSynthesisLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: SenpaiSynthesisDevEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # BedrockModelId だけを呼べる（RagLambdaRole と同じ ARN の組み立て）。KB 検索権限は持たない。
+        - PolicyName: BedrockInvokeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - !Ref BedrockModelId
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub
+                    - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                    - FoundationModelId: !Join
+                        - '.'
+                        - - !Select [1, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                          - !Select [2, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                Condition:
+                  StringLike:
+                    bedrock:InferenceProfileArn: !If
+                      - BedrockModelIdIsApplicationProfile
+                      - !Ref BedrockModelId
+                      - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+        # 自分の相談の読み取り（ユーザー GSI の Query。Scan は許可しない）と、まとめ 1 行の条件付き保存だけ。
+        - PolicyName: ChatLogsSynthesisAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource:
+                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub
+                    - ${TableArn}/index/userId-timestamp-index
+                    - TableArn:
+                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "2"
+
+  SenpaiSynthesisFunction:
+    Type: AWS::Serverless::Function
+    Condition: SenpaiSynthesisDevEnabled
+    Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+      FunctionName: !Sub senpai-synthesis-${Environment}
+      CodeUri: ../../lambda/rag/senpai-synthesis/
+      Handler: app.lambda_handler
+      Description: Dev-only prototype that combines the saved technical and law answers of one Senpai turn
+      Role: !GetAtt SenpaiSynthesisLambdaRole.Arn
+      # API Gateway の統合タイムアウト（29 秒）より短い Bedrock 読み取り待ち + 保存の余裕。
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          SENPAI_SYNTHESIS_ENABLED: 'true'
+          ENVIRONMENT: !Ref Environment
+          ADMIN_GROUP_NAME: admin
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_READ_TIMEOUT: '22'
+          SENPAI_SYNTHESIS_MAX_TOKENS: '2048'
+          CHATLOGS_TABLE:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+      Events:
+        SynthesisApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/senpai/synthesis
+            Method: POST
+
+  # ============================================================================
+  # Senpai field reports「結果を残す」(dev-only, off by default; all resources conditional)
+  # ============================================================================
+  # 未確認の観測候補。作成から FIELD_REPORT_TTL_DAYS で TTL 削除（確認後の扱いは担当者画面で決める）。
+  SenpaiFieldReportsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: SenpaiFieldReportsDevEnabled
+    Properties:
+      TableName: !Sub senpai-field-reports-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: reportId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+        - AttributeName: reviewState
+          AttributeType: S
+      KeySchema:
+        - AttributeName: reportId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        # 本人の報告の読み取り（GET）
+        - IndexName: userId-createdAt-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # 担当者による状態別の書き出し（Scan を使わないため）
+        - IndexName: reviewState-createdAt-index
+          KeySchema:
+            - AttributeName: reviewState
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+
+  SenpaiFieldReportLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: SenpaiFieldReportsDevEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # 自分の相談の実在確認（ユーザー GSI の Query のみ）。ChatLogs への書き込みは持たない。
+        - PolicyName: ChatLogsTurnRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub
+                    - ${TableArn}/index/userId-timestamp-index
+                    - TableArn:
+                        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+        # 報告 1 件の条件付き保存・再取得と、本人の一覧（Scan は許可しない）。
+        - PolicyName: FieldReportsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource:
+                  - !GetAtt SenpaiFieldReportsTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub ${SenpaiFieldReportsTable.Arn}/index/userId-createdAt-index
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "2"
+
+  SenpaiFieldReportFunction:
+    Type: AWS::Serverless::Function
+    Condition: SenpaiFieldReportsDevEnabled
+    Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+      FunctionName: !Sub senpai-field-report-${Environment}
+      CodeUri: ../../lambda/rag/senpai-field-report/
+      Handler: app.lambda_handler
+      Description: Dev-only 先輩チャット「結果を残す」 field report candidates (save and list own)
+      Role: !GetAtt SenpaiFieldReportLambdaRole.Arn
+      # DynamoDB の Query（最大 10 ページ）と 1 件の保存だけ。モデル呼び出しはない。
+      Timeout: 15
+      MemorySize: 256
+      Environment:
+        Variables:
+          SENPAI_FIELD_REPORTS_ENABLED: 'true'
+          ENVIRONMENT: !Ref Environment
+          ADMIN_GROUP_NAME: admin
+          FIELD_REPORT_TTL_DAYS: '180'
+          FIELD_REPORTS_TABLE: !Ref SenpaiFieldReportsTable
+          CHATLOGS_TABLE:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+      Events:
+        FieldReportCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/senpai/field-reports
+            Method: POST
+        FieldReportList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/senpai/field-reports
+            Method: GET
+
+  # ============================================================================
+  # Senpai research job「調査ジョブ」(dev-only prototype, off by default; all resources conditional)
+  # 契約: docs/features/development/senpai-research-contract.md / 実装メモ: senpai-research.md
+  # 受付 Lambda（軽い・Bedrock/KB に触れない）とワーカー Lambda（非同期起動専用）に分け、権限を分離する。
+  # ============================================================================
+  # ジョブ・ロック・日次回数・二重送信防止を1表に置く（ハッシュキー pk のみ。Query/Scan は不要）。TTL で自動削除。
+  SenpaiResearchJobsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: SenpaiResearchDevEnabled
+    Properties:
+      TableName: !Sub senpai-research-jobs-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+
+  SenpaiResearchApiLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: SenpaiResearchDevEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # ジョブ表の1件単位の読み書きだけ（Query / Scan は許可しない）。Bedrock・KB・ChatLogs は持たない。
+        - PolicyName: ResearchJobsTableAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !GetAtt SenpaiResearchJobsTable.Arn
+        # 起動できるのは調査ワーカーだけ。
+        - PolicyName: InvokeResearchWorker
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt SenpaiResearchWorkerFunction.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "2"
+
+  SenpaiResearchApiFunction:
+    Type: AWS::Serverless::Function
+    Condition: SenpaiResearchDevEnabled
+    Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+      FunctionName: !Sub senpai-research-api-${Environment}
+      CodeUri: ../../lambda/rag/rag-function/
+      Handler: senpai_research_api.lambda_handler
+      Description: Dev-only 先輩チャットの調査ジョブ 受付と進捗取得（検索・生成はワーカーが行う）
+      Role: !GetAtt SenpaiResearchApiLambdaRole.Arn
+      # DynamoDB の数回の条件付き書き込みと非同期起動だけ。API Gateway の統合タイムアウト（29 秒）より十分短い。
+      Timeout: 15
+      MemorySize: 256
+      Environment:
+        Variables:
+          SENPAI_RESEARCH_ENABLED: 'true'
+          ENVIRONMENT: !Ref Environment
+          ADMIN_GROUP_NAME: admin
+          SENPAI_RESEARCH_TABLE: !Ref SenpaiResearchJobsTable
+          SENPAI_RESEARCH_WORKER_NAME: !Ref SenpaiResearchWorkerFunction
+          SENPAI_RESEARCH_DAILY_LIMIT: !Ref SenpaiResearchDailyLimit
+          # 起動待ち120秒＋ワーカー180秒＋保存余裕30秒。画面の360秒以内。
+          SENPAI_RESEARCH_JOB_TTL_SECONDS: '330'
+      Events:
+        ResearchCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/senpai/research
+            Method: POST
+        ResearchStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/senpai/research/{jobId}
+            Method: GET
+
+  SenpaiResearchWorkerLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: SenpaiResearchDevEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # 検索は技術 KB（と、有効なときだけ法令 KB）。Rerank は試作では使わない。
+        - PolicyName: ResearchKnowledgeBaseRetrieve
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:Retrieve
+                Resource:
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
+                  - !If
+                    - LawRagDevEnabled
+                    - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${LawKnowledgeBaseId}
+                    - !Ref AWS::NoValue
+        # まとめ（BedrockModelId）と、設定したときだけ整理用の小さいモデル。RagLambdaRole と同じ ARN の組み立て。
+        - PolicyName: ResearchBedrockInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - !Ref BedrockModelId
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub
+                    - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                    - FoundationModelId: !Join
+                        - '.'
+                        - - !Select [1, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                          - !Select [2, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                Condition:
+                  StringLike:
+                    bedrock:InferenceProfileArn: !If
+                      - BedrockModelIdIsApplicationProfile
+                      - !Ref BedrockModelId
+                      - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              - !If
+                - HasSenpaiUnderstandModelId
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !If
+                    - SenpaiUnderstandModelIdIsApplicationProfile
+                    - !Ref SenpaiUnderstandModelId
+                    - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${SenpaiUnderstandModelId}
+                - !Ref AWS::NoValue
+              - !If
+                - HasSenpaiUnderstandModelId
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !If
+                    - SenpaiUnderstandModelIdIsApplicationProfile
+                    - 'arn:aws:bedrock:*::foundation-model/*'
+                    - !Sub
+                      - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                      - FoundationModelId: !Join
+                          - '.'
+                          - - !Select [1, !Split ['.', !Join ['', [!Ref SenpaiUnderstandModelId, '..']]]]
+                            - !Select [2, !Split ['.', !Join ['', [!Ref SenpaiUnderstandModelId, '..']]]]
+                  Condition:
+                    StringLike:
+                      bedrock:InferenceProfileArn: !If
+                        - SenpaiUnderstandModelIdIsApplicationProfile
+                        - !Ref SenpaiUnderstandModelId
+                        - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${SenpaiUnderstandModelId}
+                - !Ref AWS::NoValue
+        # ジョブ表: 開始・段階イベントの追記・結果保存（更新）と、ロックの解放（削除）だけ。作成は受付が行う。
+        - PolicyName: ResearchJobsTableWorker
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !GetAtt SenpaiResearchJobsTable.Arn
+        # 完了した質問と回答の行を ChatLogs に追加するだけ（読み取り・更新・削除はしない）。
+        - PolicyName: ChatLogsPut
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource:
+                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+        # ノウハウ索引の1オブジェクトと、法令全文（有効なとき）の読み取りだけ。文書バケットは読めない。
+        - !If
+          - SenpaiResearchReadsS3
+          - PolicyName: ResearchIndexRead
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - !If
+                  - KnowhowIndexDevEnabled
+                  - Effect: Allow
+                    Action:
+                      - s3:GetObject
+                    Resource: !Sub arn:aws:s3:::${KnowhowIndexBucket}/${KnowhowIndexKey}
+                  - !Ref AWS::NoValue
+                - !If
+                  - LawFullTextDevEnabled
+                  - Effect: Allow
+                    Action: s3:GetObject
+                    Resource: !Sub arn:aws:s3:::${LawDataBucketName}/kb/egov/*
+                    Condition:
+                      StringEquals:
+                        aws:ResourceAccount: !Ref AWS::AccountId
+                  - !Ref AWS::NoValue
+                - !If
+                  - HasLawDataBucketKmsKey
+                  - Effect: Allow
+                    Action: kms:Decrypt
+                    Resource: !Ref LawDataBucketKmsKeyArn
+                    Condition:
+                      StringEquals:
+                        kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+                  - !Ref AWS::NoValue
+          - !Ref AWS::NoValue
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "2"
+
+  SenpaiResearchWorkerFunction:
+    Type: AWS::Serverless::Function
+    Condition: SenpaiResearchDevEnabled
+    Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+      FunctionName: !Sub senpai-research-worker-${Environment}
+      CodeUri: ../../lambda/rag/rag-function/
+      Handler: senpai_research_worker.lambda_handler
+      Description: Dev-only 先輩チャットの調査ジョブのワーカー（受付から非同期起動のみ。再試行しない）
+      Role: !GetAtt SenpaiResearchWorkerLambdaRole.Arn
+      # 探索計画90秒＋進行中呼出し最大45秒＋保存余裕。ロック330秒は起動待ち120秒も含む。
+      Timeout: 180
+      MemorySize: !Ref RagLambdaMemory
+      # 非同期起動のみ。再試行すると同じ質問で重複して検索・生成するため 0 にする。
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 120
+      Environment:
+        Variables:
+          # --- RagFunction と同じ検索・生成の設定（app.py をそのまま再利用するため） ---
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+          RAG_LOGIC_VERSION: !Ref RagLogicVersion
+          LAW_KNOWLEDGE_BASE_ID: !Ref LawKnowledgeBaseId
+          LAW_RAG_ENABLED: !Ref LawRagEnabled
+          KNOWHOW_ENABLED: !If [KnowhowIndexDevEnabled, 'true', 'false']
+          KNOWHOW_INDEX_BUCKET: !Ref KnowhowIndexBucket
+          KNOWHOW_INDEX_KEY: !Ref KnowhowIndexKey
+          ENVIRONMENT: !Ref Environment
+          ADMIN_GROUP_NAME: admin
+          LAW_DATA_BUCKET_NAME: !If [LawFullTextDevEnabled, !Ref LawDataBucketName, '']
+          LAW_DATA_BUCKET_OWNER: !If [LawFullTextDevEnabled, !Ref AWS::AccountId, '']
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_REQUEST_STYLE: !Ref BedrockRequestStyle
+          RAG_SEARCH_TYPE: !Ref RagSearchType
+          KB_PROFILE_JSON: !Ref KbProfileJson
+          MODEL_PROFILE_JSON: !Ref ModelProfileJson
+          GENERATION_THINKING: !Ref GenerationThinking
+          GENERATION_EFFORT: !Ref GenerationEffort
+          KB_SOURCE_BUCKET: !Ref KnowledgeBaseDataSourceBucket
+          KB_SOURCE_PREFIX: !Ref KnowledgeBaseSourcePrefix
+          CHATLOGS_TABLE:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          CHATLOGS_METRIC_SHARDS: "10"
+          DOCUMENTS_BUCKET:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
+          PRESIGNED_URL_EXPIRES_IN: !Ref PresignedUrlExpiresIn
+          CITATION_URI_MODE: !Ref CitationUriMode
+          # SDK自動再試行は0回。初回試行と明示的な検索だけを有限枠へ計上する。
+          BEDROCK_READ_TIMEOUT: '40'
+          BEDROCK_MAX_ATTEMPTS: '0'
+          # 調査ジョブ専用の待ち時間（残り予算でさらに短くなる）。KB 検索 1 回の読み取り待ち（秒）と、モデル 1 呼び出しの上限（秒）。
+          SENPAI_RESEARCH_KB_READ_TIMEOUT: '12'
+          SENPAI_RESEARCH_MODEL_READ_TIMEOUT: '40'
+          # --- 調査ジョブの設定 ---
+          SENPAI_RESEARCH_TABLE: !Ref SenpaiResearchJobsTable
+          SENPAI_UNDERSTAND_MODEL_ID: !Ref SenpaiUnderstandModelId
+          SENPAI_RESEARCH_MAX_SEARCHES: !Ref SenpaiResearchMaxSearches
+          SENPAI_RESEARCH_MAX_MODEL_CALLS: !Ref SenpaiResearchMaxModelCalls
+          SENPAI_RESEARCH_JOB_BUDGET_MS: !Ref SenpaiResearchJobBudgetMs
+          SENPAI_RESEARCH_MAX_INPUT_BYTES: !Ref SenpaiResearchMaxInputBytes
+          SENPAI_RESEARCH_NO_PROGRESS_LIMIT: !Ref SenpaiResearchNoProgressLimit
+          # 追加の検索・判断を始める前に、まとめ用に残しておく時間（ミリ秒）。
+          SENPAI_RESEARCH_SYNTH_RESERVE_MS: '45000'
+
   ChatManagementFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -812,6 +1515,14 @@ Resources:
   # ============================================================================
   RagApi:
     Type: AWS::Serverless::Api
+    # W1028 は、条件付き関数（先輩のまとめ・現場報告・調査ジョブ）の API イベントから SAM が自動生成する
+    # paths の二重の Fn::If（同じ条件の内側の false 側）に出る。テンプレートに書いた Fn::If ではないため、
+    # この API だけ W1028 を止める。自分で書く Fn::If は、条件付きリソースの中で同じ条件を使わないこと。
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W1028
     Properties:
       PropagateTags: true
       Name: !Sub rag-api-${Environment}
@@ -964,6 +1675,26 @@ Outputs:
     Export:
       Name: !Sub ${ProjectName}-${Environment}-RagFunctionArn
   
+  SenpaiFieldReportFunctionArn:
+    Condition: SenpaiFieldReportsDevEnabled
+    Description: Senpai field reports (dev-only) Lambda Function ARN
+    Value: !GetAtt SenpaiFieldReportFunction.Arn
+
+  SenpaiSynthesisFunctionArn:
+    Condition: SenpaiSynthesisDevEnabled
+    Description: Senpai synthesis (dev-only prototype) Lambda Function ARN
+    Value: !GetAtt SenpaiSynthesisFunction.Arn
+
+  SenpaiResearchApiFunctionArn:
+    Condition: SenpaiResearchDevEnabled
+    Description: Senpai research job (dev-only prototype) API Lambda Function ARN
+    Value: !GetAtt SenpaiResearchApiFunction.Arn
+
+  SenpaiResearchWorkerFunctionArn:
+    Condition: SenpaiResearchDevEnabled
+    Description: Senpai research job (dev-only prototype) worker Lambda Function ARN
+    Value: !GetAtt SenpaiResearchWorkerFunction.Arn
+
   ChatManagementFunctionArn:
     Description: Chat Management Lambda Function ARN
     Value: !GetAtt ChatManagementFunction.Arn

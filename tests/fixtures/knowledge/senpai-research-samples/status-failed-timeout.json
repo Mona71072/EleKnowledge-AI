@@ -1,0 +1,277 @@
+{
+  "body": {
+    "debug": {
+      "budget": {
+        "elapsedMaxMs": 90000,
+        "elapsedMs": 1100,
+        "inputBytesMax": 120000,
+        "modelCallsMax": 10,
+        "modelCallsUsed": 3,
+        "searchesMax": 18,
+        "searchesUsed": 2
+      },
+      "coverage": {
+        "missing": [
+          "A2"
+        ],
+        "supported": [
+          {
+            "id": "A1",
+            "kind": "technical",
+            "ref": "T1",
+            "status": "direct"
+          }
+        ]
+      },
+      "grounding": {
+        "mode": "not_run"
+      },
+      "lastJudgment": "insufficient",
+      "progress": [],
+      "queries": {
+        "knowhow": "ドア 異音",
+        "law": [],
+        "tech": [
+          "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか",
+          "AXIEZ-LINKs ドア 開閉 異音"
+        ]
+      },
+      "stages": [
+        {
+          "completed": true,
+          "modelCalls": 1,
+          "ms": 50,
+          "stage": "understand",
+          "usage": {},
+          "usageMissing": true
+        },
+        {
+          "completed": true,
+          "evidenceValidity": "unassessed",
+          "ms": 50,
+          "searches": 0,
+          "selected": 1,
+          "stage": "knowhow"
+        },
+        {
+          "completed": true,
+          "modelCalls": 1,
+          "ms": 50,
+          "stage": "sufficiency",
+          "usage": {},
+          "usageMissing": true
+        },
+        {
+          "completed": false,
+          "modelCalls": 1,
+          "ms": 50,
+          "stage": "synthesize",
+          "usage": {},
+          "usageMissing": true
+        },
+        {
+          "evidenceValidity": "unassessed",
+          "ms": 100,
+          "newCandidateItems": 1,
+          "newExposedEvidence": 1,
+          "searchesCharged": 1,
+          "selected": 1,
+          "seq": 6,
+          "stage": "tech_search"
+        },
+        {
+          "evidenceValidity": "unassessed",
+          "ms": 101,
+          "newCandidateItems": 0,
+          "newExposedEvidence": 0,
+          "searchesCharged": 1,
+          "selected": 1,
+          "seq": 6,
+          "stage": "tech_search"
+        }
+      ],
+      "stopDetail": null,
+      "tools": [
+        {
+          "evidenceValidity": "unassessed",
+          "filters": {
+            "modelType": "AXIEZ-LINKs"
+          },
+          "hits": 1,
+          "ms": 100,
+          "newCandidateItems": 1,
+          "newExposedEvidence": 1,
+          "query": "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか",
+          "searchesCharged": 1,
+          "selected": 1,
+          "seq": 6,
+          "tool": "tech_search",
+          "topScores": [
+            0.7
+          ]
+        },
+        {
+          "evidenceValidity": "unassessed",
+          "filters": {
+            "modelType": "AXIEZ-LINKs"
+          },
+          "hits": 1,
+          "ms": 101,
+          "newCandidateItems": 0,
+          "newExposedEvidence": 0,
+          "query": "AXIEZ-LINKs ドア 開閉 異音",
+          "searchesCharged": 1,
+          "selected": 1,
+          "seq": 6,
+          "tool": "tech_search",
+          "topScores": [
+            0.7
+          ]
+        }
+      ],
+      "understandingRaw": {
+        "aspects": [
+          {
+            "id": "A1",
+            "kind": "technical",
+            "question": "ドアの異音"
+          },
+          {
+            "id": "A2",
+            "kind": "legal",
+            "question": "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか"
+          }
+        ],
+        "controlMethod": null,
+        "fallback": false,
+        "intent": "cause",
+        "lawRelevant": false,
+        "missing": [],
+        "modelType": "AXIEZ-LINKs",
+        "part": "ドア",
+        "queries": {
+          "knowhow": "ドア 異音",
+          "law": null,
+          "tech": "AXIEZ-LINKs ドア 開閉 異音"
+        },
+        "situation": "開閉時",
+        "symptom": "異音"
+      }
+    },
+    "error": {
+      "code": "Timeout",
+      "message": "まとめの作成が時間内に完了しませんでした。もう一度お試しください。"
+    },
+    "jobId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "pollAfterMs": 0,
+    "status": "failed",
+    "steps": [
+      {
+        "endedAt": null,
+        "labelJa": "質問を整理中",
+        "seq": 1,
+        "startedAt": "2027-01-15T08:00:01Z",
+        "status": "running",
+        "step": "understand"
+      },
+      {
+        "detailJa": "AXIEZ-LINKs / ドア / 異音 / 開閉時",
+        "endedAt": "2027-01-15T08:00:02Z",
+        "labelJa": "質問を整理中",
+        "seq": 2,
+        "startedAt": "2027-01-15T08:00:01Z",
+        "status": "done",
+        "step": "understand"
+      },
+      {
+        "endedAt": null,
+        "labelJa": "ノウハウを確認中",
+        "seq": 3,
+        "startedAt": "2027-01-15T08:00:03Z",
+        "status": "running",
+        "step": "knowhow"
+      },
+      {
+        "counts": {
+          "documents": 1,
+          "hits": 1,
+          "selected": 1
+        },
+        "detailJa": "1件の事例メモ",
+        "endedAt": "2027-01-15T08:00:04Z",
+        "labelJa": "ノウハウを確認中",
+        "seq": 4,
+        "startedAt": "2027-01-15T08:00:03Z",
+        "status": "done",
+        "step": "knowhow"
+      },
+      {
+        "detailJa": "法令に関係しない質問のため省略",
+        "endedAt": "2027-01-15T08:00:05Z",
+        "labelJa": "法令を確認中",
+        "seq": 5,
+        "startedAt": "2027-01-15T08:00:05Z",
+        "status": "skipped",
+        "step": "law_search"
+      },
+      {
+        "detailJa": "『AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要です』など2件の検索語で検索",
+        "endedAt": null,
+        "labelJa": "技術資料を検索中",
+        "seq": 6,
+        "startedAt": "2027-01-15T08:00:06Z",
+        "status": "running",
+        "step": "tech_search"
+      },
+      {
+        "counts": {
+          "documents": 1,
+          "hits": 2,
+          "selected": 1
+        },
+        "detailJa": "『AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要です』など2件の検索語で検索",
+        "endedAt": "2027-01-15T08:00:07Z",
+        "labelJa": "技術資料を検索中",
+        "seq": 7,
+        "startedAt": "2027-01-15T08:00:06Z",
+        "status": "done",
+        "step": "tech_search"
+      },
+      {
+        "endedAt": null,
+        "labelJa": "足りない点を確認中",
+        "seq": 8,
+        "startedAt": "2027-01-15T08:00:08Z",
+        "status": "running",
+        "step": "sufficiency"
+      },
+      {
+        "detailJa": "追加で調べる方法がありません",
+        "endedAt": "2027-01-15T08:00:09Z",
+        "labelJa": "足りない点を確認中",
+        "seq": 9,
+        "startedAt": "2027-01-15T08:00:08Z",
+        "status": "done",
+        "step": "sufficiency"
+      },
+      {
+        "endedAt": null,
+        "labelJa": "回答をまとめています",
+        "seq": 10,
+        "startedAt": "2027-01-15T08:00:10Z",
+        "status": "running",
+        "step": "synthesize"
+      },
+      {
+        "detailJa": "回答をまとめられませんでした",
+        "endedAt": "2027-01-15T08:00:11Z",
+        "labelJa": "回答をまとめています",
+        "seq": 11,
+        "startedAt": "2027-01-15T08:00:10Z",
+        "status": "failed",
+        "step": "synthesize"
+      }
+    ]
+  },
+  "statusCode": 200
+}

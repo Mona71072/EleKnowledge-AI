@@ -18,7 +18,20 @@ function loadTsx(path, mocks) {
     fileName: filename.pathname,
   });
   const compiledModule = { exports: {} };
-  const localRequire = (name) => Object.hasOwn(mocks, name) ? mocks[name] : require(name);
+  const localRequire = (name) => {
+    if (Object.hasOwn(mocks, name)) return mocks[name];
+    if (name === './SenpaiConversationSidebar') return loadTsx('../src/components/knowledge/SenpaiConversationSidebar.tsx', {});
+    if (name === '@/data/kbModelTypes') return loadTsx('../src/data/kbModelTypes.ts', {});
+    if (name === '@/lib/knowledge-senpai-synthesis.mjs') return { requestSenpaiSynthesis: async () => ({}) };
+    if (name === '@/lib/knowledge-senpai-field-report.mjs') return require('../src/lib/knowledge-senpai-field-report.mjs');
+    if (name === './SenpaiFieldReportForm') return loadTsx('../src/components/knowledge/SenpaiFieldReportForm.tsx', { '@/lib/auth-helpers': { getIdToken: async () => 'test-token' } });
+    // 調査ジョブ表示の部品と、画面に依存しない lib は実物を読み込む。
+    if (/^\.\/Senpai[A-Za-z]+$/u.test(name)) return loadTsx(`../src/components/knowledge/${name.slice(2)}.tsx`, {});
+    if (name === 'next/link') return Link;
+    if (name.startsWith('@/lib/') && name.endsWith('.mjs')) return require(`../src/lib/${name.slice(6)}`);
+    if (name === '@/hooks/useSenpaiHistory') return { useSenpaiHistory: () => ({ entries: [], loading: false, error: '', complete: true, opening: false, openError: '', openConversation: async () => {}, resetSelection() {}, refresh() {} }) };
+    return require(name);
+  };
   new Function('require', 'module', 'exports', outputText)(localRequire, compiledModule, compiledModule.exports);
   return compiledModule.exports;
 }
@@ -26,15 +39,51 @@ function loadTsx(path, mocks) {
 const Link = ({ children, href, ...props }) => createElement('a', { href, ...props }, children);
 
 function findElement(root, predicate) {
+  return findExpanded(expandTree(root), predicate);
+}
+
+function findExpanded(root, predicate) {
   if (!root || typeof root !== 'object') return null;
+  if (Array.isArray(root)) {
+    for (const item of root) { const found = findExpanded(item, predicate); if (found) return found; }
+    return null;
+  }
   if (typeof root.type === 'string' && predicate(root)) return root;
   const children = root.props?.children;
   const list = Array.isArray(children) ? children : [children];
   for (const child of list) {
-    const found = findElement(child, predicate);
+    const found = findExpanded(child, predicate);
     if (found) return found;
   }
   return null;
+}
+
+
+// 画面は props だけで描く部品の組み合わせなので、部品を展開して中の要素を探す。
+// 入力欄のフォーカス管理などで使うフックは、副作用なしの代用品（React の dispatcher）で動かす。
+const HOOK_SHIM = {
+  useRef: (initial) => ({ current: initial }),
+  useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+  useEffect() {}, useLayoutEffect() {},
+  useCallback: (fn) => fn, useMemo: (fn) => fn(), useId: () => 'test-id',
+};
+
+function withHookShim(run) {
+  const internals = createRequire(import.meta.url)('react').__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const previous = internals.H;
+  internals.H = HOOK_SHIM;
+  try { return run(); } finally { internals.H = previous; }
+}
+
+function expandTree(node) {
+  if (Array.isArray(node)) return node.map(expandTree);
+  if (!node || typeof node !== 'object' || !node.props) return node;
+  const component = typeof node.type === 'function' ? node.type
+    : node.type?.$$typeof === Symbol.for('react.memo') && typeof node.type.type === 'function' ? node.type.type : null;
+  if (component) {
+    try { return expandTree(withHookShim(() => component(node.props))); } catch { return node; }
+  }
+  return { ...node, props: { ...node.props, children: expandTree(node.props.children) } };
 }
 
 function loadInteractiveChat({ initialSnapshot, createController }) {
@@ -43,7 +92,7 @@ function loadInteractiveChat({ initialSnapshot, createController }) {
   let hookIndex = 0;
   let effectStarted = false;
   const mockReact = {
-    ...React,
+    ...React, useCallback: (fn) => fn,
     useState(initial) {
       const index = hookIndex++;
       if (!(index in slots)) slots[index] = initial;
@@ -154,7 +203,6 @@ test('direct user-side route mounts a conversational chat for admins', () => {
   assert.equal(chatRenders, 1);
   assert.match(html, /aria-label="先輩チャット"/);
   assert.match(html, /aria-label="先輩への質問"/);
-  assert.match(html, /href="\/"/);
   assert.doesNotMatch(html, /href="\/admin|Markdownを選ぶ/);
 });
 
@@ -198,6 +246,7 @@ test('chat page starts as an empty conversation with a message composer and rese
   assert.match(html, /aria-label="質問を入力"/);
   assert.match(html, /質問を送信/);
   assert.match(html, /新しい相談/);
+  assert.match(html, /href="\/"/);
   assert.match(html, /技術KB/);
   assert.match(html, /法令KB/);
   assert.doesNotMatch(html, /Markdownファイルを選択|照合まとめ/);
@@ -208,7 +257,7 @@ test('Senpai chat opts normal searches into the server Markdown index and leaves
   let querySource;
   const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
     react: {
-      ...React,
+      ...React, useCallback: (fn) => fn,
       useEffect(effect) { effect(); },
       useState(initial) { return [initial, () => {}]; },
       useRef(initial) { return { current: initial }; },
@@ -338,6 +387,83 @@ test('late completion from an old相談 does not erase a newer draft', async () 
   assert.equal(findElement(view, (element) => element.type === 'textarea' && element.props['aria-label'] === '質問を入力').props.value, '新しい相談の下書き');
 });
 
+test('optional model select defaults to unspecified and offers the six UI model keys', () => {
+  const render = loadInteractiveChat({
+    initialSnapshot: { turns: [], running: false },
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+  });
+  render();
+  const html = renderToStaticMarkup(render());
+
+  assert.match(html, /機種（任意）/);
+  assert.match(html, /<option value="" selected="">指定しない<\/option>|<option value="">指定しない<\/option>/);
+  for (const key of ['AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター']) {
+    assert.match(html, new RegExp(`<option value="${key}"`));
+  }
+});
+
+test('chosen model is sent only when non-empty and is kept across turns', async () => {
+  const sent = [];
+  const render = loadInteractiveChat({
+    initialSnapshot: { turns: [], running: false },
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async (...args) => { sent.push(args); }, cancel() {}, reset() {}, dispose() {} }),
+  });
+  const submitWith = async (question) => {
+    findElement(render(), (el) => el.type === 'textarea').props.onChange({ target: { value: question } });
+    await findElement(render(), (el) => el.type === 'form').props.onSubmit({ preventDefault() {} });
+  };
+  render();
+  await submitWith('指定なし');
+  findElement(render(), (el) => el.type === 'select').props.onChange({ target: { value: 'NEXCUBE' } });
+  await submitWith('NEXCUBE一回目');
+  await submitWith('NEXCUBE二回目');
+
+  assert.deepEqual(sent, [['指定なし'], ['NEXCUBE一回目', { modelType: 'NEXCUBE' }], ['NEXCUBE二回目', { modelType: 'NEXCUBE' }]]);
+});
+
+test('Senpai chat forwards the model type to the research query', async () => {
+  const React = require('react');
+  let querySource;
+  const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
+    react: { ...React, useCallback: (fn) => fn, useEffect(effect) { effect(); }, useState(initial) { return [initial, () => {}]; }, useRef(initial) { return { current: initial }; } },
+    'next/link': Link,
+    '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
+    '@/lib/chat-session-link.mjs': { buildChatSessionHref: () => '/chat' },
+    '@/lib/knowledge-senpai-chat.mjs': {
+      createSenpaiChat: (options) => {
+        querySource = options.querySource;
+        return { getSnapshot: () => ({ turns: [], running: false }), send: async () => {}, cancel() {}, reset() {}, dispose() {} };
+      },
+    },
+    '@/lib/knowledge-research.mjs': { queryKnowledgeSource: async (options) => options, researchSourceHref: () => null },
+  }).KnowledgeSenpaiChat;
+  Chat();
+  const withModel = await querySource({ mode: 'normal', query: '質問', modelType: 'AXIEZ', signal: new AbortController().signal });
+  const without = await querySource({ mode: 'normal', query: '質問', signal: new AbortController().signal });
+
+  assert.equal(withModel.modelType, 'AXIEZ');
+  assert.equal(Object.hasOwn(without, 'modelType'), false);
+});
+
+test('a turn shows the model it was filtered by only when one was chosen', () => {
+  const render = loadInteractiveChat({
+    initialSnapshot: {
+      running: false,
+      turns: [
+        { id: 1, query: '指定あり', modelType: 'AXIEZ', normal: lane('loading'), law: lane('loading') },
+        { id: 2, query: '指定なし', normal: lane('loading'), law: lane('loading') },
+      ],
+    },
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+  });
+  render();
+  const html = renderToStaticMarkup(render());
+
+  // 入力欄の機種の選択（「機種: 指定なし」）とは別に、機種を選んだ相談だけに小さな表示が付く。
+  assert.equal((html.match(/機種: AXIEZ/g) || []).length, 1);
+  assert.equal((html.match(/機種: /g) || []).length, 2);
+});
+
 test('safe lane errors are shown and a healthy lane answer remains visible', () => {
   const initialSnapshot = {
     running: false,
@@ -354,7 +480,7 @@ test('safe lane errors are shown and a healthy lane answer remains visible', () 
   assert.match(html, /法令KBを利用できません。接続設定・APIの有効化・権限を確認してください。/);
 });
 
-test('chat explains separate history retention and that its combined transcript is local to this page', () => {
+test('Senpai chat has a left conversation history and keeps saved consultations after reload', () => {
   const initialSnapshot = { turns: [], running: false };
   const render = loadInteractiveChat({
     initialSnapshot,
@@ -365,6 +491,9 @@ test('chat explains separate history retention and that its combined transcript 
 
   assert.match(html, /60日/);
   assert.match(html, /再読み込み/);
+  assert.match(html, /aria-label="相談履歴"/);
+  assert.match(html, /履歴を開く/);
+  assert.doesNotMatch(html, /まとめ表示は保存されない|再読み込みすると表示が消えます/);
 });
 
 test('law source displays the returned law number, provision reference, and effective date', () => {
@@ -389,4 +518,300 @@ test('law source displays the returned law number, provision reference, and effe
   assert.match(html, /令和八年法律第一号/);
   assert.match(html, /第十二条/);
   assert.match(html, /2026-04-01/);
+});
+
+test('history sidebar selects the requested consultation, escapes titles, and distinguishes errors from empty history', () => {
+  const { SenpaiConversationSidebar } = loadTsx('../src/components/knowledge/SenpaiConversationSidebar.tsx', {});
+  const selected = [];
+  const props = {
+    open: true, entries: [{ conversationId: '11111111-1111-4111-8111-111111111111', title: '<img src=x>質問', createdAt: '2026-10-20T00:00:00Z', lastMessageTime: '2026-10-20T00:00:00Z', messageCount: 2, daysUntilDeletion: 59 }],
+    selectedId: '11111111-1111-4111-8111-111111111111', loading: false, error: '', complete: true,
+    onNew() {}, onSelect: (id) => selected.push(id), onClose() {}, onRetry() {},
+  };
+  const tree = withHookShim(() => SenpaiConversationSidebar(props));
+  const current = findElement(tree, (element) => element.type === 'button' && element.props['aria-current'] === 'page');
+  current.props.onClick();
+  assert.deepEqual(selected, [props.selectedId]);
+  const html = renderToStaticMarkup(tree);
+  assert.match(html, /&lt;img src=x&gt;質問/);
+  assert.doesNotMatch(html, /<img\b/);
+  assert.match(html.replace(/<!--.*?-->/gu, ''), /2件の質問/);
+  assert.match(html, /履歴メニューを閉じる/);
+  const failed = renderToStaticMarkup(createElement(SenpaiConversationSidebar, { ...props, entries: [], error: '履歴の取得失敗' }));
+  assert.match(failed, /履歴の取得失敗/);
+  assert.match(failed, /履歴を再取得/);
+  assert.doesNotMatch(failed, /履歴はまだありません/);
+});
+
+
+function findAnyElement(root, predicate) {
+  return findAnyExpanded(expandTree(root), predicate);
+}
+
+function findAnyExpanded(root, predicate) {
+  if (!root || typeof root !== 'object') return null;
+  if (Array.isArray(root)) {
+    for (const item of root) { const found = findAnyExpanded(item, predicate); if (found) return found; }
+    return null;
+  }
+  if (root.props && predicate(root)) return root;
+  const children = root.props?.children;
+  for (const child of Array.isArray(children) ? children : [children]) {
+    const found = findAnyExpanded(child, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
+const TURN_UUID = '20000000-0000-4000-8000-000000000001';
+const baseAnswer = (mode) => ({
+  mode, query: '質問', content: `${mode}回答`, responseType: 'pages', sessionId: `${mode}-s`, messageId: `${mode}-m`,
+  receivedAt: '2026-10-20T00:00:00Z', sourceDocuments: [], pageCandidates: [], clarifyQuestions: [],
+});
+
+function synthesisChat(turnOverrides = {}, { running = false, synthesisFlag = 'true' } = {}) {
+  const calls = [];
+  const turn = {
+    id: 1, senpaiTurnId: TURN_UUID, query: '質問',
+    normal: lane('success', { answer: baseAnswer('normal') }),
+    law: lane('success', { answer: baseAnswer('law') }),
+    ...turnOverrides,
+  };
+  const snapshot = { conversationId: '10000000-0000-4000-8000-000000000001', running, turns: [turn] };
+  const render = withSynthesisFlag(synthesisFlag, () => loadInteractiveChat({
+    initialSnapshot: snapshot,
+    createController: (initial) => ({
+      getSnapshot: () => initial, send: async () => {}, cancel() {}, reset() {}, dispose() {},
+      synthesize: async (id) => { calls.push(id); },
+    }),
+  }));
+  render();
+  return { render, calls };
+}
+
+function withSynthesisFlag(value, fn) {
+  const previous = process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS;
+  if (value == null) delete process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS;
+  else process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS = value;
+  try { return fn(); } finally {
+    if (previous === undefined) delete process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS;
+    else process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS = previous;
+  }
+}
+
+test('the synthesis button is hidden unless the development flag is on, but a saved synthesis still shows', () => {
+  for (const synthesisFlag of [null, 'false']) {
+    assert.doesNotMatch(html(synthesisChat({}, { synthesisFlag }).render), /工技先輩のまとめを作る/);
+    const saved = html(synthesisChat({ synthesis: { status: 'success', content: '保存済みのまとめ', messageId: `senpai-synthesis-${TURN_UUID}` } }, { synthesisFlag }).render);
+    assert.match(saved, /保存済みのまとめ/);
+  }
+});
+
+const html = (render) => renderToStaticMarkup(render());
+
+test('offers a manual synthesis button only when both lanes settled and one succeeded', () => {
+  assert.match(html(synthesisChat().render), /工技先輩のまとめを作る/);
+  assert.match(html(synthesisChat({ law: lane('error', { message: 'x' }) }).render), /工技先輩のまとめを作る/);
+  assert.doesNotMatch(html(synthesisChat({}, { running: true }).render), /工技先輩のまとめを作る/);
+  assert.doesNotMatch(html(synthesisChat({ law: lane('loading') }).render), /工技先輩のまとめを作る/);
+  assert.doesNotMatch(html(synthesisChat({ normal: lane('error'), law: lane('cancelled') }).render), /工技先輩のまとめを作る/);
+  assert.doesNotMatch(html(synthesisChat({ senpaiTurnId: undefined }).render), /工技先輩のまとめを作る/);
+});
+
+test('the synthesis button asks the controller to synthesize that turn', () => {
+  const { render, calls } = synthesisChat();
+  const element = findAnyElement(render(), (node) => node.type === 'button' && node.props.children === '工技先輩のまとめを作る');
+  assert.ok(element);
+  element.props.onClick();
+  assert.deepEqual(calls, [1]);
+});
+
+test('renders loading, error with retry, and a saved synthesis above the lane columns', () => {
+  const loading = html(synthesisChat({ synthesis: { status: 'loading' } }).render);
+  assert.match(loading, /まとめを作成しています/);
+  assert.doesNotMatch(loading, /工技先輩のまとめを作る/);
+
+  const failed = html(synthesisChat({ synthesis: { status: 'error', message: '時間内に完了しませんでした' } }).render);
+  assert.match(failed, /時間内に完了しませんでした/);
+  assert.match(failed, /工技先輩のまとめを作る/);
+
+  const done = html(synthesisChat({ synthesis: {
+    status: 'success', content: '<b>候補</b>です\n改行', messageId: `senpai-synthesis-${TURN_UUID}`,
+    inputs: { normal: true, law: false, knowhowCount: 2 },
+  } }).render);
+  assert.match(done, /工技先輩のまとめ（試作・開発中）/);
+  assert.match(done, /下の2つの回答を組み合わせただけ/);
+  assert.match(done, /出典で確認/);
+  assert.match(done, /&lt;b&gt;候補&lt;\/b&gt;です/);
+  assert.doesNotMatch(done, /<b>候補/);
+  assert.doesNotMatch(done, /工技先輩のまとめを作る/);
+  assert.match(done, /法令KBの回答は使っていません/);
+  assert.ok(done.indexOf('工技先輩のまとめ（試作・開発中）') < done.indexOf('技術KBからの回答'));
+});
+
+test('wires the synthesis source to the RAG API with the id token', async () => {
+  const React = require('react');
+  let synthesisSource;
+  const requests = [];
+  const Chat = loadTsx('../src/components/knowledge/KnowledgeSenpaiChat.tsx', {
+    react: { ...React, useCallback: (fn) => fn, useEffect(effect) { effect(); }, useState(initial) { return [initial, () => {}]; }, useRef(initial) { return { current: initial }; } },
+    'next/link': Link,
+    '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
+    '@/lib/chat-session-link.mjs': { buildChatSessionHref: () => '/chat' },
+    '@/lib/knowledge-senpai-chat.mjs': {
+      createSenpaiChat: (options) => {
+        synthesisSource = options.synthesisSource;
+        return { getSnapshot: () => ({ turns: [], running: false }), send: async () => {}, cancel() {}, reset() {}, dispose() {} };
+      },
+    },
+    '@/lib/knowledge-senpai-synthesis.mjs': { requestSenpaiSynthesis: async (options) => { requests.push(options); return {}; } },
+    '@/lib/knowledge-research.mjs': { queryKnowledgeSource: async () => ({}), researchSourceHref: () => null },
+  }).KnowledgeSenpaiChat;
+  Chat();
+  const signal = new AbortController().signal;
+  await synthesisSource({ senpaiConversationId: 'c', senpaiTurnId: 't', signal });
+  assert.equal(requests[0].senpaiConversationId, 'c');
+  assert.equal(requests[0].senpaiTurnId, 't');
+  assert.equal(requests[0].signal, signal);
+  assert.equal(await requests[0].getToken(), 'test-token');
+});
+
+test('labels the new scope-verification keys and never renders an undefined label', () => {
+  const answer = {
+    ...baseAnswer('normal'),
+    knowhow: {
+      status: 'matched', indexVersion: `sha256:${'a'.repeat(64)}`, searchTerms: [],
+      matches: [{
+        knowledgeId: 'KH-1', cardVersion: 1, sha256: 'b'.repeat(64), title: 'カード', status: 'draft',
+        usage: 'navigation_only', body: '本文', searchTerms: [],
+        sourceRefs: [{ ref_type: 'x', brand_new_ref: 'R1' }],
+        modelScope: {
+          scope_status: 'verified', scope_verified_by: '山田', scope_verified_at: '2026-10-19', future_scope_key: ['A', 'B'],
+        },
+      }],
+    },
+  };
+  const verified = html(synthesisChat({ normal: lane('success', { answer }) }).render);
+  assert.match(verified, /適用範囲の確認/);
+  assert.match(verified, /担当者確認済み/);
+  assert.match(verified, /確認者/);
+  assert.match(verified, /確認日/);
+  assert.match(verified, /future_scope_key/);
+  assert.match(verified, /brand_new_ref/);
+  assert.doesNotMatch(verified, /undefined/);
+
+  const unverified = structuredClone(answer);
+  unverified.knowhow.matches[0].modelScope = { scope_status: 'pending' };
+  assert.match(html(synthesisChat({ normal: lane('success', { answer: unverified }) }).render), /未確認/);
+});
+
+function withFieldReportsFlag(value, fn) {
+  const previous = process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS;
+  if (value === undefined) delete process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS;
+  else process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS = value;
+  try { return fn(); } finally {
+    if (previous === undefined) delete process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS;
+    else process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS = previous;
+  }
+}
+
+test('「結果を残す」 is hidden unless the development flag is on', () => {
+  for (const flag of [undefined, 'false']) {
+    withFieldReportsFlag(flag, () => assert.doesNotMatch(html(synthesisChat().render), /結果を残す/));
+  }
+});
+
+test('「結果を残す」 appears only after a settled turn with at least one answer', () => {
+  withFieldReportsFlag('true', () => {
+    assert.match(html(synthesisChat().render), /結果を残す/);
+    assert.match(html(synthesisChat({ law: lane('error', { message: 'x' }) }).render), /結果を残す/);
+    // 別の質問を実行中でも、回答済みのターンの「結果を残す」は消さない（入力途中の下書きを失わないため）。
+    assert.match(html(synthesisChat({}, { running: true }).render), /結果を残す/);
+    assert.doesNotMatch(html(synthesisChat({ law: lane('loading') }).render), /結果を残す/);
+    assert.doesNotMatch(html(synthesisChat({ normal: lane('error'), law: lane('cancelled') }).render), /結果を残す/);
+    assert.doesNotMatch(html(synthesisChat({ senpaiTurnId: undefined }).render), /結果を残す/);
+  });
+});
+
+test('the field report form starts closed, copies nothing, and shows a sent report as unconfirmed', () => {
+  const { SenpaiFieldReportForm } = loadTsx('../src/components/knowledge/SenpaiFieldReportForm.tsx', {
+    '@/lib/auth-helpers': { getIdToken: async () => 'test-token' },
+  });
+  const turn = {
+    id: 1, senpaiTurnId: TURN_UUID, query: '相談本文ZZZ', modelType: 'NEXCUBE',
+    normal: lane('success', { answer: baseAnswer('normal') }), law: lane('success', { answer: baseAnswer('law') }),
+  };
+  const conversationId = '10000000-0000-4000-8000-000000000001';
+  const closed = renderToStaticMarkup(createElement(SenpaiFieldReportForm, { conversationId, turn, onSent() {} }));
+  assert.match(closed, /<button[^>]*>[\s\S]*?<\/svg>結果を残す<\/button>/);
+  assert.doesNotMatch(closed, /相談本文ZZZ|textarea/);
+  const sent = renderToStaticMarkup(createElement(SenpaiFieldReportForm, {
+    conversationId, turn, onSent() {},
+    sent: { reportId: 'r', senpaiConversationId: conversationId, senpaiTurnId: TURN_UUID, createdAt: '2026-10-20T00:00:00Z', finding: 'x', reviewState: 'unconfirmed', cardReactions: [] },
+  }));
+  assert.match(sent, /送信済みです（未確認）/);
+  assert.doesNotMatch(sent, /<button/);
+  assert.equal(renderToStaticMarkup(createElement(SenpaiFieldReportForm, { turn, onSent() {} })), '');
+});
+
+function fitAnswer(fit, scope = { product_lines: ['AXIEZ-LINKs'] }) {
+  return {
+    ...baseAnswer('normal'),
+    knowhow: {
+      status: 'matched', indexVersion: `sha256:${'a'.repeat(64)}`, searchTerms: [],
+      matches: [{
+        knowledgeId: 'KH-FIT', cardVersion: 1, sha256: 'b'.repeat(64), title: 'カード', status: 'draft',
+        usage: 'navigation_only', body: '本文', searchTerms: [],
+        sourceRefs: [{ ref_type: 'lists_item', list_item_id: 'L-1' }],
+        modelScope: scope, ...fit,
+      }],
+    },
+  };
+}
+
+test('notes on the card when its recognized product differs from the selected model', () => {
+  const answer = fitAnswer({ modelFit: 'other_product', modelFitProducts: ['AXIEZ-LINKs'] });
+  const page = html(synthesisChat({ modelType: 'AXIEZ', normal: lane('success', { answer }) }).render);
+  assert.match(page, /AXIEZ-LINKs（VFGLF・巻上機上部）の事例です。選択中の AXIEZ（VFGLB・巻上機下部）でも当てはまるかは要確認です。/);
+
+  const reverse = fitAnswer({ modelFit: 'other_product', modelFitProducts: ['AXIEZ'] });
+  assert.match(html(synthesisChat({ modelType: 'AXIEZ-LINKs', normal: lane('success', { answer: reverse }) }).render),
+    /AXIEZ（VFGLB・巻上機下部）の事例です。選択中の AXIEZ-LINKs（VFGLF・巻上機上部）でも当てはまるかは要確認です。/);
+
+  const plain = fitAnswer({ modelFit: 'other_product', modelFitProducts: ['NEXCUBE', 'AXIEZ'] });
+  assert.match(html(synthesisChat({ modelType: 'メルシティ', normal: lane('success', { answer: plain }) }).render),
+    /NEXCUBE、AXIEZ（VFGLB・巻上機下部）の事例です。選択中の メルシティでも当てはまるかは要確認です。/);
+
+  const generic = fitAnswer({ modelFit: 'other_product', modelFitProducts: [] });
+  assert.match(html(synthesisChat({ modelType: 'エスカレーター', normal: lane('success', { answer: generic }) }).render),
+    /別の機種区分の事例です。選択中の エスカレーターでも当てはまるかは要確認です。/);
+});
+
+test('shows no fit notice for matching, general, unknown, legacy or unselected cards', () => {
+  const cases = [
+    [{ modelFit: 'matched' }, 'AXIEZ'],
+    [{ modelFit: 'general' }, 'AXIEZ'],
+    [{ modelFit: 'unknown' }, 'AXIEZ'],
+    [{}, 'AXIEZ'],
+    [{ modelFit: 'other_product', modelFitProducts: ['AXIEZ-LINKs'] }, undefined],
+  ];
+  for (const [fit, modelType] of cases) {
+    const page = html(synthesisChat({ ...(modelType ? { modelType } : {}), normal: lane('success', { answer: fitAnswer(fit) }) }).render);
+    assert.doesNotMatch(page, /でも当てはまるかは要確認です/, JSON.stringify(fit));
+  }
+});
+
+test('a question that could not be sent is put back in the input instead of being lost', async () => {
+  const render = loadInteractiveChat({
+    initialSnapshot: { turns: [], running: false },
+    createController: (snapshot) => ({
+      getSnapshot: () => snapshot, send: async () => { throw Object.assign(new Error('x'), { code: 'validation' }); }, cancel() {}, reset() {}, dispose() {},
+    }),
+  });
+  render();
+  findElement(render(), (el) => el.type === 'textarea').props.onChange({ target: { value: '送れなかった長い質問' } });
+  await findElement(render(), (el) => el.type === 'form').props.onSubmit({ preventDefault() {} });
+  const view = render();
+  assert.equal(findElement(view, (el) => el.type === 'textarea').props.value, '送れなかった長い質問');
+  assert.match(renderToStaticMarkup(view), /質問を送信できませんでした/);
 });

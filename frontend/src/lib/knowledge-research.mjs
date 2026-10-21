@@ -9,15 +9,22 @@ const KNOWHOW_SOURCE_IDS = Object.freeze({
   kb_document: 'document_number',
   law_rag: 'law_id',
 });
+// SYNC: must equal SOURCE_REF_KEYS in knowhow_retrieval.py and build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
 const KNOWHOW_SOURCE_FIELDS = new Set([
   'ref_type', 'source_id', 'list_item_id', 'onenote_id', 'document_number',
   'kb_filename', 'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator',
 ]);
+// SYNC: must equal MODEL_SCOPE_KEYS in knowhow_retrieval.py and build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
 const KNOWHOW_SCOPE_FIELDS = new Set([
   'control_methods', 'door_families', 'door_types', 'excludes', 'guide_systems',
   'lists_model_label', 'machine_room', 'may_apply_to', 'model_abbreviations',
   'observed_on', 'product_lines', 'scope_note', 'conditions',
+  'scope_status', 'scope_verified_by', 'scope_verified_at',
 ]);
+// SYNC: must equal MODEL_FIT_VALUES in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
+const KNOWHOW_MODEL_FITS = new Set(['matched', 'general', 'other_product', 'unknown']);
+// SYNC: must equal the MODEL_ALIASES keys in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
+const KNOWHOW_MODEL_PRODUCTS = new Set(['AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター']);
 const RESPONSE_FIELDS = [
   'documentName',
   'title',
@@ -236,6 +243,20 @@ function cleanModelScope(value) {
   return clean;
 }
 
+/** Response-only fit to the selected model; both fields are optional so stored older answers still restore. */
+function cleanModelFit(match) {
+  const hasFit = Object.hasOwn(match, 'modelFit');
+  const hasProducts = Object.hasOwn(match, 'modelFitProducts');
+  if (!hasFit && !hasProducts) return {};
+  if (!hasFit || !KNOWHOW_MODEL_FITS.has(match.modelFit)) return null;
+  if (!hasProducts) return { modelFit: match.modelFit };
+  const products = match.modelFitProducts;
+  if (match.modelFit !== 'other_product' || !Array.isArray(products)
+    || products.length > KNOWHOW_MODEL_PRODUCTS.size || new Set(products).size !== products.length
+    || !products.every((product) => KNOWHOW_MODEL_PRODUCTS.has(product))) return null;
+  return { modelFit: match.modelFit, modelFitProducts: [...products] };
+}
+
 function cleanKnowhowMatch(match) {
   if (!isPlainObject(match)
     || typeof match.knowledgeId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(match.knowledgeId)
@@ -250,6 +271,8 @@ function cleanKnowhowMatch(match) {
     || !match.sourceRefs.every((sourceRef) => cleanKnowhowSourceRef(sourceRef) !== null)) return null;
   const modelScope = cleanModelScope(match.modelScope);
   if (!modelScope) return null;
+  const modelFit = cleanModelFit(match);
+  if (!modelFit) return null;
   let serialized;
   try {
     serialized = JSON.stringify(match);
@@ -268,6 +291,7 @@ function cleanKnowhowMatch(match) {
     searchTerms: [...match.searchTerms],
     sourceRefs: match.sourceRefs.map(cleanKnowhowSourceRef),
     modelScope,
+    ...modelFit,
   };
 }
 
@@ -290,7 +314,7 @@ function cleanKnowhow(value) {
   };
 }
 
-function normalizeResponse(data, mode, query, receivedAt, expectedSessionId, includeKnowhow) {
+function normalizeResponse(data, mode, query, receivedAt, expectedSessionId, includeKnowhow, senpaiConversationId, senpaiTurnId) {
   if (!data || typeof data !== 'object' || Array.isArray(data)
     || typeof data.content !== 'string'
     || !RESPONSE_TYPES.has(data.responseType)
@@ -316,6 +340,10 @@ function normalizeResponse(data, mode, query, receivedAt, expectedSessionId, inc
   if (expectedSessionId !== undefined && data.sessionId !== expectedSessionId) {
     fail('invalid_response', '会話の識別情報が一致しないため、続きの回答を表示できません');
   }
+  if (senpaiConversationId !== undefined
+    && (data.senpaiConversationId !== senpaiConversationId || data.senpaiTurnId !== senpaiTurnId)) {
+    fail('invalid_response', '相談履歴の識別情報が一致しないため、回答を表示できません');
+  }
   return {
     mode,
     query,
@@ -328,16 +356,48 @@ function normalizeResponse(data, mode, query, receivedAt, expectedSessionId, inc
     sourceDocuments: data.sourceDocuments.map((item) => cleanSource(item, mode)),
     pageCandidates: data.pageCandidates.map((item) => cleanSource(item, mode)),
     clarifyQuestions: [...data.clarifyQuestions],
+    ...(senpaiConversationId !== undefined ? { senpaiConversationId, senpaiTurnId } : {}),
     ...(includeKnowhow ? { knowhow } : {}),
   };
+}
+
+/** Normalize a persisted assistant record through the same citation and Markdown checks as live RAG. */
+export function normalizeStoredResearchAnswer({ record, mode, query, conversationId, turnId }) {
+  if (!record || typeof record !== 'object' || (mode !== 'normal' && mode !== 'law')
+    || typeof conversationId !== 'string' || typeof turnId !== 'string') {
+    fail('invalid_response', '保存された回答の形式を確認できませんでした');
+  }
+  const includeKnowhow = Object.hasOwn(record, 'knowhow');
+  if (includeKnowhow && mode !== 'normal') fail('invalid_response', '保存された回答の形式を確認できませんでした');
+  const receivedAt = validIsoTimestamp(record.timestamp) || new Date().toISOString();
+  const normalizedRecord = { ...record };
+  for (const field of ['sourceDocuments', 'pageCandidates', 'clarifyQuestions']) {
+    if (!Object.hasOwn(record, field)) normalizedRecord[field] = [];
+  }
+  const answer = normalizeResponse({
+    ...normalizedRecord,
+    aiMessageId: normalizedRecord.aiMessageId || normalizedRecord.messageId,
+  }, mode, query, receivedAt, record.sessionId, includeKnowhow, conversationId, turnId);
+  if (answer.messageId !== record.messageId) fail('invalid_response', '保存された回答の識別情報が一致しません');
+  return answer;
+}
+
+function validateModelType(modelType) {
+  if (modelType === undefined) return undefined;
+  const trimmed = typeof modelType === 'string' ? modelType.trim() : '';
+  if (!trimmed || trimmed.length > 64 || /[\u0000-\u001f\u007f-\u009f]/u.test(trimmed)) {
+    fail('validation', '機種の指定を確認してください');
+  }
+  return trimmed;
 }
 
 /**
  * Search one existing RAG mode with an independent request and bounded auth/network wait.
  * The Markdown and any local metadata are deliberately not accepted by this API.
- * @param {{baseUrl:string, getToken:()=>Promise<string|null|undefined>, fetchImpl?:typeof fetch, mode:'normal'|'law', query:string, sessionId?:string, signal?:AbortSignal, timeoutMs?:number, includeKnowhow?:boolean}} options
+ * @param {{baseUrl:string, getToken:()=>Promise<string|null|undefined>, fetchImpl?:typeof fetch, mode:'normal'|'law', query:string, sessionId?:string, signal?:AbortSignal, timeoutMs?:number, includeKnowhow?:boolean, modelType?:string}} options
+ * `modelType` is a UI model key sent as a filter for normal mode only; law mode ignores it.
  */
-export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS, includeKnowhow }) {
+export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS, includeKnowhow, modelType, senpaiConversationId, senpaiTurnId }) {
   const endpoint = safeEndpoint(baseUrl);
   const normalizedQuery = validateQuery(query, mode);
   if (includeKnowhow !== undefined && typeof includeKnowhow !== 'boolean') {
@@ -345,6 +405,13 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
   }
   if (includeKnowhow === true && mode !== 'normal') {
     fail('validation', 'ノウハウMarkdown検索は技術KBでのみ利用できます');
+  }
+  const normalizedModelType = validateModelType(modelType);
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+  if ((senpaiConversationId === undefined) !== (senpaiTurnId === undefined)
+    || (senpaiConversationId !== undefined
+      && (!UUID.test(senpaiConversationId) || !UUID.test(senpaiTurnId)))) {
+    fail('validation', '相談履歴の識別情報を確認してください');
   }
   if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId.trim()
     || sessionId.length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(sessionId))) {
@@ -395,7 +462,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
         response = await fetchImpl(`${endpoint}/rag/query`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: normalizedQuery, mode, filters: {}, ...(sessionId !== undefined ? { sessionId } : {}), ...(includeKnowhow === true ? { includeKnowhow: true } : {}) }),
+          body: JSON.stringify({ query: normalizedQuery, mode, filters: mode === 'normal' && normalizedModelType ? { modelType: normalizedModelType } : {}, ...(sessionId !== undefined ? { sessionId } : {}), ...(includeKnowhow === true ? { includeKnowhow: true } : {}), ...(senpaiConversationId !== undefined ? { senpaiConversationId, senpaiTurnId } : {}) }),
           signal: controller.signal,
         });
       } catch {
@@ -421,7 +488,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
       } catch {
         fail('invalid_response', '検索結果の形式を確認できませんでした');
       }
-      return normalizeResponse(data, mode, normalizedQuery, receivedAt, sessionId, includeKnowhow === true);
+      return normalizeResponse(data, mode, normalizedQuery, receivedAt, sessionId, includeKnowhow === true, senpaiConversationId, senpaiTurnId);
     })();
     return await Promise.race([operation, interruption]);
   } catch (error) {

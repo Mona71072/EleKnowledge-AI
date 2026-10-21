@@ -163,3 +163,103 @@ test('index digest is stable for identical cards and retains full body, conditio
   assert.ok(first.cards[0].sourceRefs.some((ref) => ref.ref_type === 'onenote_page' && ref.onenote_id === 'SYNTH-NOTE-1' && ref.page_role === 'workflow'));
   assert.ok(first.cards[0].sourceRefs.some((ref) => ref.ref_type === 'kb_document' && ref.document_number === 'SYNTH-DOC-1' && ref.kb_filename === 'manual.pdf' && ref.kb_verify_status === 'pending'));
 });
+
+test('editor annotation keys on source refs are dropped from the index; other unknown keys still fail', async (t) => {
+  const { root, allowed } = await fixture(t);
+  const annotated = [
+    { ref_type: 'lists_item', list_item_id: 'SYNTH-LIST-1', note: 'editor note', record_id: 'R-1', kb_category: 'cat' },
+    { ref_type: 'law_rag', law_id: 'SYNTH-LAW-1', law_rag_status: 'ok', retrieval: 'auto', summary_from_kb: 'yes' },
+  ];
+  const markdown = card({ refs: annotated });
+  await writeFile(path.join(allowed, 'one.md'), markdown);
+  const entry = await selectedEntry(root, 'knowledge/cards/practice-guides/one.md', markdown);
+  const index = await buildKnowhowIndex({ root, manifest: manifest([entry]) });
+  assert.equal(index.cards[0].sourceRefs.length, 2);
+  for (const ref of index.cards[0].sourceRefs) {
+    for (const key of ['note', 'law_rag_status', 'retrieval', 'summary_from_kb', 'record_id', 'kb_category']) assert.equal(key in ref, false);
+  }
+  assert.equal(JSON.stringify(index).includes('editor note'), false);
+  const unknown = card({ refs: [{ ref_type: 'lists_item', list_item_id: 'SYNTH-LIST-1', mystery_key: 'x' }] });
+  await writeFile(path.join(allowed, 'one.md'), unknown);
+  await assert.rejects(buildKnowhowIndex({ root, manifest: manifest([await selectedEntry(root, 'knowledge/cards/practice-guides/one.md', unknown)]) }));
+  const onlyAnnotation = card({ refs: [{ ref_type: 'lists_item', note: 'no identity' }] });
+  await writeFile(path.join(allowed, 'one.md'), onlyAnnotation);
+  await assert.rejects(buildKnowhowIndex({ root, manifest: manifest([await selectedEntry(root, 'knowledge/cards/practice-guides/one.md', onlyAnnotation)]) }));
+});
+
+test('slash notation is accepted in model scope values and source ref locators', async (t) => {
+  const { root, allowed } = await fixture(t);
+  const markdown = card({
+    scope: { may_apply_to: ['LINKs 7seg/2桁表示'], excludes: ['LV5K/LV6K 戸型のみ'], door_types: ['LV5K-CO/2S'], scope_note: 'A/B' },
+    refs: [{ ref_type: 'kb_document', document_number: 'SYNTH-DOC-1', locator: 'D14 DCB/DOB' }],
+  });
+  await writeFile(path.join(allowed, 'one.md'), markdown);
+  const entry = await selectedEntry(root, 'knowledge/cards/practice-guides/one.md', markdown);
+  const index = await buildKnowhowIndex({ root, manifest: manifest([entry]) });
+  assert.deepEqual(index.cards[0].modelScope.excludes, ['LV5K/LV6K 戸型のみ']);
+  assert.deepEqual(index.cards[0].modelScope.door_types, ['LV5K-CO/2S']);
+  assert.equal(index.cards[0].sourceRefs[0].locator, 'D14 DCB/DOB');
+});
+
+test('path-like, backslash, parent-segment, absolute, and URL values are still rejected', async (t) => {
+  const { root, allowed } = await fixture(t);
+  const bad = ['../x', '/abs', 'a\\x', 'a/../x', 'https://example.com/x', 's3://bucket/key', 'file:///etc/passwd', 'javascript:alert(1)'];
+  const cases = [];
+  for (const value of bad) {
+    cases.push(card({ scope: { excludes: [`'${value}'`] } }));
+    cases.push(card({ scope: { may_apply_to: [`'${value}'`] } }));
+    cases.push(card({ refs: [{ ref_type: 'kb_document', document_number: 'SYNTH-DOC-1', locator: `'${value}'` }] }));
+  }
+  for (const markdown of cases) {
+    await writeFile(path.join(allowed, 'one.md'), markdown);
+    const entry = await selectedEntry(root, 'knowledge/cards/practice-guides/one.md', markdown);
+    await assert.rejects(buildKnowhowIndex({ root, manifest: manifest([entry]) }), undefined, markdown);
+  }
+});
+
+const scopedCard = (lines) => card().replace('model_scope:\n', `model_scope:\n  product_lines:\n    - AXIEZ\n${lines.map((line) => `  ${line}\n`).join('')}`);
+
+async function buildScoped(t, lines) {
+  const { root, allowed } = await fixture(t);
+  const markdown = scopedCard(lines);
+  await writeFile(path.join(allowed, 'one.md'), markdown);
+  const entry = await selectedEntry(root, 'knowledge/cards/practice-guides/one.md', markdown);
+  return buildKnowhowIndex({ root, manifest: manifest([entry]) });
+}
+
+test('scope verification marks are kept as scalars in modelScope but never become search terms', async (t) => {
+  const index = await buildScoped(t, ['scope_status: verified', 'scope_verified_by: reviewer-a', 'scope_verified_at: 2026-10-20']);
+  const [built] = index.cards;
+  assert.equal(built.modelScope.scope_status, 'verified');
+  assert.equal(built.modelScope.scope_verified_by, 'reviewer-a');
+  assert.equal(built.modelScope.scope_verified_at, '2026-10-20');
+  for (const term of ['verified', 'reviewer-a', '2026-10-20']) assert.equal(built.searchTerms.includes(term), false);
+});
+
+test('an unverified or unmarked scope builds without verification fields being required', async (t) => {
+  const marked = await buildScoped(t, ['scope_status: unverified']);
+  assert.equal(marked.cards[0].modelScope.scope_status, 'unverified');
+  const unmarked = await buildScoped(t, []);
+  assert.equal('scope_status' in unmarked.cards[0].modelScope, false);
+});
+
+test('verified scope without reviewer and date, or with malformed marks, fails the build', async (t) => {
+  const rejected = [
+    ['scope_status: verified'],
+    ['scope_status: verified', 'scope_verified_by: reviewer-a'],
+    ['scope_status: verified', 'scope_verified_at: 2026-10-20'],
+    ['scope_status: verified', 'scope_verified_by: reviewer-a', 'scope_verified_at: 20261020'],
+    ['scope_status: verified', 'scope_verified_by: reviewer-a', 'scope_verified_at: 2026-13-45'],
+    ['scope_status: maybe'],
+    ['scope_verified_by: reviewer-a', 'scope_status:', '  - verified'],
+  ];
+  for (const lines of rejected) await assert.rejects(buildScoped(t, lines), undefined, lines.join(' / '));
+});
+
+test('excluded, unconfirmed and note scope values never become search terms', async (t) => {
+  const index = await buildScoped(t, ['scope_note: other products only']);
+  const [built] = index.cards;
+  assert.equal(built.searchTerms.includes('AXIEZ'), true);
+  for (const term of ['real cases', 'synthetic only', 'other products only']) assert.equal(built.searchTerms.includes(term), false);
+  assert.deepEqual(built.modelScope.excludes, ['real cases']);
+});

@@ -104,6 +104,22 @@ test('accepts canonical empty scope arrays from the private Markdown index', asy
   assert.deepEqual(answer.knowhow.matches[0].modelScope.excludes, []);
 });
 
+test('accepts scope verification marks returned from the private Markdown index', async () => {
+  const knowhow = knowhowWithVerifiedScope();
+  const answer = await queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '合成された検索', includeKnowhow: true,
+    fetchImpl: fetchOk(normalPayloadWithKnowhow(knowhow)),
+  });
+  assert.equal(answer.knowhow.matches[0].modelScope.scope_status, 'verified');
+  assert.equal(answer.knowhow.matches[0].modelScope.scope_verified_at, '2026-10-20');
+});
+
+function knowhowWithVerifiedScope() {
+  const knowhow = knowhowPayload();
+  knowhow.matches[0].modelScope = { product_lines: ['AXIEZ'], scope_status: 'verified', scope_verified_by: 'reviewer', scope_verified_at: '2026-10-20' };
+  return knowhow;
+}
+
 function fetchOk(payload, onRequest = () => {}) {
   return async (url, init) => {
     onRequest(url, init);
@@ -139,6 +155,38 @@ test('posts only the explicit query, mode, and empty filters with the Cognito ID
   assert.equal(Number.isNaN(Date.parse(answer.receivedAt)), false);
   assert.equal(answer.responseTimestamp, undefined);
   assert.equal(answer.sourceDocuments[0].sourceUri, 's3://technical-kb/docs/install.pdf');
+});
+
+test('sends paired Senpai history UUIDs only when supplied and requires the response to echo them', async () => {
+  const conversationId = '10000000-0000-4000-8000-000000000001';
+  const turnId = '20000000-0000-4000-8000-000000000001';
+  let body;
+  const payload = { ...normalPayload(), senpaiConversationId: conversationId, senpaiTurnId: turnId };
+  const answer = await queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '先輩相談',
+    senpaiConversationId: conversationId, senpaiTurnId: turnId,
+    fetchImpl: fetchOk(payload, (_url, init) => { body = JSON.parse(init.body); }),
+  });
+  assert.equal(body.senpaiConversationId, conversationId);
+  assert.equal(body.senpaiTurnId, turnId);
+  assert.equal(answer.senpaiConversationId, conversationId);
+  assert.equal(answer.senpaiTurnId, turnId);
+  for (const overrides of [
+    { senpaiConversationId: conversationId },
+    { senpaiTurnId: turnId },
+    { senpaiConversationId: 'bad', senpaiTurnId: turnId },
+    { senpaiConversationId: conversationId, senpaiTurnId: 'bad' },
+  ]) {
+    await assert.rejects(queryKnowledgeSource({
+      baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: 'invalid', ...overrides,
+      fetchImpl: fetchOk(payload),
+    }), (error) => error.code === 'validation');
+  }
+  await assert.rejects(queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '先輩相談',
+    senpaiConversationId: conversationId, senpaiTurnId: turnId,
+    fetchImpl: fetchOk(normalPayload()),
+  }), (error) => error.code === 'invalid_response');
 });
 
 test('preserves ordinary request bodies and opts into server-indexed Markdown only when explicitly requested', async () => {
@@ -591,5 +639,78 @@ test('renders imported knowledge IDs as literals in generated target provenance'
     { knowledgeId: 'SYNTH', baseVersion: 0, manualBodyRevision: 0 },
     { knowledgeId: 'SYNTH', baseVersion: 1, manualBodyRevision: -1 }]) {
     assert.throws(() => researchClient.buildResearchTargetNote(target));
+  }
+});
+
+test('sends the optional model filter only for normal mode and never for law mode', async () => {
+  const bodies = [];
+  const run = (mode, extra) => queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode, query: '機種指定', ...extra,
+    fetchImpl: fetchOk(normalPayload(), (_url, init) => bodies.push(JSON.parse(init.body))),
+  });
+  await run('normal', { modelType: ' AXIEZ ' });
+  await run('law', { modelType: 'AXIEZ' });
+  await run('normal', {});
+
+  assert.deepEqual(bodies[0].filters, { modelType: 'AXIEZ' });
+  assert.deepEqual(bodies[1].filters, {});
+  assert.deepEqual(bodies[2].filters, {});
+});
+
+test('rejects malformed model filters before authentication or fetch', async () => {
+  let calls = 0;
+  const common = {
+    baseUrl: BASE, getToken: async () => { calls += 1; return TOKEN; },
+    fetchImpl: async () => { calls += 1; return response(normalPayload()); },
+    query: 'question', mode: 'normal',
+  };
+  for (const modelType of ['', '   ', 1, null, 'a'.repeat(65), 'AX\u0000IEZ']) {
+    await assert.rejects(queryKnowledgeSource({ ...common, modelType }), (error) => error.code === 'validation');
+  }
+  assert.equal(calls, 0);
+});
+
+async function queryWithKnowhow(knowhow) {
+  return queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '合成された検索', includeKnowhow: true,
+    modelType: 'AXIEZ', fetchImpl: fetchOk(normalPayloadWithKnowhow(knowhow)),
+  });
+}
+
+test('accepts the optional response-only model fit fields and keeps older payloads valid', async () => {
+  const old = await queryWithKnowhow(knowhowPayload());
+  assert.equal('modelFit' in old.knowhow.matches[0], false);
+  for (const modelFit of ['matched', 'general', 'unknown']) {
+    const knowhow = knowhowPayload();
+    knowhow.matches[0].modelFit = modelFit;
+    assert.equal((await queryWithKnowhow(knowhow)).knowhow.matches[0].modelFit, modelFit);
+  }
+  const other = knowhowPayload();
+  other.matches[0].modelFit = 'other_product';
+  other.matches[0].modelFitProducts = ['AXIEZ-LINKs'];
+  const clean = (await queryWithKnowhow(other)).knowhow.matches[0];
+  assert.equal(clean.modelFit, 'other_product');
+  assert.deepEqual(clean.modelFitProducts, ['AXIEZ-LINKs']);
+  other.matches[0].modelFitProducts = [];
+  assert.deepEqual((await queryWithKnowhow(other)).knowhow.matches[0].modelFitProducts, []);
+});
+
+test('rejects malformed model fit fields instead of rendering them', async () => {
+  const cases = [
+    { modelFit: 'conflicting' },
+    { modelFit: '' },
+    { modelFit: 1 },
+    { modelFit: null },
+    { modelFitProducts: ['AXIEZ-LINKs'] },
+    { modelFit: 'matched', modelFitProducts: ['AXIEZ-LINKs'] },
+    { modelFit: 'other_product', modelFitProducts: 'AXIEZ-LINKs' },
+    { modelFit: 'other_product', modelFitProducts: ['VFGLF'] },
+    { modelFit: 'other_product', modelFitProducts: ['AXIEZ', 'AXIEZ'] },
+    { modelFit: 'other_product', modelFitProducts: ['AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター', 'AXIEZ'] },
+  ];
+  for (const extra of cases) {
+    const knowhow = knowhowPayload();
+    Object.assign(knowhow.matches[0], extra);
+    await assert.rejects(queryWithKnowhow(knowhow), (error) => error.code === 'invalid_response', JSON.stringify(extra));
   }
 });

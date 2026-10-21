@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "indexVersion": "sha256:d8d04594a4514b3383886e6b46552058add8a5a4e7b957fe5f6ab6a903bb2155",
+  "generatedAt": "2026-10-20T00:00:00.000Z",
+  "cards": [
+    {
+      "knowledgeId": "KH-SYN-CONFLICT",
+      "cardVersion": 1,
+      "sha256": "4a1ba0f1bf220dd824bdb4dd11596f7d3c7c922f03e7d88f16a67fccdd37c7ab",
+      "title": "synthzeta エスカレーター側の合成カード",
+      "status": "draft",
+      "usage": "navigation_only",
+      "body": "# synthzeta エスカレーター側の合成カード\n\n機種フィルタで落ちることを確認する合成本文。\n",
+      "searchTerms": [
+        "synthzeta エスカレーター側の合成カード",
+        "エスカレーター"
+      ],
+      "sourceRefs": [
+        {
+          "ref_type": "onenote_page",
+          "onenote_id": "SYN-ONENOTE-1",
+          "page_role": "primary"
+        }
+      ],
+      "modelScope": {
+        "product_lines": [
+          "エスカレーター"
+        ],
+        "scope_status": "verified",
+        "scope_verified_at": "2026-10-20",
+        "scope_verified_by": "合成レビュー担当"
+      }
+    },
+    {
+      "knowledgeId": "KH-SYN-DUPTERMS",
+      "cardVersion": 1,
+      "sha256": "54c09c32abc2176b077863097c5f7f65ecd439729038c181152d33a77369696e",
+      "title": "qxdupterm 重複検索語 合成カード",
+      "status": "draft",
+      "usage": "navigation_only",
+      "body": "# qxdupterm 重複検索語 合成カード\n\n同じ語が title・symptoms・keywords・aliases・tags・適用範囲に重複して現れる合成本文。実設備の助言ではない。\n",
+      "searchTerms": [
+        "qxdupterm 重複検索語 合成カード",
+        "qxdupterm",
+        "qxdupterm 症状",
+        "AXIEZ"
+      ],
+      "sourceRefs": [
+        {
+          "ref_type": "lists_item",
+          "list_item_id": "SYN-DUP-1"
+        }
+      ],
+      "modelScope": {
+        "observed_on": [
+          "qxdupterm"
+        ],
+        "product_lines": [
+          "AXIEZ",
+          "AXIEZ"
+        ]
+      }
+    },
+    {
+      "knowledgeId": "KH-SYN-POSITIVE",
+      "cardVersion": 1,
+      "sha256": "95745e5e8554a99c7d096a2c23cf73c4507b07f001c654edd4d297f449485d8b",
+      "title": "synthzeta センサー異常 合成カード",
+      "status": "draft",
+      "usage": "navigation_only",
+      "body": "# synthzeta センサー異常 合成カード\n\n条件つきの合成本文。実設備の助言ではない。\n",
+      "searchTerms": [
+        "synthzeta センサー異常 合成カード",
+        "synthzeta 検出遅れ",
+        "qxpositive",
+        "D14 DCB/DOB 構成",
+        "AXIEZ"
+      ],
+      "sourceRefs": [
+        {
+          "ref_type": "lists_item",
+          "list_item_id": "SYN-1"
+        },
+        {
+          "ref_type": "law_rag",
+          "law_id": "SYN-LAW-1",
+          "law_title": "合成法令 A/B",
+          "locator": "第1条/第2項"
+        }
+      ],
+      "modelScope": {
+        "conditions": [
+          "D14 DCB/DOB 構成"
+        ],
+        "excludes": [
+          "qxexcl 構成"
+        ],
+        "may_apply_to": [
+          "qxmay 構成"
+        ],
+        "product_lines": [
+          "AXIEZ"
+        ],
+        "scope_note": "qxnote は注記のみ",
+        "scope_status": "verified",
+        "scope_verified_at": "2026-10-20",
+        "scope_verified_by": "合成レビュー担当"
+      }
+    },
+    {
+      "knowledgeId": "KH-SYN-UNVERIFIED",
+      "cardVersion": 1,
+      "sha256": "7f8e3afdccbd51044a5cc6f1d0c43b0612e79c3bcc3142cee16ff9e9997b9af1",
+      "title": "synthzeta メルシティ側の未検証カード",
+      "status": "draft",
+      "usage": "navigation_only",
+      "body": "# synthzeta メルシティ側の未検証カード\n\n未検証の適用範囲は機種フィルタで落とされないことを確認する合成本文。\n",
+      "searchTerms": [
+        "synthzeta メルシティ側の未検証カード",
+        "メルシティ"
+      ],
+      "sourceRefs": [
+        {
+          "ref_type": "kb_document",
+          "document_number": "SYN-DOC-1",
+          "kb_filename": "synthetic.pdf",
+          "kb_verify_status": "pending"
+        }
+      ],
+      "modelScope": {
+        "may_apply_to": [
+          "qxmay 構成"
+        ],
+        "product_lines": [
+          "メルシティ"
+        ]
+      }
+    }
+  ]
+}
