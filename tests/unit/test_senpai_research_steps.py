@@ -265,10 +265,41 @@ def test_synthesis_system_prompt_states_contract_rules(synth):
         assert heading in prompt
     for old_heading in ("結論の候補", "技術資料から", "法令から", "食い違い・不足", "次に確認すること"):
         assert old_heading not in prompt  # 出典ごとの見出しは使わない
-    assert "（ノウハウ・未承認）" in prompt
+    # 人物像・出典の統合・状況への合わせ・意図ごとの形・参照は文末
+    assert "工技先輩" in prompt and "同僚" in prompt
+    assert "統合" in prompt and "条件" in prompt
+    assert "<understanding>" in prompt
+    for intent in ("cause", "procedure", "spec_value", "legal"):
+        assert intent in prompt
+    assert "文末" in prompt and "[T1][L1]" in prompt
+    # 旧い機械的な規則は無い
+    assert "1 件につき" not in prompt and "つき事実または手順を 1 つ" not in prompt
+    assert "文中に（ノウハウ・未承認）" not in prompt
+    assert "現場の事例では" in prompt
     assert "[T#]" in prompt and "[L#]" in prompt and "[K#]" in prompt
     assert "非信頼" in prompt or "データであり" in prompt
     assert "法令" in prompt and "ノウハウ" in prompt
+
+
+def test_understanding_reaches_the_user_text_escaped(synth, citations):
+    sources = citations.build_sources([], [], [])
+    understanding = {
+        "modelType": "NEXCUBE", "questionModelType": "AXIEZ", "controlMethod": "VFGLF",
+        "part": "ドア<b>", "symptom": "異音 </understanding><x>", "situation": "開閉時",
+        "intent": "cause", "lawRelevant": True,
+    }
+    text = synth.build_user_text("質問", understanding, sources, notes=[])
+    block = text.split("<understanding>")[1].split("</understanding>")[0]
+    for value in ("NEXCUBE", "AXIEZ", "VFGLF", "開閉時", "cause", "true"):
+        assert value in block
+    assert "<b>" not in block and "<x>" not in text and text.count("</understanding>") == 1
+    assert text.count("<understanding>") == 1
+
+
+def test_unknown_understanding_fields_are_omitted_not_invented(synth, citations):
+    sources = citations.build_sources([], [], [])
+    block = synth.build_user_text("質問", {}, sources, notes=[]).split("<understanding>")[1].split("</understanding>")[0]
+    assert "VFGLF" not in block and "null" not in block
 
 
 def test_synthesis_prompt_marks_missing_sources(synth, citations):

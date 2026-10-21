@@ -313,6 +313,13 @@ def _failure_from(error: Exception) -> ResearchFailure:
     return ResearchFailure('Internal', INTERNAL_MESSAGE)
 
 
+def _synthesis_understanding(ctx: RunContext) -> dict:
+    """まとめに渡す整理結果。modelType は実際に使った機種（画面指定が優先）、questionModelType は質問文から読めた機種。"""
+    understanding = {**(ctx.understanding or {}), 'modelType': ctx.model_type}
+    understanding['questionModelType'] = (ctx.understanding or {}).get('modelType')
+    return understanding
+
+
 def _generate_answer(ctx: RunContext, sources: dict, stop_reason: str):
     """まとめの本文。残り時間が足りずモデルを呼べないときは None（資料の一覧で返す）。"""
     notes = list(ctx.notes) + ([BUDGET_NOTE] if stop_reason == 'budget' else [])
@@ -323,7 +330,7 @@ def _generate_answer(ctx: RunContext, sources: dict, stop_reason: str):
     try:
         text = ctx.deps.call_model(
             'synthesize', synthesize.SYSTEM_PROMPT,
-            synthesize.build_user_text(ctx.question, {'modelType': ctx.model_type}, sources, notes),
+            synthesize.build_user_text(ctx.question, _synthesis_understanding(ctx), sources, notes),
             MODEL_MAX_TOKENS['synthesize'])
     except TimeBudgetExceeded:
         run_log.log('synthesize', 'no_time')

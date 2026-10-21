@@ -478,3 +478,13 @@ def test_budget_fallback_uses_the_same_headings():
     assert text.startswith("## 結論\n時間の上限に達したため、確認できた資料を示します")
     assert "## 根拠と手順\n- " in text and "[T1]" in text and "[L1]" in text
     assert "技術資料から" not in text and "## 確認が必要な点" not in text
+
+
+def test_runner_passes_the_understanding_to_synthesis():
+    runner = support.load_module("senpai_research_runner.py")
+    deps = FakeDeps(understand=_understanding(modelType="AXIEZ-LINKs", modelEvidence="LINKs", part="ドア"))
+    job, budget, recorder, events, clock = _setup(runner, deps, model_type="NEXCUBE")
+    runner.run_research(job, deps, recorder, budget)
+    user = [u for p, u in deps.model_calls if p == "synthesize"][0]
+    block = user.split("<understanding>")[1].split("</understanding>")[0]
+    assert "NEXCUBE" in block and "AXIEZ-LINKs" in block and "ドア" in block and "cause" in block
