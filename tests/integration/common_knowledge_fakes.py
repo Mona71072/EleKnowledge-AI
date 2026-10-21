@@ -1,14 +1,14 @@
-"""In-memory DynamoDB/S3/GitHub-compatible doubles for the common-knowledge adapters.
+"""In-memory DynamoDB/S3 doubles for the common-knowledge adapters.
 
 They implement only what the adapters send, with the documented failure semantics: conditional
 TransactWriteItems cancel as a whole, GSI pages are KEYS_ONLY and return LastEvaluatedKey whenever
-Limit is reached, S3 If-None-Match/If-Match answer 412 (missing If-Match target: 404).
+Limit is reached, S3 If-None-Match/If-Match answer 412 (missing If-Match target: 404), buckets are
+versioned (DeleteObject adds a delete marker; an old VersionId stays readable).
 """
-import base64
 import copy
 import hashlib
 import io
-import json
+import uuid
 
 from botocore.exceptions import ClientError
 
@@ -79,24 +79,51 @@ class FakeDynamo:
 
 class FakeS3:
     def __init__(self):
-        self.objects = {}
+        self.versions = {}  # key -> [(version id, body or None for a delete marker, etag, metadata)]
 
-    def put_object(self, Bucket, Key, Body, ContentType, IfNoneMatch=None, IfMatch=None):
-        current = self.objects.get(Key)
+    def latest(self, key):
+        versions = self.versions.get(key)
+        return versions[-1] if versions and versions[-1][1] is not None else None
+
+    def put_object(self, Bucket, Key, Body, ContentType, IfNoneMatch=None, IfMatch=None, Metadata=None):
+        current = self.latest(Key)
         if IfNoneMatch == '*' and current is not None:
             raise client_error('PreconditionFailed', 412, 'PutObject')
         if IfMatch is not None:
             if current is None:
                 raise client_error('NoSuchKey', 404, 'PutObject')
-            if current[1] != IfMatch:
+            if current[2] != IfMatch:
                 raise client_error('PreconditionFailed', 412, 'PutObject')
-        self.objects[Key] = (Body, '"' + hashlib.md5(Body).hexdigest() + '"')
+        version, etag = uuid.uuid4().hex, '"' + hashlib.md5(Body).hexdigest() + '"'
+        self.versions.setdefault(Key, []).append((version, Body, etag, dict(Metadata or {})))
+        return {'VersionId': version, 'ETag': etag}
 
-    def get_object(self, Bucket, Key):
-        if Key not in self.objects:
-            raise client_error('NoSuchKey', 404, 'GetObject')
-        body, etag = self.objects[Key]
-        return {'Body': io.BytesIO(body), 'ETag': etag}
+    def _find(self, Key, VersionId, operation):
+        if VersionId is None:
+            found = self.latest(Key)
+            if found is None:
+                raise client_error('NoSuchKey' if operation == 'GetObject' else '404', 404, operation)
+            return found
+        found = next((item for item in self.versions.get(Key, []) if item[0] == VersionId), None)
+        if found is None or found[1] is None:
+            raise client_error('NoSuchVersion', 404, operation)
+        return found
+
+    def get_object(self, Bucket, Key, VersionId=None):
+        version, body, etag, metadata = self._find(Key, VersionId, 'GetObject')
+        return {'Body': io.BytesIO(body), 'ETag': etag, 'VersionId': version, 'Metadata': metadata}
+
+    def head_object(self, Bucket, Key):
+        version, _body, etag, metadata = self._find(Key, None, 'HeadObject')
+        return {'ETag': etag, 'VersionId': version, 'Metadata': metadata}
+
+    def delete_object(self, Bucket, Key):
+        self.versions.setdefault(Key, []).append((uuid.uuid4().hex, None, None, {}))
+        return {}
+
+    def list_object_versions(self, Bucket, Prefix):
+        return {'Versions': [{'Key': key, 'VersionId': item[0]} for key, items in self.versions.items()
+                             if key.startswith(Prefix) for item in items if item[1] is not None]}
 
 
 class Faulty:
@@ -116,100 +143,3 @@ class Faulty:
                 raise error
             return method(**kwargs)
         return call
-
-
-class FakeGitHub:
-    """Minimal GitHub-compatible Git Data API: blobs, trees, commits, refs, contents, commits?path."""
-
-    def __init__(self, branch='main'):
-        self.objects, self.branch, self.calls, self.before_patch = {}, branch, [], None
-        empty = self._store({'kind': 'tree', 'entries': {}})
-        self.head = self._store({'kind': 'commit', 'tree': empty, 'parents': [], 'message': 'init'})
-
-    def _store(self, value):
-        sha = hashlib.sha1(json.dumps(value, sort_keys=True).encode()).hexdigest()
-        self.objects[sha] = value
-        return sha
-
-    def _tree_put(self, tree_sha, parts, blob):
-        entries = dict(self.objects[tree_sha]['entries']) if tree_sha else {}
-        if len(parts) == 1:
-            entries[parts[0]] = ('blob', blob)
-        else:
-            child = entries.get(parts[0], ('tree', None))[1]
-            entries[parts[0]] = ('tree', self._tree_put(child, parts[1:], blob))
-        return self._store({'kind': 'tree', 'entries': entries})
-
-    def _lookup(self, commit, path):
-        sha = self.objects[commit]['tree']
-        for part in path.split('/'):
-            entry = self.objects[sha]['entries'].get(part)
-            if entry is None:
-                return None
-            sha = entry[1]
-        return sha
-
-    def _history(self, path):
-        commit, found = self.head, []
-        while commit:
-            value = self.objects[commit]
-            parent = value['parents'][0] if value['parents'] else None
-            if self._lookup(commit, path) != (self._lookup(parent, path) if parent else None):
-                found.append(commit)
-            commit = parent
-        return found
-
-    def commit_external(self, path, data):
-        """Simulate another client committing directly to the branch."""
-        blob = self._store({'kind': 'blob', 'data': base64.b64encode(data).decode()})
-        tree = self._tree_put(self.objects[self.head]['tree'], path.split('/'), blob)
-        self.head = self._store({'kind': 'commit', 'tree': tree, 'parents': [self.head], 'message': 'external'})
-
-    def __call__(self, method, url, headers, body):
-        assert headers['Authorization'] == 'Bearer synthetic-token'
-        self.calls.append((method, url))
-        path, _, query = url.split('/repos/synthetic/knowledge', 1)[1].partition('?')
-        params = dict(item.split('=', 1) for item in query.split('&')) if query else {}
-        data = json.loads(body) if body else None
-        from urllib.parse import unquote
-        if method == 'GET' and path == f'/git/ref/heads/{self.branch}':
-            return 200, json.dumps({'object': {'sha': self.head}}).encode()
-        if method == 'GET' and path == '/commits':
-            found = self._history(unquote(params['path']))
-            return 200, json.dumps([{'sha': sha} for sha in found[-1:]]).encode()
-        if method == 'GET' and path.startswith('/contents/'):
-            ref = unquote(params['ref'])
-            commit = self.head if ref == self.branch else ref
-            sha = self._lookup(commit, unquote(path[len('/contents/'):]))
-            if sha is None or self.objects[sha]['kind'] != 'blob':
-                return 404, b'{}'
-            return 200, json.dumps({'type': 'file', 'encoding': 'base64',
-                                    'content': self.objects[sha]['data']}).encode()
-        if method == 'GET' and path.startswith('/git/commits/'):
-            value = self.objects[path.rsplit('/', 1)[1]]
-            return 200, json.dumps({'tree': {'sha': value['tree']}}).encode()
-        if method == 'GET' and path.startswith('/git/trees/'):
-            entries = self.objects[path.rsplit('/', 1)[1]]['entries']
-            return 200, json.dumps({'tree': [{'path': name, 'type': kind, 'sha': sha}
-                                             for name, (kind, sha) in entries.items()]}).encode()
-        if method == 'POST' and path == '/git/blobs':
-            return 201, json.dumps({'sha': self._store({'kind': 'blob', 'data': data['content']})}).encode()
-        if method == 'POST' and path == '/git/trees':
-            tree = data['base_tree']
-            for entry in data['tree']:
-                tree = self._tree_put(tree, entry['path'].split('/'), entry['sha'])
-            return 201, json.dumps({'sha': tree}).encode()
-        if method == 'POST' and path == '/git/commits':
-            sha = self._store({'kind': 'commit', 'tree': data['tree'], 'parents': data['parents'],
-                               'message': data['message']})
-            return 201, json.dumps({'sha': sha}).encode()
-        if method == 'PATCH' and path == f'/git/refs/heads/{self.branch}':
-            if self.before_patch:
-                hook, self.before_patch = self.before_patch, None
-                hook()
-            assert data['force'] is False
-            if self.objects[data['sha']]['parents'] != [self.head]:
-                return 422, b'{"message":"Update is not a fast forward"}'
-            self.head = data['sha']
-            return 200, b'{}'
-        raise AssertionError((method, path))

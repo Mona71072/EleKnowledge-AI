@@ -16,7 +16,7 @@ MESSAGES = {400: '入力内容を確認してください。', 401: '認証が�
             503: '保存先または公開情報を確認できません。同じ操作で再試行してください。'}
 # Each deployed function serves only its own routes, as a second guard behind API Gateway wiring.
 RESPONSIBILITIES = {
-    'intake': {'contribute', 'list', 'detail', 'transition', 'pending', 'operation'},
+    'intake': {'contribute', 'list', 'detail', 'transition', 'pending', 'operation', 'me'},
     'editorial': {'card', 'draft', 'review-requests', 'decisions'},
     'publication': {'publish', 'withdraw'},
     'reader': {'published'},
@@ -30,6 +30,8 @@ def route(method, path):
         return {'POST': 'contribute', 'GET': 'list'}.get(method), None
     if path == '/knowledge/operations' and method == 'GET':
         return 'pending', None
+    if path == '/knowledge/me' and method == 'GET':
+        return 'me', None
     match = re.fullmatch(r'/knowledge/(contributions|cards|published|operations)/'
                          r'([A-Za-z0-9][A-Za-z0-9_-]{0,79})(?:/([a-z-]+))?', path)
     if match is None:
@@ -111,6 +113,8 @@ def handle(event, service=None, responsibility=None, allowed_origin=None):
                 result['cursor'] = base64.urlsafe_b64encode(encode(cursor).encode()).decode()
         elif name == 'pending':
             result = service.pending_operations(claims)
+        elif name == 'me':
+            result = service.me(claims)
         elif name == 'detail':
             result = service.detail(claims, identifier)
         elif name == 'transition':

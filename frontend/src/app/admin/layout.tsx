@@ -49,6 +49,26 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
+  // Common knowledge is authorized by the API's grant table, not by Cognito admin membership:
+  // a signed-in non-admin with business grants may open this one page (other admin pages stay closed).
+  if (gate === 'denied' && pathname === '/admin/knowledge'
+    && process.env.NEXT_PUBLIC_ENABLE_COMMON_KNOWLEDGE === 'true') {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="border-b border-gray-200 bg-white">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+            <div className="text-lg font-bold text-gray-900">EleKnowledge</div>
+            <div className="flex items-center gap-3">
+              <Link href="/" className="text-sm text-blue-600 underline underline-offset-2">ホームに戻る</Link>
+              <Button onClick={handleSignOut} variant="outline" size="sm">ログアウト</Button>
+            </div>
+          </div>
+        </header>
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">{children}</main>
+      </div>
+    );
+  }
+
   if (gate === 'denied') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -99,6 +119,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       ),
     },
     ...(process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH === 'true'
+      || process.env.NEXT_PUBLIC_ENABLE_COMMON_KNOWLEDGE === 'true'
       ? [{
           href: '/admin/knowledge',
           label: 'ノウハウ確認',

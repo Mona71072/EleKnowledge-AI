@@ -22,7 +22,7 @@ async function until(condition) {
 }
 
 // Execute the actual TSX handlers with React state boundaries under test control.
-// HTTP, API validation, SQLite, local Git and distribution persistence are real.
+// HTTP, API validation and the SQLite ledger/working/canonical persistence are real.
 function mount() {
   const state = [];
   let index = 0;
@@ -103,8 +103,8 @@ test('actual UI handlers complete all three synthetic entry lifecycles over loop
       await ui.click('最新状態を再取得');
       await ui.click('編集を引き受ける');
       if (type !== 'correction') ui.input('単元ID', cardId);
-      await ui.click('Git作業版へ保存');
-      assert.match(ui.text(), /Git作業版の保存が完了/);
+      await ui.click('作業版を保存');
+      assert.match(ui.text(), /作業版の保存が完了/);
       await ui.click('この版の技術確認を依頼');
       assert.match(ui.text(), /特定版を技術確認待ち/);
       ui.select('合成の操作者', 'reviewer');

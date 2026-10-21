@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalJson, inputHash, requestKnowledge, validateConnection } from '../src/lib/common-knowledge.mjs';
+import { canonicalJson, inputHash, requestKnowledge, validateConnection, validationGrant } from '../src/lib/common-knowledge.mjs';
 
 test('confirmation and retry keys hash stable UTF-8 with nested sorted keys', async () => {
   const value = { z: '日本語\n', a: { v: 2, b: 1 } };
@@ -44,4 +44,27 @@ test('retries preserve actor-bound request key; publication CAS and no-store are
   assert.notEqual(sent[0].init.headers['Idempotency-Key'], sent[2].init.headers['Idempotency-Key']);
   await assert.rejects(requestKnowledge({ ...options, fetchImpl: async () => ({ ok: false,
     status: 409, json: async () => ({ code: 'ManifestConflict', message: '版が変わりました' }) }) }), /ManifestConflict/u);
+});
+
+test("real input is limited to the validation scope and the caller's own live grants", async () => {
+  const me = {
+    actor: 'sub-1',
+    assignment: { permissions: ['view', 'edit'], domains: ['itai-validation'], audiences: ['itai-validation'], expiresAt: 1 },
+    contributions: [{ permissionId: 'other', domain: 'x', audience: 'x', expiresAt: 1 },
+      { permissionId: 'itai-validation-sharing', domain: 'itai-validation', audience: 'itai-validation', expiresAt: 1 }],
+    evidence: [{ id: 'E1', version: '1', sha256: 'b'.repeat(64), domain: 'itai-validation', audience: 'itai-validation', expiresAt: 1 },
+      { id: 'E2', version: '1', sha256: 'c'.repeat(64), domain: 'x', audience: 'x', expiresAt: 1 }],
+  };
+  const grant = validationGrant(me, 'itai-validation');
+  assert.deepEqual(grant.permissions, ['view', 'edit']);
+  assert.equal(grant.contribution.permissionId, 'itai-validation-sharing');
+  assert.deepEqual(grant.evidence.map((item) => item.id), ['E1']);
+  assert.deepEqual(validationGrant(me, 'another'), { scope: 'another', permissions: [], contribution: null, evidence: [] });
+  assert.deepEqual(validationGrant({ ...me, assignment: null }, 'itai-validation').permissions, []);
+  for (const scope of ['', 'Itai Validation', '*']) assert.throws(() => validationGrant(me, scope));
+  const sent = [];
+  await requestKnowledge({ baseUrl: 'https://api.example.com/dev', token: 't', actor: 'a', path: '/me',
+    fetchImpl: async (url) => { sent.push(url); return { ok: true, json: async () => ({}) }; } });
+  assert.deepEqual(sent, ['https://api.example.com/dev/knowledge/me']);
+  await assert.rejects(requestKnowledge({ baseUrl: 'https://api.example.com/dev', token: 't', actor: 'a', path: '/meta' }));
 });

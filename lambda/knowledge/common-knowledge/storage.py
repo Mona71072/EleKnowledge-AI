@@ -1,10 +1,10 @@
-"""Shared encoding plus local synthetic durability adapters; no AWS or remote Git access."""
+"""Shared encoding plus local synthetic durability adapters; no AWS access."""
+import base64
 import contextlib
 import hashlib
 import json
-import pathlib
 import sqlite3
-import subprocess
+import uuid
 
 
 def encode(value):
@@ -149,96 +149,108 @@ class Store:
             'SELECT value FROM records WHERE kind=? ORDER BY id', (kind,))]
 
 
-class LocalGit:
-    """Operation commits and immutable version paths permit crash recovery."""
-
-    def __init__(self, root):
-        self.root = pathlib.Path(root).resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
-        if not (self.root / '.git').exists():
-            self.run('init', '--quiet')
-            self.run('config', 'user.name', 'Synthetic I1')
-            self.run('config', 'user.email', 'synthetic@example.invalid')
-            self.run('config', 'core.autocrlf', 'false')
-
-    def run(self, *args):
-        return subprocess.check_output(
-            ['git', '-c', 'core.hooksPath=/dev/null', '-C', str(self.root), *args],
-            stderr=subprocess.DEVNULL).decode('utf-8').strip()
-
-    def write(self, operation, files):
-        marker = f'operations/{operation}.json'
-        expected = digest({name: digest(data) for name, data in files.items()})
-        # Lookup by operation marker, then verify every byte in that exact commit.
-        found = self.run('log', '--all', '--format=%H', '--', marker)
-        if found:
-            commit = found.splitlines()[0]
-            saved = json.loads(self.run('show', f'{commit}:{marker}'))
-            if saved['hash'] != expected:
-                raise ValueError('operation content mismatch')
-            for name, data in files.items():
-                actual = subprocess.check_output(['git', '-C', str(self.root),
-                                                  'show', f'{commit}:{name}'])
-                if actual != data:
-                    raise ValueError('operation bytes mismatch')
-            return commit
-        for name, data in {**files, marker: encode({'hash': expected}).encode()}.items():
-            path = self.root / name
-            if not path.resolve().is_relative_to(self.root) or any(
-                    item.is_symlink() for item in [path, *path.parents] if item != self.root.parent):
-                raise ValueError('invalid Git path')
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if path.exists() and path.read_bytes() != data:
-                raise ValueError('immutable Git path conflict')
-            path.write_bytes(data)
-        self.run('add', '--', *files, marker)
-        self.run('commit', '--quiet', '-m', f'I1 operation {operation}')
-        return self.run('rev-parse', 'HEAD')
-
-    def read(self, commit, path):
-        return subprocess.check_output(['git', '-C', str(self.root), 'show', f'{commit}:{path}'])
-
-    def proposal_tree(self, identifier):
-        return self.run('rev-parse', f'HEAD:proposals/{identifier}')
+def kb_metadata(bundle):
+    """Bedrock KB sidecar for published/{id}.md. Scalars only; the guard reads the manifest instead."""
+    return {'metadataAttributes': {
+        'knowledgeId': bundle['knowledgeId'], 'workingRevision': bundle['workingRevision'],
+        'kind': bundle['kind'], 'domain': bundle['domain'], 'audience': bundle['audience'],
+        'applicability': bundle['applicability'], 'expiresAt': bundle['expiresAt'],
+        'bundleHash': bundle['bundleHash'], 'rawSha256': bundle['rawSha256']}}
 
 
-class LocalDistribution:
-    """Immutable artifact + CAS manifest adapter in its own SQLite file, apart from the ledger."""
+class LocalWork:
+    """Versioned working copy (S3 drafts/ stand-in). Every put keeps a new, never-deleted version."""
+
+    def __init__(self, store):
+        self.store = store
+
+    def put(self, identifier, raw, operation=None):
+        with self.store.unit() as unit:
+            head = unit.get('work-head', identifier)
+            # A retried operation reuses its own version instead of stacking duplicates.
+            if operation and head and head['operation'] == operation and head['sha256'] == digest(raw):
+                return head['versionId']
+            version = uuid.uuid4().hex
+            unit.put('work-version', f'{identifier}#{version}', {'data': base64.b64encode(raw).decode()})
+            unit.put('work-head', identifier, {'versionId': version, 'operation': operation,
+                                               'sha256': digest(raw)})
+            return version
+
+    def read(self, identifier, version):
+        with self.store.unit() as unit:
+            value = unit.get('work-version', f'{identifier}#{version}')
+        return None if value is None else base64.b64decode(value['data'])
+
+    def current(self, identifier):
+        with self.store.unit() as unit:
+            head = unit.get('work-head', identifier)
+        return (None, None) if head is None else (head['versionId'], self.read(identifier, head['versionId']))
+
+
+class LocalCanonical:
+    """Canonical store (S3 approved/ published/ manifests/ stand-in) in its own SQLite file."""
 
     available = True
 
     def __init__(self, store):
         self.store = store
 
+    def _check(self):
+        if not self.available:
+            raise OSError('canonical store unavailable')
+
+    def approve(self, key, raw, record):
+        with self.store.unit() as unit:
+            value = {'data': base64.b64encode(raw).decode(), 'record': record}
+            previous = unit.get('approved', key)
+            if previous is not None and previous != json.loads(encode(value)):
+                raise ValueError('immutable approved conflict')
+            unit.put('approved', key, value)
+
+    def read_approved(self, key):
+        self._check()
+        with self.store.unit() as unit:
+            value = unit.get('approved', key)
+        return None if value is None else base64.b64decode(value['data'])
+
     def manifest(self, identifier):
-        if not self.available:
-            raise OSError('manifest unavailable')
+        self._check()
         with self.store.unit() as unit:
-            return unit.get('manifest', identifier) or {'generation': 0, 'active': None}
+            value = unit.get('manifest', identifier) or {'generation': 0, 'active': None, 'bundle': None}
+        return {k: value[k] for k in ('generation', 'active', 'bundle')}
 
-    def artifact(self, key, value):
+    def compare_swap(self, identifier, expected, active, operation, bundle):
+        """Generations only grow; a retry is recognised only while its own manifest is current."""
+        self._check()
         with self.store.unit() as unit:
-            previous = unit.get('artifact', key)
-            if previous is not None and previous != value:
-                raise ValueError('immutable artifact conflict')
-            unit.put('artifact', key, value)
-
-    def read_artifact(self, key):
-        with self.store.unit() as unit:
-            return unit.get('artifact', key)
-
-    def compare_swap(self, identifier, expected, active, operation):
-        if not self.available:
-            raise OSError('manifest unavailable')
-        with self.store.unit() as unit:
-            current = unit.get('manifest', identifier) or {'generation': 0, 'active': None}
-            receipt = unit.get('publication-operation', operation)
-            if receipt:
-                # A later withdrawal/publication cannot be undone by an older retry.
-                return receipt if receipt == current else None
+            current = unit.get('manifest', identifier) or {'generation': 0, 'operation': None}
+            if current['operation'] == operation:
+                return {'generation': current['generation'], 'active': current['active']}
             if current['generation'] != expected:
                 return None
-            value = {'generation': expected + 1, 'active': active}
-            unit.put('manifest', identifier, value)
-            unit.put('publication-operation', operation, value)
-            return value
+            unit.put('manifest', identifier, {'generation': expected + 1, 'active': active,
+                                              'bundle': bundle, 'operation': operation})
+            return {'generation': expected + 1, 'active': active}
+
+    def project(self, identifier):
+        """Make published/ match the current manifest (SQLite: one transaction, no race)."""
+        self._check()
+        with self.store.unit() as unit:
+            manifest = unit.get('manifest', identifier)
+            if manifest is None or manifest['active'] is None:
+                unit.delete('published', identifier)
+                return
+            approved = unit.get('approved', manifest['active'])
+            unit.put('published', identifier, {'data': approved['data'],
+                                               'metadata': kb_metadata(manifest['bundle'])})
+
+    def read_published(self, identifier):
+        self._check()
+        with self.store.unit() as unit:
+            value = unit.get('published', identifier)
+        return None if value is None else base64.b64decode(value['data'])
+
+    def published_metadata(self, identifier):
+        with self.store.unit() as unit:
+            value = unit.get('published', identifier)
+        return None if value is None else value['metadata']

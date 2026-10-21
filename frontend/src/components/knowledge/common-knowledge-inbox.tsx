@@ -2,26 +2,30 @@
 
 import { useState } from 'react';
 import { getIdToken } from '@/lib/auth-helpers';
-import { inputHash, requestKnowledge, validateConnection } from '@/lib/common-knowledge.mjs';
+import { inputHash, requestKnowledge, validateConnection, validationGrant } from '@/lib/common-knowledge.mjs';
+import type { CommonKnowledgeMe } from '@/lib/common-knowledge.mjs';
 
 type Candidate = {
   candidateId: string; candidateRevision: number; candidateType: string; state: string;
   context?: string; summary?: string; targetLinks?: string[];
-  targetKnowledgeId?: string; targetRevision?: number;
+  targetKnowledgeId?: string; targetRevision?: number; expiresAt?: number;
 };
 type Version = { bundleHash: string; rawSha256: string; approvalId?: string; status: string; kind: string };
 type Card = {
   knowledgeId: string; workingRevision: number; markdown: string;
   versions: Record<string, Version>; review?: { reviewRequestId: string; bundleHash: string } | null;
 };
-type Saved = { knowledgeId: string; workingRevision: number; candidateRevision: number; bundleHash: string; gitCommit: string };
+type Saved = { knowledgeId: string; workingRevision: number; candidateRevision: number; bundleHash: string; workVersionId: string };
 type Manifest = { generation: number; active: string | null };
 type Published = { knowledgeId: string; workingRevision: number; rawSha256: string; markdown: string; generation: number };
 const STATE_LABELS: Record<string, string> = {
   unconfirmed: '未確認', in_review: '編集中', awaiting_review: '技術確認待ち',
   reflected: '正本反映済み', held: '保留', rejected: '不採用',
 };
-const ACTORS = { contributor: '投稿本人', viewer: 'admin閲覧のみ', editor: '編集担当',
+const PERMISSION_LABELS: Record<string, string> = {
+  view: '閲覧', edit: '編集', approve: '技術承認', publish: '公開・停止', read: '公開版の読取',
+};
+const ACTORS = { contributor: '投稿本人', viewer: '閲覧のみ', editor: '編集担当',
   reviewer: '技術確認者', publisher: '公開担当', reader: 'RAG読者', agent: '開発エージェント' };
 const INPUT_CLASS = 'w-full rounded border border-gray-300 bg-white p-2 text-sm text-gray-900';
 const BUTTON_CLASS = 'rounded border border-violet-300 px-3 py-2 text-sm font-medium text-violet-900 disabled:opacity-40';
@@ -29,6 +33,8 @@ const BUTTON_CLASS = 'rounded border border-violet-300 px-3 py-2 text-sm font-me
 /** Shared inbox with server authorization and separately persisted editing/review/publication. */
 export function CommonKnowledgeInbox() {
   const synthetic = process.env.NEXT_PUBLIC_COMMON_KNOWLEDGE_SYNTHETIC === 'true';
+  const apiUrl = process.env.NEXT_PUBLIC_COMMON_KNOWLEDGE_API_URL || '';
+  const scope = process.env.NEXT_PUBLIC_COMMON_KNOWLEDGE_VALIDATION_SCOPE || '';
   const [actor, setActor] = useState('viewer');
   const [state, setState] = useState('unconfirmed');
   const [items, setItems] = useState<Candidate[]>([]);
@@ -51,10 +57,12 @@ export function CommonKnowledgeInbox() {
   const [published, setPublished] = useState<Published | null>(null);
   const [receipt, setReceipt] = useState<Saved | null>(null);
   const [pending, setPending] = useState<{ operationId: string; status: string }[]>([]);
+  const [summary, setSummary] = useState('合成の用語Z・架空機種A');
+  const [me, setMe] = useState<CommonKnowledgeMe | null>(null);
 
   async function api<T>(path: string, method = 'GET', body?: unknown, revision?: number): Promise<T> {
     const baseUrl = validateConnection({
-      baseUrl: process.env.NEXT_PUBLIC_COMMON_KNOWLEDGE_API_URL || '', synthetic,
+      baseUrl: apiUrl, synthetic,
       development: process.env.NODE_ENV === 'development', hostname: window.location.hostname,
     });
     const token = synthetic ? `synthetic-${actor}` : await getIdToken();
@@ -67,6 +75,17 @@ export function CommonKnowledgeInbox() {
     try { await action(); } catch (error) {
       setMessage(error instanceof Error ? error.message : '操作できませんでした。');
     } finally { setBusy(false); }
+  }
+
+  async function loadMe() {
+    const result = await api<CommonKnowledgeMe>('/me');
+    setMe(result);
+    return result;
+  }
+
+  /** Real input only inside the validation scope, with the caller's own live grants. */
+  async function grant() {
+    return validationGrant(me ?? await loadMe(), scope);
   }
 
   async function list(next = false) {
@@ -96,11 +115,16 @@ export function CommonKnowledgeInbox() {
 
   async function submit() {
     if (!confirmed) throw new Error('共有する最小文脈を確認してください。');
-    // I1's synthetic permission is explicitly server-issued; no real permission is inferred.
-    if (!synthetic) throw new Error('実データの共有許可設定は受入待ちです。');
-    const body = { candidateType, originRef: { id: `synthetic-${candidateType}-${await inputHash(context)}`, revision: 1 },
-      summary: '合成の用語Z・架空機種A', context, domain: 'synthetic', audience: 'synthetic',
-      permissionId: 'synthetic-sharing', ...(candidateType === 'unknown_term' ? { term: '用語Z' } : {}),
+    // Sharing permission is always server-issued; nothing is inferred on the client.
+    let sharing = { domain: 'synthetic', audience: 'synthetic', permissionId: 'synthetic-sharing' };
+    if (!synthetic) {
+      const { contribution } = await grant();
+      if (!contribution) throw new Error('この検証範囲の共有許可がありません。');
+      sharing = { domain: contribution.domain, audience: contribution.audience, permissionId: contribution.permissionId };
+    }
+    const prefix = synthetic ? 'synthetic' : 'ui';
+    const body = { candidateType, originRef: { id: `${prefix}-${candidateType}-${await inputHash(context)}`, revision: 1 },
+      summary, context, ...sharing, ...(candidateType === 'unknown_term' ? { term: '用語Z' } : {}),
       ...(candidateType === 'correction' ? { targetKnowledgeId: correctionTarget, targetRevision: correctionRevision } : {}) };
     const result = await api<Candidate>('/contributions', 'POST', { ...body, confirmedHash: await inputHash(body) });
     setSelected(result); setCard(null); setReceipt(null);
@@ -109,18 +133,25 @@ export function CommonKnowledgeInbox() {
 
   async function save() {
     if (!selected) return;
-    if (!synthetic) throw new Error('実データの根拠・保持・共有範囲設定は受入待ちです。');
+    let scoped = { domain: 'synthetic', audience: 'synthetic', expiresAt,
+      sourceRefs: [{ id: 'SYN-ORIGINAL', version: '1', locator: 'p.1', sha256: 'a'.repeat(64),
+        claimType: 'source_verified', verified: true }] };
+    if (!synthetic) {
+      // Evidence comes only from the protected registry entries granted for this scope.
+      const { evidence } = await grant();
+      if (!evidence.length || !selected.expiresAt) throw new Error('この検証範囲の根拠台帳または候補の期限を確認できません。');
+      scoped = { domain: scope, audience: scope, expiresAt: selected.expiresAt,
+        sourceRefs: evidence.slice(0, 1).map((item) => ({ id: item.id, version: item.version, locator: '検証用',
+          sha256: item.sha256, claimType: item.sourceVerified ? 'source_verified' : 'technician_statement', verified: true })) };
+    }
     const result = await api<Saved>(`/cards/${cardId}/draft`, 'PUT', {
       candidateId: selected.candidateId, candidateRevision: selected.candidateRevision, kind, markdown,
-      applicability: '架空機種A・改訂1。他機種には適用しない。',
-      sourceRefs: [{ id: 'SYN-ORIGINAL', version: '1', locator: 'p.1', sha256: 'a'.repeat(64),
-        claimType: 'source_verified', verified: true }], domain: 'synthetic', audience: 'synthetic',
-      expiresAt, unknowns: [],
+      applicability: '架空機種A・改訂1。他機種には適用しない。', ...scoped, unknowns: [],
     }, card?.workingRevision ?? 0);
     setReceipt(result);
     setSelected({ ...selected, candidateRevision: result.candidateRevision, state: 'in_review' });
     setCard(await api<Card>(`/cards/${cardId}`));
-    setMessage('Git作業版の保存が完了しました。技術承認と公開は別操作です。');
+    setMessage('作業版の保存が完了しました。技術承認と公開は別操作です。');
   }
 
   async function requestReview() {
@@ -151,26 +182,42 @@ export function CommonKnowledgeInbox() {
     setMessage(withdraw ? '公開を停止しました。次の参照から利用できません。' : '承認した特定版を公開しました。');
   }
 
-  const canEdit = !synthetic || actor === 'editor';
-  const canReview = !synthetic || actor === 'reviewer';
-  const canPublish = !synthetic || actor === 'publisher';
+  const granted = synthetic ? [] : (me ? validationGrant(me, scope).permissions : []);
+  const canContribute = synthetic ? actor === 'contributor' : Boolean(me && validationGrant(me, scope).contribution);
+  const canEdit = synthetic ? actor === 'editor' : granted.includes('edit');
+  const canReview = synthetic ? actor === 'reviewer' : granted.includes('approve');
+  const canPublish = synthetic ? actor === 'publisher' : granted.includes('publish');
 
   return <section aria-label="共通知識インボックス" className="space-y-5 rounded-xl border border-violet-200 bg-white p-5">
     <div><h2 className="text-xl font-bold">ノウハウ・用語と基礎知識</h2>
       <p className="mt-2 text-sm text-gray-600">共有された候補を編集し、特定版の技術確認と公開を別々に行います。</p>
       {synthetic && <p className="mt-2 text-sm text-amber-900">合成I1試行。架空の人物・原本・共有許可だけを使用します。実資料は入力しないでください。</p>}
+      {!synthetic && <p className="mt-2 text-sm text-amber-900">検証範囲（{scope || '未設定'}）だけで動作します。合成の内容だけを入力し、実資料・個人情報は入力しないでください。</p>}
     </div>
+    {!synthetic && <div className="space-y-2 rounded border p-3 text-sm">
+      <h3 className="font-semibold">接続先と自分の権限</h3>
+      <p className="break-all">接続先API: {apiUrl || '未設定'}</p>
+      <button className={BUTTON_CLASS} disabled={busy} onClick={() => void perform(async () => { await loadMe(); })}>権限を確認</button>
+      {me && <div className="space-y-1">
+        <p className="break-all">操作者: {me.actor}</p>
+        <p>業務権限: {me.assignment ? me.assignment.permissions.map((name) => PERMISSION_LABELS[name] || name).join('・') : 'なし'}
+          {me.assignment && ` ／ 分野 ${me.assignment.domains.join(',')} ／ 期限 ${new Date(me.assignment.expiresAt * 1000).toLocaleString('ja-JP')}`}</p>
+        <p>共有許可: {me.contributions.map((item) => `${item.permissionId}（${item.domain}）`).join('、') || 'なし'}</p>
+        <p>根拠台帳: {me.evidence.map((item) => `${item.id} 版${item.version}`).join('、') || 'なし'}</p>
+      </div>}
+    </div>}
     {synthetic && <label className="block text-sm">合成の操作者<select className={INPUT_CLASS} value={actor} onChange={(event) => {
       setActor(event.target.value); setPublished(null); setMessage(''); setItems([]); setCursor(null); setPending([]);
     }}>{Object.entries(ACTORS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
     <fieldset disabled={busy} className="space-y-4 disabled:opacity-60">
-      {synthetic && actor === 'contributor' && <div className="space-y-2 rounded border p-3">
+      {canContribute && <div className="space-y-2 rounded border p-3">
         <h3 className="font-semibold">共有する候補を投函</h3>
         <label className="block text-sm">候補の種類<select className={INPUT_CLASS} value={candidateType} onChange={(event) => { setCandidateType(event.target.value); setConfirmed(false); }}>
           <option value="field_report">現場報告</option><option value="unknown_term">不明用語</option><option value="correction">訂正</option>
         </select></label>
         {candidateType === 'correction' && <><label className="block text-sm">訂正対象の単元ID<input className={INPUT_CLASS} value={correctionTarget} onChange={(event) => { setCorrectionTarget(event.target.value); setConfirmed(false); }} /></label>
           <label className="block text-sm">訂正対象の承認版<input type="number" className={INPUT_CLASS} min={1} value={correctionRevision} onChange={(event) => { setCorrectionRevision(Number(event.target.value)); setConfirmed(false); }} /></label></>}
+        <label className="block text-sm">候補の要約<input className={INPUT_CLASS} maxLength={200} value={summary} onChange={(event) => { setSummary(event.target.value); setConfirmed(false); }} /></label>
         <label className="block text-sm">共有する最小文脈<textarea className={INPUT_CLASS} maxLength={2000} value={context} onChange={(event) => { setContext(event.target.value); setConfirmed(false); }} /></label>
         <label className="block text-sm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> この文面を共有候補として保存することを確認しました</label>
         <button className={BUTTON_CLASS} onClick={() => void perform(submit)}>明示して投函</button>
@@ -200,9 +247,9 @@ export function CommonKnowledgeInbox() {
         </select></label>
         <label className="block text-sm">単元のMarkdown<textarea className={`${INPUT_CLASS} min-h-40 font-mono`} value={markdown} readOnly={!canEdit} onChange={(event) => setMarkdown(event.target.value)} /></label>
         {card && <p className="break-all text-xs text-gray-600">作業版 {card.workingRevision} · {card.versions[String(card.workingRevision)].status} · 承認束 {card.versions[String(card.workingRevision)].bundleHash}</p>}
-        {receipt && <p className="break-all text-xs">Git保存済み: {receipt.gitCommit}</p>}
+        {receipt && <p className="break-all text-xs">作業用バケットの版: {receipt.workVersionId}</p>}
         <div className="flex flex-wrap gap-2">
-          {canEdit && <><button className={BUTTON_CLASS} onClick={() => void perform(save)}>Git作業版へ保存</button>
+          {canEdit && <><button className={BUTTON_CLASS} onClick={() => void perform(save)}>作業版を保存</button>
             <button className={BUTTON_CLASS} disabled={!card} onClick={() => void perform(requestReview)}>この版の技術確認を依頼</button></>}
           {canReview && <><button className={BUTTON_CLASS} disabled={!card?.review} onClick={() => void perform(() => decide('approve'))}>この版を技術承認・正本反映</button>
             <button className={BUTTON_CLASS} disabled={!card?.review} onClick={() => void perform(() => decide('return'))}>差し戻す</button></>}

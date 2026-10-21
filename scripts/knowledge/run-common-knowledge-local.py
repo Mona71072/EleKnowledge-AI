@@ -1,4 +1,4 @@
-"""Explicit loopback-only synthetic I1 server. Never contacts AWS or remote Git."""
+"""Explicit loopback-only synthetic I1 server. Never contacts AWS."""
 import argparse
 import importlib.util
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 
 MODULES = Path(__file__).resolve().parents[2] / 'lambda/knowledge/common-knowledge'
 sys.path.insert(0, str(MODULES))
-from storage import LocalDistribution, LocalGit, Store  # noqa: E402
+from storage import LocalCanonical, LocalWork, Store  # noqa: E402
 from service import Service  # noqa: E402
 
 spec = importlib.util.spec_from_file_location('common_knowledge_app', MODULES / 'app.py')
@@ -43,8 +43,7 @@ def synthetic_claims(token):
     if actor not in {'synthetic-' + name for name in (
             'viewer', 'editor', 'reviewer', 'publisher', 'reader', 'agent', 'contributor')}:
         return {}
-    return {'sub': actor, 'cognito:groups': [] if actor in {
-        'synthetic-reader', 'synthetic-agent', 'synthetic-contributor'} else ['admin']}
+    return {'sub': actor}  # No Cognito group: only the server-side grant table authorizes.
 
 
 def make_handler(service, origin):
@@ -105,8 +104,8 @@ def main():
     if directory.is_relative_to(repo) or repo.is_relative_to(directory):
         parser.error('保存先はアプリrepo外の合成専用領域にしてください')
     directory.mkdir(parents=True, exist_ok=True)
-    service = Service(Store(directory / 'ledger.sqlite3'), LocalGit(directory / 'canonical-git'),
-                      LocalDistribution(Store(directory / 'distribution.sqlite3')), synthetic_policy(), enabled=True)
+    service = Service(Store(directory / 'ledger.sqlite3'), LocalWork(Store(directory / 'work.sqlite3')),
+                      LocalCanonical(Store(directory / 'canonical.sqlite3')), synthetic_policy(), enabled=True)
     server = HTTPServer(('127.0.0.1', args.port), make_handler(service, args.origin))
     print(f'Synthetic I1 only: http://127.0.0.1:{args.port}; persistent local ledger ready.', flush=True)
     try:

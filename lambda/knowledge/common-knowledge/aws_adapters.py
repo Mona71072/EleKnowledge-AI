@@ -1,4 +1,4 @@
-"""DynamoDB ledger and private S3 distribution adapters (same contracts as the SQLite I1 adapters)."""
+"""DynamoDB ledger plus S3 working and canonical adapters (same contracts as the SQLite I1 adapters)."""
 import contextlib
 import json
 import time
@@ -6,12 +6,14 @@ import uuid
 
 from botocore.exceptions import ClientError
 
-from storage import Contention, digest, encode, sort_key
+from storage import Contention, digest, encode, kb_metadata, sort_key
 
 
 INDEXES = {'state': ('StateIndex', 'gsiState'), 'submitter': ('SubmitterIndex', 'gsiSubmitterState'),
            'pending': ('PendingIndex', 'gsiPendingActor')}
 ACCEPTANCE_TTL_SECONDS = 7 * 24 * 3600
+JSON = 'application/json; charset=utf-8'
+MARKDOWN = 'text/markdown; charset=utf-8'
 
 
 class DynamoUnit:
@@ -174,12 +176,63 @@ class DynamoDbLedger:
         return self._reread(keys)
 
 
-class S3Distribution:
-    """Private immutable artifacts + ETag-CAS manifest that records the operation that wrote it.
 
-    Generations only grow, so a retried publish whose manifest was later replaced (e.g. by a
-    withdrawal) fails the generation check and can never revive; a retry whose manifest is still
-    current is recognised by its operation id and returns the same result.
+def _missing(error):
+    return (error.response.get('Error', {}).get('Code') in {'NoSuchKey', 'NoSuchVersion', '404'}
+            or error.response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 404)
+
+
+class S3Work:
+    """Versioned working bucket. drafts/{id}.md is edited freely; the ledger pins VersionId+sha256."""
+
+    def __init__(self, client, bucket, prefix=''):
+        self.client, self.bucket, self.prefix = client, bucket, prefix
+
+    def key(self, identifier):
+        return f'{self.prefix}drafts/{identifier}.md'
+
+    def put(self, identifier, raw, operation=None):
+        if operation:
+            # A retried operation reuses its own version instead of stacking duplicates.
+            try:
+                head = self.client.head_object(Bucket=self.bucket, Key=self.key(identifier))
+                metadata = head.get('Metadata', {})
+                if metadata.get('operation') == operation and metadata.get('sha256') == digest(raw):
+                    return head['VersionId']
+            except ClientError as error:
+                if not _missing(error):
+                    raise
+        response = self.client.put_object(
+            Bucket=self.bucket, Key=self.key(identifier), Body=raw, ContentType=MARKDOWN,
+            Metadata={'sha256': digest(raw), **({'operation': operation} if operation else {})})
+        return response['VersionId']
+
+    def read(self, identifier, version):
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=self.key(identifier),
+                                              VersionId=version)
+        except ClientError as error:
+            if _missing(error) or error.response.get('Error', {}).get('Code') == 'InvalidArgument':
+                return None
+            raise
+        return response['Body'].read()
+
+    def current(self, identifier):
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=self.key(identifier))
+        except ClientError as error:
+            if _missing(error):
+                return None, None
+            raise
+        return response['VersionId'], response['Body'].read()
+
+
+class S3Canonical:
+    """approved/ (immutable), manifests/ (ETag CAS) and published/ (projection of the manifest).
+
+    Generations only grow and the manifest records the operation that wrote it, so a retried
+    publish whose manifest was later replaced (e.g. by a withdrawal) can never revive. published/
+    is always rebuilt from the latest manifest, so a lost or late projection cannot undo a stop.
     """
 
     def __init__(self, client, bucket, prefix=''):
@@ -189,54 +242,90 @@ class S3Distribution:
         try:
             response = self.client.get_object(Bucket=self.bucket, Key=self.prefix + key)
         except ClientError as error:
-            if error.response.get('Error', {}).get('Code') in {'NoSuchKey', '404'}:
+            if _missing(error):
                 return None, None
             raise
-        return json.loads(response['Body'].read().decode('utf-8')), response['ETag']
+        return response['Body'].read(), response['ETag']
 
-    def _put(self, key, value, **condition):
+    def _put(self, key, body, content_type, **condition):
         try:
-            self.client.put_object(Bucket=self.bucket, Key=self.prefix + key,
-                                   Body=encode(value).encode('utf-8'),
-                                   ContentType='application/json; charset=utf-8', **condition)
+            self.client.put_object(Bucket=self.bucket, Key=self.prefix + key, Body=body,
+                                   ContentType=content_type, **condition)
             return True
         except ClientError as error:
             code = error.response.get('Error', {}).get('Code')
             status = error.response.get('ResponseMetadata', {}).get('HTTPStatusCode')
-            if code in {'PreconditionFailed', 'ConditionalRequestConflict', 'NoSuchKey'} or status in {
-                    409, 412, 404}:
+            if condition and (code in {'PreconditionFailed', 'ConditionalRequestConflict', 'NoSuchKey'}
+                              or status in {409, 412, 404}):
                 return False
             raise
 
-    @staticmethod
-    def public(manifest):
-        return {'generation': manifest['generation'], 'active': manifest['active']}
+    def _immutable(self, key, body, content_type):
+        if self._put(key, body, content_type, IfNoneMatch='*'):
+            return
+        if self._get(key)[0] != body:
+            raise ValueError('immutable approved conflict')
+
+    def approve(self, key, raw, record):
+        self._immutable(f'approved/{key}.md', raw, MARKDOWN)
+        self._immutable(f'approved/{key}.json', encode(record).encode('utf-8'), JSON)
+
+    def read_approved(self, key):
+        return self._get(f'approved/{key}.md')[0]
+
+    def _manifest(self, identifier):
+        body, etag = self._get(f'manifests/{identifier}.json')
+        if body is None:
+            return {'generation': 0, 'active': None, 'bundle': None, 'operation': None}, None
+        return json.loads(body), etag
 
     def manifest(self, identifier):
-        value, _ = self._get(f'manifests/{identifier}.json')
-        return self.public(value) if value else {'generation': 0, 'active': None}
+        value = self._manifest(identifier)[0]
+        return {k: value[k] for k in ('generation', 'active', 'bundle')}
 
-    def artifact(self, key, value):
-        if self._put(f'artifacts/{key}.json', value, IfNoneMatch='*'):
-            return
-        previous, _ = self._get(f'artifacts/{key}.json')
-        if previous != json.loads(encode(value)):
-            raise ValueError('immutable artifact conflict')
-
-    def read_artifact(self, key):
-        return self._get(f'artifacts/{key}.json')[0]
-
-    def compare_swap(self, identifier, expected, active, operation):
+    def compare_swap(self, identifier, expected, active, operation, bundle):
         key = f'manifests/{identifier}.json'
         for _attempt in range(3):
-            current, etag = self._get(key)
-            current = current or {'generation': 0, 'active': None, 'operation': None}
-            if current.get('operation') == operation:
-                return self.public(current)
+            current, etag = self._manifest(identifier)
+            if current['operation'] == operation:
+                return {'generation': current['generation'], 'active': current['active']}
             if current['generation'] != expected:
                 return None
-            value = {'generation': expected + 1, 'active': active, 'operation': operation}
-            if self._put(key, value, **({'IfMatch': etag} if etag else {'IfNoneMatch': '*'})):
-                return self.public(value)
+            value = {'generation': expected + 1, 'active': active, 'bundle': bundle, 'operation': operation}
+            if self._put(key, encode(value).encode('utf-8'), JSON,
+                         **({'IfMatch': etag} if etag else {'IfNoneMatch': '*'})):
+                return {'generation': value['generation'], 'active': active}
             # 412/409: another writer won between read and write. Re-read and decide again.
         raise Contention()
+
+    def project(self, identifier):
+        body_key = f'published/{identifier}.md'
+        meta_key = body_key + '.metadata.json'
+        for _attempt in range(3):
+            manifest, etag = self._manifest(identifier)
+            current = self._get(body_key)[0]
+            if manifest['active'] is None:
+                if current is not None:
+                    self.client.delete_object(Bucket=self.bucket, Key=self.prefix + body_key)
+                if self._get(meta_key)[0] is not None:
+                    self.client.delete_object(Bucket=self.bucket, Key=self.prefix + meta_key)
+            else:
+                raw = self.read_approved(manifest['active'])
+                if raw is None:
+                    raise OSError('approved object missing')
+                if current != raw:
+                    self._put(body_key, raw, MARKDOWN)
+                metadata = encode(kb_metadata(manifest['bundle'])).encode('utf-8')
+                if self._get(meta_key)[0] != metadata:
+                    self._put(meta_key, metadata, JSON)
+            # Another publish/stop may have swapped the manifest meanwhile: converge on the latest.
+            if self._manifest(identifier)[1] == etag:
+                return
+        raise Contention()
+
+    def read_published(self, identifier):
+        return self._get(f'published/{identifier}.md')[0]
+
+    def published_metadata(self, identifier):
+        body = self._get(f'published/{identifier}.md.metadata.json')[0]
+        return None if body is None else json.loads(body)

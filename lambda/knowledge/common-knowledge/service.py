@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 
-from storage import digest, encode
+from storage import digest
 
 
 ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$')
@@ -42,20 +42,20 @@ def exact(data, required, optional=()):
             and data.keys() <= set(required) | set(optional))
 
 
-def to_git(value):
-    """Explicit API camelCase → canonical/audit snake_case boundary."""
+def to_canonical(value):
+    """Explicit API camelCase → canonical/audit snake_case boundary (the bundle hash input)."""
     if isinstance(value, list):
-        return [to_git(item) for item in value]
+        return [to_canonical(item) for item in value]
     if isinstance(value, dict):
-        return {re.sub(r'[A-Z]', lambda match: '_' + match[0].lower(), key): to_git(item)
+        return {re.sub(r'[A-Z]', lambda match: '_' + match[0].lower(), key): to_canonical(item)
                 for key, item in value.items()}
     return value
 
 
 class Service:
-    def __init__(self, store, git, distribution, policy, *, enabled=False,
+    def __init__(self, store, work, canonical, policy, *, enabled=False,
                  clock=time.time, fault=lambda stage: None, policy_source=None):
-        self.store, self.git, self.distribution = store, git, distribution
+        self.store, self.work, self.canonical = store, work, canonical
         self.policy, self.enabled, self.clock, self.fault = policy, enabled, clock, fault
         self.policy_source = policy_source
 
@@ -71,11 +71,8 @@ class Service:
         return claims['sub']
 
     def authorize(self, claims, permission, domain, audience):
+        """Only the protected grant table decides. Cognito groups (admin included) grant nothing."""
         actor = self.principal(claims)
-        groups = claims.get('cognito:groups', [])
-        if isinstance(groups, str):
-            groups = groups.split(',')
-        require(permission == 'read' or 'admin' in groups, 403, 'Forbidden')
         assignment = self.policy.get('actors', {}).get(actor, {})
         require(assignment.get('expiresAt', 0) > self.clock()
                 and domain in assignment.get('domains', [])
@@ -83,9 +80,27 @@ class Service:
                 and permission in assignment.get('permissions', []), 403, 'Forbidden')
         return actor
 
-    def require_git(self):
-        """Refuse Git-dependent work before an operation is accepted, so nothing is locked or saved."""
-        require(getattr(self.git, 'configured', True), 503, 'GitNotConfigured')
+    def me(self, claims):
+        """The caller's own live grants, so the screen can show and gate what the API will allow."""
+        actor = self.principal(claims)
+        now = self.clock()
+        assignment = self.policy.get('actors', {}).get(actor, {})
+        live = assignment.get('expiresAt', 0) > now
+        scopes = {(domain, audience) for domain in assignment.get('domains', [])
+                  for audience in assignment.get('audiences', [])} if live else set()
+        return {
+            'actor': actor,
+            'assignment': {k: assignment.get(k) for k in ('permissions', 'domains', 'audiences', 'expiresAt')}
+            if live else None,
+            'contributions': [{'permissionId': name, **{k: value[k] for k in ('domain', 'audience', 'expiresAt')}}
+                              for name, value in sorted(self.policy.get('contributions', {}).items())
+                              if value.get('actor') == actor and value.get('expiresAt', 0) > now],
+            'evidence': [{'id': name, **{k: value.get(k) for k in ('version', 'sha256', 'domain', 'audience',
+                                                                    'expiresAt', 'sourceVerified')}}
+                         for name, value in sorted(self.policy.get('evidence', {}).items())
+                         if 'edit' in assignment.get('permissions', [])
+                         and (value.get('domain'), value.get('audience')) in scopes
+                         and value.get('expiresAt', 0) > now]}
 
     def alive(self, item):
         require(item is not None and item['expiresAt'] > self.clock(), 404, 'NotFound')
@@ -120,8 +135,8 @@ class Service:
                 operation = str(uuid.uuid4())
                 db.accept_operation(operation, actor, key, request_hash, target)
                 db.put('operation-intent', operation, {'at': int(self.clock()), 'request': request})
-        # Acceptance survives Git failures and process death. All projections, events,
-        # manifest CAS and completion commit together, after the external Git write.
+        # Acceptance survives S3 failures and process death. Ledger projections, events and
+        # completion commit together, after the external working/canonical S3 writes.
         # A lost ledger race (Contention) is not a Failure: the operation stays accepted.
         try:
             with self.store.unit() as db:
@@ -205,11 +220,7 @@ class Service:
         require(scope in {'mine', 'inbox'} and state in STATES)
         require((after is None or (isinstance(after, str) and POSITION.fullmatch(after)))
                 and type(limit) is int and 1 <= limit <= 50)
-        groups = claims.get('cognito:groups', [])
-        if isinstance(groups, str):
-            groups = groups.split(',')
         if scope == 'inbox':
-            require('admin' in groups, 403, 'Forbidden')
             assignment = self.policy.get('actors', {}).get(actor, {})
             require(assignment.get('domains') and assignment.get('audiences')
                     and 'view' in assignment.get('permissions', [])
@@ -236,11 +247,14 @@ class Service:
         actor = self.principal(claims)
         with self.store.unit() as db:
             item = self.alive(db.get('candidate', identifier))
-            if item['submittedBy'] == actor:
-                return {k: item[k] for k in ('candidateId', 'candidateRevision', 'state',
-                                             'summary', 'context', 'candidateType', 'expiresAt')}
-            self.authorize(claims, 'view', item['domain'], item['audience'])
-            return item
+            try:
+                # A submitter who also holds the view grant (e.g. edits their own report) sees all of it.
+                self.authorize(claims, 'view', item['domain'], item['audience'])
+                return item
+            except Failure:
+                require(item['submittedBy'] == actor, 403, 'Forbidden')
+            return {k: item[k] for k in ('candidateId', 'candidateRevision', 'state',
+                                         'summary', 'context', 'candidateType', 'expiresAt')}
 
     def transition(self, claims, key, identifier, revision, data):
         exact(data, ('state', 'reason'), ('resumeCondition',))
@@ -296,22 +310,43 @@ class Service:
                          or permission.get('sourceVerified') is True), 403, 'EvidenceNotPermitted')
 
     def verify_bundle(self, version):
-        require(digest(to_git({k: version[k] for k in BUNDLE_KEYS})) == version['bundleHash'],
+        require(digest(to_canonical({k: version[k] for k in BUNDLE_KEYS})) == version['bundleHash'],
                 409, 'BundleHashMismatch')
         self.evidence_authorized(version)
 
     def save_draft(self, claims, key, identifier, working_revision, data):
-        self.require_git()
+        """Screen/API edit: the server writes the body to the working bucket and pins that version."""
         require(ID.fullmatch(identifier))
         self.validate_draft(data)
+        raw = data['markdown'].encode('utf-8')
+        fields = {k: v for k, v in data.items() if k != 'markdown'}
+        return self._draft(claims, key, identifier, working_revision, fields, raw,
+                           ['draft', identifier, working_revision, data],
+                           lambda operation: self.work.put(identifier, raw, operation))
+
+    def register_draft(self, claims, key, identifier, working_revision, data):
+        """CLI: pin a version already written to the working bucket (e.g. by the development agent)."""
+        require(ID.fullmatch(identifier))
+        exact(data, ('candidateId', 'candidateRevision', 'kind', 'applicability', 'sourceRefs',
+                     'audience', 'domain', 'expiresAt', 'unknowns', 'workVersionId'))
+        require(isinstance(data['workVersionId'], str) and 0 < len(data['workVersionId']) <= 1024)
+        raw = self.work.read(identifier, data['workVersionId'])
+        require(raw is not None, 409, 'WorkVersionMissing')
+        fields = {k: v for k, v in data.items() if k != 'workVersionId'}
+        self.validate_draft({**fields, 'markdown': raw.decode('utf-8')})
+        return self._draft(claims, key, identifier, working_revision, fields, raw,
+                           ['register', identifier, working_revision, data],
+                           lambda operation: data['workVersionId'])
+
+    def _draft(self, claims, key, identifier, working_revision, fields, raw, request, write):
         with self.store.unit() as db:
-            self.candidate(db, data['candidateId'], claims, 'edit')
+            self.candidate(db, fields['candidateId'], claims, 'edit')
         def save(db, operation):
-            item = self.candidate(db, data['candidateId'], claims, 'edit')
-            require(item['candidateRevision'] == data['candidateRevision'], 409, 'VersionConflict')
+            item = self.candidate(db, fields['candidateId'], claims, 'edit')
+            require(item['candidateRevision'] == fields['candidateRevision'], 409, 'VersionConflict')
             require(item['state'] in {'in_review', 'awaiting_review'}, 409, 'InvalidTransition')
-            require(data['domain'] == item['domain'] and data['audience'] == item['audience']
-                    and data['expiresAt'] <= item['expiresAt'], 403, 'ScopeDenied')
+            require(fields['domain'] == item['domain'] and fields['audience'] == item['audience']
+                    and fields['expiresAt'] <= item['expiresAt'], 403, 'ScopeDenied')
             card = db.get('card', identifier) or {
                 'knowledgeId': identifier, 'workingRevision': 0, 'candidateId': item['candidateId'],
                 'versions': {}, 'review': None}
@@ -327,17 +362,13 @@ class Service:
                         409, 'VersionConflict')
                 card['candidateId'] = item['candidateId']
             version = working_revision + 1
-            raw = data['markdown'].encode('utf-8')
-            metadata = {k: v for k, v in data.items() if k != 'markdown'}
-            metadata.update({'knowledgeId': identifier, 'workingRevision': version,
-                             'hashContractVersion': 'i1-json-lf-v1', 'rawSha256': digest(raw)})
-            bundle_hash = digest(to_git(metadata))
-            path = f'proposals/{identifier}/{version}.md'
-            commit = self.git.write(operation, {path: raw,
-                f'proposals/{identifier}/{version}.json': encode(to_git(metadata)).encode('utf-8')})
-            self.fault('after_git')
+            metadata = {**fields, 'knowledgeId': identifier, 'workingRevision': version,
+                        'hashContractVersion': 'i1-json-lf-v1', 'rawSha256': digest(raw)}
+            bundle_hash = digest(to_canonical(metadata))
+            work_version = write(operation)
+            self.fault('after_work')
             card['versions'][str(version)] = {**metadata, 'bundleHash': bundle_hash,
-                'draftCommit': commit, 'draftPath': path, 'editor': claims['sub'], 'status': 'draft'}
+                'workVersionId': work_version, 'editor': claims['sub'], 'status': 'draft'}
             card.update({'workingRevision': version, 'review': None})
             item.update({'state': 'in_review', 'candidateRevision': item['candidateRevision'] + 1})
             item['targetLinks'] = sorted(set([*item['targetLinks'], identifier]))
@@ -345,12 +376,16 @@ class Service:
             db.put('card', identifier, card)
             return {'knowledgeId': identifier, 'workingRevision': version,
                     'candidateRevision': item['candidateRevision'], 'bundleHash': bundle_hash,
-                    'rawSha256': digest(raw), 'gitCommit': commit}
-        return self.mutate(claims, key, 'candidate:' + data['candidateId'],
-                           ['draft', identifier, working_revision, data], save)
+                    'rawSha256': digest(raw), 'workVersionId': work_version}
+        return self.mutate(claims, key, 'candidate:' + fields['candidateId'], request, save)
+
+    def pinned(self, identifier, version):
+        """The exact working version the ledger recorded; later edits of drafts/ never substitute."""
+        raw = self.work.read(identifier, version['workVersionId'])
+        require(raw is not None and digest(raw) == version['rawSha256'], 409, 'WorkVersionConflict')
+        return raw
 
     def review(self, claims, key, identifier, revision, data):
-        self.require_git()
         exact(data, ('bundleHash', 'reason'))
         text(data['reason'])
         with self.store.unit() as db:
@@ -365,14 +400,10 @@ class Service:
                     for s in version['sourceRefs']) and all(s['id'] != identifier for s in version['sourceRefs']),
                     409, 'EvidenceUnresolved')
             self.verify_bundle(version)
-            current_raw = self.git.read('HEAD', version['draftPath'])
-            require(digest(current_raw) == version['rawSha256'], 409, 'GitVersionConflict')
-            current_metadata = self.git.read('HEAD', f'proposals/{identifier}/{revision}.json')
-            require(digest(json.loads(current_metadata)) == version['bundleHash'],
-                    409, 'GitVersionConflict')
+            self.pinned(identifier, version)
             card['review'] = {'reviewRequestId': operation, 'revision': revision,
                               'bundleHash': version['bundleHash'], 'reason': data['reason'],
-                              'baseTree': self.git.proposal_tree(identifier)}
+                              'workVersionId': version['workVersionId']}
             item = self.candidate(db, card['candidateId'], claims, 'edit')
             require(item['state'] == 'in_review', 409, 'InvalidTransition')
             item.update({'state': 'awaiting_review', 'candidateRevision': item['candidateRevision'] + 1})
@@ -389,7 +420,6 @@ class Service:
             return card['candidateId']
 
     def decide(self, claims, key, identifier, revision, data):
-        self.require_git()
         exact(data, ('reviewRequestId', 'bundleHash', 'reason', 'decision'))
         require(data['decision'] in {'approve', 'return'})
         text(data['reason'])
@@ -401,31 +431,27 @@ class Service:
             version = card['versions'].get(str(revision))
             require(version is not None and card['workingRevision'] == revision and card['review']
                     and card['review']['reviewRequestId'] == data['reviewRequestId']
+                    and card['review']['workVersionId'] == version['workVersionId']
                     and version['bundleHash'] == data['bundleHash']
                     and item['state'] == 'awaiting_review', 409, 'ReviewStale')
             require(version['editor'] != claims['sub'] and item['submittedBy'] != claims['sub'],
                     403, 'SelfApprovalDenied')
             require(version['expiresAt'] > self.clock(), 409, 'Expired')
             self.verify_bundle(version)
-            require(self.git.proposal_tree(identifier) == card['review']['baseTree'],
-                    409, 'GitVersionConflict')
             if data['decision'] == 'approve':
-                raw = self.git.read(version['draftCommit'], version['draftPath'])
-                require(digest(raw) == version['rawSha256'], 409, 'HashMismatch')
+                raw = self.pinned(identifier, version)
                 approval = {**card['review'], 'approvalId': operation, 'actor': claims['sub'],
                             'role': 'approve', 'reason': data['reason'], 'at': int(self.clock()),
                             'versionBundle': version}
-                canonical = f'cards/{identifier}/{revision}.md'
-                # Approval time must survive retries after Git succeeds but DB does not.
-                # Use the durable acceptance timestamp stored in the operation metadata.
+                # Approval time must survive retries after the canonical copy succeeds but the
+                # ledger does not: use the durable acceptance timestamp of this operation.
                 stamp = db.get('operation-intent', operation)
                 if stamp:
                     approval['at'] = stamp['at']
-                commit = self.git.write(operation, {canonical: raw,
-                    f'approvals/{identifier}/{revision}.json': encode(to_git(approval)).encode('utf-8')})
-                self.fault('after_git')
-                version.update({'status': 'approved', 'approvalId': operation,
-                                'canonicalCommit': commit, 'canonicalPath': canonical})
+                approved_key = f'{identifier}/{revision}/{version["bundleHash"]}'
+                self.canonical.approve(approved_key, raw, to_canonical(approval))
+                self.fault('after_approved')
+                version.update({'status': 'approved', 'approvalId': operation, 'approvedKey': approved_key})
                 item['state'] = 'reflected'
             else:
                 item['state'] = 'in_review'
@@ -434,56 +460,52 @@ class Service:
             db.put('candidate', card['candidateId'], item)
             db.put('card', identifier, card)
             return {'knowledgeId': identifier, 'revision': revision, 'state': item['state'],
-                    'approvalId': version.get('approvalId'), 'gitCommit': version.get('canonicalCommit')}
-        # Pin server time durably before the external Git write.
-        # It is derived from the idempotency request, not from client supplied approval data.
+                    'approvalId': version.get('approvalId'), 'approvedKey': version.get('approvedKey')}
         return self.mutate(claims, key, 'candidate:' + self._candidate_id(identifier),
                            ['decision', identifier, revision, data], decide)
 
     def publish(self, claims, key, identifier, generation, data, withdraw=False):
-        if not withdraw:
-            self.require_git()  # Withdrawal never needs Git and must stay available.
         exact(data, ('reason',) if withdraw else ('reason', 'revision', 'approvalId'))
         text(data['reason'])
         with self.store.unit() as db:
             self.card(db, identifier, claims, 'publish')
         def change(db, operation):
             card = self.card(db, identifier, claims, 'publish')
-            active = None
+            active = bundle = None
             if not withdraw:
                 version = card['versions'].get(str(data['revision']))
                 require(version and version['status'] == 'approved'
                         and version['approvalId'] == data['approvalId']
                         and version['expiresAt'] > self.clock(), 409, 'ApprovalRequired')
                 self.verify_bundle(version)
-                raw = self.git.read(version['canonicalCommit'], version['canonicalPath'])
-                require(digest(raw) == version['rawSha256'], 409, 'HashMismatch')
-                artifact = {**version, 'markdown': raw.decode('utf-8'), 'knowledgeId': identifier}
-                active = f'{identifier}/{data["revision"]}/{version["bundleHash"]}'
-                self.distribution.artifact(active, artifact)
-                self.fault('after_artifact')
-            manifest = self.distribution.compare_swap(identifier, generation, active, operation)
+                raw = self.canonical.read_approved(version['approvedKey'])
+                require(raw is not None and digest(raw) == version['rawSha256'], 409, 'HashMismatch')
+                active = version['approvedKey']
+                bundle = {**{k: version[k] for k in BUNDLE_KEYS}, 'bundleHash': version['bundleHash']}
+            # Manifest first, then published/ follows the latest manifest: a stop always wins.
+            manifest = self.canonical.compare_swap(identifier, generation, active, operation, bundle)
             require(manifest is not None, 409, 'ManifestConflict')
             self.fault('after_manifest')
+            self.canonical.project(identifier)
             return {'knowledgeId': identifier, **manifest}
         return self.mutate(claims, key, ('withdrawal:' if withdraw else 'publication:') + identifier,
                            ['withdraw' if withdraw else 'publish', generation, data], change)
 
     def published(self, claims, identifier):
-        # Reads touch only the distribution store and the protected policy, never the ledger.
+        # Reads touch only the manifest, published/ and the protected policy, never the ledger.
         self.principal(claims)
-        manifest = self.distribution.manifest(identifier)
+        manifest = self.canonical.manifest(identifier)
         require(manifest['active'] is not None, 404, 'NotPublished')
-        artifact = self.distribution.read_artifact(manifest['active'])
-        require(artifact is not None, 503, 'ArtifactUnavailable')
-        self.authorize(claims, 'read', artifact['domain'], artifact['audience'])
-        self.verify_bundle(artifact)
-        require(artifact['expiresAt'] > self.clock(), 404, 'Expired')
-        require(digest(artifact['markdown'].encode()) == artifact['rawSha256'], 503, 'HashMismatch')
-        require(self.distribution.manifest(identifier) == manifest, 409, 'PublicationChanged')
-        return {k: artifact[k] for k in ('knowledgeId', 'workingRevision', 'bundleHash',
-                'rawSha256', 'markdown', 'kind', 'applicability', 'sourceRefs', 'expiresAt')} | {
-                    'generation': manifest['generation']}
+        bundle = manifest['bundle']
+        self.authorize(claims, 'read', bundle['domain'], bundle['audience'])
+        self.verify_bundle(bundle)
+        require(bundle['expiresAt'] > self.clock(), 404, 'Expired')
+        raw = self.canonical.read_published(identifier)
+        require(raw is not None and digest(raw) == bundle['rawSha256'], 503, 'ProjectionPending')
+        require(self.canonical.manifest(identifier) == manifest, 409, 'PublicationChanged')
+        return {k: bundle[k] for k in ('knowledgeId', 'workingRevision', 'bundleHash', 'rawSha256',
+                                       'kind', 'applicability', 'sourceRefs', 'expiresAt')} | {
+                    'markdown': raw.decode('utf-8'), 'generation': manifest['generation']}
 
     def guarded_use(self, claims, identifier, consumer):
         """Both AI adapters revalidate before input and before returning/citing output."""
@@ -495,12 +517,10 @@ class Service:
         return result
 
     def card_detail(self, claims, identifier):
-        self.require_git()
         with self.store.unit() as db:
             card = self.card(db, identifier, claims, 'view')
-            version = card['versions'][str(card['workingRevision'])]
-            raw = self.git.read(version['draftCommit'], version['draftPath'])
-            return {**card, 'markdown': raw.decode('utf-8')}
+        version = card['versions'][str(card['workingRevision'])]
+        return {**card, 'markdown': self.pinned(identifier, version).decode('utf-8')}
 
     def operation(self, claims, identifier):
         actor = self.principal(claims)
@@ -534,6 +554,8 @@ class Service:
         action = request[0]
         if action == 'draft':
             return self.save_draft(claims, key, *request[1:])
+        if action == 'register':
+            return self.register_draft(claims, key, *request[1:])
         if action in {'review', 'decision'}:
             return (self.review if action == 'review' else self.decide)(claims, key, *request[1:])
         return self.publish(claims, key, target.split(':', 1)[1], *request[1:], withdraw=action == 'withdraw')

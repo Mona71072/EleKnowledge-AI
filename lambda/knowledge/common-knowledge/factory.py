@@ -2,13 +2,13 @@
 import json
 import re
 
-from remote_git import UnconfiguredGit
 from service import Service
 
 
 RESPONSIBILITIES = {'intake', 'editorial', 'publication', 'reader', 'recovery'}
 NEEDS_LEDGER = {'intake', 'editorial', 'publication', 'recovery'}
-NEEDS_DISTRIBUTION = {'publication', 'reader', 'recovery'}
+NEEDS_WORK = {'editorial', 'recovery'}
+NEEDS_CANONICAL = {'editorial', 'publication', 'reader', 'recovery'}
 NAME = re.compile(r'^[A-Za-z0-9_.-]{3,255}$')
 POLICY_SECTIONS = ('actors', 'contributions', 'evidence')
 
@@ -53,25 +53,23 @@ def build(environ, boto3_module=None):
     enabled = environ.get('COMMON_KNOWLEDGE_ENABLED')
     if enabled not in {'true', 'false'}:
         raise ConfigurationError('COMMON_KNOWLEDGE_ENABLED')
-    if environ.get('COMMON_KNOWLEDGE_GIT_MODE') != 'unconfigured':
-        # The GitHub-compatible adapter exists for review, but is not selectable until the company
-        # Git product, repository, path allowlist and credential handling are decided and accepted.
-        raise ConfigurationError('COMMON_KNOWLEDGE_GIT_MODE')
     origin = environ.get('COMMON_KNOWLEDGE_ALLOWED_ORIGIN', '')
     if not re.fullmatch(r'https://[A-Za-z0-9.-]+(:[0-9]{1,5})?', origin):
         raise ConfigurationError('COMMON_KNOWLEDGE_ALLOWED_ORIGIN')
     policy_table = setting(environ, 'COMMON_KNOWLEDGE_POLICY_TABLE')
     if boto3_module is None:
         import boto3 as boto3_module
-    from aws_adapters import DynamoDbLedger, S3Distribution
+    from aws_adapters import DynamoDbLedger, S3Canonical, S3Work
     dynamodb = boto3_module.client('dynamodb')
     ledger = Unavailable()
     if responsibility in NEEDS_LEDGER:
         ledger = DynamoDbLedger(dynamodb, setting(environ, 'COMMON_KNOWLEDGE_LEDGER_TABLE'))
-    distribution = Unavailable()
-    if responsibility in NEEDS_DISTRIBUTION:
-        distribution = S3Distribution(boto3_module.client('s3'),
-                                      setting(environ, 'COMMON_KNOWLEDGE_DISTRIBUTION_BUCKET'))
+    work = Unavailable()
+    if responsibility in NEEDS_WORK:
+        work = S3Work(boto3_module.client('s3'), setting(environ, 'COMMON_KNOWLEDGE_WORK_BUCKET'))
+    canonical = Unavailable()
+    if responsibility in NEEDS_CANONICAL:
+        canonical = S3Canonical(boto3_module.client('s3'), setting(environ, 'COMMON_KNOWLEDGE_CANONICAL_BUCKET'))
     load_policy = policy_loader(dynamodb, policy_table)
     if responsibility == 'intake':
         secret_arn = setting(environ, 'COMMON_KNOWLEDGE_CURSOR_SECRET_ARN',
@@ -85,6 +83,6 @@ def build(environ, boto3_module=None):
             return {**load_policy(), 'cursorSecret': cached['secret']}
     else:
         source = load_policy
-    service = Service(ledger, UnconfiguredGit(), distribution, {}, enabled=enabled == 'true',
+    service = Service(ledger, work, canonical, {}, enabled=enabled == 'true',
                       policy_source=source)
     return service, responsibility, origin

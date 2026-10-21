@@ -16,7 +16,7 @@ related-code:
 ## 境界と契約
 
 - 共通候補（現場報告・不明用語・訂正・要望）と単元・公開版を分離。`term_foundation`を試行識別子とし、既存カード・索引を移行しない。
-- 認証済みAPI Gateway claimsからsubとadmin所属を取得。業務権限・共有許可・保持・分野・読者はサーバー注入設定。本文のsub/role/approved等は400。adminだけでは編集・承認・公開不可。自己承認禁止。
+- 認証済みAPI Gateway claimsからsubを取得（2026-10-22改訂: admin所属は要求しない。[itai AWS契約](common-knowledge-itai-aws-contract.md)のS3正本化節）。業務権限・共有許可・保持・分野・読者はサーバー注入設定。本文のsub/role/approved等は400。adminだけでは編集・承認・公開不可。自己承認禁止。
 - `/knowledge/contributions` POST/GET、`/{id}` GET/PATCH、`/cards/{id}/draft` PUT、`/review-requests`・`/decisions`・`/publish`・`/withdraw` POST、`/published/{id}` GET、`/operations/{id}` GET。変更はIdempotency-Key必須、更新はIf-Match（候補版／作業版／manifest generation）。
 - 投函は許可IDと投稿本文のSHA256確認を要求。本人と許可をサーバー照合し、原文revisionを保存。元報告の本人APIには変更・書戻しなし。共有一覧は状態必須・最大50、本文なし。本人投影は担当者情報を返さない。
 - SQLiteはI1の永続候補・操作journal・監査・manifestアダプター。会社Gitの代替として、専用一時領域のローカルGitへ`proposals/`と`cards/`、サーバー生成の承認記録をcommitする。アプリrepoへ本文を保存しない。

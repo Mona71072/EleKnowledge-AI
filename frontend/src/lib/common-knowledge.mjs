@@ -36,10 +36,29 @@ export function validateConnection({ baseUrl, synthetic, development, hostname }
   return url.origin + stage;
 }
 
+/**
+ * Real (non-synthetic) input is allowed only inside the configured validation scope, and only
+ * with the caller's live server-side grants for exactly that domain/audience.
+ */
+export function validationGrant(me, scope) {
+  if (!scope || !/^[a-z0-9-]{1,64}$/u.test(scope)) {
+    throw new Error('検証範囲が設定されていないため、実データの投函・保存は受入待ちです。');
+  }
+  const inScope = (item) => item.domain === scope && item.audience === scope;
+  const assignment = me?.assignment;
+  const assigned = Boolean(assignment?.domains?.includes(scope) && assignment?.audiences?.includes(scope));
+  return {
+    scope,
+    permissions: assigned ? assignment.permissions : [],
+    contribution: (me?.contributions ?? []).find(inScope) ?? null,
+    evidence: (me?.evidence ?? []).filter(inScope),
+  };
+}
+
 /** Use a deterministic idempotency key for retries of the same exact actor/request. */
 export async function requestKnowledge({ baseUrl, token, actor, path, method = 'GET', body,
   revision, fetchImpl = globalThis.fetch }) {
-  if (!token || !/^\/(?:contributions|cards|published|operations)(?:[/?]|$)/u.test(path)) {
+  if (!token || !/^\/(?:contributions|cards|published|operations|me)(?:[/?]|$)/u.test(path)) {
     throw new Error('認証と操作対象を確認してください。');
   }
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };

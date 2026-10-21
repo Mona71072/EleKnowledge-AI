@@ -6,13 +6,34 @@ related-code:
   - infrastructure/sam/common-knowledge-itai-template.yaml
   - tests/integration/test_common_knowledge_aws_adapters.py
   - frontend/src/lib/common-knowledge.mjs
+  - frontend/src/components/knowledge/common-knowledge-inbox.tsx
+  - scripts/knowledge/common-knowledge-cli.py
 ---
 
 # 共通知識: itai専用AWS基盤の実装契約
 
 > 最終検証: 2026-10-22 — 実装前にAWS読取（認証主体・既存itai/共有devスタック・WAF・Amplify itai）、#195/#200のhead・コメント、設計§17の保存hashを照合。実装・配備の結果は末尾の記録へ追記する。
 
-[I1実装契約](common-knowledge-i1-contract.md)の業務ルールは変えず、保存・配布・Git・API配線をAWSで動く形へ移す。方針の正本は設計worktreeのノウハウ設計§17。[引継ぎ](common-knowledge-itai-aws-handoff.md)の許可範囲（itai専用・非破壊・合成データのみ）を超える操作は本契約に含めない。
+[I1実装契約](common-knowledge-i1-contract.md)の業務ルールは変えず、保存・配布・正本・API配線をAWSで動く形へ移す。2026-10-22の[S3正本化の決定](common-knowledge-itai-s3-canonical-handoff.md)により、正本はGitではなくS3とする（次節。以降の節のGit記述は次節で置き換える）。方針の正本は設計worktreeのノウハウ設計§17。[引継ぎ](common-knowledge-itai-aws-handoff.md)の許可範囲（itai専用・非破壊・合成データのみ）を超える操作は本契約に含めない。
+
+## S3正本化への改訂（2026-10-22）
+
+> 最終検証: 2026-10-22 — ユーザー決定（引継ぎ§決定事項1〜8）と、共有Cognitoの読取（2アカウントのsub・グループ）に基づく実装前の契約。
+
+| 項目 | 契約 |
+| --- | --- |
+| 作業用バケット（新設 `WorkBucket`） | `drafts/{knowledgeId}.md` が編集の場。バージョニング有効。開発エージェントが直接書けるのはここだけ。台帳は作業版を **VersionId＋sha256** で固定し、以後その特定版だけを確認・承認する（後から作業用を編集しても承認対象は変わらない）。バケットポリシーで全主体の `DeleteObjectVersion` を拒否し、固定した版を消せないようにする |
+| 正本バケット（既存 `DistributionBucket` を流用、置換なし） | `approved/{id}/{rev}/{bundleHash}.md`（承認時に作業用の特定版を不変コピー）と同名 `.json`（承認記録）。`published/{id}.md` と `published/{id}.md.metadata.json`（Bedrock KB用 `metadataAttributes`）は公開中だけ存在する。`manifests/{id}.json` は世代CASと読取ガード用で、公開中の版の束（domain・audience・根拠・hash）を持つ。旧 `artifacts/` は書かない。KBの作成・同期は行わない |
+| 正本への書込境界 | バケットポリシーで `approved/*` はeditorial・recovery、`manifests/*`・`published/*` はpublication・recoveryのLambdaロール以外の Put/Delete を拒否。全主体の `DeleteObjectVersion` を拒否。台帳はService（API・CLI）経由でだけ書く |
+| 公開・停止の順序 | 承認版を `approved/` から読みhashを照合 → manifest CAS（停止は active=null）→ `published/` を **最新manifestに合わせて再投影**（manifestがnullなら削除、そうでなければ `approved/` から複製）。投影後にmanifestが変わっていれば再投影を繰り返す（有限回、尽きたら操作は受付のまま再試行）。manifest先行のため、停止は投影の失敗や古い公開の再試行で覆らない |
+| 読取（RAG・開発エージェント） | manifest → `published/{id}.md` の順に読み、本文hashがmanifestの束と一致し、読む前後でmanifestが同じ場合だけ返す。`drafts/`・`approved/` を直接読んで代用しない。readerロールは `manifests/*`・`published/*` の取得だけ |
+| 作業版の登録（CLI） | `scripts/knowledge/common-knowledge-cli.py register` が同じServiceを呼び、作業用の指定版（既定は最新版）を読み、検証して作業版として登録する。編集者は呼出し元のIAM主体（`iam:` ＋ STS ARN）。CLIで行えるのは登録・確認依頼・状態確認・公開版の読取。承認・公開・停止は正本書込を伴うためAPI（画面）だけ（CLIで受け付けるとバケットポリシーの拒否で操作が受付のまま残り、同じ対象を塞ぐため） |
+| admin条件 | 撤廃。編集・承認・公開・一覧は認可表の業務権限・分野・読者・期限だけで判定する。adminに属するだけでは何もできない（I1の「adminだけでは不可」は維持）。共有Cognitoのグループは変更しない |
+| 画面 | `/admin/knowledge` は、共通知識が有効なビルドでは非adminのログイン利用者も入れる（他のadmin画面は従来どおり）。実データガードは `NEXT_PUBLIC_COMMON_KNOWLEDGE_VALIDATION_SCOPE` に一致する分野・読者に限って解除する。画面に接続先APIと、`GET /knowledge/me` で得た自分の業務権限・共有許可・根拠台帳を表示し、ボタンを権限で出し分ける |
+| 試験主体 | 本アカウント（開発用・admin所属）＝投稿・編集・公開・閲覧・読取。2つ目のアカウント（adminなし）＝承認・閲覧・読取。CLIのIAM主体＝編集・閲覧・読取。分野・読者は `itai-validation`、共有許可と根拠台帳は各1件、期限14日。subはCognitoから読取り、未追跡の作業記録にだけ置く |
+| 廃止 | `GitMode` パラメータ、`remote_git.py`（GitHub互換アダプター候補）、`LocalGit`。ローカル合成はSQLiteの作業用・正本アダプターに置き換える |
+
+IAM（改訂後）: editorialは作業用 `drafts/*` の Get/GetVersion/Put と正本 `approved/*` の Get/Put。publicationは `approved/*` の Get、`manifests/*` の Get/Put、`published/*` の Get/Put/Delete。readerは `manifests/*`・`published/*` の Get。recoveryはeditorialとpublicationの和。404判定のため各バケットの `ListBucket`（キー一覧はコードで使わない）。DynamoDBの権限は従来どおり。
 
 ## 配置と既存資源との関係
 
