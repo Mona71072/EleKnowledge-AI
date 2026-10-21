@@ -99,11 +99,18 @@ test('item 2: a turn waiting for the previous server job says so', () => {
 test('item 5: a clarify reply shows the remaining characters, caps the input and warns before truncation', () => {
   const snapshot = (query) => ({ conversationId: CONVERSATION, running: false, turns: [turn({ status: 'completed', steps: [], result: clarifyResult }, { query })] });
   const short = render(baseProps(snapshot('ドアの異音'), { question: 'AXIEZ' }));
-  assert.match(short, /補足はあと1,985文字まで入力できます/);
+  assert.doesNotMatch(short, /補足はあと/, 'plenty of room: no hint at all');
   assert.match(short, /maxLength="1990"/);
   assert.doesNotMatch(short, /省略されます/);
+  const near = render(baseProps(snapshot('ドアの異音'), { question: 'い'.repeat(1900) }));
+  assert.match(near, /<p role="status" aria-live="polite"[^>]*>補足はあと90文字まで入力できます<\/p>/);
+  const edge = (typed) => render(baseProps(snapshot('ドアの異音'), { question: 'い'.repeat(typed) }));
+  assert.match(edge(1790), /補足はあと200文字/);
+  assert.doesNotMatch(edge(1789), /補足はあと/);
+  assert.match(edge(1990), /補足はあと0文字/);
   const long = render(baseProps(snapshot('あ'.repeat(1990)), { question: 'い'.repeat(100) }));
   assert.match(long, /maxLength="995"/);
+  assert.doesNotMatch(long, /補足はあと/);
   assert.match(long, /role="note"[^>]*>元の質問が長いため、検索では元の質問の後半が省略されます。/);
   const fresh = render(baseProps({ conversationId: CONVERSATION, running: false, turns: [] }));
   assert.match(fresh, /maxLength="2000"/);
@@ -160,4 +167,20 @@ test('items 9, 13 and 20: no informative gray-400 text, reduced-motion aware ani
     for (const match of source.matchAll(/animate-pulse(?! motion-reduce:animate-none)/gu)) assert.fail(`${file} animates without motion-reduce at ${match.index}`);
     assert.doesNotMatch(source, /\bh-8 w-8\b/u, `${file} has a 32px icon button`);
   }
+});
+
+test('disclosure summaries start with a small decorative chevron and no bullet marker', () => {
+  const { SenpaiStepTimeline } = loadTsx('../src/components/knowledge/SenpaiStepTimeline.tsx');
+  const step = { seq: 1, step: 'understand', labelJa: '質問を整理中', status: 'done', startedAt: '2026-10-20T01:00:00.000Z', endedAt: '2026-10-20T01:00:02.000Z' };
+  const meta = html(createElement(SenpaiStepTimeline, { research: { status: 'completed', steps: [step], startedAt: 0, endedAt: 14000 } }));
+  assert.match(meta, /<details class="group[^"]*"><summary class="[^"]*min-h-10[^"]*list-none[^"]*"><svg[^>]*width="12"[^>]*aria-hidden="true"[^>]*class="[^"]*group-open:rotate-90 motion-reduce:transition-none"/);
+  assert.match(meta, /<\/svg><span[^>]*>14秒・1手順で調査<\/span>/);
+  assert.doesNotMatch(meta, /[▸▾•]/);
+  const { SenpaiResearchAnswer } = loadTsx('../src/components/knowledge/SenpaiResearchAnswer.tsx');
+  const answer = html(createElement(SenpaiResearchAnswer, {
+    anchorPrefix: 'senpai-turn-1', developerView: false,
+    research: { status: 'completed', steps: [], result: { kind: 'answer', answerMarkdown: '## 結論\n結論です [T1]\n\n## 根拠と手順\n- 根拠 [T1]', clarifyQuestions: [], unverifiedRefs: [], sources: { tech: [{ ref: 'T1', title: '手順書' }], law: [], knowhow: { used: [], candidates: [] } } } },
+  }));
+  assert.match(answer, /<summary class="[^"]*min-h-10[^"]*list-none[^"]*"><svg[^>]*aria-hidden="true"[^>]*group-open:rotate-90/);
+  assert.doesNotMatch(answer, /[▸▾•]/);
 });

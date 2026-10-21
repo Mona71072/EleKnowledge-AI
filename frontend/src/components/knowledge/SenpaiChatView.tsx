@@ -51,6 +51,8 @@ export function reportable(turn: Turn, fieldReports: boolean) {
   return lanes.every((lane) => lane.status !== 'loading') && lanes.some((lane) => lane.status === 'success');
 }
 
+const REMAINING_HINT_THRESHOLD = 200;
+
 const outlineChip = 'rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left text-sm leading-6 text-gray-700 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500';
 
 function EmptyState({ research, onPick }: { research: boolean; onPick: (value: string) => void }) {
@@ -98,7 +100,9 @@ export function SenpaiChatView({ snapshot, history, flags, transcriptRef, onTran
   const clarifyOriginal = answeringClarify ? latestTurn.query : undefined;
   const supplementLimit = clarifyOriginal === undefined ? undefined : clarifySupplementLimit(clarifyOriginal);
   const supplementLength = Array.from(props.question).length;
-  const limitHint = supplementLimit === undefined ? undefined : `補足はあと${Math.max(0, supplementLimit - supplementLength).toLocaleString('ja-JP')}文字まで入力できます`;
+  // 残りが十分あるうちは何も出さない。上限が近づいたときだけ知らせる。
+  const remaining = supplementLimit === undefined ? undefined : Math.max(0, supplementLimit - supplementLength);
+  const limitHint = remaining !== undefined && remaining <= REMAINING_HINT_THRESHOLD ? `補足はあと${remaining.toLocaleString('ja-JP')}文字まで入力できます` : undefined;
   const limitWarning = clarifyOriginal !== undefined && clarifyOriginalTruncated(clarifyOriginal, props.question)
     ? '元の質問が長いため、検索では元の質問の後半が省略されます。' : undefined;
   const placeholder = answeringClarify ? '補足を入力（例: AXIEZ、走行中に発生）' : '質問を入力';

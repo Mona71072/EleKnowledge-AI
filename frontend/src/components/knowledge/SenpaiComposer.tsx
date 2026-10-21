@@ -95,7 +95,7 @@ export function SenpaiComposer({ question, onQuestionChange, modelType, onModelC
           </div>
         </div>
         {warning && <p role="note" className="mt-2 text-center text-xs text-amber-700">{warning}</p>}
-        {hint && <p className="mt-1 text-center text-xs text-gray-500">{hint}</p>}
+        {hint && <p role="status" aria-live="polite" className="mt-1 text-center text-xs text-gray-500">{hint}</p>}
         {sendError && <p role="alert" className="mt-2 text-center text-sm text-red-700">{sendError}</p>}
         <p className="mt-2 text-center text-[11px] leading-4 text-gray-500">{disclaimer}</p>
       </form>

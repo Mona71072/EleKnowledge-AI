@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { DisclosureChevron } from './SenpaiIcons';
 import type { SenpaiResearchState } from '@/lib/knowledge-senpai-chat.mjs';
 import { buildTimelineRows, type SenpaiResearchStepStatus, type SenpaiResearchStep } from '@/lib/knowledge-senpai-research.mjs';
 import { formatElapsed, isRedundantDetail, stepRowLabel } from '@/lib/knowledge-senpai-research-view.mjs';
@@ -86,9 +87,10 @@ export function SenpaiStepTimeline({ research }: {
   }
   if (rows.length === 0) return null;
   return (
-    <details className="text-xs text-gray-500">
-      <summary className="flex min-h-10 cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden">
-        <span className="underline-offset-2 hover:text-gray-900 hover:underline">
+    <details className="group text-xs text-gray-500">
+      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 [&::-webkit-details-marker]:hidden">
+        <DisclosureChevron />
+        <span className="underline-offset-2 group-hover:underline">
           {elapsed !== undefined && `${formatElapsed(elapsed)}・`}{rows.length}手順で調査
         </span>
       </summary>

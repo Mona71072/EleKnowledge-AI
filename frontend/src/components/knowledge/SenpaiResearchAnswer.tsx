@@ -18,7 +18,7 @@ import {
   structureAnswer,
 } from '@/lib/knowledge-senpai-research-view.mjs';
 import { modelFitNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
-import { RetryIcon } from './SenpaiIcons';
+import { DisclosureChevron, RetryIcon } from './SenpaiIcons';
 import { SenpaiCopyButton } from './SenpaiCopyButton';
 import { SenpaiDevPanel } from './SenpaiDevPanel';
 import { REF_PREFIX, REF_TONES, SenpaiMarkdown } from './SenpaiMarkdown';
@@ -105,7 +105,7 @@ function GroundsAndSources({ result, prefix, selectedModel, evidence }: { result
   return (
     <section aria-label="根拠と出典" className="border-t border-gray-100 pt-1"><details className="group">
       <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 [&::-webkit-details-marker]:hidden">
-        <span aria-hidden="true" className="inline-block transition-transform group-open:rotate-90 motion-reduce:transition-none">▸</span>
+        <DisclosureChevron />
         <span className="underline-offset-2 group-hover:underline">{summary}</span>
       </summary>
       <div className="space-y-3 pb-1">

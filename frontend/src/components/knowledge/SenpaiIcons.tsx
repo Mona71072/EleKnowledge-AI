@@ -12,3 +12,9 @@ export const MenuIcon = () => <svg {...base}><path d="M4 7h16M4 12h16M4 17h16" /
 export const DotsIcon = () => <svg {...base}><circle cx="5" cy="12" r="1" fill="currentColor" /><circle cx="12" cy="12" r="1" fill="currentColor" /><circle cx="19" cy="12" r="1" fill="currentColor" /></svg>;
 export const RetryIcon = () => <svg {...base}><path d="M4 12a8 8 0 0 1 14-5.3L20 9" /><path d="M20 4v5h-5" /><path d="M20 12a8 8 0 0 1-14 5.3L4 15" /><path d="M4 20v-5h5" /></svg>;
 export const NoteIcon = () => <svg {...base}><path d="M5 4h10l4 4v12H5z" /><path d="M14 4v5h5M8 13h8M8 17h5" /></svg>;
+
+/** 開閉できる見出し（<summary>）の先頭に置く小さな矢印。閉じていると ▸、開くと ▾ に回る（<details class="group"> の中で使う）。 */
+export const DisclosureChevron = () => (
+  <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"
+    className="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"><path d="m9 6 6 6-6 6" /></svg>
+);
