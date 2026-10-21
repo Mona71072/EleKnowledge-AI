@@ -14,7 +14,18 @@ frontend:
     build:
       commands:
         - echo "Building Next.js application..."
-        - npm run build
+        # itaiブランチ限定: 下の env.variables はブランチ環境変数より優先されるため（2026-10-22 実査）、
+        # ブランチ変数 ITAI_RAG_API_URL / ITAI_CHAT_API_URL が両方HTTPSで設定されたときだけ itai 専用APIへ差し替える。
+        # 他ブランチ・変数未設定時は何もしない。
+        - |
+          if [ "$AWS_BRANCH" = "itai" ]; then
+            case "$ITAI_RAG_API_URL|$ITAI_CHAT_API_URL" in
+              https://*\|https://*)
+                export NEXT_PUBLIC_RAG_API_URL="$ITAI_RAG_API_URL" NEXT_PUBLIC_CHAT_API_URL="$ITAI_CHAT_API_URL"
+                echo "itai: RAG/Chat API overridden by branch variables" ;;
+            esac
+          fi
+          npm run build
     postBuild:
       commands:
         - echo "Build completed successfully"
