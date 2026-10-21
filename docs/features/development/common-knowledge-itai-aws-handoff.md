@@ -9,6 +9,8 @@ related-code:
 
 # 共通知識: itai専用AWS検証への引継ぎ
 
+> 進捗（2026-10-22）: 本書の実行順1〜7を実施。分離スタック `EleKnowledge-itai-common-knowledge` を新規作成し（フラグoff・Git未設定）、配備版と合成受入の結果、未受入・費用・rollbackを[AWS基盤の実装契約と実施記録](common-knowledge-itai-aws-contract.md)へ記録した。手順8（push・Amplify接続切替）と、会社Git・実主体・実データの受入は未実施。以下の本文は開始時点の引継ぎとして残す。
+
 > 最終検証: 2026-10-22 — ユーザーの次回AWS作成・デプロイへの追加指定、現在のローカル実装、Git祖先関係、GitHub MCPのリモートitai、既存T2/T23の境界を照合。今回AWSの現況確認・作成・デプロイは行っていない。
 
 ## 0. 最新の依頼と許可範囲

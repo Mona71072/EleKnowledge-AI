@@ -65,3 +65,51 @@ AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタッ�
 - 固定費: Secrets Manager 1件（約0.40 USD/月）。DynamoDB 2表・S3・Lambda・API Gatewayは従量で、合成受入の量ではほぼ0。PITRとS3バージョンは保存量比例。既存WAFへの関連付けで追加の固定料金はなく、通過リクエスト分のみ。
 - 停止: `CommonKnowledgeEnabled=false` が既定。API stageのスロットリングで上限を固定。
 - rollback: 本スタックは他スタックからExport参照されない。changeset作成で失敗した場合は実行しない。作成後の撤去が必要になった場合は、Retain指定の台帳表・認可表・配布バケットが残ることを確認したうえで、スタック削除とRetain資源の扱いを別途確認する（今回は削除しない）。
+
+## 実施記録（2026-10-22）
+
+> 最終検証: 2026-10-22 — ローカル試験、SAM変換/lint、changeset全ページ、配備後のAWS実査（設定・権限・配備コードhash・API・合成受入）。会社Git・実主体・実データ・ブラウザの受入ではない。
+
+### 実装とローカル検証（コミット `a8c36504`、ローカルitai）
+
+- 台帳をunit／一覧Queryへ分け、Service内の直接SQLを除去。SQLite（I1合成）とDynamoDBの2アダプター、S3配布、Git未設定アダプター、GitHub互換RESTの候補アダプター、設定検証factory、責任別ルートを実装。
+- 当初案の「操作ごとの受付票」は、manifestの世代が単調増加し、manifestに記録した操作IDで現行版の再試行を判定できるため不要と判明して削除した（変異試験で、操作ID判定を外すと試験が落ち、受付票を外しても落ちないことを確認）。
+- Git未設定は操作受付の前に503 `GitNotConfigured` で拒否する。受付後に拒否すると同じ要求の再送が永久に拒否され、対象ロックも残るため。
+- 結果: 共通知識I1 16件・AWSアダプター（模擬）35件・SAM契約5件を含む関連Python 645件成功。フロントは型検査成功、Lintエラー0（既存警告4）、`node --test` 414件のうち成功410・失敗3（残り1件は未実行扱い）。失敗3件は `knowledge-index-check`（索引ビルダー）で、変更前の同一コミットの別worktreeでも同じ3件が失敗するため本変更とは無関係。cfn-lint 1.52.1 終了0、SAM変換後39リソース・全非OPTIONSルートにCognito、`git diff --check` 成功。
+- 端末固有: pytestの既定一時領域が書込不可、長いパスでGitが失敗するため、`--basetemp` を作業用一時領域へ移し `core.longpaths` を環境変数で付与して実行した。リポジトリ設定は変えていない。
+
+### AWSへの作成（itai専用・新規スタックのみ）
+
+- 対象: スタック `EleKnowledge-itai-common-knowledge`（ap-northeast-1、SSOのitai利用者で実行）。`sam build` 後、配備物のファイルhashがコミットのblobと一致することを確認してから `sam package`（既存のSAM配備物バケットの専用prefixへ追加のみ）。
+- changeset `create-a8c36504`（CREATE）: 1ページ・39件すべてAdd、Replacementなし、既存の物理リソースを指す変更なし。パラメータは `CommonKnowledgeEnabled=false`、`GitMode=unconfigured`。IP一覧は既存itaiスタックの現在値（共有devと同一の10件）を明示指定。実行後 `CREATE_COMPLETE`、失敗イベントなし。
+- 作成物: 台帳表・認可表（いずれもRetain、SSE、PITR、台帳は3つのKEYS_ONLY GSIと合成専用TTL属性）、配布バケット（Retain、バージョニング、SSE-S3、所有者強制、TLS以外拒否、`acceptance/` だけ7日失効）、cursor用Secrets Manager 1件、REST API（stage `dev`、Cognito、IP ResourcePolicy、スロットリング 10/5、アクセスログ）、既存Regional WAFへの関連付け1件、Lambda 5・IAM Role 5・LogGroup 6・Lambda Permission 14。認可表は空のまま（実ロール未決のため何も書いていない）。
+- 実行前後で共有dev phase1/phase2、既存itai phase2、itai KB v2の状態・最終更新時刻、WAF ACLのLockTokenとルール数が一致。
+
+### 配備版の確認
+
+| 項目 | 結果 |
+| --- | --- |
+| 配備コード | 5関数とも同一zip（CodeSha256 `VCqY97FFL/hyuPoSA8/SPJyCuJfEz0eTUSskwmwihTU=`）。zip内6ファイルのSHA256がコミット `a8c36504` のblobと一致 |
+| 設定 | python3.13、10秒、256MB。全関数でフラグfalse・Git unconfigured。cursor秘密の参照はintakeだけ |
+| IAM | 各Roleの実ポリシーが契約の表どおり。DynamoDBの書込はTransactWriteItems内に限定、Queryはintakeのindexのみ、readerは台帳権限なし |
+| S3 | Block Public Access 4項目とも有効（SCPで明示設定できないため既定値を実査）、バージョニング、AES256、BucketOwnerEnforced、ポリシー非公開 |
+| DynamoDB | 2表ともSSE・PITR有効。台帳のTTLは `acceptancePurgeAt` のみ、GSI 3つともKEYS_ONLY |
+| API | トークンなし・不正形式・`synthetic-*`・署名なし（alg:none）の偽造JWTはすべて401。未定義ルート403。プリフライトとゲートウェイエラーのCORSはitai originだけ。新stageが既存Regional WAFに関連付け済み |
+| Lambda直接呼出し | 合成イベント（書込なし）で5関数とも403 `FeatureUnavailable`・`no-store`。設定欠落の503ではなく、配備設定から実アダプターを構築できている |
+| 合成受入（配備した表・バケット） | 3入口の公開→両AI読取→停止、Git成功後の投影失敗の再開（二重commitなし）、競合時に拒否確定せず再試行で完了、古い版の上書き拒否、artifactのみ成功／manifest成功後の応答喪失で停止後に復活しない、manifest取得不能503・期限切れ404、短いページ＋cursor、再起動後の未完了操作の復旧: 11件成功（2回実行）。データは合成名前空間のみで、S3は22オブジェクトすべて `acceptance/` 配下 |
+| ログ | 5関数ともプラットフォーム行（INIT_START/START/END/REPORT）だけ。エラー・トークン・パス・本文なし |
+
+接続値（アカウント、ARN、API URL、IP一覧、物理名）とchangeset全ページ・出力値は未追跡の `.private-knowhow/ck-aws/` に保存した。
+
+### 未受入・判断待ち
+
+- 会社Gitの製品・repo・path・資格情報（決定後、GitHub互換アダプターの採否と `GitMode` の許可値追加を別途レビュー）。Git必須操作は配備環境では503で止まる。知識の一往復（Git込み）は未受入。
+- 実Cognito主体での操作、業務ロール・兼務の割当、保持年限、試行単元・読者。認可表は空で、フラグもoff。
+- IP外からの拒否の実査、実ブラウザ、Amplify itaiの接続切替（itaiブランチは自動配信ON、API URLはアプリ共通値＝共有dev）。RAG／開発エージェントの実接続と有料品質検証。いずれも未実施。
+- LambdaランタイムのSDKが条件付きPutの引数を受け付けることは、関数内の実書込では未確認（フラグoffのため）。同じ処理をローカルSDKから配備バケットに対して実行した結果は上表のとおり成功。
+
+### 費用・停止・rollback
+
+- 固定費はSecrets Manager 1件（約0.40 USD/月）。他は従量で、現状はAPIに接続した画面がなく、合成受入の読み書き・ログ・保存量だけ。PITR・S3バージョンは保存量に比例。WAFは既存ACLの通過リクエスト分のみ。単価はAWS料金表を今回照会しておらず、概算として扱う。
+- 停止: フラグoffのまま。必要ならAPI stageのスロットリングを下げる更新で止められる。
+- rollback: 本スタックは他から参照されず、共有物の変更もない。撤去する場合はスタック削除で API・Lambda・Role・ログ・秘密・WAF関連付けが消え、台帳表・認可表・配布バケットはRetainで残る。削除操作は今回行っておらず、実施時は残すRetain資源の扱いを別途確認する。合成データはTTL・ライフサイクルで7日以内に自動失効する。
