@@ -12,6 +12,9 @@ const REF_ANCHOR = /^#[A-Za-z0-9-]+-ref-([TLK])(\d{1,3})$/u;
 
 // 引用の番号: 技術=技、法令=法、ノウハウ=ノ。色は文字にうっすら付けるだけ。
 export const REF_PREFIX: Record<string, string> = { T: '技', L: '法', K: 'ノ' };
+// 本文中の番号は、背景なしの軽い上付き文字にする（出典一覧の札は REF_TONES の背景つき）。
+const PILL_TEXT: Record<string, string> = { T: 'text-blue-700 hover:text-blue-900', L: 'text-emerald-700 hover:text-emerald-900', K: 'text-violet-700 hover:text-violet-900' };
+
 export const REF_TONES: Record<string, string> = {
   T: 'bg-blue-50 text-blue-700 hover:bg-blue-100',
   L: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
@@ -71,7 +74,7 @@ function makeComponents(refTitles: Readonly<Record<string, string>>, knownRefs: 
       // 取得結果にある出典で、この回答（相談）のアンカーだけをリンクにする。本文中に書かれた偽の番号は文字のまま出す。
       if (!knownRefs.has(refId) || href !== `#${researchRefAnchor(anchorPrefix, refId)}`) return <span>{children}</span>;
       return (
-        <a href={href} title={refTitles[refId]} onClick={() => openAncestorDetails(document.getElementById(href.slice(1)))} className={`relative mx-0.5 inline-block rounded px-1 align-super text-[10px] font-medium leading-4 no-underline before:absolute before:-inset-x-1 before:-inset-y-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${REF_TONES[match[1]]}`}>{`${REF_PREFIX[match[1]]}${match[2]}`}</a>
+        <a href={href} title={refTitles[refId]} onClick={() => openAncestorDetails(document.getElementById(href.slice(1)))} className={`relative -top-1 mx-px inline-block rounded px-0.5 align-baseline text-[10px] font-normal leading-none no-underline before:absolute before:-inset-x-1.5 before:-inset-y-3 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${PILL_TEXT[match[1]]}`}>{`${REF_PREFIX[match[1]]}${match[2]}`}</a>
       );
     },
     img: ({ alt }) => <span>{alt ? `（画像: ${alt}）` : ''}</span>,
@@ -81,9 +84,9 @@ function makeComponents(refTitles: Readonly<Record<string, string>>, knownRefs: 
     h4: ({ children }) => <h6 className="mt-4 text-sm font-semibold text-gray-900 first:mt-0">{children}</h6>,
     h5: ({ children }) => <h6 className="mt-4 text-sm font-semibold text-gray-900 first:mt-0">{children}</h6>,
     h6: ({ children }) => <h6 className="mt-4 text-sm font-semibold text-gray-900 first:mt-0">{children}</h6>,
-    p: ({ children }) => <p className="mt-2 break-words first:mt-0">{keepRefRunsTogether(children)}</p>,
-    ul: ({ children }) => <ul className="mt-2 list-disc space-y-1 pl-5 marker:text-gray-400">{children}</ul>,
-    ol: ({ children }) => <ol className="mt-2 list-decimal space-y-1 pl-5 marker:text-gray-400">{children}</ol>,
+    p: ({ children }) => <p className="mt-3 break-words first:mt-0">{keepRefRunsTogether(children)}</p>,
+    ul: ({ children }) => <ul className="mt-3 list-disc space-y-2 pl-5 marker:text-gray-400 first:mt-0">{children}</ul>,
+    ol: ({ children }) => <ol className="mt-3 list-decimal space-y-2 pl-6 marker:font-medium marker:text-gray-500 first:mt-0">{children}</ol>,
     li: ({ children }) => <li>{keepRefRunsTogether(children)}</li>,
     blockquote: ({ children }) => <blockquote className="mt-2 border-l-2 border-gray-300 pl-3 text-gray-600">{children}</blockquote>,
     pre: ({ children }) => <pre className="mt-2 overflow-x-auto rounded-lg bg-gray-100 p-3 text-xs">{children}</pre>,

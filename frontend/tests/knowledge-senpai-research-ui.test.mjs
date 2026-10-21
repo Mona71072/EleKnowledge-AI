@@ -148,7 +148,7 @@ test('sources are grouped with tiny labels; the title itself is the link and the
 test('without used knowhow the general view shows nothing about it, and the developer view keeps the detail', () => {
   const sources = { tech: [], law: [], knowhow: { used: [], candidates: [{ knowledgeId: 'KH-9', cardVersion: 1, title: '候補だけ' }] } };
   const page = view(completed({}, { sources, answerMarkdown: '本文のみ' }));
-  assert.doesNotMatch(page, /ノウハウ|候補だけ|<section aria-label="根拠と出典"/);
+  assert.doesNotMatch(page, /ノウハウ|候補だけ|<section aria-label="出典"/);
   const dev = view(completed({}, { sources, answerMarkdown: '本文のみ' }), { developerView: true });
   assert.match(dev, /ノウハウは参照していません/);
   assert.match(dev, /候補として渡したが使わなかったノウハウ/);
@@ -543,27 +543,38 @@ test('the answer leads with the conclusion, lists the grounds, and gathers the n
 
 test('inline refs are coloured chips with the source title, and unverified refs stay plain text', () => {
   const page = view(completed({}, { answerMarkdown: '本文 [T1] [L1] [K1] [T9]', unverifiedRefs: ['T9'] }));
-  assert.match(page, /<a href="#senpai-turn-1-ref-T1" title="保守手順書" class="[^"]*bg-blue-50[^"]*">技1<\/a>/);
-  assert.match(page, /<a href="#senpai-turn-1-ref-L1" title="建築基準法 第三十四条" class="[^"]*bg-emerald-50[^"]*">法1<\/a>/);
-  assert.match(page, /<a href="#senpai-turn-1-ref-K1" title="調整の勘所" class="[^"]*bg-violet-50[^"]*">ノ1<\/a>/);
+  // 本文中の番号は背景なしの軽い上付き文字（小さく、行の高さを変えず、色だけ種類ごとに変える）。
+  assert.match(page, /<a href="#senpai-turn-1-ref-T1" title="保守手順書" class="[^"]*relative -top-1[^"]*text-\[10px\][^"]*leading-none[^"]*text-blue-700[^"]*">技1<\/a>/);
+  assert.match(page, /<a href="#senpai-turn-1-ref-L1" title="建築基準法 第三十四条" class="[^"]*text-emerald-700[^"]*">法1<\/a>/);
+  assert.match(page, /<a href="#senpai-turn-1-ref-K1" title="調整の勘所" class="[^"]*text-violet-700[^"]*">ノ1<\/a>/);
+  assert.doesNotMatch(page.match(/<a href="#senpai-turn-1-ref-T1"[^>]*>/)[0], /bg-blue-50/);
   assert.match(page, /\[T9\]/);
   assert.doesNotMatch(page, /ref-T9/);
 });
 
-test('the answer shows the conclusion and notes; grounds and sources wait in one closed toggle', () => {
+test('the answer body is always visible: conclusion, grounds as written, notes; only the source list is a closed toggle', () => {
   const page = view(completed({}, {
-    answerMarkdown: '## 結論\n調整です [T1]\n\n## 根拠と手順\n- 手順です [T1]\n- 基準です [L1]\n\n## 確認が必要な点\n- 階数が不明',
+    answerMarkdown: '## 結論\n調整です [T1]\n\n## 根拠と手順\nまず確認します。次に調整します [T1]。\n\n1. 戸の隙間を測る [T1]\n2. 基準と比べる [L1]\n\n## 確認が必要な点\n- 階数が不明',
   }));
-  const toggle = page.indexOf('<section aria-label="根拠と出典"');
-  assert.ok(toggle > page.indexOf('調整です'), 'the conclusion stays outside, before the toggle');
+  const toggle = page.indexOf('<section aria-label="出典"');
+  assert.ok(toggle > page.indexOf('調整です'));
+  assert.ok(toggle > page.indexOf('まず確認します'), 'the grounds are outside the toggle');
+  assert.ok(toggle > page.indexOf('戸の隙間を測る'));
   assert.ok(toggle > page.indexOf('階数が不明'), 'the notes stay visible');
-  assert.match(page, /<section aria-label="根拠と出典"[^>]*><details(?![^>]*\bopen\b)[^>]*><summary[^>]*>[\s\S]*?根拠と出典（技術資料 \d+・法令 \d+・ノウハウ \d+）[\s\S]*?<\/summary>[\s\S]*手順です[\s\S]*基準です[\s\S]*id="senpai-turn-1-ref-T1"[\s\S]*id="senpai-turn-1-ref-K1"[\s\S]*<\/details><\/section>/);
-  assert.equal(page.match(/<section aria-label="根拠と出典"/g).length, 1);
+  assert.match(page, /<ol class="[^"]*list-decimal[^"]*space-y-2[^"]*">[\s\S]*戸の隙間を測る[\s\S]*基準と比べる[\s\S]*<\/ol>/, 'numbered steps keep their numbers');
+  assert.match(page, /<p class="mt-3 break-words first:mt-0">まず確認します。/);
+  assert.match(page, /<section aria-label="出典"[^>]*><details(?![^>]*\bopen\b)[^>]*><summary[^>]*>[\s\S]*?出典（技術資料 \d+・法令 \d+・ノウハウ \d+）[\s\S]*?<\/summary>[\s\S]*id="senpai-turn-1-ref-T1"[\s\S]*id="senpai-turn-1-ref-K1"[\s\S]*<\/details><\/section>/);
+  assert.doesNotMatch(page.slice(toggle), /戸の隙間を測る|まず確認します/, 'nothing but sources inside the toggle');
+  assert.equal(page.match(/<section aria-label="出典"/g).length, 1);
+  assert.doesNotMatch(page, /根拠と出典/);
+
+  const old = view(completed({}, { answerMarkdown: '## 結論の候補\n調整です [T1]\n\n## 技術資料から\n手順です\n\n## 法令から\n基準です [L1]' }));
+  assert.ok(old.indexOf('<section aria-label="出典"') > old.indexOf('基準です'), 'old-format grounds are visible too');
 
   const plain = view(completed({}, { answerMarkdown: '見出しのない回答です [T1]' }));
-  assert.ok(plain.indexOf('見出しのない回答です') < plain.indexOf('<section aria-label="根拠と出典"'), 'an unstructured answer stays fully visible');
+  assert.ok(plain.indexOf('見出しのない回答です') < plain.indexOf('<section aria-label="出典"'));
   assert.match(plain, /<summary[^>]*>[\s\S]*?出典（技術資料/);
-  assert.doesNotMatch(view(completed({}, { answerMarkdown: '本文', sources: NO_SOURCES })), /aria-label="根拠と出典"/);
+  assert.doesNotMatch(view(completed({}, { answerMarkdown: '本文', sources: NO_SOURCES })), /aria-label="出典"/);
 });
 
 test('source rows carry a tinted number pill and keep the knowhow cards split', () => {
@@ -722,7 +733,7 @@ test('a run of ref pills and the punctuation right after it never wrap apart', (
 
 test('small links and buttons keep their look but get a larger invisible hit area', () => {
   const page = view(completed());
-  assert.match(page, /<a href="#senpai-turn-1-ref-T1"[^>]*class="[^"]*relative[^"]*before:-inset-y-2/);
+  assert.match(page, /<a href="#senpai-turn-1-ref-T1"[^>]*class="[^"]*relative[^"]*before:-inset-y-3/);
   assert.match(page, /<a href="\/doc[^>]*class="[^"]*relative[^"]*before:-inset-y-2/, 'the source title link keeps a 40px hit area');
   const failed = view({ status: 'failed', steps: [] }, { query: 'q', onResend() {} });
   assert.match(failed, /class="[^"]*before:-inset-y-2\.5[^"]*">もう一度試す</);
@@ -733,7 +744,7 @@ test('small links and buttons keep their look but get a larger invisible hit are
 test('the action bar comes last, after the sources and the knowhow', () => {
   const page = view(completed(), { query: '質問', onResend() {} });
   const bar = page.indexOf('aria-label="回答の操作"');
-  assert.ok(bar > page.indexOf('aria-label="根拠と出典"'));
+  assert.ok(bar > page.indexOf('aria-label="出典"'));
   assert.ok(bar > page.indexOf('ノウハウ 2件'));
   assert.ok(bar > page.indexOf('候補として渡したが使わなかったノウハウ'));
   assert.match(page.slice(bar), /aria-label="回答をコピー"[\s\S]*aria-label="もう一度調べる" title="もう一度調べる"/);

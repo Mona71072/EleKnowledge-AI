@@ -98,19 +98,18 @@ function KnowhowUsed({ result, prefix, selectedModel }: { result: SenpaiResearch
  * 画面に最初から出すのは結論と確認が必要な点だけで、根拠と出典は見たいときだけ開く。
  * 本文の番号（技1・法1・ノ1）を押したときは、開閉が開いて該当の行へ移動する。
  */
-function GroundsAndSources({ result, prefix, selectedModel, evidence }: { result: SenpaiResearchResult; prefix: string; selectedModel?: string; evidence?: string }) {
+/** 出典の一覧だけを閉じた開閉の中に入れる。回答の本文（結論・根拠と手順）は常に見える。 */
+function SourcesDisclosure({ result, prefix, selectedModel }: { result: SenpaiResearchResult; prefix: string; selectedModel?: string }) {
   const { tech, law } = result.sources;
-  const summary = sourceSummary(result, Boolean(evidence));
+  const summary = sourceSummary(result);
   if (!summary) return null;
   return (
-    <section aria-label="根拠と出典" className="border-t border-gray-100 pt-1"><details className="group">
+    <section aria-label="出典" className="border-t border-gray-100 pt-1"><details className="group">
       <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 [&::-webkit-details-marker]:hidden">
         <DisclosureChevron />
         <span className="underline-offset-2 group-hover:underline">{summary}</span>
       </summary>
-      <div className="space-y-3 pb-1">
-      {evidence && <AnswerMarkdown result={result} prefix={prefix} body={evidence} />}
-      <div className="space-y-1">
+      <div className="space-y-1 pb-1">
       {tech.length > 0 && (
         <section aria-label="技術資料の出典">
           <h5 className={groupLabel}>技術資料</h5>
@@ -141,7 +140,6 @@ function GroundsAndSources({ result, prefix, selectedModel, evidence }: { result
       )}
       <KnowhowUsed result={result} prefix={prefix} selectedModel={selectedModel} />
       </div>
-      </div>
     </details></section>
   );
 }
@@ -167,16 +165,16 @@ function AnswerMarkdown({ result, prefix, body, variant }: { result: SenpaiResea
 }
 
 /**
- * 結論を先頭の文に、確認が必要な点を1つの控えめなブロックにする。見出しは出さない。
- * 「根拠と手順」は `withEvidence` のときだけここに出す（回答では閉じた「根拠と出典」の中に入る）。
+ * 結論（先頭の文）→ 根拠と手順（書かれたままの段落・番号つき/箇条書き）→ 確認が必要な点（控えめなブロック）。
+ * 見出しは出さない。旧形式の回答は同じ3つに寄せる。
  */
-function AnswerText({ result, prefix, withEvidence = false }: { result: SenpaiResearchResult; prefix: string; withEvidence?: boolean }) {
+function AnswerText({ result, prefix }: { result: SenpaiResearchResult; prefix: string }) {
   const parts = structureAnswer(result.answerMarkdown);
   if (!parts) return <AnswerMarkdown result={result} prefix={prefix} body={result.answerMarkdown} />;
   return (
     <div className="space-y-4">
       {parts.lead && <AnswerMarkdown result={result} prefix={prefix} body={parts.lead} variant="lead" />}
-      {withEvidence && parts.evidence && <AnswerMarkdown result={result} prefix={prefix} body={parts.evidence} />}
+      {parts.evidence && <AnswerMarkdown result={result} prefix={prefix} body={parts.evidence} />}
       {parts.notes && <aside aria-label="確認が必要な点" className="rounded-xl bg-gray-50 px-4 py-3"><h5 className={groupLabel}>確認が必要な点</h5><AnswerMarkdown result={result} prefix={prefix} body={parts.notes} variant="plain" /></aside>}
     </div>
   );
@@ -189,7 +187,7 @@ function ClarifyBlock({ result, prefix, query, onResend }: { result: SenpaiResea
       <p className="font-medium">条件の確認が必要です</p>
       {hasQuestions
         ? <ul className="mt-1 list-disc space-y-0.5 pl-5 marker:text-gray-400">{result.clarifyQuestions.map((question, index) => <li key={`${index}-${question}`}>{question}</li>)}</ul>
-        : result.answerMarkdown.trim() && <AnswerText result={result} prefix={prefix} withEvidence />}
+        : result.answerMarkdown.trim() && <AnswerText result={result} prefix={prefix} />}
       {/* 最新の相談だけが続きを受け付ける（onResend が渡るのは最新の相談だけ）。古い聞き返しには出さない。 */}
       {onResend && <p className="mt-2 text-sm text-gray-500">下の入力欄に答えを書いてください。</p>}
       {onResend && query && clarifyAsksModel(result) && (
@@ -209,7 +207,6 @@ function ResultBody({ result, prefix, selectedModel, query, onResend, actions }:
   const mismatch = modelMismatch(result, selectedModel, KNOWN_MODELS);
   // 機種を選んでいない相談でも、質問から読めた機種があれば、別機種の事例の注意に使う。
   const noticeModel = selectedModel ?? result.understanding?.modelType ?? undefined;
-  const evidence = result.kind === 'answer' ? structureAnswer(result.answerMarkdown)?.evidence : undefined;
   return (
     <div className="space-y-4">
       {mismatch && (
@@ -228,7 +225,7 @@ function ResultBody({ result, prefix, selectedModel, query, onResend, actions }:
         <p className="text-[15px] leading-7 text-gray-900">該当する情報を確認できませんでした。質問の言い換えや、機種の指定を試してください。</p>
       )}
       {result.kind === 'answer' && <AnswerText result={result} prefix={prefix} />}
-      <GroundsAndSources result={result} prefix={prefix} selectedModel={noticeModel} evidence={evidence} />
+      <SourcesDisclosure result={result} prefix={prefix} selectedModel={noticeModel} />
       {result.kind === 'answer' && (
         <div role="group" aria-label="回答の操作" className="-mx-1 flex flex-wrap items-center gap-1">
           <SenpaiCopyButton getText={() => buildCopyText(result)} />

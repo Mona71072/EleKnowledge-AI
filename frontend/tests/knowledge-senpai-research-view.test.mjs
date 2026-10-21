@@ -46,14 +46,12 @@ import {
   sourceSummary, structureAnswer, stepRowLabel,
 } from '../src/lib/knowledge-senpai-research-view.mjs';
 
-test('sourceSummary labels the closed toggle with the grounds and per-kind source counts', () => {
+test('sourceSummary labels the closed toggle with per-kind source counts, and is null without sources', () => {
   const sources = (tech, law, used) => ({ sources: { tech: Array(tech).fill({}), law: Array(law).fill({}), knowhow: { used: Array(used).fill({}), candidates: [{}] } } });
-  assert.equal(sourceSummary(sources(2, 1, 3), true), '根拠と出典（技術資料 2・法令 1・ノウハウ 3）');
-  assert.equal(sourceSummary(sources(2, 1, 3), false), '出典（技術資料 2・法令 1・ノウハウ 3）');
-  assert.equal(sourceSummary(sources(1, 0, 0), false), '出典（技術資料 1）');
-  assert.equal(sourceSummary(sources(0, 0, 2), true), '根拠と出典（ノウハウ 2）');
-  assert.equal(sourceSummary(sources(0, 0, 0), true), '根拠と手順');
-  assert.equal(sourceSummary(sources(0, 0, 0), false), null);
+  assert.equal(sourceSummary(sources(2, 1, 3)), '出典（技術資料 2・法令 1・ノウハウ 3）');
+  assert.equal(sourceSummary(sources(1, 0, 0)), '出典（技術資料 1）');
+  assert.equal(sourceSummary(sources(0, 0, 2)), '出典（ノウハウ 2）');
+  assert.equal(sourceSummary(sources(0, 0, 0)), null);
 });
 
 test('finished steps use past-tense labels; running keeps the server label', () => {
