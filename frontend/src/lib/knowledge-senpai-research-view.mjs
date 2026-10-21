@@ -175,15 +175,18 @@ export function modelMismatch(result, selectedModel, knownModels) {
 }
 
 /**
- * 閉じた出典の開閉ボタンに出す1行。「出典 6件（技術資料 2・法令 1・ノウハウ 3）」。0件の種類は出さない。
- * 使わなかったノウハウ候補は数えない。出典が1件も無ければ null。
+ * 閉じた開閉（根拠と出典）のボタンに出す1行。「根拠と出典（技術資料 2・法令 1・ノウハウ 3）」。
+ * 0件の種類は出さず、使わなかったノウハウ候補は数えない。根拠の本文が無ければ「出典（…）」。
+ * 出典が無く根拠だけなら「根拠と手順」、どちらも無ければ null。
+ *
+ * @param {{sources: {tech: readonly unknown[], law: readonly unknown[], knowhow: {used: readonly unknown[]}}}} result
+ * @param {boolean} hasEvidence 開閉の中に「根拠と手順」の本文も入るか
  */
-export function sourceSummary(result) {
+export function sourceSummary(result, hasEvidence) {
   const { tech, law, knowhow } = result.sources;
   const counts = [['技術資料', tech.length], ['法令', law.length], ['ノウハウ', knowhow.used.length]].filter(([, count]) => count > 0);
-  if (counts.length === 0) return null;
-  const total = counts.reduce((sum, [, count]) => sum + count, 0);
-  return `出典 ${total}件（${counts.map(([label, count]) => `${label} ${count}`).join('・')}）`;
+  if (counts.length === 0) return hasEvidence ? '根拠と手順' : null;
+  return `${hasEvidence ? '根拠と出典' : '出典'}（${counts.map(([label, count]) => `${label} ${count}`).join('・')}）`;
 }
 
 /** 回答と、番号（[T1] など）つきの出典を、そのまま貼れるプレーンテキストにする。 */
