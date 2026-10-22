@@ -59,6 +59,7 @@ export function CommonKnowledgeInbox() {
   const [pending, setPending] = useState<{ operationId: string; status: string }[]>([]);
   const [summary, setSummary] = useState('合成の用語Z・架空機種A');
   const [me, setMe] = useState<CommonKnowledgeMe | null>(null);
+  const [failed, setFailed] = useState(false);
 
   async function api<T>(path: string, method = 'GET', body?: unknown, revision?: number): Promise<T> {
     const baseUrl = validateConnection({
@@ -71,12 +72,13 @@ export function CommonKnowledgeInbox() {
   }
 
   async function perform(action: () => Promise<void>) {
-    setBusy(true); setMessage(''); setPublished(null);
+    setBusy(true); setMessage(''); setFailed(false); setPublished(null);
     try {
       // Buttons follow the caller's live grants, so load them before the first operation.
       if (!synthetic && !me) await loadMe();
       await action();
     } catch (error) {
+      setFailed(true);
       setMessage(error instanceof Error ? error.message : '操作できませんでした。');
     } finally { setBusy(false); }
   }
@@ -97,11 +99,13 @@ export function CommonKnowledgeInbox() {
     const result = await api<{ items: Candidate[]; cursor: string | null }>(
       `/contributions?scope=${scope}&state=${state}${next && cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
     setItems(result.items); setCursor(result.cursor);
+    setMessage(`一覧を取得しました（${result.items.length}件${result.cursor ? '、続きあり' : ''}）。`);
   }
 
   async function load(identifier: string) {
     const result = await api<Candidate>(`/contributions/${identifier}`);
     setSelected(result); setCard(null); setReceipt(null);
+    setMessage('候補の最新状態を読み込みました。');
     const target = result.targetLinks?.[0] || result.targetKnowledgeId;
     if (target) {
       const loaded = await api<Card>(`/cards/${target}`);
@@ -198,6 +202,9 @@ export function CommonKnowledgeInbox() {
       {synthetic && <p className="mt-2 text-sm text-amber-900">合成I1試行。架空の人物・原本・共有許可だけを使用します。実資料は入力しないでください。</p>}
       {!synthetic && <p className="mt-2 text-sm text-amber-900">検証範囲（{scope || '未設定'}）だけで動作します。合成の内容だけを入力し、実資料・個人情報は入力しないでください。</p>}
     </div>
+    <p role="status" aria-live="polite" className={`sticky top-2 z-10 rounded border p-3 text-sm ${busy || message ? '' : 'hidden'} ${
+      busy ? 'border-violet-200 bg-violet-50 text-violet-900' : failed ? 'border-red-300 bg-red-50 text-red-900' : 'border-green-300 bg-green-50 text-green-900'}`}>
+      {busy ? '保存先へ確認中…' : `${failed ? '失敗: ' : '完了: '}${message}`}</p>
     {!synthetic && <div className="space-y-2 rounded border p-3 text-sm">
       <h3 className="font-semibold">接続先と自分の権限</h3>
       <p className="break-all">接続先API: {apiUrl || '未設定'}</p>
@@ -254,7 +261,7 @@ export function CommonKnowledgeInbox() {
         {card && <p className="break-all text-xs text-gray-600">作業版 {card.workingRevision} · {card.versions[String(card.workingRevision)].status} · 承認束 {card.versions[String(card.workingRevision)].bundleHash}</p>}
         {receipt && <p className="break-all text-xs">作業用バケットの版: {receipt.workVersionId}</p>}
         {canEdit && ['unconfirmed', 'held'].includes(selected.state) && <p className="text-xs text-gray-600">編集するには、先に「編集を引き受ける／再開」を押してください。</p>}
-        {canReview && !card?.review && <p className="text-xs text-gray-600">技術承認・差し戻しは、編集担当が「この版の技術確認を依頼」した版だけに行えます。</p>}
+        {canReview && !card?.review && selected.state === 'in_review' && <p className="text-xs text-gray-600">技術承認・差し戻しは、編集担当が「この版の技術確認を依頼」した版だけに行えます。</p>}
         <div className="flex flex-wrap gap-2">
           {canEdit && <><button className={BUTTON_CLASS} onClick={() => void perform(save)}>作業版を保存</button>
             <button className={BUTTON_CLASS} disabled={!card} onClick={() => void perform(requestReview)}>この版の技術確認を依頼</button></>}
@@ -291,6 +298,5 @@ export function CommonKnowledgeInbox() {
         {published && <div><p className="break-all text-xs">{published.knowledgeId} · 第{published.workingRevision}版 · {published.rawSha256}</p><pre className="whitespace-pre-wrap text-sm">{published.markdown}</pre></div>}
       </div>
     </fieldset>
-    <p role="status" aria-live="polite" className="text-sm">{busy ? '保存先へ確認中…' : message}</p>
   </section>;
 }
