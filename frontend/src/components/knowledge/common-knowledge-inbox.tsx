@@ -60,6 +60,7 @@ export function CommonKnowledgeInbox() {
   const [summary, setSummary] = useState('合成の用語Z・架空機種A');
   const [me, setMe] = useState<CommonKnowledgeMe | null>(null);
   const [failed, setFailed] = useState(false);
+  const [area, setArea] = useState('');
 
   async function api<T>(path: string, method = 'GET', body?: unknown, revision?: number): Promise<T> {
     const baseUrl = validateConnection({
@@ -71,8 +72,9 @@ export function CommonKnowledgeInbox() {
     return requestKnowledge<T>({ baseUrl, token, actor: synthetic ? actor : 'authenticated', path, method, body, revision });
   }
 
-  async function perform(action: () => Promise<void>) {
-    setBusy(true); setMessage(''); setFailed(false); setPublished(null);
+  /** `where` names the button group, so the result is shown right next to the button pressed. */
+  async function perform(action: () => Promise<void>, where = 'candidate') {
+    setArea(where); setBusy(true); setMessage(''); setFailed(false); setPublished(null);
     try {
       // Buttons follow the caller's live grants, so load them before the first operation.
       if (!synthetic && !me) await loadMe();
@@ -196,19 +198,24 @@ export function CommonKnowledgeInbox() {
   const canReview = synthetic ? actor === 'reviewer' : granted.includes('approve');
   const canPublish = synthetic ? actor === 'publisher' : granted.includes('publish');
 
+  function status(where: string) {
+    if (area !== where || (!busy && !message)) return null;
+    return <p role="status" aria-live="polite" className={`rounded border p-2 text-sm ${
+      busy ? 'border-violet-200 bg-violet-50 text-violet-900' : failed ? 'border-red-300 bg-red-50 text-red-900' : 'border-green-300 bg-green-50 text-green-900'}`}>
+      {busy ? '保存先へ確認中…' : `${failed ? '失敗: ' : '完了: '}${message}`}</p>;
+  }
+
   return <section aria-label="共通知識インボックス" className="space-y-5 rounded-xl border border-violet-200 bg-white p-5">
     <div><h2 className="text-xl font-bold">ノウハウ・用語と基礎知識</h2>
       <p className="mt-2 text-sm text-gray-600">共有された候補を編集し、特定版の技術確認と公開を別々に行います。</p>
       {synthetic && <p className="mt-2 text-sm text-amber-900">合成I1試行。架空の人物・原本・共有許可だけを使用します。実資料は入力しないでください。</p>}
       {!synthetic && <p className="mt-2 text-sm text-amber-900">検証範囲（{scope || '未設定'}）だけで動作します。合成の内容だけを入力し、実資料・個人情報は入力しないでください。</p>}
     </div>
-    <p role="status" aria-live="polite" className={`sticky top-2 z-10 rounded border p-3 text-sm ${busy || message ? '' : 'hidden'} ${
-      busy ? 'border-violet-200 bg-violet-50 text-violet-900' : failed ? 'border-red-300 bg-red-50 text-red-900' : 'border-green-300 bg-green-50 text-green-900'}`}>
-      {busy ? '保存先へ確認中…' : `${failed ? '失敗: ' : '完了: '}${message}`}</p>
     {!synthetic && <div className="space-y-2 rounded border p-3 text-sm">
       <h3 className="font-semibold">接続先と自分の権限</h3>
       <p className="break-all">接続先API: {apiUrl || '未設定'}</p>
-      <button className={BUTTON_CLASS} disabled={busy} onClick={() => void perform(async () => { await loadMe(); })}>権限を確認</button>
+      <button className={BUTTON_CLASS} disabled={busy} onClick={() => void perform(async () => { await loadMe(); setMessage('権限を読み込みました。'); }, 'me')}>権限を確認</button>
+      {status('me')}
       {me && <div className="space-y-1">
         <p className="break-all">操作者: {me.actor}</p>
         <p>業務権限: {me.assignment ? me.assignment.permissions.map((name) => PERMISSION_LABELS[name] || name).join('・') : 'なし'}
@@ -232,27 +239,30 @@ export function CommonKnowledgeInbox() {
         <label className="block text-sm">候補の要約<input className={INPUT_CLASS} maxLength={200} value={summary} onChange={(event) => { setSummary(event.target.value); setConfirmed(false); }} /></label>
         <label className="block text-sm">共有する最小文脈<textarea className={INPUT_CLASS} maxLength={2000} value={context} onChange={(event) => { setContext(event.target.value); setConfirmed(false); }} /></label>
         <label className="block text-sm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> この文面を共有候補として保存することを確認しました</label>
-        <button className={BUTTON_CLASS} onClick={() => void perform(submit)}>明示して投函</button>
+        <button className={BUTTON_CLASS} onClick={() => void perform(submit, 'contribute')}>明示して投函</button>
+        {status('contribute')}
       </div>}
       <div className="flex flex-wrap items-end gap-2">
         <label className="text-sm">候補の状態<select className={INPUT_CLASS} value={state} onChange={(event) => { setState(event.target.value); setCursor(null); }}>
           {Object.entries(STATE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select></label>
-        <button className={BUTTON_CLASS} onClick={() => void perform(() => list())}>共有一覧を取得</button>
-        {cursor && <button className={BUTTON_CLASS} onClick={() => void perform(() => list(true))}>次のページ</button>}
+        <button className={BUTTON_CLASS} onClick={() => void perform(() => list(), 'list')}>共有一覧を取得</button>
+        {cursor && <button className={BUTTON_CLASS} onClick={() => void perform(() => list(true), 'list')}>次のページ</button>}
       </div>
+      {status('list')}
       <ul className="space-y-2">{items.map((item) => <li key={item.candidateId}>
-        <button className="text-sm text-violet-900 underline" onClick={() => void perform(() => load(item.candidateId))}>{item.candidateType} · {STATE_LABELS[item.state]} · {item.candidateId}</button>
+        <button className="text-sm text-violet-900 underline" onClick={() => void perform(() => load(item.candidateId), 'list')}>{item.candidateType} · {STATE_LABELS[item.state]} · {item.candidateId}</button>
       </li>)}</ul>
       {selected && <div className="space-y-3 rounded border p-4">
         <h3 className="font-semibold">選択した候補 · {STATE_LABELS[selected.state]} · 第{selected.candidateRevision}版</h3>
         <p className="whitespace-pre-wrap text-sm">{selected.summary}<br />{selected.context}</p>
         <label className="block text-sm">操作の理由<input className={INPUT_CLASS} value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} /></label>
         <div className="flex flex-wrap gap-2">
-          <button className={BUTTON_CLASS} onClick={() => void perform(() => load(selected.candidateId))}>最新状態を再取得</button>
-          {canEdit && <><button className={BUTTON_CLASS} onClick={() => void perform(() => transition('in_review'))}>編集を引き受ける／再開</button>
-            <button className={BUTTON_CLASS} onClick={() => void perform(() => transition('held'))}>理由を付けて保留</button></>}
+          <button className={BUTTON_CLASS} onClick={() => void perform(() => load(selected.candidateId), 'candidate-top')}>最新状態を再取得</button>
+          {canEdit && <><button className={BUTTON_CLASS} onClick={() => void perform(() => transition('in_review'), 'candidate-top')}>編集を引き受ける／再開</button>
+            <button className={BUTTON_CLASS} onClick={() => void perform(() => transition('held'), 'candidate-top')}>理由を付けて保留</button></>}
         </div>
+        {status('candidate-top')}
         <label className="block text-sm">単元ID<input className={INPUT_CLASS} value={cardId} disabled={!!card} onChange={(event) => setCardId(event.target.value)} /></label>
         <label className="block text-sm">分類<select className={INPUT_CLASS} value={kind} disabled={!canEdit} onChange={(event) => setKind(event.target.value)}>
           <option value="term_foundation">用語・基礎知識</option><option value="case_summary">事例</option><option value="practice_guide">実務ガイド</option>
@@ -271,6 +281,7 @@ export function CommonKnowledgeInbox() {
             <button className={BUTTON_CLASS} disabled={!card} onClick={() => void perform(() => publication(false))}>承認版を公開</button>
             <button className={BUTTON_CLASS} disabled={!card} onClick={() => void perform(() => publication(true))}>公開を停止</button></>}
         </div>
+        {status('candidate')}
       </div>}
       <div className="space-y-2 rounded border p-3">
         <h3 className="font-semibold">未完了操作の復旧</h3>
@@ -279,7 +290,7 @@ export function CommonKnowledgeInbox() {
           const result = await api<{ items: { operationId: string; status: string }[] }>('/operations');
           setPending(result.items);
           setMessage(`未完了の操作: ${result.items.length}件。`);
-        })}>自分の未完了操作を取得</button>
+        }, 'recovery')}>自分の未完了操作を取得</button>
         {pending.map((operation) => <div key={operation.operationId} className="text-sm">
           {operation.operationId} · {operation.status}
           <button className={BUTTON_CLASS} onClick={() => void perform(async () => {
@@ -287,8 +298,9 @@ export function CommonKnowledgeInbox() {
             setPending(pending.filter((item) => item.operationId !== operation.operationId));
             if (selected) await load(selected.candidateId);
             setMessage('操作を復旧しました。最新状態を確認してください。');
-          })}>同じ操作IDから再開</button>
+          }, 'recovery')}>同じ操作IDから再開</button>
         </div>)}
+        {status('recovery')}
       </div>
       <div className="space-y-2 rounded border p-3">
         <h3 className="font-semibold">両AIと共通の公開版確認</h3>
@@ -296,7 +308,8 @@ export function CommonKnowledgeInbox() {
         <button className={BUTTON_CLASS} onClick={() => void perform(async () => {
           const result = await api<Published>(`/published/${cardId}`); setPublished(result); setGeneration(result.generation);
           setMessage(`公開版を読みました（第${result.workingRevision}版・公開世代${result.generation}）。`);
-        })}>公開版を毎回確認して読む</button>
+        }, 'read')}>公開版を毎回確認して読む</button>
+        {status('read')}
         {published && <div><p className="break-all text-xs">{published.knowledgeId} · 第{published.workingRevision}版 · {published.rawSha256}</p><pre className="whitespace-pre-wrap text-sm">{published.markdown}</pre></div>}
       </div>
     </fieldset>

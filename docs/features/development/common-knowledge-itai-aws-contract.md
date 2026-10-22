@@ -134,3 +134,48 @@ AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタッ�
 - 固定費はSecrets Manager 1件（約0.40 USD/月）。他は従量で、現状はAPIに接続した画面がなく、合成受入の読み書き・ログ・保存量だけ。PITR・S3バージョンは保存量に比例。WAFは既存ACLの通過リクエスト分のみ。単価はAWS料金表を今回照会しておらず、概算として扱う。
 - 停止: フラグoffのまま。必要ならAPI stageのスロットリングを下げる更新で止められる。
 - rollback: 本スタックは他から参照されず、共有物の変更もない。撤去する場合はスタック削除で API・Lambda・Role・ログ・秘密・WAF関連付けが消え、台帳表・認可表・配布バケットはRetainで残る。削除操作は今回行っておらず、実施時は残すRetain資源の扱いを別途確認する。合成データはTTL・ライフサイクルで7日以内に自動失効する。
+
+## S3正本化の反映と受入（2026-10-22）
+
+> 最終検証: 2026-10-22 — ローカル試験、changeset全ページ、配備後のAWS実査（設定・権限・配備コードhash・バケットポリシーの拒否・API）、実AWSでの合成受入、Amplify itaiの配信バンドル実査、2アカウントの実ブラウザ操作と台帳・S3の照合。
+
+### 実装とローカル検証（`6d247a40` ほか、ローカルitai → origin/itai）
+
+- 本書「S3正本化への改訂」節のとおり実装。共通知識の試験はPython 52件・フロント6件（合成UIのe2e含む）成功、型検査・cfn-lint・`git diff --check` 成功、Lintエラー0。収束ループを外すと同時停止の試験が落ちることを変異試験で確認。
+- 全体試験の残る失敗は本変更と無関係: node 3件（既存の索引ビルダー、前回記録と同じ）、Python 2件（未変更のカードがWindows作業ツリーでCRLF）、法令アップロード29件は一時領域のパス長が原因で短いパスでは全件成功。
+
+### AWS（itai専用スタックの更新2回。いずれもchangesetを全ページ確認後にユーザーが実行）
+
+| changeset | 内容 | 結果 |
+| --- | --- | --- |
+| `s3-canonical-6d247a40` | 1ページ17件。Add: 作業用バケット・同ポリシー・`/me` の呼出権限・API Deployment。Modify 12（Replacementなし）。Remove: 旧API Deployment（ルート追加時のSAM標準の付け替え） | UPDATE_COMPLETE、失敗イベントなし |
+| `flag-on-6d247a40` | `CommonKnowledgeEnabled=true` のみ。5関数の環境変数、API本体は関数ARNの動的再評価（再作成なし） | UPDATE_COMPLETE |
+
+- 前後で共有dev phase1/phase2・既存itai phase2・Regional WAF（LockToken・ルール数）が一致。Cognitoは読取のみ。
+- 配備コード: 5関数同一zip、5ファイルのhashがコミットと一致。フラグtrue。
+- 両バケット: バージョニング、公開ブロック4項目、SSE-S3、所有者強制、非公開。
+- 境界の実査: 個人SSO主体から正本の `approved/`・`published/`・`manifests/` への書込と作業用の版削除はすべてAccessDenied。作業用 `drafts/` への書込だけ可。
+- API: トークンなし・偽造JWTは401、未定義ルート403。
+- 実AWSでの合成受入: 13シナリオ成功（3入口の公開→両AI読取→停止、作業版の書込後の投影失敗の再開、競合の再試行、古い版の上書き拒否、manifest後の投影前障害で停止が覆らない、同時停止で `published/` が消える、manifest取得不能・期限、ページング、未完了操作の復旧、固定版が後の編集で変わらない）。データは `acceptance#…`／`acceptance/` だけ。
+- 認可表: 本アカウント（閲覧・編集・公開・読取＋共有許可）、2つ目（閲覧・承認・読取）、CLIのIAM主体（閲覧・編集・読取）、合成の根拠台帳1件。範囲 `itai-validation`、期限2026-11-05。投入はユーザーが実行。
+- CLI: 配備環境で `pending`・`read` が動作。操作者は `iam:assumed-role/…`（アカウントIDなし）。
+
+### Amplify itai
+
+- ブランチ環境変数だけでは、amplify.ymlに直書きのRAG/チャットURLが優先されることを配信バンドルで実査した。そのため amplify.yml に「`AWS_BRANCH=itai` かつ `ITAI_RAG_API_URL`／`ITAI_CHAT_API_URL` が両方HTTPSのときだけ上書き」する分岐を入れた（ユーザー承認、他ブランチの挙動は不変）。
+- ブランチ変数: `ITAI_RAG_API_URL`・`ITAI_CHAT_API_URL`（itai phase2）、`NEXT_PUBLIC_COMMON_KNOWLEDGE_API_URL`、`NEXT_PUBLIC_ENABLE_COMMON_KNOWLEDGE=true`、`NEXT_PUBLIC_COMMON_KNOWLEDGE_VALIDATION_SCOPE=itai-validation`、既存の `NEXT_PUBLIC_LAW_RAG_ENABLED`。
+- 配信バンドルにitai専用のRAG・チャット・共通知識APIだけが入り、共有devのRAG/チャットURLは0件。itai phase2のルートは共有devの全ルートを含む（RAGに先輩調査を追加）。チャット履歴はitai専用表になるため、共有devの過去の会話はitai画面に出ない。先輩調査・総合・現場報告のフラグはoffのまま。
+
+### 実ブラウザ（2アカウント）
+
+- 2つ目のアカウント（adminなし）が共通知識画面に入り、閲覧・承認できた。ホームの入口カードを追加し、URL直打ち不要にした。
+- 一往復: 投函 → 編集引受 → 作業版保存 → 確認依頼 → 差し戻し → 再編集・再依頼 → 承認（2つ目）→ 公開 → 両アカウントで読取 → 停止 → 読取不可。台帳・S3の照合: 作業版4版がそれぞれ作業用バケットの別版に固定、承認は第4版で `approved/` に本文と承認記録、公開でmanifest世代1と `published/`（本文＋KB用metadata）、停止で世代2・active無し・`published/` は削除マーカー。
+- 画面の改善（受入中に反映）: 権限の自動読込（未読込で編集欄が無効になる問題）、押せない理由の表示、操作結果を押したボタンの近くに成功・失敗・処理中で表示。
+- 本アカウントで、itai専用APIでの先輩チャット（#195）の表示とチャット利用を確認。先輩チャットは「開発中・管理者限定」のままで、2つ目のアカウントでは表示されない（今回の決定範囲外）。
+
+### 未受入・費用・停止・rollback
+
+- 未受入: CLIでの作業版登録→確認依頼の実配備での一往復（ローカル試験のみ）、Bedrock KBの作成・同期（形式のみKB向け）、IP外からの拒否の実査、実データ・保持方針、専用編集画面（キーマン向け）。
+- 費用: Secrets Manager 1件（約0.40 USD/月）に加え、作業用バケットの保存量・版数に比例する従量（現状数KB）。他は従来どおり従量で僅少。ブラウザ確認の質問によるBedrock呼出しのみ発生。料金表は今回照会していない概算。
+- 停止: `CommonKnowledgeEnabled=false` の更新、または認可表の削除で全操作403。Amplifyは `ITAI_*` 変数を外せば共有devのRAG/チャットに戻る。
+- rollback: スタックは他から参照されない。作業用バケットはRetain（固定した版を消さないため、版削除はポリシーで拒否）。公開中の知識はない（停止済み）。
