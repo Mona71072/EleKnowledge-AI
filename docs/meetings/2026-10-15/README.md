@@ -22,6 +22,7 @@ related-code: []
 ## 議事録・現行の配布資料
 
 - [打合せ議事録（Word）](../../key-persons/Ele-Knowledge_キーマン打合せ_議事録_20261015.docx)：`docs/key-persons/`を正本とし、このフォルダーには複製しません。
+- [打合せ議事録（配布用PDF）](../../key-persons/Ele-Knowledge_キーマン打合せ_議事録_20261015.pdf)：法令一覧・FAQとデザインを統一した4ページ版。
 - [キーマン向け資料](../../key-persons/README.md)
 - [利用者向けマニュアル・FAQ](../../user-manual/README.md)
 
