@@ -278,6 +278,7 @@ export function CommonKnowledgeInbox() {
         <button className={BUTTON_CLASS} onClick={() => void perform(async () => {
           const result = await api<{ items: { operationId: string; status: string }[] }>('/operations');
           setPending(result.items);
+          setMessage(`未完了の操作: ${result.items.length}件。`);
         })}>自分の未完了操作を取得</button>
         {pending.map((operation) => <div key={operation.operationId} className="text-sm">
           {operation.operationId} · {operation.status}
@@ -294,6 +295,7 @@ export function CommonKnowledgeInbox() {
         <label className="block text-sm">読む単元ID<input className={INPUT_CLASS} value={cardId} onChange={(event) => setCardId(event.target.value)} /></label>
         <button className={BUTTON_CLASS} onClick={() => void perform(async () => {
           const result = await api<Published>(`/published/${cardId}`); setPublished(result); setGeneration(result.generation);
+          setMessage(`公開版を読みました（第${result.workingRevision}版・公開世代${result.generation}）。`);
         })}>公開版を毎回確認して読む</button>
         {published && <div><p className="break-all text-xs">{published.knowledgeId} · 第{published.workingRevision}版 · {published.rawSha256}</p><pre className="whitespace-pre-wrap text-sm">{published.markdown}</pre></div>}
       </div>
