@@ -64,6 +64,29 @@ A subsequent cost-tag check confirmed all three new keys on 18 of those 19 resou
 
 See [the authoritative operation record](ops-cost-allocation-tags.md#2026-10-20のaws反映追加確認) and [the resource register supplement](cost-allocation-resource-register.md#2026-10-20の追加確認19件). Billing activation remains unverified because `ListCostAllocationTags` was denied for the member account; resource tagging and billing activation are distinct.
 
+## itai専用検証環境の追補（2026-10-22）
+
+> 最終検証: 2026-10-22 — origin/itai b9076cbdの実装契約・SAMとPR #195の実施報告を文書照合。今回のAWS再実査ではない。
+
+#195の先輩チャット等を検証するitai専用環境が作成され、共通知識も別スタックに配置された。実装・配備記録はitaiブランチにあり、#195のhead d0dd0397やdevelopに取込済みという意味ではない。10/20のタグ照合母集団110件へ足さない。
+
+| 対象 | 役割・状態（実施記録による） | 管理元・境界 |
+| --- | --- | --- |
+| EleKnowledge-itai-phase2 | itai専用のRAG・チャット・先輩チャット検証APIと専用チャット履歴。Amplify itaiの接続先 | itai検証側のPhase2構成。共有dev Phase2とは別。通常の共有devデプロイへ混ぜない |
+| itai KB v2 | 既存のitai側KB検証環境。共通知識の新規KBではない | 共通知識スタック作成・更新前後で状態不変を確認した記録あり。既存資料の移行・同期や正式移行対象の判断を兼ねない |
+| EleKnowledge-itai-common-knowledge | 新規作成後、S3正本化と有効化の更新がUPDATE_COMPLETE | itaiブランチのinfrastructure/sam/common-knowledge-itai-template.yaml |
+| LedgerTable / PolicyTable | 候補・版・状態・監査の台帳と業務認可の2表。PITR・暗号化・Retain | 共通知識専用。合成検証用TTLと業務データの保持方針を区別 |
+| WorkBucket / DistributionBucket | バージョニング付き作業用drafts/と正本approved/・published/・manifests/。既存配布バケットを正本に転用 | 2バケット。承認版の不変保存・公開と停止を分離。公開ブロック・TLS・SSE。実名非掲載 |
+| API / Lambda / IAM / Logs / cursor secret | Cognito付きREST API、責任別Lambda 5、Role 5、LogGroup 6、Secrets Manager 1、既存Regional WAFとの関連付け | 共有Cognito/WAFは参照。API側で業務権限・分野・読者・期限を検証。秘密値・内部URL・IDは非掲載 |
+| Amplify itai | RAG・チャット・共通知識はitai専用APIへ接続 | 既存Amplifyアプリのブランチ。共有devの過去チャットは表示されない。他APIの共有参照とは区別 |
+
+共通知識SAMの分類は `gyoumu012Project=ele-knowledge` / `gyoumu012Component=rag` / `gyoumu012Usage=development`、Purposeはitai-common-knowledge-validation。これはテンプレートの設定確認であり、新規全資源の実タグ読み戻し・課金明細への反映を本PRで確認したものではない。初期台帳のタグ件数へ混ぜず、次回のサービス別読取で台帳ID・実タグ・管理元を追補する。
+
+実施記録では合成13シナリオ、2アカウントの投函→編集→差し戻し→承認→公開→読取→停止を確認。KB作成・同期、CLI登録の実配備一往復、実データ・保持方針は未受入。共有dev・Cognito・WAF設定の不変確認と、追加APIのWAF関連付けを区別する。
+
+根拠: [itai実装契約](https://github.com/yukiworkspace/EleKnowledge-AI/blob/b9076cbd/docs/features/development/common-knowledge-itai-aws-contract.md)、[SAM](https://github.com/yukiworkspace/EleKnowledge-AI/blob/b9076cbd/infrastructure/sam/common-knowledge-itai-template.yaml)、[#195実施報告](https://github.com/yukiworkspace/EleKnowledge-AI/pull/195#issuecomment-6330271972)。この追補でAWS変更・デプロイ・正式移行対象への追加を実行しない。
+
+
 ## Phase 1 - Auth and Base Data
 
 > 最終検証: 2026-10-04 — SAMテンプレートとLambdaのAWS API呼出しを照合（実環境未確認）

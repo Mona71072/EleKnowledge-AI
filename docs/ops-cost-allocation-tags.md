@@ -142,6 +142,23 @@ Phase 1 / Phase 2 / アーカイブ / お知らせ・集計 / 監視 / WAF / ト
 
 変更前・変更セット・読み戻し・追加タグ照合の詳細はGit除外済みの `eval-results/cost-tags/env193-20261020/` に保存した。内部ARN・アカウント値・個人の認証設定を共有文書へ転記していない。台帳・マップ・ランブックはこの実施記録を参照し、請求の有効化確認は別の残作業として管理する。
 
+## 2026-10-22の追補: 110件の内訳
+
+> 最終検証: 2026-10-22 — 10/20保存のresource-tags-verification-local.json全110行を再集計。今回のAWS再照会ではない。
+
+10/20の110件は、Env削除を確認した75件、Env残存の別管理19件、読み戻し時点でEnvなしの残り16件に重複なく分かれる（75＋19＋16＝110）。この16件は今回さらに16件削除したという意味ではない。CloudFormation本体のowner判定やDynamoDB Streamを含む照会結果の分類であり、個別の削除時点までは断定しない。
+
+| サービス | 件数 | 残り16件の識別・確認範囲 |
+| --- | ---: | --- |
+| CloudFormation | 6 | Phase1、Phase2、WAF、監視、お知らせ・集計、チャットアーカイブのスタック本体。照会結果のownerフィールドは空で、75件の判定には入らない |
+| DynamoDB table | 6 | metrics-dev、chatlogs-dev、sessions-dev、sites-dev、users-dev、announcements-dev |
+| DynamoDB Stream | 2 | chatlogs-dev、users-devのStream。テーブルと別行であり独立の直接タグ付与対象ではない |
+| Athena | 1 | eleknowledge-analytics-devのworkgroup |
+| S3 | 1 | 法令RAGの既存データバケット。適用前からEnvなし。実名・ARNは未掲載 |
+
+16件はいずれも適用後Envなし、Env以外のタグ変更なし。16件すべてに新3キーがあると確認したものではない。104件の初期台帳や19件の追加確認へ加算しない。証跡は未追跡の `eval-results/cost-tags/env193-20261020/` に保持する。
+
+
 ## 一次情報
 
 - [AWS TagResources API](https://docs.aws.amazon.com/resourcegroupstagging/latest/APIReference/API_TagResources.html): リージョン制約、20件上限、部分失敗、CloudFormation更新の注意点。

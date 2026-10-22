@@ -222,6 +222,14 @@ related-code: scripts/ops/apply_cost_allocation_tags.py, infrastructure/sam/
 
 この表は対象19件の時点確認であり、法令KBの移行対象合意や全AWSリソースの棚卸しを兼ねない。ARNと台帳IDの対応、適用前後・再読取は未追跡の `eval-results/cost-tags/env193-20261020/` に保持した。
 
+## 110件の母集団と後続のitai環境
+
+> 最終検証: 2026-10-22 — 10/20の保存済み110行とitaiブランチb9076cbdの実施記録を文書照合。AWS再照会・全表再検証なし。
+
+110件＝Env削除75件＋Env残存19件＋Envなし16件。残り16件はスタック本体6、DynamoDB table 6、Stream 2、Athena 1、S3 1で、[運用記録の内訳](ops-cost-allocation-tags.md#2026-10-22の追補-110件の内訳)に識別名と判定境界を記載した。
+
+10/22にitai専用の共通知識スタック、作業用／正本S3、台帳／認可表等が追加されている。これらは10/20の110件・19件・初期104件に含まれない。[リソースマップのitai追補](aws-resource-map.md#itai専用検証環境の追補2026-10-22)に管理元・用途・タグ検証境界を記載する。法令KBの移行対象は[monaの10/21回答](https://github.com/yukiworkspace/EleKnowledge-AI/pull/194#issuecomment-6304277103)と本依頼で合意されたが、既存のタグ検証件数を増やす決定ではない。
+
 ## 更新・差分確認の手順
 
 1. デプロイ後と月次に、運用文書の手順でAWSの計画・検証結果を新しいファイル名で取得する。失敗・未検証行を確認済みとして台帳へ取り込まない。
