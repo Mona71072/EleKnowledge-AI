@@ -8,6 +8,12 @@ related-code: frontend/src/app/page.tsx, frontend/src/app/chat/page.tsx
 
 **目的:** 利用者マニュアル・FAQ等の原稿と配布物を区別し、管理者が確認・再生成できる入口。
 
+## 配布資料のデザイン
+
+> 最終検証: 2026-10-20 — 共通デザイン基準への参照を確認
+
+新規作成・改訂時は [配布資料の共通デザイン基準](../distribution-design.md) を使用します。書体・配色等の詳細は本READMEへ複製しません。
+
 ## 現行の更新対象
 
 - 原稿: [利用者マニュアルHTML](eleknowledge-user-manual.html)。第2版は法令チャットの説明を追加した版。確認用途を示すラベルは利用者向け文書に記載しない。
