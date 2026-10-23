@@ -176,3 +176,9 @@ related-code:
 - 完了した回答は ChatLogs に `ragMode=senpai_research`、既存の先輩タグ（`senpaiConversationId`/`senpaiTurnId`）付きの assistant 行として保存（TTL 60日）。相談履歴から開き直すと回答・出典を復元する（段階イベントは復元しない）。通常の `/chat` 履歴には出さない。
 - 完了した回答の保存は、ジョブ行を `completed` にできた**後**にだけ行う（期限切れで失敗にされたジョブの回答は履歴に残さない）。
 - CloudWatch には `jobId`（UUID）・段階名・件数・時間・終了理由・エラー種別だけを出す。質問・検索語・本文・回答・`userId` は出さない。ワーカーは `job_started` と `job_finished`（`status` は `completed` / `failed` / `lost_lease`）を対で出し、片方だけの `jobId` は異常（強制終了など）として検知できる。
+
+## 2026-10-23のクラウド技術確認
+
+> 最終検証: 2026-10-23 — 本節の検証記録リンクだけを追加。既存契約全体の検証日は据え置き。
+
+[関連280テスト・SAM静的検証と未統合差分](verification-2026-10-23-senpai-cloud-review.md)を参照。itaiの未push修正と二段階承認は未統合で、実モデル・AWS・Windowsの受入ではない。
