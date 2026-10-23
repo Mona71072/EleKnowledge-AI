@@ -47,6 +47,8 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 
 ### 🟡 開発中の機能（Phase 3）
 
+> 最終検証: 2026-10-23 — 製品用語・基礎知識の索引行だけを#200最新回答へ整合。他行は再検証していない。
+
 | 機能 | 仕様 | 補足資料 |
 |------|------|---------|
 | トラブルシューティング | [docs/features/development/phase3-troubleshooting-spec.md](docs/features/development/phase3-troubleshooting-spec.md) | AWS リソースは存在するが利用者向け E2E 未確認。既存の[処理シーケンス](docs/features/production/troubleshooting-sequence.md)は現行との照合が必要。PoC 設計: [docs/agent-spec.md](docs/agent-spec.md) ／ [実装ガイド](docs/features/development/phase3-troubleshooting-implementation-guide.md) |
@@ -54,7 +56,7 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 | 法令チャット（developプレリリース） | [法令RAG設計](docs/features/development/legal-rag-design.md) ／ [法令API補足](docs/api/legal-chat.md) | Amplify job 64でdevelopへ公開反映済み。法令カードと法令画面への遷移を実確認。itai配信版の実アカウント操作はユーザー確認済み。対象はdev全ユーザー、実費は今後確認。[対象一覧](docs/features/development/legal-rag-target-laws.md) ／ [公開・受入手順](docs/legal-chat-prerelease.md) ／ [確認記録](docs/verification-2026-10-09-legal-chat-prerelease.md) |
 | RAG の 2 モード化（通常モード＋じっくりモード。設計段階） | [設計（合意済み・未実装）](docs/design-2026-09-24-rag-two-modes.md) | 決定: [docs/decisions-2026-09-24-rag-two-modes.md](docs/decisions-2026-09-24-rag-two-modes.md) ／ 調査: [docs/survey-2026-09-24-agentic-rag.md](docs/survey-2026-09-24-agentic-rag.md) ／ [KB 修正依頼台帳](docs/kb-change-requests.md) |
 | Know-how Knowledge Layer（設計段階・未確定） | [docs/design-2026-10-01-knowhow-flywheel.md](docs/design-2026-10-01-knowhow-flywheel.md) | 調査: [docs/survey-2026-10-01-knowhow-flywheel.md](docs/survey-2026-10-01-knowhow-flywheel.md) |
-| 製品用語・基礎知識のAI共有（初期構想・未合意） | [初期構想](docs/concept-2026-10-21-product-domain-knowledge.md) | 当社固有の用語・通称・仕組みを一単元ずつ根拠付きでまとめ、開発エージェントとEle-Knowledgeで共有する案。S3等の構成は候補で、AWS作成・KB取込・参照経路は未実装。 |
+| 製品用語・基礎知識のAI共有（共同確認中） | [初期構想](docs/concept-2026-10-21-product-domain-knowledge.md) | ノウハウと共通管理。開発中はGit正本、運用開始時にS3へ切替。キーマンの内容承認と管理者のapproved保存・公開を分離する方針。itai専用S3検証実装は存在するが、二段階承認・業務用移行・KB接続は未受入。 |
 
 ### 📖 利用者向け案内
 
