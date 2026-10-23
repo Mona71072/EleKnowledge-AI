@@ -162,7 +162,9 @@ WAFのようにLambdaコードを持たない通常のCloudFormationテンプレ
 
 ### 6.1 既存値は維持、変更する値だけ明示する
 
-以下は既存パラメーターをすべて `UsePreviousValue = true` とし、`$PlannedOverrides` の項目だけを変更する。`NoEcho` の秘匿値も読み出して再入力する必要がない。テンプレートから削除したパラメーターは送信対象から外し、新しい必須パラメーターは承認済み値を追加してから作成する。
+> 最終検証: 2026-10-23 — 手順本文とPhase 2テンプレートを静的照合。候補パラメーターの選別とRoleARN保持を補完。AWS・PowerShell実行は未実施。
+
+以下は既存パラメーターをすべて `UsePreviousValue = true` とし、`$PlannedOverrides` の項目だけを変更する。`NoEcho` の秘匿値も読み出して再入力する必要がない。テンプレートから削除したパラメーターは送信対象から外し、新しいパラメーターはDefaultの有無にかかわらず承認済み値を明示する。下の候補キー照合で未指定なら停止し、意図しないDefaultの採用を防ぐ。
 
 ```powershell
 # 原則として既存値を保持する。Phase 2の版は今回のソースへ更新する。
@@ -173,9 +175,22 @@ if ((Split-Path -Leaf $SourceTemplate) -eq 'phase2-template.yaml') {
 # 例: $PlannedOverrides['PresignedUrlExpiresIn'] = '300'
 # 例示値を今回の承認済み変更と取り違えないこと。
 
+# 候補テンプレートに残る項目だけ保持する。削除済みパラメーターの再送を防ぐ。
+$summaryJson = aws cloudformation get-template-summary --template-url $TemplateUrl --profile $DeployProfile --region $DeployRegion --output json
+if ($LASTEXITCODE -ne 0) { throw '候補テンプレートのパラメーター取得失敗' }
+$TemplateParameterKeys = @(($summaryJson | ConvertFrom-Json).Parameters | ForEach-Object { $_.ParameterKey })
+$PreviousParameterKeys = @($BeforeStack.Parameters | ForEach-Object { $_.ParameterKey })
+foreach ($key in $PlannedOverrides.Keys) {
+    if ($key -notin $TemplateParameterKeys) { throw "候補にない変更パラメーター: $key" }
+}
+foreach ($key in $TemplateParameterKeys) {
+    if ($key -notin $PreviousParameterKeys -and -not $PlannedOverrides.ContainsKey($key)) {
+        throw "新規パラメーターの承認済み値を明示する: $key"
+    }
+}
 $Parameters = @(
     foreach ($p in $BeforeStack.Parameters) {
-        if (-not $PlannedOverrides.ContainsKey($p.ParameterKey)) {
+        if ($p.ParameterKey -in $TemplateParameterKeys -and -not $PlannedOverrides.ContainsKey($p.ParameterKey)) {
             @{ ParameterKey = $p.ParameterKey; UsePreviousValue = $true }
         }
     }
@@ -193,6 +208,7 @@ $request = @{
     Parameters = $Parameters
     Description = "commit=$DeployCommit; reviewed backend update"
 }
+if ($BeforeStack.RoleARN) { $request['RoleARN'] = $BeforeStack.RoleARN }
 $RequestPath = "$EvidenceDir/create-change-set.json"
 [IO.File]::WriteAllText($RequestPath, ($request | ConvertTo-Json -Depth 20), $Utf8NoBom)
 
@@ -372,6 +388,7 @@ AWS公式の確認先:
 - [sam package](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-cli-command-reference-sam-package.html): コードと依存をS3へ送り、参照を置換したテンプレートを生成。
 - [sam deploy](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-cli-command-reference-sam-deploy.html): 変更セット作成と実行、S3・config・パラメーター指定。
 - [SAM設定ファイル](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-config.html): 設定の探索・優先関係。
+- [get-template-summary](https://docs.aws.amazon.com/cli/latest/reference/cloudformation/get-template-summary.html): 候補テンプレートのパラメーターキー・Default・型の取得。
 - [create-change-set](https://docs.aws.amazon.com/cli/latest/reference/cloudformation/create-change-set.html): UsePreviousValueとTemplateURLの指定。
 - [変更セットの実行](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-changesets-execute.html): 確認した変更セットの適用。
 - [ロールバックの再開](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-continueupdaterollback.html): UPDATE_ROLLBACK_FAILED時の復旧。
@@ -438,11 +455,7 @@ foreach ($logicalId in @('RagFunction', 'ChatManagementFunction')) {
 1. 5章を順に実行する。通常更新の再実行例は`sam validate --lint` → `sam build --no-cached` → **build配下のtemplateを**`sam package` → packaged templateを既存S3へ配置、の順。限定反映では8章で準備した候補と対応するビルド成果物を使い、稼働中S3 CodeUriを保持する。
 2. `resolve_s3`混入を避け、最小設定と`--no-resolve-s3`を使う。10/15のアーカイブpackageでもこの指定が必要だった。ローカルの設定だけを変えてSCPを回避したり、バケットを作り直したりしない。
 3. 6.1で`$PlannedOverrides`を決め、既存の他項目をすべて`UsePreviousValue`にする。**今回のPhase 2コード更新では`RagLogicVersion=$DeployCommit`を明示する。** 10/14の既存値保持を、そのまま版ラベルも保持する指示として使わない。既存機能フラグやモデルをテンプレートのDefaultへ戻さない。
-4. 既存のCloudFormationサービスロールがある場合は、6.1の`$request`作成後・JSON保存前に次を加える。当時の作成スクリプトもRoleARNがある場合に引き継いでいる。
-
-```powershell
-if ($BeforeStack.RoleARN) { $request['RoleARN'] = $BeforeStack.RoleARN }
-```
+4. 既存のCloudFormationサービスロールがある場合は、6.1のブロックがRoleARNを引き継ぐ。当時の作成スクリプトと同じ扱いとし、別のロールへ置き換えない。
 
 5. 6.1の`create-change-set`と作成待機・`describe-change-set`を実行する。当時はpackage後のテンプレートが51,200 bytes未満であることを確認して`TemplateBody`で送った。5〜6章の`TemplateURL`方式は大きいテンプレートにも対応するための再実行例である。両方を同時に指定しない。
 
@@ -516,3 +529,21 @@ if ($LASTEXITCODE -ne 0) { throw 'イベント取得失敗' }
 ```
 
 イベントの理由にも実リソース値が含まれることがあるため、確認はローカルで行う。12章の完了記録には、成功・ロールバック・未確認試験・次の担当を区別して残す。
+
+## 15. クラウドでの再確認と再実行前の確認表
+
+> 最終検証: 2026-10-23 — #196のmona要求5点、§14、PR headのPhase 2と#195 d0dd0397を静的照合。過去の成功記録を再実行したものではない。
+
+| monaの確認要求 | 読む場所 | 作業時に埋めること |
+| --- | --- | --- |
+| 作業場所・テンプレート・スタック | §2、§14.1–14.2 | 専用チェックアウトの絶対パス・検証済みGit SHA・承認対象スタック |
+| 認証から完了読取りまでの順序 | §3–7、§14.2–14.6 | STS確認→現状保存→build/package→変更セット確認→同じ変更セット実行→読取り |
+| 具体的な選択と保持値 | §3.2、§6.1、§14.2–14.4 | 許可済みプロファイル・既存成果物バケット・RagLogicVersion・候補に残る既存値と新規値 |
+| 実行判断・更新後の確認 | §6.2、§7、§14.5–14.6 | 今回の許容差分、実行直前の状態、版・コードSHA・設定・HTTPとブラウザの別記録 |
+| 失敗時の次の操作・停止条件 | §11、§14.7 | 状態とイベントの読取り。原因未解消の再実行や権限緩和をしない |
+
+今回§6.1の例を補完した。本文にだけあった「削除済みパラメーターは送らない」を候補テンプレートのキー照合として実装し、新規キーの承認済み値がなければ停止する。既存RoleARNの保持も通常経路へ入れ、§14だけを読まない場合の漏れを防ぐ。
+
+#195はこのPRのPhase 2より新しく、調査ジョブ・条件付きAPI・RagApi限定W1028抑制を含む。#195を反映する場合は、その検証済みheadを入力にして本手順を使う。CI成功をSAM lint成功と読み替えず、§5の対象テンプレートで検証し、警告抑制の対象と理由も確認する。
+
+クラウドで今回確認できたのは文書・ソースの整合まで。PowerShell構文解析、Windows実操作、AWS変更セット作成・適用、実認証のHTTP・画面試験は今回未実施。過去の§14の成功例と区別して記録する。内容へのmonaの回答とマージ可は引き続き別途確認する。
