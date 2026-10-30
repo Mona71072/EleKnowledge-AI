@@ -104,8 +104,8 @@ def _accepted(job_id: str, status: str) -> dict:
     return http.respond(202, {'jobId': job_id, 'status': status, 'pollAfterMs': config.POLL_AFTER_MS})
 
 
-def _undo_reservation(job_store, user_id: str, request: dict, *, lock_job_id: str = None,
-                      slot_day: str = None) -> None:
+def _undo_reservation(job_store, user_id: str, request: dict, *, request_job_id: str,
+                      lock_job_id: str = None, slot_day: str = None) -> None:
     """途中で断った要求が、ロック・日次枠・二重送信登録を残さないようにする。
 
     slot_day は日次枠を取った日。指定したときだけ、その日の枠を返す。
@@ -114,7 +114,7 @@ def _undo_reservation(job_store, user_id: str, request: dict, *, lock_job_id: st
         job_store.return_daily_slot(user_id, slot_day)
     if lock_job_id:
         job_store.release_lock(user_id, lock_job_id)
-    job_store.release_request(user_id, request['clientRequestId'])
+    job_store.release_request(user_id, request['clientRequestId'], request_job_id)
 
 
 def _claim_or_replay(job_store, user_id: str, request: dict, job_id: str):
@@ -127,7 +127,7 @@ def _claim_or_replay(job_store, user_id: str, request: dict, job_id: str):
         if existing is not None:
             return existing_id, existing['status']
         # 登録だけが残り、ジョブ行が無い（前回の受付が途中で落ちた）。登録を外して作り直す。
-        job_store.release_request(user_id, request['clientRequestId'])
+        job_store.release_request(user_id, request['clientRequestId'], existing_id)
     raise RuntimeError('request replay raced twice')
 
 
@@ -141,11 +141,12 @@ def _create(event: dict, user_id: str) -> dict:
     if replay is not None:
         return _accepted(*replay)
     if not job_store.acquire_lock(user_id, job_id, config.job_ttl_seconds()):
-        _undo_reservation(job_store, user_id, request)
+        _undo_reservation(job_store, user_id, request, request_job_id=job_id)
         return http.error(409, 'JobInProgress', '前の調査が実行中です。完了してからお試しください')
     day = job_store.daily_day()
     if not job_store.take_daily_slot(user_id, config.daily_limit(), day):
-        _undo_reservation(job_store, user_id, request, lock_job_id=job_id)
+        _undo_reservation(job_store, user_id, request, request_job_id=job_id,
+                          lock_job_id=job_id)
         return http.error(429, 'DailyLimitExceeded', '本日の調査回数の上限に達しました')
     try:
         job_store.create_job(store.build_job_item(
@@ -153,14 +154,16 @@ def _create(event: dict, user_id: str) -> dict:
         ))
     except Exception:
         # ジョブ行を作れなかった要求は、ロック・日次枠・登録を残さない（再送で作り直せる）。
-        _undo_reservation(job_store, user_id, request, lock_job_id=job_id, slot_day=day)
+        _undo_reservation(job_store, user_id, request, request_job_id=job_id,
+                          lock_job_id=job_id, slot_day=day)
         raise
     try:
         invoke_worker(job_id)
     except Exception as error:  # noqa: BLE001 - 失敗は利用者に一般化して返す
         _log('invoke_worker', 'error', error, job_id)
         job_store.fail_job(job_id, 'Internal', '調査を開始できませんでした。時間をおいて再度お試しください')
-        _undo_reservation(job_store, user_id, request, lock_job_id=job_id, slot_day=day)
+        _undo_reservation(job_store, user_id, request, request_job_id=job_id,
+                          lock_job_id=job_id, slot_day=day)
         return http.error(502, 'StartFailed', '調査を開始できませんでした。時間をおいて再度お試しください')
     _log('create', 'ok', job_id=job_id)
     return _accepted(job_id, 'queued')

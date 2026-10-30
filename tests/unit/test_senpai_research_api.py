@@ -147,6 +147,33 @@ def test_same_client_request_id_returns_same_job_without_second_invoke(api):
     assert api.test_ctx.invoked == [first["jobId"]]
 
 
+def test_expired_request_replay_creates_new_job_without_returning_old_result(api):
+    first = body_of(_post(api))
+    store = api.test_ctx.store
+    store.start_job(first["jobId"])
+    store.complete_job(first["jobId"], {"kind": "answer", "answerMarkdown": "期限切れ"}, {})
+    _finish(api, first["jobId"])
+    now = int(api.test_ctx.clock())
+    api.test_ctx.table.update_item(
+        Key={"pk": f"JOB#{first['jobId']}"},
+        UpdateExpression="SET #ttl = :expired",
+        ExpressionAttributeNames={"#ttl": "ttl"},
+        ExpressionAttributeValues={":expired": now - 1},
+    )
+    api.test_ctx.table.update_item(
+        Key={"pk": f"REQ#{USER_ID}#{support.CLIENT_REQUEST_ID}"},
+        UpdateExpression="SET #ttl = :expired",
+        ExpressionAttributeNames={"#ttl": "ttl"},
+        ExpressionAttributeValues={":expired": now - 1},
+    )
+
+    retry = _post(api)
+
+    assert retry["statusCode"] == 202
+    assert body_of(retry)["jobId"] != first["jobId"]
+    assert api.test_ctx.invoked == [first["jobId"], body_of(retry)["jobId"]]
+
+
 def test_second_active_job_is_409_and_does_not_use_quota(api, monkeypatch):
     monkeypatch.setenv("SENPAI_RESEARCH_DAILY_LIMIT", "2")
     first = body_of(_post(api))

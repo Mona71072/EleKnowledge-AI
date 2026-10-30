@@ -93,8 +93,17 @@ class JobStore:
                 return existing['jobId'], False
         raise RuntimeError('request claim raced twice')
 
-    def release_request(self, user_id: str, client_request_id: str) -> None:
-        self._table.delete_item(Key={'pk': f'REQ#{user_id}#{client_request_id}'})
+    def release_request(self, user_id: str, client_request_id: str, job_id: str) -> None:
+        """自分の要求予約だけを外す（競合相手の予約は残す）。"""
+        try:
+            self._table.delete_item(
+                Key={'pk': f'REQ#{user_id}#{client_request_id}'},
+                ConditionExpression='jobId = :job',
+                ExpressionAttributeValues={':job': job_id},
+            )
+        except ClientError as error:
+            if not _is_condition_failure(error):
+                raise
 
     # ------------------------------------------------------------ ロック
 
