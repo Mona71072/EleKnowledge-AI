@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "source": "synthetic",
+  "questionId": "T21-SYN-001",
+  "candidateLimit": 10,
+  "requestedEquipment": "SYN-MODEL-A",
+  "requestedVersion": "v3",
+  "goldEvidence": [
+    {"documentId": "SYN-GOLD-A", "page": 11},
+    {"documentId": "SYN-GOLD-B", "page": 1}
+  ],
+  "candidates": [
+    {"queryLane": "q1", "documentId": "SYN-NOISE-A-01", "page": 1, "chunkId": "SYN-CHUNK-A01", "contentHash": "SYN-HASH-A01", "score": 0.99, "rerankScore": 0.95, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-NOISE-A-02", "page": 2, "chunkId": "SYN-CHUNK-A02", "contentHash": "SYN-HASH-A02", "score": 0.98, "rerankScore": 0.94, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-NOISE-A-03", "page": 3, "chunkId": "SYN-CHUNK-A03", "contentHash": "SYN-HASH-A03", "score": 0.97, "rerankScore": 0.93, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-NOISE-A-04", "page": 4, "chunkId": "SYN-CHUNK-A04", "contentHash": "SYN-HASH-A04", "score": 0.96, "rerankScore": 0.92, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-NOISE-A-05", "page": 5, "chunkId": "SYN-CHUNK-A05", "contentHash": "SYN-HASH-A05", "score": 0.95, "rerankScore": 0.91, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-NOISE-A-06", "page": 6, "chunkId": "SYN-CHUNK-A06", "contentHash": "SYN-HASH-A06", "score": 0.94, "rerankScore": 0.90, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-NOISE-A-07", "page": 7, "chunkId": "SYN-CHUNK-A07", "contentHash": "SYN-HASH-A07", "score": 0.93, "rerankScore": 0.89, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-NOISE-A-08", "page": 8, "chunkId": "SYN-CHUNK-A08", "contentHash": "SYN-HASH-A08", "score": 0.92, "rerankScore": 0.88, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-NOISE-A-09", "page": 9, "chunkId": "SYN-CHUNK-A09", "contentHash": "SYN-HASH-A09", "score": 0.91, "rerankScore": 0.87, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-NOISE-A-10", "page": 10, "chunkId": "SYN-CHUNK-A10", "contentHash": "SYN-HASH-A10", "score": 0.90, "rerankScore": 0.86, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-GOLD-A", "page": 11, "chunkId": "SYN-CHUNK-GA", "contentHash": "SYN-HASH-GA", "score": 0.89, "rerankScore": 0.50, "equipment": "SYN-MODEL-A", "version": "v3"},
+    {"queryLane": "q2", "documentId": "SYN-GOLD-B", "page": 1, "chunkId": "SYN-CHUNK-GB", "contentHash": "SYN-HASH-GB", "score": 0.88, "rerankScore": 0.999, "equipment": "SYN-MODEL-A", "version": "v3"},
+    {"queryLane": "q2", "documentId": "SYN-NOISE-B-01", "page": 1, "chunkId": "SYN-CHUNK-B01", "contentHash": "SYN-HASH-B01", "score": 0.87, "rerankScore": 0.85, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q2", "documentId": "SYN-NOISE-B-02", "page": 2, "chunkId": "SYN-CHUNK-B02", "contentHash": "SYN-HASH-B02", "score": 0.86, "rerankScore": 0.84, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q2", "documentId": "SYN-NOISE-B-03", "page": 3, "chunkId": "SYN-CHUNK-B03", "contentHash": "SYN-HASH-B03", "score": 0.85, "rerankScore": 0.83, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q2", "documentId": "SYN-NOISE-B-04", "page": 4, "chunkId": "SYN-CHUNK-B04", "contentHash": "SYN-HASH-B04", "score": 0.84, "rerankScore": 0.82, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q2", "documentId": "SYN-NOISE-B-05", "page": 5, "chunkId": "SYN-CHUNK-B05", "contentHash": "SYN-HASH-B05", "score": 0.83, "rerankScore": 0.81, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q2", "documentId": "SYN-NOISE-B-06", "page": 6, "chunkId": "SYN-CHUNK-B06", "contentHash": "SYN-HASH-B06", "score": 0.82, "rerankScore": 0.80, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q2", "documentId": "SYN-NOISE-B-07", "page": 7, "chunkId": "SYN-CHUNK-B07", "contentHash": "SYN-HASH-B07", "score": 0.81, "rerankScore": 0.79, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q2", "documentId": "SYN-NOISE-B-08", "page": 8, "chunkId": "SYN-CHUNK-B08", "contentHash": "SYN-HASH-B08", "score": 0.80, "rerankScore": 0.78, "equipment": "SYN-MODEL-B", "version": "v2"},
+    {"queryLane": "q1", "documentId": "SYN-GOLD-B", "page": 1, "chunkId": "SYN-CHUNK-GB", "contentHash": "SYN-HASH-GB", "score": 0.60, "rerankScore": 0.60, "equipment": "SYN-MODEL-A", "version": "v3"}
+  ]
+}

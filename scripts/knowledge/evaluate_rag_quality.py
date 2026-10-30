@@ -121,10 +121,18 @@ def _score(cases: list[dict], results: list[dict], k: int, *, include_categories
         for claim in result["claims"]:
             if claim.get("factual", False):
                 answer["factual_claims"] += 1
+                answer["scope_match_total"] += int(claim["scopeMatch"])
                 if claim.get("supported", False):
                     answer["supported_claims"] += 1
                 else:
                     answer["unsupported_claims"] += 1
+                for condition in claim["conditionChecks"]:
+                    if not condition["applicable"]:
+                        continue
+                    answer["applicable_conditions"] += 1
+                    answer["stated_conditions"] += int(condition["stated"])
+                    answer["supported_conditions"] += int(condition["supported"])
+                    answer["omitted_conditions"] += int(not condition["stated"])
                 valid_citations = [c for c in claim["citations"] if c.get("validSupport", False) and c["documentId"] in retrieved_ids]
                 if not valid_citations:
                     answer["citation_omissions"] += 1
@@ -150,6 +158,8 @@ def _score(cases: list[dict], results: list[dict], k: int, *, include_categories
                 "decisionAccuracy": sub["answer"]["decision_accuracy"],
                 "goldEvidenceRecall": sub["search"]["gold_evidence_recall"],
                 "unsupportedFactualClaimRate": sub["answer"]["unsupported_factual_claim_rate"],
+                "claimScopeMatchRate": sub["answer"]["claim_scope_match_rate"],
+                "conditionSupportRate": sub["answer"]["condition_support_rate"],
             }
         for case in cases:
             result = result_by_id.get(case["id"])
@@ -190,6 +200,12 @@ def _score(cases: list[dict], results: list[dict], k: int, *, include_categories
                     and all(row.get(field) == forbidden[field] for field in ("version", "equipment", "part") if field in forbidden)
                 }),
                 "unsupportedFactualClaims": sum(bool(c.get("factual")) and not bool(c.get("supported")) for c in result["claims"]),
+                "scopeMismatchedClaims": sum(bool(c.get("factual")) and not bool(c["scopeMatch"]) for c in result["claims"]),
+                "omittedApplicableConditions": sum(
+                    bool(condition["applicable"]) and not bool(condition["stated"])
+                    for claim in result["claims"] if claim.get("factual")
+                    for condition in claim["conditionChecks"]
+                ),
             })
     return {
         "case_count": len(cases),
@@ -207,6 +223,10 @@ def _score(cases: list[dict], results: list[dict], k: int, *, include_categories
             "citation_precision": _metric(answer["citation_valid"], answer["citation_total"]),
             "citation_omission_rate": _metric(answer["citation_omissions"], answer["factual_claims"]),
             "unsupported_factual_claim_rate": _metric(answer["unsupported_claims"], answer["factual_claims"]),
+            "claim_scope_match_rate": _metric(answer["scope_match_total"], answer["factual_claims"]),
+            "condition_statement_rate": _metric(answer["stated_conditions"], answer["applicable_conditions"]),
+            "condition_support_rate": _metric(answer["supported_conditions"], answer["applicable_conditions"]),
+            "condition_omission_rate": _metric(answer["omitted_conditions"], answer["applicable_conditions"]),
             "law_technical_confusion": _metric(answer["law_confusion"], answer["law_case_total"]),
         },
         "categories": category_report if include_categories else {},
@@ -242,12 +262,34 @@ def evaluate(cases: list[dict], results: list[dict], k: int = 5, *, allow_empty:
             if type(item["rank"]) is not int or item["rank"] < 1 or type(item["relevant"]) is not bool or type(item["authorized"]) is not bool:
                 raise ValueError(f"{row['caseId']}: rank/relevance/authorization label invalid")
         for claim in row["claims"]:
-            if not isinstance(claim, dict) or not {"factual", "supported", "lawClaim", "citations"} <= set(claim):
-                raise ValueError(f"{row['caseId']}: claim needs factual/support/lawClaim/citations judgments")
-            if not all(type(claim[field]) is bool for field in ("factual", "supported", "lawClaim")) or not isinstance(claim["citations"], list):
+            if not isinstance(claim, dict) or not {"factual", "supported", "lawClaim", "scopeMatch", "conditionChecks", "citations"} <= set(claim):
+                raise ValueError(f"{row['caseId']}: claim needs factual/support/law/scope/condition/citation judgments")
+            if not all(type(claim[field]) is bool for field in ("factual", "supported", "lawClaim", "scopeMatch")) or not isinstance(claim["citations"], list) or not isinstance(claim["conditionChecks"], list):
                 raise ValueError(f"{row['caseId']}: claim judgment types invalid")
             if any(not isinstance(c, dict) or not {"documentId", "sourceKind", "validSupport"} <= set(c) or type(c["validSupport"]) is not bool for c in claim["citations"]):
                 raise ValueError(f"{row['caseId']}: citations need documentId/sourceKind/validSupport")
+            retrieved_ids = {item["documentId"] for item in row["retrieved"]}
+            valid_citation_ids = {
+                c["documentId"] for c in claim["citations"]
+                if c["validSupport"] and c["documentId"] in retrieved_ids
+            }
+            condition_ids: set[str] = set()
+            for condition in claim["conditionChecks"]:
+                if not isinstance(condition, dict) or set(condition) != {"conditionId", "applicable", "stated", "supported", "supportingDocumentIds"}:
+                    raise ValueError(f"{row['caseId']}: condition checks need id/applicability/statement/support/source links")
+                if not isinstance(condition["conditionId"], str) or not condition["conditionId"].strip() or condition["conditionId"] in condition_ids:
+                    raise ValueError(f"{row['caseId']}: condition IDs must be non-empty and unique per claim")
+                condition_ids.add(condition["conditionId"])
+                if not all(type(condition[field]) is bool for field in ("applicable", "stated", "supported")) or not isinstance(condition["supportingDocumentIds"], list) or not all(isinstance(i, str) for i in condition["supportingDocumentIds"]):
+                    raise ValueError(f"{row['caseId']}: condition judgment types invalid")
+                if condition["supported"] and (not condition["applicable"] or not condition["stated"] or not condition["supportingDocumentIds"]):
+                    raise ValueError(f"{row['caseId']}: supported condition must be applicable, stated, and cited")
+                if condition["supported"] and not set(condition["supportingDocumentIds"]) <= valid_citation_ids:
+                    raise ValueError(f"{row['caseId']}: condition support must link to a claim supporting citation")
+            if claim["supported"] and (not claim["scopeMatch"] or any(c["applicable"] and not c["supported"] for c in claim["conditionChecks"])):
+                raise ValueError(f"{row['caseId']}: supported claim cannot have a scope mismatch or unsupported applicable condition")
+            if claim["factual"] and claim["supported"] and not valid_citation_ids:
+                raise ValueError(f"{row['caseId']}: supported factual claim must link to a retrieved supporting citation")
         by_id[row["caseId"]] = row
     if results and set(by_id) != {case["id"] for case in cases}:
         missing = sorted({case["id"] for case in cases} - set(by_id))

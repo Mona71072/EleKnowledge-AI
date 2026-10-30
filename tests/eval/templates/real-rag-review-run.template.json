@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "templateOnly": true,
+  "run": {
+    "source": "not-run",
+    "datasetVersion": "PENDING_APPROVAL",
+    "headSha": "PENDING",
+    "evaluatedAt": null,
+    "awsAccountAlias": null,
+    "region": null,
+    "knowledgeBaseId": null,
+    "dataSourceAlias": null,
+    "syncRevision": null,
+    "retrievalMode": "Retrieve-only",
+    "topK": null,
+    "modelInvoked": false,
+    "externalSendApprovedBy": null,
+    "storageLocationAlias": null,
+    "graderIds": [],
+    "adjudicatorId": null,
+    "grader": "two independent human technical graders; adjudicator resolves disagreement",
+    "notes": "Template only. Fill only after documented data, AWS-send, storage, and reviewer approvals. Keep real questions and evidence in the access-controlled store, not this repository."
+  },
+  "gradingContract": {
+    "search": ["requiredEvidenceRetrieved", "topKRetained", "equipmentVersionPartMatch", "irrelevantOrUnauthorizedContamination"],
+    "answer": ["claimSupport", "citationPrecision", "citationOmission", "conditionCompleteness", "holdDecision", "lawTechnicalConfusion"],
+    "criticalFailures": ["wrongEquipment", "staleVersion", "unsafeUnsupportedAssertion", "falseLegalCitation", "unauthorizedDisclosure", "unsafeWorkDecision"],
+    "adjudicationRule": "Two independent human graders. Resolve disagreements against the authorized source revision. Any critical failure blocks acceptance regardless of aggregate rates."
+  },
+  "cases": [
+    {"id":"REAL-001","category":"model_specific","questionRef":null,"premisesRef":null,"equipment":null,"model":null,"part":null,"conditionRef":null,"expectedDecision":"PENDING_TECHNICAL_REVIEW","approvedSourceRefs":[],"forbiddenSourceRefs":[],"ownerApprovalRecordRef":null,"technicalReviewerId":null,"technicalReviewedAt":null,"graderA":null,"graderB":null,"adjudication":null,"majorFailureObserved":null},
+    {"id":"REAL-002","category":"fault_diagnosis","questionRef":null,"premisesRef":null,"equipment":null,"model":null,"part":null,"conditionRef":null,"expectedDecision":"PENDING_TECHNICAL_REVIEW","approvedSourceRefs":[],"forbiddenSourceRefs":[],"ownerApprovalRecordRef":null,"technicalReviewerId":null,"technicalReviewedAt":null,"graderA":null,"graderB":null,"adjudication":null,"majorFailureObserved":null},
+    {"id":"REAL-003","category":"procedure_limit","questionRef":null,"premisesRef":null,"equipment":null,"model":null,"part":null,"conditionRef":null,"expectedDecision":"PENDING_TECHNICAL_REVIEW","approvedSourceRefs":[],"forbiddenSourceRefs":[],"ownerApprovalRecordRef":null,"technicalReviewerId":null,"technicalReviewedAt":null,"graderA":null,"graderB":null,"adjudication":null,"majorFailureObserved":null},
+    {"id":"REAL-004","category":"legal_standard","questionRef":null,"premisesRef":null,"equipment":null,"model":null,"part":null,"conditionRef":null,"expectedDecision":"PENDING_TECHNICAL_REVIEW","approvedSourceRefs":[],"forbiddenSourceRefs":[],"ownerApprovalRecordRef":null,"technicalReviewerId":null,"technicalReviewedAt":null,"graderA":null,"graderB":null,"adjudication":null,"majorFailureObserved":null},
+    {"id":"REAL-005","category":"cross_source","questionRef":null,"premisesRef":null,"equipment":null,"model":null,"part":null,"conditionRef":null,"expectedDecision":"PENDING_TECHNICAL_REVIEW","approvedSourceRefs":[],"forbiddenSourceRefs":[],"ownerApprovalRecordRef":null,"technicalReviewerId":null,"technicalReviewedAt":null,"graderA":null,"graderB":null,"adjudication":null,"majorFailureObserved":null},
+    {"id":"REAL-006","category":"insufficient_conflicting_or_stale","questionRef":null,"premisesRef":null,"equipment":null,"model":null,"part":null,"conditionRef":null,"expectedDecision":"PENDING_TECHNICAL_REVIEW","approvedSourceRefs":[],"forbiddenSourceRefs":[],"ownerApprovalRecordRef":null,"technicalReviewerId":null,"technicalReviewedAt":null,"graderA":null,"graderB":null,"adjudication":null,"majorFailureObserved":null}
+  ]
+}

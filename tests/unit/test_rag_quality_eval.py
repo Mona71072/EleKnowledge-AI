@@ -46,7 +46,14 @@ def test_metrics_use_explicit_denominators_and_detect_metadata_mismatch() -> Non
             {"documentId": "SYN-TECH-1", "version": "v1", "equipment": "SYN-LIFT-B", "part": "brake", "sourceKind": "technical", "rank": 1, "relevant": True, "authorized": True},
             {"documentId": "SYN-WRONG-MODEL", "version": "v1", "equipment": "SYN-LIFT-B", "part": "brake", "sourceKind": "technical", "rank": 2, "relevant": False, "authorized": False},
         ],
-        "claims": [{"factual": True, "supported": False, "lawClaim": False, "citations": [{"documentId": "SYN-TECH-1", "sourceKind": "technical", "validSupport": False}]}],
+        "claims": [{
+            "factual": True, "supported": False, "lawClaim": False, "scopeMatch": False,
+            "conditionChecks": [
+                {"conditionId": "COND-MODEL", "applicable": True, "stated": False, "supported": False, "supportingDocumentIds": []},
+                {"conditionId": "COND-VOLTAGE", "applicable": True, "stated": True, "supported": False, "supportingDocumentIds": []},
+            ],
+            "citations": [{"documentId": "SYN-TECH-1", "sourceKind": "technical", "validSupport": False}],
+        }],
     }
     report = EVAL.evaluate([case], [result], k=1)
     # A matching document ID on a stale/wrong-model revision is not the gold evidence.
@@ -56,6 +63,10 @@ def test_metrics_use_explicit_denominators_and_detect_metadata_mismatch() -> Non
     assert report["search"]["irrelevant_or_unauthorized_rate"] == {"numerator": 2, "denominator": 2, "rate": 1.0}
     assert report["answer"]["unsupported_factual_claim_rate"]["numerator"] == 1
     assert report["answer"]["citation_precision"]["rate"] == 0.0
+    assert report["answer"]["claim_scope_match_rate"] == {"numerator": 0, "denominator": 1, "rate": 0.0}
+    assert report["answer"]["condition_statement_rate"] == {"numerator": 1, "denominator": 2, "rate": 0.5}
+    assert report["answer"]["condition_support_rate"] == {"numerator": 0, "denominator": 2, "rate": 0.0}
+    assert report["answer"]["condition_omission_rate"] == {"numerator": 1, "denominator": 2, "rate": 0.5}
     assert report["cases"][0]["forbiddenEvidenceReturned"] == ["SYN-WRONG-MODEL@v1"]
 
 
@@ -65,11 +76,34 @@ def test_expected_hold_and_law_source_confusion_are_separate() -> None:
         "caseId": "RQ-002",
         "decision": "answer",
         "retrieved": [{"documentId": "SYN-TECH-1", "version": "v2", "equipment": "SYN-LIFT-A", "part": "brake", "sourceKind": "technical", "rank": 1, "relevant": True, "authorized": True}],
-        "claims": [{"factual": True, "supported": False, "lawClaim": True, "citations": [{"documentId": "SYN-TECH-1", "sourceKind": "technical", "validSupport": False}]}],
+        "claims": [{"factual": True, "supported": False, "lawClaim": True, "scopeMatch": True, "conditionChecks": [], "citations": [{"documentId": "SYN-TECH-1", "sourceKind": "technical", "validSupport": False}]}],
     }
     report = EVAL.evaluate([case], [result])
     assert report["answer"]["correct_abstention"] == {"numerator": 0, "denominator": 1, "rate": 0.0}
     assert report["answer"]["law_technical_confusion"]["numerator"] == 1
+
+
+def test_supported_condition_must_link_to_a_claim_supporting_citation() -> None:
+    case = _case("RQ-003")
+    result = {
+        "caseId": "RQ-003",
+        "decision": "answer",
+        "retrieved": [],
+        "claims": [{
+            "factual": True, "supported": True, "lawClaim": False, "scopeMatch": True,
+            "conditionChecks": [{
+                "conditionId": "COND-MODEL", "applicable": True, "stated": True,
+                "supported": True, "supportingDocumentIds": ["SYN-TECH-1"],
+            }],
+            "citations": [{"documentId": "SYN-TECH-1", "sourceKind": "technical", "validSupport": False}],
+        }],
+    }
+    try:
+        EVAL.evaluate([case], [result])
+    except ValueError as error:
+        assert "condition support must link" in str(error)
+    else:
+        raise AssertionError("unsupported citation must not be accepted as a condition source")
 
 
 def test_empty_baseline_reports_unmeasured_metrics_not_zero_quality() -> None:
