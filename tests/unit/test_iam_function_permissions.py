@@ -117,6 +117,37 @@ def test_auth_functions_have_only_their_users_table_operations():
     assert signup_resources == login_resources == ["UsersTable.Arn"]
 
 
+def test_phase3_troubleshooting_permissions_are_scoped_to_used_resources():
+    template = _template("phase3-template.yaml")
+    role = template["Resources"]["LambdaExecutionRole"]["Properties"]
+    statements = _policy_statements(role["Policies"])
+
+    invoke = next(statement for statement in statements if "bedrock:InvokeAgent" in statement["Action"])
+    retrieve = next(statement for statement in statements if "bedrock:Retrieve" in statement["Action"])
+    assert invoke["Resource"] == "arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:agent-alias/${AgentId}/${AgentAliasId}"
+    assert set(retrieve["Resource"]) == {
+        "arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}",
+        "arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:knowledge-base/${TroubleCasesKnowledgeBaseId}",
+        "arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:knowledge-base/${TroubleshootingManualKnowledgeBaseId}",
+        "arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:knowledge-base/${CMaterialKnowledgeBaseId}",
+    }
+    assert all(statement["Resource"] != "*" for statement in statements if any(
+        action.startswith("bedrock:") or action.startswith("bedrock-agent-runtime:")
+        for action in statement["Action"]
+    ))
+    assert not {"bedrock-agent-runtime:InvokeAgent", "bedrock-agent-runtime:Retrieve"} & _policy_actions(role["Policies"])
+
+    def action_list(statement):
+        return statement["Action"] if isinstance(statement["Action"], list) else [statement["Action"]]
+
+    dynamodb = [statement for statement in statements if any(action.startswith("dynamodb:") for action in action_list(statement))]
+    assert all("dynamodb:Scan" not in action_list(statement) for statement in dynamodb)
+    assert all("SitesTable.Arn" not in str(statement["Resource"]) for statement in dynamodb if any(
+        action in action_list(statement) for action in ("dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query")
+    ))
+    assert any("dynamodb:GetItem" in action_list(statement) and "SitesTable.Arn" in str(statement["Resource"]) for statement in dynamodb)
+
+
 def test_rag_deployments_require_a_reviewed_source_version():
     import re
 

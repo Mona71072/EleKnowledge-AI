@@ -51,6 +51,8 @@ class _Boom:
     ("prod", "true", "admin"),
     ("dev", "false", "admin"),
     ("dev", "true", "users"),
+    ("dev", "true", "keyman"),
+    ("dev", "true", "users,keyman"),
     ("dev", "true", None),
 ])
 def test_gate_rejects_before_any_store_or_worker_access(api, monkeypatch, env_name, flag, groups):

@@ -268,6 +268,24 @@ def test_feedback_missing_message_returns_404():
     assert resp["statusCode"] == 404
 
 
+def test_feedback_cannot_update_another_users_session():
+    mod, table = load_app()
+    table.query.return_value = {"Items": [{"userId": "user-2", "sessionId": "s1"}]}
+    event = _event(
+        "PUT",
+        "/chat/messages/msg1/feedback",
+        body={"sessionId": "s1", "feedback": "bad", "reason": "wrong_doc"},
+        path_params={"messageId": "msg1"},
+        sub="user-1",
+        groups="user",
+    )
+
+    response = mod.lambda_handler(event, None)
+
+    assert response["statusCode"] == 404
+    table.update_item.assert_not_called()
+
+
 def test_feedback_rejects_invalid_reason():
     mod, table = load_app()
     table.query.return_value = {"Items": [{"userId": "user-1", "sessionId": "s1"}]}

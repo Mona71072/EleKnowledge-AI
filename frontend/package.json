@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "test:e2e:local": "node tests/e2e/senpai-local.e2e.mjs",
     "build": "next build",
     "build:turbopack": "next build --turbopack",
     "start": "next start",
@@ -47,6 +48,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.1",
+    "playwright": "1.64.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

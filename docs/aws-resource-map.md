@@ -20,6 +20,12 @@ The names below use `dev` as the example environment. For production, replace `-
 
 Use [AWS Migration Runbook](aws-migration-runbook.md) for deployment order, Bedrock ID updates, and Amplify environment variable setup.
 
+## Local SAM template validation (2026-10-30)
+
+`scripts/validation/lint_sam_templates.py` runs pinned `cfn-lint` 1.46.0 against all 12 YAML templates directly under `infrastructure/sam/`. CI fails on any new or changed finding. It records four narrowly matched schema findings for the managed Bedrock Knowledge Base/connector properties in `legal-rag-kb-template.yaml`; the current AWS CloudFormation reference documents these properties, while this linter version's schema does not. It also records the Python 3.8 deprecation finding for the excluded legacy `phase3-troubleshooting-small.yaml` POC. That template is not deployable under current Lambda runtime rules and is not the active Phase 3 stack.
+
+This static check does not replace `sam validate`, `sam build`, Docker-backed `sam local`, a CloudFormation change set, or an AWS deployment/readback. SAM CLI, Docker, and AWS access were unavailable for this local check.
+
 ## Development environment observation (2026-09-30)
 
 > 最終検証: 2026-09-30 — AWS CLI 読み取り専用確認（東京リージョンの開発環境。通知到達と機能 E2E は未確認）

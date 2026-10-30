@@ -128,27 +128,32 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action:
-                  - bedrock:InvokeAgent
-                  - bedrock-agent-runtime:InvokeAgent
-                  - bedrock:Retrieve
-                  - bedrock-agent-runtime:Retrieve
-                Resource: '*'
+                Action: bedrock:InvokeAgent
+                Resource: !Sub arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:agent-alias/${AgentId}/${AgentAliasId}
+              - Effect: Allow
+                Action: bedrock:Retrieve
+                Resource:
+                  - !Sub arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
+                  - !Sub arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:knowledge-base/${TroubleCasesKnowledgeBaseId}
+                  - !Sub arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:knowledge-base/${TroubleshootingManualKnowledgeBaseId}
+                  - !Sub arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:knowledge-base/${CMaterialKnowledgeBaseId}
         - PolicyName: DynamoDBAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !GetAtt SitesTable.Arn
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
                   - dynamodb:Query
-                  - dynamodb:Scan
                 Resource:
-                  - !GetAtt SitesTable.Arn
                   - !GetAtt SessionsTable.Arn
                   - !Sub ${SessionsTable.Arn}/index/*
+              # Scan is not used by the Phase 3 Lambda handlers; keep it out of the shared role.
         - PolicyName: S3Access
           PolicyDocument:
             Version: '2012-10-17'

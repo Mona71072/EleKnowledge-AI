@@ -1,6 +1,6 @@
 ---
 status: development
-last-verified: 2026-10-20
+last-verified: 2026-10-30
 related-code:
   - frontend/src/app/admin/knowledge/research/page.tsx
   - frontend/src/app/knowledge/chat/page.tsx
@@ -21,6 +21,8 @@ related-code:
   - frontend/src/components/knowledge/KnowledgeComparisonPanel.tsx
   - frontend/tests/knowledge-research.test.mjs
   - frontend/tests/knowledge-comparison.test.mjs
+  - frontend/tests/e2e/senpai-local.e2e.mjs
+  - frontend/package.json
 ---
 
 # 工技先輩の開発画面：ノウハウ・技術KB・法令KBの照合
@@ -155,5 +157,11 @@ TDDで認証・送信項目・モード分離・不正入力・不正応答・�
 - 独立レビューで同一検索・質問・対象版の制約と出力構文を再確認し、重大・高優先の残存指摘なし。担当者の比較内容を自動生成したり、承認状態に変換したりする処理はない。
 
 実環境の確認記録: **未実施**。担当者照合まとめのローカル評価: **合成ケースで実施**。実資料の適用条件・食い違いに対する評価: **未実施**。二つのAI回答と担当者の比較メモを組み合わせる実装であり、単一の統合AI回答ではない。
+
+### 2026-10-30 ローカル先輩チャットのブラウザー一気通貫検証
+
+`cd frontend && npm run test:e2e:local`は、PlaywrightのChromiumからNext.jsの`/knowledge/chat`を開き、テスト専用のloopback HTTP APIへ接続する。APIは合成質問・合成出典・履歴だけをメモリ内に持ち、検索・根拠判定・回答生成・保存もAPIモックが模擬する。Python Lambdaや本番検索・状態遷移のE2Eではなく、画面とHTTP契約の検査であり、認証・認可の証明ではない。Bedrock・DynamoDB・S3・Cognitoには接続しない。Playwright実行プロセスに限って`NEXT_PUBLIC_SKIP_AUTH=true`と`NEXT_PUBLIC_DEV_ADMIN=true`を渡す。
+
+技術・法令の2レーン送信、送信中の入力停止、合成資料の出典表示、履歴一覧からの再読込、根拠0件、両レーン検索失敗時のエラー表示、モバイル/デスクトップ幅の横はみ出しなしを確認する。単体API契約ではユーザー所有権と管理者ゲートを別途検査する。実Lambdaの起動、Cognito認証、DynamoDB保存/削除/TTL到来、AWS IAM、実検索品質、社内資料の業務受入はこのブラウザー試験の対象外。
 
 関連: [ノウハウ編集画面](knowledge-review-workbench.md)、[法令API](../../api/legal-chat.md)、[Markdown自動探索の実装契約](knowledge-markdown-retrieval.md)。

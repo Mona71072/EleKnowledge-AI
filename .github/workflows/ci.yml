@@ -19,7 +19,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,6 +30,10 @@ jobs:
           cache-dependency-path: tests/unit/requirements-test.txt
       - name: Install unit test dependencies
         run: pip install -r tests/unit/requirements-test.txt
+      - name: Install pinned CloudFormation template linter
+        run: pip install cfn-lint==1.46.0
+      - name: Lint SAM templates with documented schema exceptions
+        run: python scripts/validation/lint_sam_templates.py
       - name: Run unit tests
         env:
           AWS_DEFAULT_REGION: ap-northeast-1
@@ -48,6 +52,12 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+      - name: Install Chromium for local synthetic browser flow
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run browser end-to-end flow against synthetic APIs
+        working-directory: frontend
+        run: npm run test:e2e:local
       # 全カードが索引生成と同じ検証を通ることを確認する（承認一覧は不要・何も書き出さない）。
       - name: Check every knowledge card builds
         run: node scripts/knowledge/build-senpai-index.mjs check .

@@ -3,6 +3,8 @@ import hashlib
 import json
 import types
 
+import pytest
+
 
 def _event(body, *, groups="admin"):
     return {
@@ -16,7 +18,8 @@ def _event(body, *, groups="admin"):
     }
 
 
-def test_non_admin_is_rejected_before_session_or_history_reads(rag_app, monkeypatch):
+@pytest.mark.parametrize("groups", ["user", "keyman", "users,keyman"])
+def test_non_admin_is_rejected_before_session_or_history_reads(rag_app, monkeypatch, groups):
     monkeypatch.setattr(rag_app, "ENVIRONMENT", "dev")
     monkeypatch.setattr(rag_app, "KNOWHOW_ENABLED", True, raising=False)
     monkeypatch.setattr(
@@ -31,7 +34,7 @@ def test_non_admin_is_rejected_before_session_or_history_reads(rag_app, monkeypa
     )
 
     response = rag_app.handle_rag_request(
-        _event({"query": "かごの振動", "includeKnowhow": True}, groups="user"),
+        _event({"query": "かごの振動", "includeKnowhow": True}, groups=groups),
         None,
         0,
     )

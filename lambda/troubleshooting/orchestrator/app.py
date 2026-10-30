@@ -10,7 +10,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import boto3
@@ -93,9 +93,17 @@ def format_agent_input(validated_data: Dict[str, Any]) -> str:
 # DynamoDB セッション管理
 # ---------------------------------------------------------------------------
 
-def extract_user_id(event: Dict[str, Any]) -> str:
-    authorizer = event.get("requestContext", {}).get("authorizer", {})
-    return authorizer.get("userId") or authorizer.get("claims", {}).get("sub") or "anonymous"
+def extract_user_id(event: Dict[str, Any]) -> Optional[str]:
+    request_context = event.get("requestContext")
+    if not isinstance(request_context, dict):
+        return None
+    authorizer = request_context.get("authorizer")
+    if not isinstance(authorizer, dict):
+        return None
+    claims = authorizer.get("claims")
+    claims = claims if isinstance(claims, dict) else {}
+    user_id = authorizer.get("userId") or claims.get("sub")
+    return user_id.strip() if isinstance(user_id, str) and user_id.strip() else None
 
 
 def is_admin(event: Dict[str, Any]) -> bool:
@@ -282,9 +290,11 @@ def format_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
+        user_id = extract_user_id(event)
+        if not user_id:
+            return format_response(401, {"error": "認証が必要です"})
         if not is_admin(event):
             return format_response(403, {"error": "管理者権限が必要です"})
-        user_id = extract_user_id(event)
         body = json.loads(event["body"])
         validated = validate_input(body)
         input_text = format_agent_input(validated)
