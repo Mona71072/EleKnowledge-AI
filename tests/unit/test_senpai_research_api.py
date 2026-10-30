@@ -147,6 +147,19 @@ def test_same_client_request_id_returns_same_job_without_second_invoke(api):
     assert api.test_ctx.invoked == [first["jobId"]]
 
 
+def test_duplicate_request_during_initial_claim_keeps_the_first_claim(api):
+    request = api.parse_request(api_event(valid_body()))
+    store = api.test_ctx.store
+    first_job_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    second_job_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    assert store.claim_request(USER_ID, request["clientRequestId"], first_job_id) == (first_job_id, True)
+
+    replay = api._claim_or_replay(store, USER_ID, request, second_job_id)
+
+    assert replay == (first_job_id, "queued")
+    assert store.claim_request(USER_ID, request["clientRequestId"], second_job_id) == (first_job_id, False)
+
+
 def test_expired_request_replay_creates_new_job_without_returning_old_result(api):
     first = body_of(_post(api))
     store = api.test_ctx.store
