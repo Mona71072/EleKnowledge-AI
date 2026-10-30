@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>問合せ対応のシステム構成と利用イメージ | Ele-Knowledge</title>
+  <style>
+    :root {
+      --paper: #f2f5f2;
+      --white: #fff;
+      --ink: #192d2e;
+      --muted: #586b69;
+      --line: #d5dfd9;
+      --red: #c83e35;
+      --red-soft: #fff0ed;
+      --teal: #087a73;
+      --teal-soft: #e6f4f1;
+      --green: #368254;
+      --green-soft: #edf6ee;
+      --gold: #95600b;
+      --gold-soft: #fff5df;
+      --blue: #3b6684;
+      --blue-soft: #edf4f8;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgb(8 122 115 / 3%) 1px, transparent 1px),
+        linear-gradient(rgb(8 122 115 / 3%) 1px, transparent 1px),
+        var(--paper);
+      background-size: 26px 26px;
+      font-family: "Yu Gothic UI", "Meiryo", sans-serif;
+      line-height: 1.55;
+    }
+
+    .page { width: min(1560px, calc(100% - 44px)); margin: 0 auto; padding: 30px 0 24px; }
+
+    .masthead {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      padding-bottom: 13px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .masthead strong { color: var(--red); font-size: 15px; }
+    h1 { margin: 25px 0 6px; font-size: clamp(30px, 3vw, 44px); line-height: 1.2; letter-spacing: 0; }
+    .lead { max-width: 1050px; margin: 0; color: var(--muted); font-size: 15px; }
+
+    .keyline {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      margin: 21px 0 25px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--line);
+    }
+
+    .keyline > div { padding: 12px 16px; background: var(--white); }
+    .keyline b { display: block; margin-bottom: 2px; font-size: 14px; }
+    .keyline p { margin: 0; color: var(--muted); font-size: 12px; }
+    .keyline .k-current b { color: var(--red); }
+    .keyline .k-now b { color: var(--teal); }
+    .keyline .k-next b { color: var(--green); }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 7px 15px; margin: 0 0 16px; color: var(--muted); font-size: 11px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .swatch { width: 11px; height: 11px; border-radius: 3px; background: #edf1ef; border: 1px solid #a9b8b0; }
+    .swatch.person { background: var(--red-soft); border-color: var(--red); }
+    .swatch.app { background: var(--teal-soft); border-color: var(--teal); }
+    .swatch.storage { background: var(--blue-soft); border-color: var(--blue); }
+    .swatch.future { background: var(--green-soft); border: 1px dashed var(--green); }
+
+    .architecture {
+      --accent: var(--red);
+      --tint: var(--red-soft);
+      margin: 0 0 22px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--accent);
+      border-radius: 7px;
+      background: var(--white);
+      box-shadow: 0 10px 28px rgb(25 45 46 / 6%);
+    }
+
+    .architecture.current { --accent: var(--teal); --tint: var(--teal-soft); }
+    .architecture.future { --accent: var(--green); --tint: var(--green-soft); }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 14px;
+      align-items: start;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-number {
+      display: grid;
+      width: 40px;
+      height: 40px;
+      place-items: center;
+      border-radius: 5px;
+      background: var(--tint);
+      color: var(--accent);
+      font-weight: 900;
+    }
+
+    .eyebrow { margin: 0 0 2px; color: var(--accent); font-size: 11px; font-weight: 900; }
+    h2 { margin: 0; font-size: 22px; line-height: 1.35; letter-spacing: 0; }
+    .section-head p:last-child { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+
+    .diagram-title { margin: 15px 0 9px; font-size: 13px; font-weight: 900; }
+    .diagram-frame { padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfb; }
+
+    .node {
+      min-width: 0;
+      padding: 11px 12px;
+      border: 1px solid #aebbb5;
+      border-radius: 5px;
+      background: #f0f3f1;
+      text-align: center;
+    }
+
+    .node b { display: block; font-size: 13px; line-height: 1.4; }
+    .node small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .node.person { border-color: var(--red); background: var(--red-soft); }
+    .node.app { border-color: var(--teal); background: var(--teal-soft); }
+    .node.cloud { border-color: var(--blue); background: var(--blue-soft); }
+    .node.result { border-color: var(--gold); background: var(--gold-soft); }
+    .node.future-node { border-style: dashed; border-color: var(--green); background: var(--green-soft); }
+    .node.neutral { background: var(--white); }
+
+    .ordered-flow { margin: 12px 0 0; padding: 0; list-style: none; }
+    .workflow-step { position: relative; display: grid; grid-template-columns: 30px minmax(190px, 230px) minmax(0, 1fr); gap: 12px; padding-bottom: 10px; }
+    .workflow-step:not(:last-child)::before { position: absolute; top: 28px; bottom: 0; left: 13px; width: 2px; background: var(--line); content: ""; }
+    .stage-number { z-index: 1; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; background: var(--accent); color: white; font-size: 12px; font-weight: 900; }
+    .stage-copy { padding-top: 2px; }
+    .stage-copy b { display: block; font-size: 12px; line-height: 1.45; }
+    .stage-copy small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+    .stage-track { display: flex; min-width: 0; align-items: stretch; gap: 7px; }
+    .stage-track .node { display: grid; flex: 1 1 130px; align-content: center; min-height: 58px; padding: 8px 10px; }
+    .stage-track .node b { font-size: 11px; }
+    .stage-track .node small { font-size: 9px; }
+    .stage-arrow { display: grid; flex: 0 0 24px; place-items: center; color: var(--accent); font-size: 18px; font-weight: 900; }
+    .stage-track.stack { flex-wrap: wrap; }
+    .stage-track.stack .node { flex-basis: 140px; }
+    .stage-track .stage-note { display: grid; flex: 2 1 190px; align-content: center; padding: 7px 10px; border-left: 2px solid var(--accent); background: var(--tint); color: var(--muted); font-size: 10px; }
+
+    .arrow {
+      display: flex;
+      min-width: 42px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      text-align: center;
+      font-size: 21px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .arrow small { max-width: 100px; margin-top: 4px; color: var(--muted); font-size: 9px; font-weight: 700; line-height: 1.25; }
+    .arrow.down { min-height: 28px; flex-direction: row; }
+    .arrow.down small { margin: 0 0 0 7px; }
+    .arrow.muted { color: #788985; }
+    .arrow.future-arrow { color: var(--green); }
+
+    .requester-row {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) 70px minmax(220px, 1.2fr);
+      align-items: center;
+      gap: 8px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .hub-node { width: min(610px, 100%); margin: 14px auto 8px; padding: 9px 12px; border: 1px solid var(--red); border-radius: 5px; background: var(--red-soft); color: var(--red); font-size: 12px; font-weight: 900; text-align: center; }
+    .source-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .source-item { display: flex; min-width: 0; flex-direction: column; align-items: center; gap: 7px; }
+    .source-item .arrow { min-height: 28px; }
+    .source-item .node { width: 100%; min-height: 87px; display: grid; align-content: center; }
+
+    .gather-bar {
+      width: min(680px, 100%);
+      margin: 14px auto 0;
+      padding: 10px 14px;
+      border: 1px solid var(--red);
+      border-radius: 5px;
+      background: var(--red-soft);
+      text-align: center;
+    }
+
+    .gather-bar b { display: block; font-size: 13px; }
+    .gather-bar small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+
+    .lane-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 16px 0 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .lane-label::after { height: 1px; flex: 1; background: var(--line); content: ""; }
+    .registration-row { display: grid; grid-template-columns: 1fr 46px 1.2fr 46px 1fr 46px 1fr; align-items: center; gap: 7px; }
+    .usage-row, .return-row { display: grid; grid-template-columns: minmax(135px, 1fr) 62px minmax(135px, 1fr) 62px minmax(155px, 1.15fr) 62px minmax(150px, 1fr); align-items: stretch; gap: 7px; }
+    .usage-row .node, .return-row .node { display: grid; align-content: center; min-height: 88px; }
+    .usage-row .arrow, .return-row .arrow { min-width: 48px; }
+    .followup-row { display: grid; grid-template-columns: minmax(135px, 1fr) 42px minmax(135px, 1fr) 42px minmax(135px, 1fr) 42px minmax(135px, 1fr); align-items: stretch; gap: 6px; }
+    .followup-row .node { display: grid; align-content: center; min-height: 85px; }
+    .step-number { display: inline-grid; width: 19px; height: 19px; margin: 0 auto 5px; place-items: center; border-radius: 50%; background: var(--red); color: white; font-size: 10px; font-weight: 900; }
+
+    .response-row { display: grid; grid-template-columns: 1fr 46px 1.1fr 46px 1fr 46px 1fr; align-items: center; gap: 7px; }
+    .response-row .node { min-height: 82px; display: grid; align-content: center; }
+
+    .future-top { display: grid; grid-template-columns: minmax(150px, .8fr) 48px minmax(150px, .9fr) 48px minmax(220px, 1.5fr); align-items: center; gap: 7px; }
+    .connectors {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 9px;
+      padding: 12px;
+      border: 1px dashed #84ad91;
+      border-radius: 6px;
+      background: #f8fcf8;
+    }
+
+    .connector { display: grid; align-content: center; min-height: 90px; padding: 9px; border: 1px dashed var(--green); border-radius: 5px; background: var(--green-soft); text-align: center; }
+    .connector b { font-size: 11px; }
+    .connector small { margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .middle-row { display: grid; grid-template-columns: minmax(0, 2fr) 54px minmax(0, 1.2fr) 54px minmax(0, 1fr); align-items: center; gap: 7px; margin-top: 10px; }
+    .bridge { display: flex; justify-content: center; align-items: center; gap: 9px; margin: 8px 0; padding: 7px 10px; color: var(--green); font-size: 11px; font-weight: 800; text-align: center; }
+    .bridge span { font-size: 20px; line-height: 1; }
+    .flow-down { display: flex; flex-direction: column; align-items: center; margin: 8px auto; color: var(--green); text-align: center; }
+    .flow-down b { font-size: 21px; line-height: 1; }
+    .flow-down small { margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .output-stack { display: grid; gap: 7px; }
+    .human-actions { display: grid; grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr) 42px minmax(0, 1fr); align-items: stretch; gap: 7px; margin-top: 10px; }
+    .human-actions .node { min-height: 75px; display: grid; align-content: center; }
+    .feedback-row { display: grid; grid-template-columns: minmax(190px, 1fr) 48px minmax(220px, 1.2fr) 48px minmax(220px, 1.2fr); align-items: center; gap: 7px; max-width: 990px; margin: 12px auto 0; }
+
+    .usecase {
+      display: grid;
+      grid-template-columns: 155px 1fr;
+      gap: 12px;
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-left: 3px solid var(--accent);
+      background: var(--tint);
+    }
+
+    .usecase b { color: var(--accent); font-size: 12px; }
+    .usecase p { margin: 0; color: var(--ink); font-size: 11px; }
+
+    .caution {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid #e3cc91;
+      border-radius: 4px;
+      background: var(--gold-soft);
+      color: #514522;
+      font-size: 10px;
+    }
+
+    .caution b { color: var(--gold); }
+    .references { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 17px; color: var(--muted); font-size: 10px; }
+    .references a { color: var(--blue); }
+
+    footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 15px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+
+    @media (max-width: 1050px) {
+      .page { width: min(100% - 32px, 850px); }
+      .workflow-step { grid-template-columns: 30px minmax(155px, 190px) minmax(0, 1fr); gap: 9px; }
+      .stage-track { flex-wrap: wrap; }
+      .stage-track .node { flex-basis: 145px; }
+      .stage-track.stack .node { flex-basis: 145px; }
+      .registration-row { grid-template-columns: 1fr; }
+      .registration-row .arrow { min-height: 20px; transform: rotate(90deg); }
+    }
+
+    @media (max-width: 600px) {
+      .page { width: calc(100% - 24px); padding-top: 17px; }
+      .masthead { align-items: flex-start; flex-direction: column; gap: 3px; }
+      .keyline { grid-template-columns: 1fr; }
+      .architecture { padding: 14px; }
+      .section-head { gap: 9px; }
+      h2 { font-size: 19px; }
+      .diagram-frame { padding: 10px; }
+      .requester-row { grid-template-columns: 1fr; }
+      .requester-row .arrow { min-height: 20px; transform: rotate(90deg); }
+      .workflow-step { grid-template-columns: 28px minmax(0, 1fr); gap: 8px; padding-bottom: 12px; }
+      .stage-track { grid-column: 2; flex-direction: column; align-items: stretch; }
+      .stage-track .node, .stage-track.stack .node, .stage-track .stage-note { flex: 1 1 auto; }
+      .stage-arrow { min-height: 18px; transform: rotate(90deg); }
+      .usecase { grid-template-columns: 1fr; gap: 3px; }
+      footer { flex-direction: column; }
+    }
+
+    @media print {
+      @page { size: A3 landscape; margin: 9mm; }
+      body { background: white; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .page { width: 100%; padding: 0; }
+      h1 { font-size: 28pt; }
+      .keyline { margin: 10px 0 12px; }
+      .architecture { padding: 14px; box-shadow: none; break-inside: avoid; }
+      .architecture + .architecture { break-before: page; }
+      .diagram-frame { padding: 11px; }
+      .references a { text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <strong>ELE-KNOWLEDGE / システム構成と利用イメージ</strong>
+      <span>問合せ対応：情報を探す、根拠を確かめる、回答する</span>
+    </header>
+
+    <h1>問合せ対応を支える仕組みの変化</h1>
+    <p class="lead">情報源が担当者ごとに分かれている現状から、現在利用できる資料検索支援、将来の連携構想までを、誰が何をするかとシステム構成を合わせて示します。</p>
+
+    <section class="keyline" aria-label="全体の要点">
+      <div class="k-current"><b>現在：担当者が情報を集める</b><p>資料・法令・現場情報・ベテランの知見を個別に確認し、人が回答を組み立てる。</p></div>
+      <div class="k-now"><b>現行：資料検索を支援</b><p>登録済み資料をRAG検索。法令、現場システム、実務確認、ファイル作成は人が行う。</p></div>
+      <div class="k-next"><b>将来：連携と回答準備を検討</b><p>権限を確認した情報源の連携、根拠整理、回答・ファイルの下書き支援を検討する。</p></div>
+    </section>
+
+    <div class="legend" aria-label="図の凡例">
+      <span><i class="swatch person"></i>人・手作業</span>
+      <span><i class="swatch app"></i>現在のEle-Knowledgeアプリ処理</span>
+      <span><i class="swatch storage"></i>現在のAWS・資料基盤</span>
+      <span><i class="swatch"></i>外部システム・情報源</span>
+      <span><i class="swatch future"></i>将来案・未実装</span>
+    </div>
+
+    <section class="architecture" aria-labelledby="today-title">
+      <div class="section-head">
+        <div class="section-number">01</div>
+        <div>
+          <p class="eyebrow">CURRENT WORK / 人が各所を個別に確認</p>
+          <h2 id="today-title">現状：担当者が複数の情報源を回って回答</h2>
+          <p>資料検索、法令確認、現場情報の取得・入力、ベテランへの相談、回答ファイル作成までを人が担当。</p>
+        </div>
+      </div>
+
+      <h3 class="diagram-title">システム構成と情報の流れ</h3>
+      <div class="diagram-frame">
+        <ol class="ordered-flow" aria-label="現状の問合せ対応6工程">
+          <li class="workflow-step"><span class="stage-number">1</span><div class="stage-copy"><b>問合せを受け、内容を整理</b><small>対象機種・現場状況・確認したい点を聞き取る</small></div><div class="stage-track"><div class="node neutral"><b>問合せ元</b></div><span class="stage-arrow">→</span><div class="node person"><b>担当者</b><small>内容と条件を整理</small></div></div></li>
+          <li class="workflow-step"><span class="stage-number">2</span><div class="stage-copy"><b>対象資料を各システムで検索</b><small>現場情報も必要に応じて取得・入力</small></div><div class="stage-track stack"><div class="node neutral"><b>資料管理システム</b><small>マニュアル・規程・仕様・図面</small></div><div class="node neutral"><b>現場・業務システム</b><small>現場情報・工程・機種情報</small></div><div class="stage-note">担当者が各システムを個別に開いて検索・確認</div></div></li>
+          <li class="workflow-step"><span class="stage-number">3</span><div class="stage-copy"><b>法令・規則を別途検索</b><small>適用条文や条件を確認</small></div><div class="stage-track"><div class="node person"><b>担当者</b><small>法令情報源を検索</small></div><span class="stage-arrow">→</span><div class="node neutral"><b>法令・規則の情報源</b><small>条文・改正・適用条件</small></div></div></li>
+          <li class="workflow-step"><span class="stage-number">4</span><div class="stage-copy"><b>実務上の扱いを先輩に確認</b><small>類似事例や具体的な対応方法を相談</small></div><div class="stage-track"><div class="node person"><b>担当者</b><small>相談内容を説明</small></div><span class="stage-arrow">↔</span><div class="node person"><b>ベテラン・有識者</b><small>経験知・過去事例を共有</small></div></div></li>
+          <li class="workflow-step"><span class="stage-number">5</span><div class="stage-copy"><b>情報を照合して回答を組み立てる</b><small>資料・法令・現場条件・助言を突き合わせる</small></div><div class="stage-track"><div class="node neutral"><b>資料・法令・現場情報</b></div><span class="stage-arrow">＋</span><div class="node person"><b>担当者が照合・判断</b></div><span class="stage-arrow">＋</span><div class="node person"><b>先輩の助言</b></div></div></li>
+          <li class="workflow-step"><span class="stage-number">6</span><div class="stage-copy"><b>回答ファイルを作成し、返信</b><small>必要なファイルの作成・保存・送付も人が担当</small></div><div class="stage-track"><div class="node person"><b>担当者</b><small>回答ファイルを作成・確認</small></div><span class="stage-arrow">→</span><div class="node neutral"><b>問合せ元へ返信</b></div></div></li>
+        </ol>
+      </div>
+
+      <div class="usecase"><b>利用イメージ</b><p>問合せを受けた担当者が、複数の資料システムで候補を探し、法令を別途調べ、現場情報を業務システムから確認・入力し、実務上の扱いを先輩に聞く。最後に情報を照合し、回答ファイルを作って返信する。</p></div>
+    </section>
+
+    <section class="architecture current" aria-labelledby="now-title">
+      <div class="section-head">
+        <div class="section-number">02</div>
+        <div>
+          <p class="eyebrow">CURRENT ELE-KNOWLEDGE / 登録資料のRAG検索</p>
+          <h2 id="now-title">現行仕様：Ele-Knowledgeが登録済み資料の検索を支援</h2>
+          <p>利用者の質問からKnowledge Baseを検索し、回答と出典候補を返す。未接続の情報源は、これまでどおり人が確認する。</p>
+        </div>
+      </div>
+
+      <h3 class="diagram-title">資料登録と問合せ利用の2つの流れ</h3>
+      <div class="diagram-frame">
+        <div class="lane-label">A. 資料を検索対象にする流れ（人が資料を確認・登録）</div>
+        <div class="registration-row">
+          <div class="node person"><b>資料所管者・管理者</b><small>利用可否・版・対象を確認</small></div>
+          <div class="arrow"><span>→</span><small>選定</small></div>
+          <div class="node neutral"><b>社内の各資料保管元</b><small>必要資料を担当者が取り出し・整理</small></div>
+          <div class="arrow"><span>→</span><small>手動登録</small></div>
+          <div class="node cloud"><b>Amazon S3</b><small>Knowledge Baseの資料置き場</small></div>
+          <div class="arrow"><span>→</span><small>同期・索引</small></div>
+          <div class="node cloud"><b>Amazon Bedrock<br>Knowledge Base</b><small>登録資料を検索可能にする</small></div>
+        </div>
+
+        <div class="lane-label">B. 問合せ対応フロー（比較図と同じ①〜⑥）</div>
+        <ol class="ordered-flow" aria-label="Ele-Knowledge現行仕様の問合せ対応6工程">
+          <li class="workflow-step"><span class="stage-number">1</span><div class="stage-copy"><b>問合せ内容をチャットに入力</b><small>担当者が質問と分かっている条件を入力</small></div><div class="stage-track"><div class="node person"><b>担当者</b><small>相談内容を入力</small></div><span class="stage-arrow">→</span><div class="node app"><b>Ele-Knowledge Webチャット</b><small>Amplify / Next.js・Cognito認証</small></div></div></li>
+          <li class="workflow-step"><span class="stage-number">2</span><div class="stage-copy"><b>登録済み資料を検索</b><small>KBに登録済みの資料が検索対象</small></div><div class="stage-track"><div class="node app"><b>API Gateway<br>＋ Lambda</b><small>質問を受け取り検索要求</small></div><span class="stage-arrow">→</span><div class="node cloud"><b>Bedrock Knowledge Base</b><small>S3登録資料を検索</small></div><span class="stage-arrow">→</span><div class="node result"><b>関連資料候補</b><small>検索結果がLambdaへ戻る</small></div></div></li>
+          <li class="workflow-step"><span class="stage-number">3</span><div class="stage-copy"><b>回答と出典候補を受け取る</b><small>AI回答と関連資料への候補を表示</small></div><div class="stage-track"><div class="node app"><b>Lambdaが回答・引用を構成</b></div><span class="stage-arrow">→</span><div class="node app"><b>Webチャット</b><small>担当者に回答・出典候補を返す</small></div><span class="stage-arrow">→</span><div class="node person"><b>担当者</b></div></div></li>
+          <li class="workflow-step"><span class="stage-number">4</span><div class="stage-copy"><b>原資料を開き、内容を確認</b><small>対象機種・版・条件が問合せに合うか照合</small></div><div class="stage-track"><div class="node person"><b>担当者</b><small>引用候補を確認</small></div><span class="stage-arrow">→</span><div class="node cloud"><b>原資料（S3等）</b><small>引用リンクから資料を開く</small></div><span class="stage-arrow">→</span><div class="node person"><b>人が妥当性を確認</b></div></div></li>
+          <li class="workflow-step"><span class="stage-number">5</span><div class="stage-copy"><b>法令・現場情報・実務知を別途確認</b><small>法令検索、現場システム、先輩への相談は人が担当</small></div><div class="stage-track stack"><div class="node person"><b>担当者が法令を検索</b></div><div class="node person"><b>現場システムで取得・入力</b></div><div class="node person"><b>先輩・有識者へ確認</b></div></div></li>
+          <li class="workflow-step"><span class="stage-number">6</span><div class="stage-copy"><b>回答ファイルを作成し、返信</b><small>資料・法令・現場条件をまとめ、人が確定</small></div><div class="stage-track"><div class="node person"><b>担当者が回答を作成</b><small>ファイル作成・保存・送信</small></div><span class="stage-arrow">→</span><div class="node neutral"><b>問合せ元へ返信</b></div></div></li>
+        </ol>
+      </div>
+
+      <div class="usecase"><b>利用イメージ</b><p>担当者は問合せ内容をRAGチャットに入力し、登録済みの社内資料について回答と出典候補を得る。原資料を開いて正しさを確認した後、法令検索・現場情報の取得と入力・先輩への相談を行い、回答とファイルを自分で完成させる。</p></div>
+      <div class="caution"><b>現行範囲：</b>社内の各資料システム、法令情報源、現場業務システムをEle-Knowledgeが自動で巡回・更新する構成ではありません。資料の選定・登録も人が行います。法令RAGは開発・検証中の別経路であり、ここでは通常利用できる現行フローに含めていません。</div>
+    </section>
+
+    <section class="architecture future" aria-labelledby="future-title">
+      <div class="section-head">
+        <div class="section-number">03</div>
+        <div>
+          <p class="eyebrow">FUTURE CONCEPT / 接続先・権限・運用は今後検討</p>
+          <h2 id="future-title">将来構想：複数の根拠を集め、確認しやすい回答案へ</h2>
+          <p>業務上の合意、データ整備、アクセス権限、各システムとの接続が実現した場合の構想。実装済み・確定済みの構成ではない。</p>
+        </div>
+      </div>
+
+      <h3 class="diagram-title">横断検索と人の確認を含む構成イメージ</h3>
+      <div class="diagram-frame">
+        <ol class="ordered-flow" aria-label="将来構想の問合せ対応6工程">
+          <li class="workflow-step"><span class="stage-number">1</span><div class="stage-copy"><b>問合せと現場条件を受け付ける</b><small>不足条件を確認し、検索に必要な情報をそろえる構想</small></div><div class="stage-track"><div class="node person"><b>相談者・担当者</b><small>問合せと現場条件を入力</small></div><span class="stage-arrow">→</span><div class="node future-node"><b>Ele-Knowledge</b><small>条件不足を聞き返す案</small></div></div></li>
+          <li class="workflow-step"><span class="stage-number">2</span><div class="stage-copy"><b>許可された情報源を横断検索</b><small>接続先と権限は関係部門との確認が前提</small></div><div class="stage-track stack"><div class="node future-node"><b>連携・検索オーケストレーション</b><small>質問に応じて情報源を選択</small></div><span class="stage-arrow">↕</span><div class="node future-node"><b>正規資料KB／法令検索／現場データ／承認済み事例</b><small>根拠を検索し、出典・版・更新日とともに返す構想</small></div></div></li>
+          <li class="workflow-step"><span class="stage-number">3</span><div class="stage-copy"><b>回答と出典候補を受け取る</b><small>検索結果の違い、不足、未確認事項を含めて提示する案</small></div><div class="stage-track"><div class="node future-node"><b>連携検索の結果</b><small>複数情報源の根拠</small></div><span class="stage-arrow">→</span><div class="node future-node"><b>Ele-Knowledgeが回答案を整理</b><small>資料・条文・現場データへの出典を付ける</small></div><span class="stage-arrow">→</span><div class="node person"><b>担当者</b><small>回答案と根拠を受け取る</small></div></div></li>
+          <li class="workflow-step"><span class="stage-number">4</span><div class="stage-copy"><b>原資料を開き、内容を確認</b><small>条件・版・現場状況を人が照合し、不明点は所管や有識者へ確認</small></div><div class="stage-track stack"><div class="node person"><b>担当者</b><small>根拠と現場条件を照合</small></div><span class="stage-arrow">→</span><div class="node person"><b>所管者・有識者</b><small>必要な場合に専門確認</small></div></div></li>
+          <li class="workflow-step"><span class="stage-number">5</span><div class="stage-copy"><b>情報を照合して回答を組み立てる</b><small>AIは根拠付きの下書きを支援し、業務判断は人が行う</small></div><div class="stage-track"><div class="node future-node"><b>根拠・相違・不足を整理した回答案</b></div><span class="stage-arrow">→</span><div class="node person"><b>担当者が照合・判断</b><small>最終内容を人が決定</small></div></div></li>
+          <li class="workflow-step"><span class="stage-number">6</span><div class="stage-copy"><b>回答ファイルを作成し、返信</b><small>下書き支援は将来案。確定・保存・送信は人が行う</small></div><div class="stage-track"><div class="node future-node"><b>回答ファイルの下書き</b><small>作成支援の範囲は未確定</small></div><span class="stage-arrow">→</span><div class="node person"><b>担当者が確定・承認</b></div><span class="stage-arrow">→</span><div class="node neutral"><b>問合せ元へ返信</b></div></div></li>
+        </ol>
+      </div>
+
+      <div class="usecase"><b>利用イメージ</b><p>担当者が問合せと現場条件を伝えると、将来の連携基盤が許可された資料・法令・現場データ・承認済み知見を探し、根拠と不足情報を整理した回答案を返す。担当者や有識者が原資料を照合し、必要な判断・承認を行ってから回答を確定する。確認済みの事例だけを、所管者の承認後に再利用可能な知識として蓄積する。</p></div>
+      <div class="caution"><b>未決事項：</b>接続対象とアクセス権限、現場データの提供時期、法令対象範囲、ナレッジの登録・承認・更新責任、ファイル作成支援の範囲。自動判断・無承認送信を前提としません。</div>
+    </section>
+
+    <nav class="references" aria-label="参考資料">
+      <span>関連資料：</span>
+      <a href="../../PRODUCT_INTENT.md">製品意図</a>
+      <a href="../../product-roadmap.md">製品ロードマップ</a>
+      <a href="../../api/rag.md">RAG API仕様</a>
+      <a href="../../features/development/legal-rag-design.md">法令RAG設計（開発中）</a>
+    </nav>
+
+    <footer>
+      <span>2026-10-02 / 問合せ対応シナリオ</span>
+      <span>現行仕様と将来構想を区別した説明用図。実装・運用の詳細は各仕様書を参照。</span>
+    </footer>
+  </main>
+</body>
+</html>

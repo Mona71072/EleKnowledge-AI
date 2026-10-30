@@ -481,7 +481,6 @@ Globals:
       gyoumu012Component: shared
       gyoumu012Usage: !Ref CostUsage
       Project: !Ref ProjectName
-      Env: !Ref Environment
       ManagedBy: SAM
       Phase: "2"
 
@@ -506,7 +505,6 @@ Resources:
         gyoumu012Component: rag
         gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
-        Env: !Ref Environment
         ManagedBy: SAM
         Phase: "2"
 
@@ -741,8 +739,6 @@ Resources:
       Tags:
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
         - Key: Phase
@@ -1555,7 +1551,6 @@ Resources:
         gyoumu012Component: rag
         gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
-        Env: !Ref Environment
         Phase: "2"
   
   ChatApi:
@@ -1607,7 +1602,6 @@ Resources:
         gyoumu012Component: shared
         gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
-        Env: !Ref Environment
         Phase: "2"
 
   # ============================================================================

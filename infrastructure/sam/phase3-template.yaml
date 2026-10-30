@@ -101,7 +101,6 @@ Globals:
       gyoumu012Component: troubleshooting
       gyoumu012Usage: !Ref CostUsage
       Project: !Ref ProjectName
-      Env: !Ref Environment
       ManagedBy: SAM
       Phase: "3"
 
@@ -176,8 +175,6 @@ Resources:
           Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
         - Key: Phase
@@ -208,8 +205,6 @@ Resources:
           Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
         - Key: Phase
@@ -253,8 +248,6 @@ Resources:
           Value: !Ref CostUsage
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref Environment
         - Key: ManagedBy
           Value: SAM
         - Key: Phase
@@ -377,7 +370,6 @@ Resources:
         gyoumu012Component: troubleshooting
         gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
-        Env: !Ref Environment
         ManagedBy: SAM
         Phase: "3"
 
@@ -393,7 +385,6 @@ Resources:
         gyoumu012Component: troubleshooting
         gyoumu012Usage: !Ref CostUsage
         Project: !Ref ProjectName
-        Env: !Ref Environment
         ManagedBy: SAM
         Phase: "3"
 
