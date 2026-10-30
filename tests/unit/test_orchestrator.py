@@ -28,14 +28,34 @@ def test_extract_user_id_present():
 
 
 def test_extract_user_id_missing_authorizer():
-    assert orchestrator.extract_user_id({}) == "anonymous"
+    assert orchestrator.extract_user_id({}) is None
 
 
 def test_extract_user_id_empty_string():
-    # 空文字も欠落と同じく 'anonymous' へフォールバック（missing_authorizer と同契約）。
-    # 認証自体は API Gateway の Cognito Authorizer が上流で保証する。
+    # 空の userId は未認証として扱い、匿名の共有所有者へフォールバックしない。
     event = {"requestContext": {"authorizer": {"userId": ""}}}
-    assert orchestrator.extract_user_id(event) == "anonymous"
+    assert orchestrator.extract_user_id(event) is None
+
+
+def test_extract_user_id_handles_null_authorizer_and_claims():
+    assert orchestrator.extract_user_id({"requestContext": {"authorizer": None}}) is None
+    assert orchestrator.extract_user_id({"requestContext": {"authorizer": {"claims": None}}}) is None
+
+
+def test_handler_rejects_missing_verified_identity_before_side_effects(monkeypatch):
+    monkeypatch.setattr(orchestrator, "init_session", MagicMock(side_effect=AssertionError("session write")))
+    monkeypatch.setattr(orchestrator, "invoke_agent", MagicMock(side_effect=AssertionError("agent invocation")))
+    event = {
+        "httpMethod": "POST",
+        "body": '{"model":"KE-LG","troubleDescription":"合成の確認質問"}',
+        "requestContext": {"authorizer": {"claims": {"cognito:groups": "admin"}}},
+    }
+
+    response = orchestrator.lambda_handler(event, None)
+
+    assert response["statusCode"] == 401
+    assert orchestrator.init_session.call_count == 0
+    assert orchestrator.invoke_agent.call_count == 0
 
 
 # ---------------------------------------------------------------------------
