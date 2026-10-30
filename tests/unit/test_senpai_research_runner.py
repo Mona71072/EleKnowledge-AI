@@ -496,9 +496,18 @@ def test_fake_refs_are_removed_and_recorded(runner):
 
 # ---------------------------------------------------------------- 失敗
 
-def test_all_searches_failing_is_a_failure_not_a_not_found(runner):
+def test_all_searches_failing_holds_law_relevant_questions(runner):
     deps = FakeDeps(tech=lambda q, m: RuntimeError("kb down"), law=lambda q: RuntimeError("kb down"),
                     understand=_understanding(lawRelevant=True))
+    outcome, events, *_ = _run(runner, deps)
+    assert outcome["result"]["kind"] == "not_found"
+    assert "法令" in outcome["result"]["answerMarkdown"]
+    assert not any(purpose == "synthesize" for purpose, _ in deps.model_calls)
+
+
+def test_all_searches_failing_is_a_failure_for_non_law_question(runner):
+    deps = FakeDeps(tech=lambda q, m: RuntimeError("kb down"), law=lambda q: RuntimeError("kb down"),
+                    understand=_understanding(lawRelevant=False))
     with pytest.raises(runner.ResearchFailure) as caught:
         _run(runner, deps)
     assert caught.value.code == "Internal"

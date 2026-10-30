@@ -137,13 +137,14 @@ const entry = () => loadTsx('../src/components/knowledge/KnowledgeChatEntry.tsx'
   '@/components/ui/Card': { Card: ({ children, className }) => createElement('div', { className }, children) },
 }).KnowledgeChatEntry;
 
-test('Amplify dev deployment enables the real Senpai entry for admins only', () => {
+test('Amplify shared dev keeps the unfinished Senpai entry disabled', () => {
   const buildSpec = parse(readFileSync(new URL('../../amplify.yml', import.meta.url), 'utf8'));
   const variables = buildSpec.env.variables;
   assert.match(variables.NEXT_PUBLIC_RAG_API_URL, /\/dev$/);
   const enabled = variables.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH === 'true';
+  assert.equal(variables.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH, 'false');
   const Entry = entry();
-  assert.match(renderToStaticMarkup(createElement(Entry, { isAdmin: true, enabled })), /href="\/knowledge\/chat"/);
+  assert.equal(renderToStaticMarkup(createElement(Entry, { isAdmin: true, enabled })), '');
   assert.equal(renderToStaticMarkup(createElement(Entry, { isAdmin: false, enabled })), '');
 });
 

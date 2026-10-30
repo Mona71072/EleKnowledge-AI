@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "run": {
+    "source": "not-run",
+    "headSha": "not-run",
+    "evaluatedAt": "2026-10-30",
+    "grader": "未実施",
+    "notes": "合成評価セットと採点器の初期基準。承認済み実資料、保存済みの承認応答、AWS接続を使ったRAG実行がないため、製品の検索・回答品質の数値は未測定。N=0を0点として扱わない。"
+  },
+  "results": []
+}

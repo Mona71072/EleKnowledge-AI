@@ -1,0 +1,75 @@
+---
+status: draft
+last-verified: 2026-10-30
+related-code:
+  - scripts/knowledge/evaluate_rag_quality.py
+  - tests/fixtures/knowledge/rag-quality-eval-v1.json
+  - tests/unit/test_rag_quality_eval.py
+---
+
+# RAG品質の評価セットと採点契約
+
+## 目的と評価の境界
+
+この評価セットは、機種・版・部位を取り違えた検索、根拠のない断定、誤引用、法令と技術資料の混同、権限外資料の露出を継続的に検出するための開発用契約である。合成データの結果を、実業務の正答率、会社資料の有用性、Bedrock上の実検索性能として扱わない。
+
+`tests/fixtures/knowledge/rag-quality-eval-v1.json`の30ケースはすべて合成であり、文書ID・版・機種・数値・法令相当の記述は架空である。Knowledge Baseへ投入したり、技術・法令の実務根拠として使用したりしない。各ケースに質問、前提、期待する回答または保留、期待根拠のID・版・機種・部位・資料種別、誤引用禁止資料、評価項目、重大失敗を記録した。6カテゴリを各5件含む。
+
+| カテゴリ | 主な失敗検出 |
+|---|---|
+| `model_specific` | 型式・制御方式・部位・版の取り違え |
+| `fault_diagnosis` | 相関からの原因断定、測定不足時の誤診 |
+| `procedure_limit` | 条件・前提を落とした手順や値、旧版採用 |
+| `legal_standard` | 法令根拠なしの回答、旧版、法令と技術解説の混同 |
+| `cross_source` | 技術資料とノウハウの権威差、質問要素の引用漏れ |
+| `adversarial_or_insufficient` | 根拠不足、矛盾、権限外、検索文書中の命令文 |
+
+## 実行と入力
+
+この採点器はローカル専用で、AWS・Bedrock・外部モデルを呼び出さない。回答本文の自動意味採点も行わない。各クエリの検索候補と応答を実行時の生データから採点JSONへ写し、独立した技術者が文書の適用条件と回答主張を照合する。高リスクケースの不一致は別の有識者が裁定する。判定者名、対象HEAD、実行日時、データ源はrun metadataに残す。
+
+```bash
+python scripts/knowledge/evaluate_rag_quality.py \
+  --cases tests/fixtures/knowledge/rag-quality-eval-v1.json \
+  --results <human-judged-run.json> \
+  --k 5 \
+  --json-out /tmp/rag-quality-report.json
+```
+
+入力の`results`は30ケースすべてを含め、取得資料のID・版・機種・部位・資料種別・順位と、人間が付けた関連性・認可ラベルを記録する。回答は主張単位に分け、事実性、根拠支持、法令主張か、引用ID・資料種別・引用が主張を支持するかを判定する。引用本文や実資料本文をこの評価JSONへ複製しない。
+
+## 指標と分母
+
+各指標は分子・分母・率をJSONで出力する。分母が0なら率は`null`であり、0%と解釈しない。
+
+| 指標 | 計算 |
+|---|---|
+| 正しい根拠の取得率 | 文書ID・版・機種・部位・資料種別が全て一致して取得候補に含まれた期待根拠数 / 全期待根拠数 |
+| Top-K根拠保持率 | 同じ全属性が一致し、かつrank ≤ Kの期待根拠数 / 全期待根拠数 |
+| 版・機種・部位一致率 | 文書ID・版・機種・部位・資料種別が全て一致した期待根拠数 / 全期待根拠数（根拠取得率と同じ厳格一致を用いる） |
+| 不要・権限外・禁止根拠率 | 無関係、未認可、禁止ID、期待根拠の誤版・誤機種・誤部位の取得数 / 全取得数 |
+| 回答主張の支持率 | 人が根拠支持と判定した事実主張数 / 全事実主張数 |
+| 引用精度 | 取得済み資料のうち人が主張を支持すると判定した引用数 / 全引用数 |
+| 引用漏れ率 | 有効な引用を持たない事実主張数 / 全事実主張数 |
+| 不支持断定率 | 不支持と判定した事実主張数 / 全事実主張数 |
+| 保留適切率 | 期待が`hold`で実際も`hold`のケース数 / 保留を期待したケース数 |
+| 法令・技術混同率 | 技術資料等を法的主張の根拠にした法令関連ケース数 / 全法令関連ケース数 |
+
+Bedrockの評価資料も検索のみと検索＋生成を分け、検索ではContext relevance / Context coverage、回答ではFaithfulness / Citation precision / Citation coverage等を別指標としている。本評価はこの分離を参考にし、対象機種・版・権限・保留の判断を追加した。Bedrockの自動評価値は候補比較に使えても、技術的正解や業務受入の証明としては使わない。[Bedrock RAG評価](https://docs.aws.amazon.com/bedrock/latest/userguide/evaluation-kb.html)・[Bedrock評価指標](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-evaluation-metrics.html)
+
+## 初期ベースライン
+
+初期ベースラインは「評価データ30件・実システム評価0件」である。現時点で承認済み実資料や保存応答を使った実RAG実行はしていない。ベースラインJSONの各品質率は`null`（N=0）であり、検索・回答品質は未測定と記録する。評価器の算定確認は`tests/unit/test_rag_quality_eval.py`の合成入力で行い、このテスト成功を製品品質に加算しない。
+
+```bash
+python -m pytest tests/unit/test_rag_quality_eval.py -q
+python scripts/knowledge/evaluate_rag_quality.py --allow-empty
+```
+
+モデルまたは検索変更を比べるときは、同じ質問・同じ候補文書・同じK・同じ人手判定基準でrun JSONを作る。現行の一括スコア順選別、検索レーン別候補枠、再ランキング、メタデータ絞り込み、根拠十分性ゲートを一つずつ比較し、検索指標と回答指標の差を分離する。Top-Kだけを増やした結果やLLM judgeだけの差で採用を決めない。
+
+実資料の正答セットは、技術担当者が文書ID・承認済み版・型式・適用条件・禁止資料を確認してから追加する。承認者と採点者を記録し、機密・個人情報を含む原文を一般fixtureへ複製しない。閾値は合成セットでは決めず、実資料の二重採点と重大失敗のレビューを経て合意する。
+
+## AWS接続後の最小試験
+
+実AWS試験は別承認と接続確認の後に行う。最初は読み取り専用の`Retrieve`で代表6ケースを1回ずつ実行し、対象アカウント・リージョン・KB ID・同期版・データ分類・検索権限を記録する。候補とメタデータを安全な監査先へ保存して人が採点し、KB同期・S3書込・設定変更は行わない。生成モデルを呼ぶFaithfulness/引用評価は、少数実行の費用・データ範囲・承認者を別途決めた後に限る。

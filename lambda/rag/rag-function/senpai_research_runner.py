@@ -412,9 +412,12 @@ def run_research(job: dict, deps, recorder, budget) -> dict:
         _step_understand(ctx)
         _step_knowhow(ctx)
         _step_initial_search(ctx)
-        if ctx.all_searches_failed():
+        # 法令関連の問いは十分性ループで法令検索の再試行機会を残す。
+        # それ以外の問いで全検索が失敗した場合は内部エラーにする。
+        if ctx.all_searches_failed() and not ctx.understanding.get('lawRelevant'):
             raise ResearchFailure('Internal', SEARCH_FAILED_MESSAGE)
         stop_reason, questions = _sufficiency_loop(ctx)
+        # 法令関連と判定した問いは、技術資料だけで代替しない。
         if ctx.understanding.get('lawRelevant') and not ctx.sources()['law']:
             return _law_evidence_missing_outcome(ctx, stop_reason)
         if questions:
