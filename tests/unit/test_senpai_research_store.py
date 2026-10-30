@@ -69,6 +69,15 @@ def test_claim_request_replaces_expired_idempotency_row_before_ttl_deletion(env)
     assert table.get_item(Key={"pk": key})["Item"]["jobId"] == JOB_B
 
 
+def test_release_request_does_not_delete_a_claim_owned_by_another_job(env):
+    _mod, store, *_ = env
+    assert store.claim_request(USER_ID, support.CLIENT_REQUEST_ID, JOB_A) == (JOB_A, True)
+
+    store.release_request(USER_ID, support.CLIENT_REQUEST_ID, JOB_B)
+
+    assert store.claim_request(USER_ID, support.CLIENT_REQUEST_ID, JOB_B) == (JOB_A, False)
+
+
 def test_claim_request_is_scoped_per_user(env):
     _mod, store, *_ = env
     store.claim_request(USER_ID, support.CLIENT_REQUEST_ID, JOB_A)
@@ -78,7 +87,7 @@ def test_claim_request_is_scoped_per_user(env):
 def test_release_request_allows_reuse(env):
     _mod, store, *_ = env
     store.claim_request(USER_ID, support.CLIENT_REQUEST_ID, JOB_A)
-    store.release_request(USER_ID, support.CLIENT_REQUEST_ID)
+    store.release_request(USER_ID, support.CLIENT_REQUEST_ID, JOB_A)
     assert store.claim_request(USER_ID, support.CLIENT_REQUEST_ID, JOB_B) == (JOB_B, True)
 
 
