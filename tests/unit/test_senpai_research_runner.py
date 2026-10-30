@@ -323,9 +323,11 @@ def test_law_search_is_skipped_when_understanding_says_irrelevant(runner):
 
 def test_law_search_is_skipped_when_not_configured(runner):
     deps = FakeDeps(understand=_understanding(lawRelevant=True), law_available=False)
-    _outcome, events, *_ = _run(runner, deps)
+    outcome, events, *_ = _run(runner, deps)
     assert next(e for e in events if e["step"] == "law_search")["status"] == "skipped"
     assert deps.law_calls == []
+    assert outcome["result"]["kind"] == "not_found"
+    assert "法令の根拠" in outcome["result"]["answerMarkdown"]
 
 
 def test_law_results_are_cited_with_l_refs(runner):
@@ -506,7 +508,21 @@ def test_one_failed_search_does_not_stop_the_others(runner):
     deps = FakeDeps(law=lambda q: RuntimeError("law kb down"), understand=_understanding(lawRelevant=True))
     outcome, events, *_ = _run(runner, deps)
     assert any(e["step"] == "law_search" and e["status"] == "failed" for e in events)
-    assert outcome["result"]["kind"] == "answer"
+    assert deps.tech_calls
+    assert outcome["result"]["kind"] == "not_found"
+    assert outcome["result"]["warnings"] == ["法令の検索に失敗したため、法令の根拠は含まれていません。"]
+    assert not any(purpose == "synthesize" for purpose, _ in deps.model_calls)
+
+
+def test_law_relevant_question_without_law_results_holds_technical_only_answer(runner):
+    deps = FakeDeps(law=lambda _query: _retrieval(hits=0),
+                    understand=_understanding(lawRelevant=True))
+
+    outcome, _events, *_ = _run(runner, deps)
+
+    assert outcome["result"]["kind"] == "not_found"
+    assert outcome["result"]["sources"]["tech"] == []
+    assert not any(purpose == "synthesize" for purpose, _ in deps.model_calls)
 
 
 def test_synthesis_timeout_is_reported_as_timeout(runner):
