@@ -59,6 +59,16 @@ def test_claim_request_returns_existing_job_for_same_client_request_id(env):
     assert store.claim_request(USER_ID, support.CLIENT_REQUEST_ID, JOB_B) == (JOB_A, False)
 
 
+def test_claim_request_replaces_expired_idempotency_row_before_ttl_deletion(env):
+    _mod, store, table, clock = env
+    key = f"REQ#{USER_ID}#{support.CLIENT_REQUEST_ID}"
+    table.put_item(Item={"pk": key, "jobId": JOB_A, "ttl": int(clock()) - 1})
+
+    assert table.get_item(Key={"pk": key}).get("Item") is not None
+    assert store.claim_request(USER_ID, support.CLIENT_REQUEST_ID, JOB_B) == (JOB_B, True)
+    assert table.get_item(Key={"pk": key})["Item"]["jobId"] == JOB_B
+
+
 def test_claim_request_is_scoped_per_user(env):
     _mod, store, *_ = env
     store.claim_request(USER_ID, support.CLIENT_REQUEST_ID, JOB_A)
@@ -132,6 +142,16 @@ def test_create_and_get_job_round_trip(env):
     job = store.get_job(JOB_A)
     assert job["userId"] == USER_ID and job["status"] == "queued"
     assert store.get_job(JOB_B) is None
+
+
+def test_get_job_hides_expired_item_before_ttl_deletion(env):
+    store_mod, store, table, clock = env
+    item = _item(store_mod, clock=clock)
+    item["ttl"] = int(clock()) - 1
+    store.create_job(item)
+
+    assert table.get_item(Key={"pk": f"JOB#{JOB_A}"}).get("Item") is not None
+    assert store.get_job(JOB_A) is None
 
 
 def test_start_job_only_from_queued(env):

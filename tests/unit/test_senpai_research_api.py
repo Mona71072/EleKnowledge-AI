@@ -269,6 +269,24 @@ def test_completed_job_returns_result_and_admin_debug(api):
     assert "error" not in body
 
 
+def test_status_hides_expired_completed_result_while_ttl_deletion_is_pending(api):
+    job_id = body_of(_post(api))["jobId"]
+    store = api.test_ctx.store
+    store.start_job(job_id)
+    store.complete_job(job_id, {"kind": "answer", "answerMarkdown": "期限切れの回答"}, {})
+    store._table.update_item(
+        Key={"pk": f"JOB#{job_id}"},
+        UpdateExpression="SET #ttl = :expired",
+        ExpressionAttributeNames={"#ttl": "ttl"},
+        ExpressionAttributeValues={":expired": int(api.test_ctx.clock()) - 1},
+    )
+
+    assert api.test_ctx.table.get_item(Key={"pk": f"JOB#{job_id}"}).get("Item") is not None
+    response = _get(api, job_id)
+    assert response["statusCode"] == 404
+    assert "期限切れの回答" not in response["body"]
+
+
 def test_debug_is_hidden_from_non_admin_callers(api):
     job_id = body_of(_post(api))["jobId"]
     store = api.test_ctx.store
