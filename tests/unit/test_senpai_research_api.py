@@ -156,8 +156,38 @@ def test_duplicate_request_during_initial_claim_keeps_the_first_claim(api):
 
     replay = api._claim_or_replay(store, USER_ID, request, second_job_id)
 
-    assert replay == (first_job_id, "queued")
+    assert replay == (first_job_id, "request_in_flight")
     assert store.claim_request(USER_ID, request["clientRequestId"], second_job_id) == (first_job_id, False)
+
+
+def test_duplicate_post_during_initial_claim_returns_request_in_progress(api):
+    first_job_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    assert api.test_ctx.store.claim_request(
+        USER_ID, support.CLIENT_REQUEST_ID, first_job_id
+    ) == (first_job_id, True)
+
+    response = _post(api)
+
+    assert response["statusCode"] == 409
+    assert body_of(response)["error"] == "RequestInProgress"
+    assert api.test_ctx.invoked == []
+    assert api.test_ctx.store.claim_request(
+        USER_ID, support.CLIENT_REQUEST_ID, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    ) == (first_job_id, False)
+
+
+def test_orphaned_request_claim_can_be_reclaimed_after_lease(api):
+    request = api.parse_request(api_event(valid_body()))
+    store = api.test_ctx.store
+    first_job_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    next_job_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    assert store.claim_request(USER_ID, request["clientRequestId"], first_job_id) == (first_job_id, True)
+    api.test_ctx.clock.advance(api.store.REQUEST_CLAIM_LEASE_SECONDS + 1)
+
+    replay = api._claim_or_replay(store, USER_ID, request, next_job_id)
+
+    assert replay is None
+    assert store.claim_request(USER_ID, request["clientRequestId"], first_job_id) == (next_job_id, False)
 
 
 def test_expired_request_replay_creates_new_job_without_returning_old_result(api):

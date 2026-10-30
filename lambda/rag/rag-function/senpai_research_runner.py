@@ -307,6 +307,17 @@ def _not_found_outcome(ctx: RunContext, stop_reason: str) -> dict:
     return _outcome(ctx, result)
 
 
+def _law_evidence_missing_outcome(ctx: RunContext, stop_reason: str) -> dict:
+    """法令関連質問は、有効な法令根拠が無ければ技術資料だけで回答しない。"""
+    ctx.recorder.skip('synthesize', '法令の根拠がないため回答を保留')
+    ctx.recorder.skip('verify', '回答を保留')
+    result = _result(
+        ctx, kind='not_found', markdown=synthesize.law_evidence_missing_markdown(),
+        public_sources=citations.public_sources(ctx.sources(), cited=set()),
+        stop_reason=stop_reason)
+    return _outcome(ctx, result)
+
+
 def _failure_from(error: Exception) -> ResearchFailure:
     if _is_timeout(error):
         return ResearchFailure('Timeout', TIMEOUT_MESSAGE)
@@ -404,6 +415,8 @@ def run_research(job: dict, deps, recorder, budget) -> dict:
         if ctx.all_searches_failed():
             raise ResearchFailure('Internal', SEARCH_FAILED_MESSAGE)
         stop_reason, questions = _sufficiency_loop(ctx)
+        if ctx.understanding.get('lawRelevant') and not ctx.sources()['law']:
+            return _law_evidence_missing_outcome(ctx, stop_reason)
         if questions:
             return _clarify_outcome(ctx, questions)
         return _answer_outcome(ctx, stop_reason)

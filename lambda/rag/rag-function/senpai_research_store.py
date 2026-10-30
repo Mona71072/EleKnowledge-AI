@@ -15,6 +15,7 @@ from botocore.exceptions import ClientError
 
 JST = timezone(timedelta(hours=9))
 JOB_RETENTION_SECONDS = 7 * 24 * 3600
+REQUEST_CLAIM_LEASE_SECONDS = 60
 DAILY_RETENTION_SECONDS = 3 * 24 * 3600
 TIMEOUT_MESSAGE = '調査が時間内に完了しませんでした。もう一度お試しください。'
 CONDITION_FAILED = 'ConditionalCheckFailedException'
@@ -73,11 +74,14 @@ class JobStore:
     def claim_request(self, user_id: str, client_request_id: str, job_id: str) -> tuple:
         """要求を登録する。既に登録済みなら (既存の jobId, False)。"""
         key = f'REQ#{user_id}#{client_request_id}'
+        now = int(self._clock())
         for _attempt in range(2):
             try:
                 self._table.put_item(
                     Item={'pk': key, 'jobId': job_id,
-                          'ttl': int(self._clock()) + JOB_RETENTION_SECONDS},
+                          'claimedAt': now,
+                          'claimExpiresAt': now + REQUEST_CLAIM_LEASE_SECONDS,
+                          'ttl': now + JOB_RETENTION_SECONDS},
                     ConditionExpression=(
                         'attribute_not_exists(pk) OR attribute_not_exists(#ttl) OR #ttl <= :now'
                     ),
@@ -92,6 +96,32 @@ class JobStore:
             if existing:
                 return existing['jobId'], False
         raise RuntimeError('request claim raced twice')
+
+    def reclaim_request(self, user_id: str, client_request_id: str,
+                        previous_job_id: str, job_id: str) -> bool:
+        """ジョブ行の無い放置済み予約だけを、リース経過後に引き継ぐ。"""
+        now = int(self._clock())
+        try:
+            self._table.put_item(
+                Item={
+                    'pk': f'REQ#{user_id}#{client_request_id}',
+                    'jobId': job_id,
+                    'claimedAt': now,
+                    'claimExpiresAt': now + REQUEST_CLAIM_LEASE_SECONDS,
+                    'ttl': now + JOB_RETENTION_SECONDS,
+                },
+                ConditionExpression=(
+                    'jobId = :previous AND '
+                    '(attribute_not_exists(#claim_expires) OR #claim_expires <= :now)'
+                ),
+                ExpressionAttributeNames={'#claim_expires': 'claimExpiresAt'},
+                ExpressionAttributeValues={':previous': previous_job_id, ':now': now},
+            )
+            return True
+        except ClientError as error:
+            if _is_condition_failure(error):
+                return False
+            raise
 
     def release_request(self, user_id: str, client_request_id: str, job_id: str) -> None:
         """自分の要求予約だけを外す（競合相手の予約は残す）。"""

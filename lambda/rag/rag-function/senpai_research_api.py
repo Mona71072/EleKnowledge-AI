@@ -126,9 +126,14 @@ def _claim_or_replay(job_store, user_id: str, request: dict, job_id: str):
         existing = job_store.get_job(existing_id)
         if existing is not None:
             return existing_id, existing['status']
-        # 登録だけが残り、ジョブ行が無い（前回の受付が途中で落ちた）。登録を外して作り直す。
-        job_store.release_request(user_id, request['clientRequestId'], existing_id)
-    raise RuntimeError('request replay raced twice')
+        # 受付直後はジョブ行の作成前になり得る。新しい予約は消さず、
+        # リース満了後だけ条件付きで引き継ぐ。
+        if job_store.reclaim_request(
+            user_id, request['clientRequestId'], existing_id, job_id
+        ):
+            return None
+    # 別の受付がまだジョブ行を作成中。予約を壊さず呼び出し元へ競合を返す。
+    return existing_id, 'request_in_flight'
 
 
 def _create(event: dict, user_id: str) -> dict:
@@ -139,6 +144,8 @@ def _create(event: dict, user_id: str) -> dict:
     job_id = str(uuid.uuid4())
     replay = _claim_or_replay(job_store, user_id, request, job_id)
     if replay is not None:
+        if replay[1] == 'request_in_flight':
+            return http.error(409, 'RequestInProgress', '同じ調査の受付処理中です。画面の状態を確認してください')
         return _accepted(*replay)
     if not job_store.acquire_lock(user_id, job_id, config.job_ttl_seconds()):
         _undo_reservation(job_store, user_id, request, request_job_id=job_id)

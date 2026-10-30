@@ -140,6 +140,13 @@ def not_found_markdown() -> str:
     )
 
 
+def law_evidence_missing_markdown() -> str:
+    return (
+        '法令に関する根拠を確認できなかったため、回答を保留します。\n\n'
+        '法令資料を確認できる状態で、もう一度お試しください。'
+    )
+
+
 def no_citation_markdown() -> str:
     return (
         '回答に根拠となる資料の参照を付けられなかったため、回答を表示しません。\n\n'

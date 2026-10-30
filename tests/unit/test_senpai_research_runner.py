@@ -327,7 +327,7 @@ def test_law_search_is_skipped_when_not_configured(runner):
     assert next(e for e in events if e["step"] == "law_search")["status"] == "skipped"
     assert deps.law_calls == []
     assert outcome["result"]["kind"] == "not_found"
-    assert "法令の根拠" in outcome["result"]["answerMarkdown"]
+    assert "根拠を確認できなかった" in outcome["result"]["answerMarkdown"]
 
 
 def test_law_results_are_cited_with_l_refs(runner):

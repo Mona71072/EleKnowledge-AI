@@ -327,6 +327,7 @@ def test_create_job_failure_undoes_every_reservation(api, monkeypatch):
 def test_resend_with_a_missing_job_creates_it(api):
     ctx = api.test_ctx
     ctx.store.claim_request(USER_ID, support.CLIENT_REQUEST_ID, support.UNKNOWN_JOB_ID)  # job 行なし
+    ctx.clock.advance(api.store.REQUEST_CLAIM_LEASE_SECONDS + 1)
     response = api.lambda_handler(api_event(valid_body()), None)
     assert response["statusCode"] == 202
     job_id = body_of(response)["jobId"]
@@ -403,15 +404,15 @@ def test_runner_answer_has_no_urls():
 
 # ================================================================ F8 検索失敗の通知
 
-def test_failed_law_lane_is_noted_for_synthesis_and_warned_in_result():
+def test_failed_law_lane_holds_answer_and_is_warned_in_result():
     runner = support.load_module("senpai_research_runner.py")
     deps = FakeDeps(understand=_understanding(lawRelevant=True,
                                               queries={"tech": "t", "law": "l", "knowhow": "k"}),
                     law=lambda q: RuntimeError("kb down"))
     job, budget, recorder, events, clock = _setup(runner, deps)
     result = runner.run_research(job, deps, recorder, budget)["result"]
-    synth_input = [u for p, u in deps.model_calls if p == "synthesize"][0]
-    assert "法令の検索に失敗" in synth_input
+    assert result["kind"] == "not_found"
+    assert not any(purpose == "synthesize" for purpose, _ in deps.model_calls)
     assert any("法令" in w for w in result["warnings"])
 
 

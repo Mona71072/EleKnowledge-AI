@@ -316,7 +316,7 @@ function startStatusError(status) {
   if (status === 400) fail('validation', '質問や相談の識別情報を確認してください');
   if (status === 401) fail('auth', 'ログイン状態を確認できませんでした。再ログインしてください');
   if (status === 403) fail('unavailable', '調査機能を現在利用できません（開発環境の管理者のみ使えます）');
-  if (status === 409) fail('unavailable', 'すでに調査を実行中です。終わってから次の質問を送信してください', 409);
+  if (status === 409) fail('unavailable', '同じ調査を受付中か、別の調査を実行中です。画面の状態を確認してください', 409);
   if (status === 429) fail('server', '本日の調査回数の上限に達したか、混み合っています。時間をおいてお試しください', 429);
   if (status === 502) fail('server', '調査を開始できませんでした。時間をおいて再度お試しください', 502);
   if (status === 504) fail('timeout', MESSAGE_TIMEOUT);
