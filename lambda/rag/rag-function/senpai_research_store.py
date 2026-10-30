@@ -78,7 +78,11 @@ class JobStore:
                 self._table.put_item(
                     Item={'pk': key, 'jobId': job_id,
                           'ttl': int(self._clock()) + JOB_RETENTION_SECONDS},
-                    ConditionExpression='attribute_not_exists(pk)',
+                    ConditionExpression=(
+                        'attribute_not_exists(pk) OR attribute_not_exists(#ttl) OR #ttl <= :now'
+                    ),
+                    ExpressionAttributeNames={'#ttl': 'ttl'},
+                    ExpressionAttributeValues={':now': int(self._clock())},
                 )
                 return job_id, True
             except ClientError as error:
@@ -176,7 +180,19 @@ class JobStore:
         )
 
     def get_job(self, job_id: str):
-        return self._table.get_item(Key={'pk': f'JOB#{job_id}'}, ConsistentRead=True).get('Item')
+        item = self._table.get_item(
+            Key={'pk': f'JOB#{job_id}'}, ConsistentRead=True
+        ).get('Item')
+        if item is None:
+            return None
+        # DynamoDB TTL deletes asynchronously. Never expose a retained result after its
+        # logical expiry, even while the physical row is still present.
+        try:
+            if int(item.get('ttl')) <= int(self._clock()):
+                return None
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return item
 
     def _update_if(self, job_id: str, update: str, condition: str, names=None, values=None) -> bool:
         kwargs = {
