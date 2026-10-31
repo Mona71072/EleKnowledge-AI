@@ -5,6 +5,7 @@ import { lstat, mkdir, open, readFile, readdir, realpath, rename, unlink, writeF
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cardDigest } from './card-hash.mjs';
 import { parseKnowledgeMarkdown } from '../../frontend/src/lib/knowledge-workbench.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -225,7 +226,7 @@ async function readCard(rootResolved, relativePath) {
   const status = metadata.status;
   if (status !== 'draft' && status !== 'approved') fail('Markdown status is unsupported or retired.');
   if (parsed.body.length > MAX_CARD_BODY_CHARS) fail('A Markdown card body exceeds the 16,000 character limit.');
-  return { parsed, metadata, markdown, sha256: digest(markdown), relativePath };
+  return { parsed, metadata, markdown, sha256: cardDigest(markdown), relativePath };
 }
 
 // SECURITY: must stay equal to or stricter than knowhow_retrieval.py so a built index passes validate_index.

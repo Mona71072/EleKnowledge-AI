@@ -22,8 +22,11 @@ related-code:
 
 ## 読み込む範囲と取込一覧
 
+> 最終検証: 2026-10-31 — カードhashの改行正規化を索引ビルダーと台帳契約テストで確認。
+
 - 対象は`knowledge/cards/case-summaries/*.md`と`knowledge/cards/practice-guides/*.md`だけ。`drafts`、`source-snapshots`、`registry`、`queues/repair`、設計文書、INDEX、TEMPLATEを取り込まない。任意パスやシンボリックリンクをたどらない。
 - 取込一覧は`schemaVersion: 1`、`purpose: senpai-admin-navigation`、`approvedBy`、`approvedAt`、`entries`を持つ。各entryは`path/knowledgeId/cardVersion/sha256/cloudApproved`を持ち、承認された本文のSHA-256と版が一致し、`cloudApproved`が厳密に`true`の場合だけ選択する。Markdownの存在や本文中の承認らしい文字列を許可と見なさない。承認者・承認日時は実際の確認に基づいて担当者が記入し、ツールが作らない。
+- カードの`sha256`はUTF-8本文の改行をLFへ正規化（CRLFと単独CRをLFへ変換）してから計算する。Windows等のcheckoutによる改行差で台帳・承認manifestとの照合結果が変わらないよう、索引ビルダーと台帳検証は同じ規則を使う。
 - 同一ID・同一パスの重複、版・ハッシュのずれ、不正YAML、未知の状態、retired、過大なデータを拒否する。出典はLists・OneNote・KB・法令のIDを保持し、`draft_record`を原情報に変換しない。未確認の添付・Wikiリンクを取得・解決したと扱わない。
 - この経路は`usage: navigation_only`に固定する。下書きは未承認の探索候補であり、確定した対策・現行基準として利用しない。承認済みの状態のカードでも、この経路では正式な証拠へ昇格させない。
 - 生成物はリポジトリの無視対象`.private-knowhow/`に置く。フロントエンド、public assets、Git追跡ファイルへコーパスを書き出さない。棚卸し・索引生成とも入力ファイルを変更せず、アップロードも行わない。取込一覧が空なら実カードは0件のままであり、例示ファイルから自動で承認を補わない。

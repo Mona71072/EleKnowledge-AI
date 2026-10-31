@@ -130,7 +130,8 @@ def test_committed_card_version_ledger_matches_every_card_file():
         front = text.split("---", 2)[1]
         card_id = re.search(r"^knowledge_id:\s*(\S+)", front, re.MULTILINE).group(1).strip("\"'")
         version = int(re.search(r"^card_version:\s*(\d+)", front, re.MULTILINE).group(1))
-        cards[card_id] = (version, hashlib.sha256(path.read_bytes()).hexdigest())
+        content = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        cards[card_id] = (version, hashlib.sha256(content).hexdigest())
     assert set(entries) == set(cards), "ledger and cards differ; run: node scripts/knowledge/build-senpai-index.mjs ledger ."
     for card_id, (version, sha) in cards.items():
         assert (entries[card_id]["cardVersion"], entries[card_id]["sha256"]) == (version, sha), (
