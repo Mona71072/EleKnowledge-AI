@@ -78,6 +78,10 @@ Globals:
     Runtime: python3.13
     Architectures:
       - x86_64
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        PROJECT_NAME: !Ref ProjectName
 
 Resources:
   ResearchJobsTable:
@@ -334,7 +338,9 @@ Resources:
   ResearchApiWebAclAssociation:
     Type: AWS::WAFv2::WebACLAssociation
     Condition: ResearchEnabled
-    DependsOn: ResearchApiFunction
+    DependsOn:
+      - ResearchApiFunction
+      - ResearchApiStage
     Properties:
       WebACLArn: !Ref WebAclArn
       ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${ResearchApi}/stages/${Environment}
