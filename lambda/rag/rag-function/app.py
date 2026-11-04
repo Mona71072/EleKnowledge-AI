@@ -1584,7 +1584,9 @@ LEGACY_GENERATION_TEMPERATURE = 0.3
 
 def build_generation_request(system_prompt: str, messages: list, model_id: str,
                              max_tokens: int = None, temperature: float = None,
-                             apply_generation_settings: bool = True) -> dict:
+                             apply_generation_settings: bool = True,
+                             generation_thinking: str = None,
+                             generation_effort: str = None) -> dict:
     """InvokeModel payload using capabilities of the selected model family.
 
     Supplemental calls such as title generation use the same conservative
@@ -1598,16 +1600,28 @@ def build_generation_request(system_prompt: str, messages: list, model_id: str,
     if system_prompt:
         body["system"] = system_prompt
     profile = get_model_profile(model_id)
+    if generation_thinking not in (None, 'disabled', 'adaptive'):
+        raise ValueError('generation_thinking must be disabled or adaptive')
+    if generation_effort not in (None, 'low', 'medium', 'high'):
+        raise ValueError('generation_effort must be low, medium, or high')
+    effective_thinking = (
+        (generation_thinking or GENERATION_THINKING)
+        if apply_generation_settings else 'disabled'
+    )
+    effective_effort = (
+        (generation_effort or GENERATION_EFFORT)
+        if apply_generation_settings else 'low'
+    )
     if profile.sampling:
         body["temperature"] = LEGACY_GENERATION_TEMPERATURE if temperature is None else temperature
-    elif apply_generation_settings and GENERATION_THINKING == 'adaptive' and profile.adaptive:
+    elif effective_thinking == 'adaptive' and profile.adaptive:
         body["thinking"] = {"type": "adaptive"}
         if profile.effort:
-            body["output_config"] = {"effort": GENERATION_EFFORT}
+            body["output_config"] = {"effort": effective_effort}
     elif profile.thinking_disable:
         body["thinking"] = {"type": "disabled"}
     elif profile.effort:
-        body["output_config"] = {"effort": "low"}
+        body["output_config"] = {"effort": effective_effort}
     return body
 
 
@@ -1658,13 +1672,17 @@ def invoke_generation(client, model_id: str, system_prompt: str, messages: list,
                       max_tokens: int = None, temperature: float = None,
                       apply_generation_settings: bool = True,
                       ensure_ascii: bool = True,
-                      call_name: str = 'answer') -> tuple:
+                      call_name: str = 'answer',
+                      generation_thinking: str = None,
+                      generation_effort: str = None) -> tuple:
     """モデル能力に応じて生成し、本文・usage・停止理由を返す。"""
     profile = get_model_profile(model_id)
     request_body = build_generation_request(
         system_prompt, messages, model_id, max_tokens=max_tokens,
         temperature=temperature,
         apply_generation_settings=apply_generation_settings,
+        generation_thinking=generation_thinking,
+        generation_effort=generation_effort,
     )
     if profile.api == 'converse':
         converse_messages, system = build_converse_messages(

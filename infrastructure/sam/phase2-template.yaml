@@ -333,6 +333,19 @@ Parameters:
       - high
     Description: Adaptive thinking effort for normal responses on supported new API models
 
+  ResearchModeEnabled:
+    Type: String
+    Default: 'off'
+    AllowedValues: ['off', 'beta', 'on']
+    Description: Enable the long-running RAG research mode in this environment
+
+  ResearchWorkerReservedConcurrency:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 20
+    Description: Maximum concurrent long-running research jobs
+
   RagLambdaTimeout:
     Type: Number
     Default: 300
@@ -446,6 +459,9 @@ Parameters:
 
 Conditions:
   HasRerankModelArn: !Not [!Equals [!Ref RerankModelArn, '']]
+  ResearchModeResourcesEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Not [!Equals [!Ref ResearchModeEnabled, 'off']]
   LawRagDevEnabled: !And
     - !Equals [!Ref Environment, dev]
     - !Equals [!Ref LawRagEnabled, 'true']
@@ -765,6 +781,298 @@ Resources:
   # ============================================================================
   # Lambda Functions - RAG
   # ============================================================================
+  ResearchJobsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ResearchModeResourcesEnabled
+    Properties:
+      TableName: !Sub rag-research-jobs-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: userId-createdAt-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "2"
+
+  ResearchFailureQueue:
+    Type: AWS::SQS::Queue
+    Condition: ResearchModeResourcesEnabled
+    Properties:
+      QueueName: !Sub rag-research-failures-${Environment}
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+
+  ResearchApiLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: ResearchModeResourcesEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ResearchJobsApiAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:TransactWriteItems
+                Resource:
+                  - !GetAtt ResearchJobsTable.Arn
+                  - !Sub ${ResearchJobsTable.Arn}/index/userId-createdAt-index
+        - PolicyName: ResearchChatLogsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                Resource:
+                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+        - PolicyName: InvokeResearchWorker
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ResearchWorkerFunction.Arn
+
+  ResearchWorkerLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: ResearchModeResourcesEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ResearchKnowledgeBaseRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:Retrieve
+                Resource: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
+        - PolicyName: ResearchModelInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - !Ref BedrockModelId
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub
+                    - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                    - FoundationModelId: !Join
+                        - '.'
+                        - - !Select [1, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                          - !Select [2, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                Condition:
+                  StringLike:
+                    bedrock:InferenceProfileArn: !If
+                      - BedrockModelIdIsApplicationProfile
+                      - !Ref BedrockModelId
+                      - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+        - !If
+          - HasRerankModelArn
+          - PolicyName: ResearchRerankAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: bedrock:Rerank
+                  Resource: '*'
+                - Effect: Allow
+                  Action: bedrock:InvokeModel
+                  Resource: !Ref RerankModelArn
+          - !Ref AWS::NoValue
+        - PolicyName: ResearchJobAndChatPersistence
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:TransactWriteItems
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt ResearchJobsTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:TransactWriteItems
+                Resource:
+                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableArn
+        - PolicyName: ResearchFailureDestination
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt ResearchFailureQueue.Arn
+
+  ResearchApiFunction:
+    Type: AWS::Serverless::Function
+    Condition: ResearchModeResourcesEnabled
+    Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+      FunctionName: !Sub rag-research-api-${Environment}
+      CodeUri: ../../lambda/rag/rag-function/
+      Handler: research_api.lambda_handler
+      Description: Long-running RAG research API and job status
+      Role: !GetAtt ResearchApiLambdaRole.Arn
+      Timeout: 25
+      MemorySize: 512
+      Environment:
+        Variables:
+          RESEARCH_MODE_ENABLED: !Ref ResearchModeEnabled
+          ENVIRONMENT: !Ref Environment
+          RESEARCH_JOBS_TABLE: !Ref ResearchJobsTable
+          RESEARCH_WORKER_FUNCTION: !Ref ResearchWorkerFunction
+          CHATLOGS_TABLE:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          CHATLOGS_METRIC_SHARDS: "10"
+      Events:
+        ResearchCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/research
+            Method: POST
+        ResearchStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/research/{jobId}
+            Method: GET
+        ResearchSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/research
+            Method: GET
+        ResearchQuota:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/research/quota
+            Method: GET
+
+  ResearchWorkerFunction:
+    Type: AWS::Serverless::Function
+    Condition: ResearchModeResourcesEnabled
+    Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+      FunctionName: !Sub rag-research-worker-${Environment}
+      CodeUri: ../../lambda/rag/rag-function/
+      Handler: research_worker.lambda_handler
+      Description: Long-running RAG research worker, asynchronously invoked by its API
+      Role: !GetAtt ResearchWorkerLambdaRole.Arn
+      Timeout: 300
+      MemorySize: !Ref RagLambdaMemory
+      ReservedConcurrentExecutions: !Ref ResearchWorkerReservedConcurrency
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 120
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt ResearchFailureQueue.Arn
+      Environment:
+        Variables:
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+          RAG_LOGIC_VERSION: !Ref RagLogicVersion
+          ENVIRONMENT: !Ref Environment
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_REQUEST_STYLE: !Ref BedrockRequestStyle
+          BEDROCK_MAX_ATTEMPTS: '1'
+          RAG_SEARCH_TYPE: !Ref RagSearchType
+          KB_PROFILE_JSON: !Ref KbProfileJson
+          MODEL_PROFILE_JSON: !Ref ModelProfileJson
+          RERANK_MODEL_ARN: !Ref RerankModelArn
+          RERANK_MAX_CANDIDATES: !Ref RerankMaxCandidates
+          GENERATION_THINKING: !Ref GenerationThinking
+          GENERATION_EFFORT: !Ref GenerationEffort
+          KB_SOURCE_BUCKET: !Ref KnowledgeBaseDataSourceBucket
+          KB_SOURCE_PREFIX: !Ref KnowledgeBaseSourcePrefix
+          CHATLOGS_TABLE:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ChatLogsTableName
+          CHATLOGS_METRIC_SHARDS: "10"
+          RESEARCH_JOBS_TABLE: !Ref ResearchJobsTable
+          DOCUMENTS_BUCKET:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
+          PRESIGNED_URL_EXPIRES_IN: !Ref PresignedUrlExpiresIn
+          CITATION_URI_MODE: !Ref CitationUriMode
+
   RagFunction:
     Type: AWS::Serverless::Function
     Properties:
