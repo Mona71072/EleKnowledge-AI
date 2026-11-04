@@ -62,6 +62,9 @@ def test_api_routes_and_role_are_separate_from_bedrock_worker(template):
     assert "bedrock:InvokeModel" not in _actions(template, "ResearchApiFunction")
     assert "bedrock:Retrieve" not in _actions(template, "ResearchApiFunction")
     assert "lambda:InvokeFunction" in _actions(template, "ResearchApiFunction")
+    assert {"dynamodb:TransactWriteItems", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem"}.issubset(
+        _actions(template, "ResearchApiFunction")
+    )
     assert all(event["Properties"]["RestApiId"] == "ResearchApi" for event in api["Events"].values())
 
 
@@ -76,6 +79,10 @@ def test_worker_is_async_only_bounded_and_has_failure_destination(template):
     assert destination["Type"] == "SQS"
     assert destination["Destination"] == "ResearchFailureQueue.Arn"
     actions = _actions(template, "ResearchWorker")
-    assert {"bedrock:Retrieve", "bedrock:InvokeModel", "sqs:SendMessage"}.issubset(actions)
+    assert {
+        "bedrock:Retrieve", "bedrock:InvokeModel", "sqs:SendMessage",
+        "dynamodb:TransactWriteItems", "dynamodb:PutItem", "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem", "dynamodb:ConditionCheckItem",
+    }.issubset(actions)
     assert "dynamodb:Scan" not in actions
     assert "lambda:InvokeFunction" not in actions

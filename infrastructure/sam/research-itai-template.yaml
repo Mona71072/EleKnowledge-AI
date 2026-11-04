@@ -167,6 +167,9 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:Query
                   - dynamodb:TransactWriteItems
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                 Resource:
                   - !GetAtt ResearchJobsTable.Arn
                   - !Sub ${ResearchJobsTable.Arn}/index/userId-createdAt-index
@@ -232,10 +235,14 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem
                   - dynamodb:TransactWriteItems
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:ConditionCheckItem
                 Resource: !GetAtt ResearchJobsTable.Arn
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
+                  - dynamodb:PutItem
                   - dynamodb:TransactWriteItems
                 Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatLogsTableName}
         - PolicyName: ResearchFailureDestination
