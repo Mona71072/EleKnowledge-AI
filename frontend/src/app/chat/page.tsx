@@ -809,6 +809,8 @@ const normalizeTableMarkdown = (text: string): string => {
       } else if (answerMode === 'research' && researchError === 'ResearchAlreadyRunning') {
         setError('このアカウントでは別のじっくり調査が実行中です');
         if (currentSession) void resumeResearchJob(currentSession);
+      } else if (answerMode === 'research' && researchError === 'ResearchUnavailable') {
+        setError('じっくり調査の受付に失敗しました。少し待ってから同じ質問を再送してください');
       } else {
         setError(`エラーが発生しました: ${err.response?.data?.message || err.message || 'Unknown error'}`);
       }

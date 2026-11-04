@@ -57,6 +57,14 @@ def get_daily_quota(table, user_id: str, now: datetime) -> dict:
     }
 
 
+def get_daily_attempt_count(table, user_id: str, now: datetime) -> int:
+    response = table.get_item(
+        Key={"pk": f"ATTEMPT#{user_id}#{research_job_store.day_key(now)}"},
+        ConsistentRead=True,
+    )
+    return int((response.get("Item") or {}).get("count", 0))
+
+
 def _get_caller_id(event: dict) -> str:
     context = event.get("requestContext") or {}
     authorizer = context.get("authorizer") or {}
@@ -110,6 +118,40 @@ def _accepted_existing_job(table, job_id: str, user_id: str, headers: dict):
     elif job.get("status") == "completed":
         payload["pollAfterMs"] = 0
     return _response(202, payload, headers)
+
+
+def classify_reservation_conflict(table, user_id: str, client_request_id: str, now: datetime, headers: dict):
+    """Recover a useful idempotency/quota/concurrency response without cancellation details."""
+    existing = _get_request_record(table, user_id, client_request_id)
+    if existing:
+        return _accepted_existing_job(table, existing["jobId"], user_id, headers)
+
+    active = table.get_item(
+        Key={"pk": f"ACTIVE#{user_id}"}, ConsistentRead=True
+    ).get("Item")
+    if active and int(active.get("expiresAt", 0)) > int(now.timestamp()):
+        return _error(409, "ResearchAlreadyRunning", headers)
+
+    quota = get_daily_quota(table, user_id, now)
+    if quota["remaining"] <= 0:
+        return _error(429, "DailyLimitExceeded", headers, quota=quota)
+
+    if get_daily_attempt_count(table, user_id, now) >= research_job_store.DAILY_ATTEMPT_LIMIT:
+        return _error(429, "DailyAttemptLimitExceeded", headers)
+    return None
+
+
+def _log_reservation_failure(error: ClientError) -> None:
+    detail = error.response.get("Error", {})
+    reason_codes = [
+        reason.get("Code", "")
+        for reason in error.response.get("CancellationReasons") or []
+    ]
+    print(json.dumps({
+        "event": "research_reservation_failed",
+        "errorCode": detail.get("Code", "Unknown"),
+        "cancellationReasons": reason_codes,
+    }, separators=(",", ":")))
 
 
 def _job_response(table, job_id: str, headers: dict, expected_user_id: str):
@@ -235,6 +277,7 @@ def _handle_post(event, headers, user_id: str, jobs_table, dynamodb_client):
     try:
         research_job_store.reserve_research_job(dynamodb_client, **reservation)
     except ClientError as error:
+        _log_reservation_failure(error)
         reasons = error.response.get("CancellationReasons") or []
         reason_codes = [item.get("Code") for item in reasons]
         if len(reason_codes) > 3 and reason_codes[3] == "ConditionalCheckFailed":
@@ -248,7 +291,11 @@ def _handle_post(event, headers, user_id: str, jobs_table, dynamodb_client):
             return _error(429, "DailyLimitExceeded", headers, quota=quota)
         if len(reason_codes) > 2 and reason_codes[2] == "ConditionalCheckFailed":
             return _error(429, "DailyAttemptLimitExceeded", headers)
-        print(f"[research] reserve_failed error_type={type(error).__name__}")
+        classified = classify_reservation_conflict(
+            jobs_table, user_id, client_request_id, now, headers,
+        )
+        if classified is not None:
+            return classified
         return _error(503, "ResearchUnavailable", headers)
 
     chatlogs = boto3.resource("dynamodb", region_name=REGION).Table(

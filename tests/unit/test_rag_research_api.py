@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from boto3.dynamodb.types import TypeDeserializer
+from botocore.exceptions import ClientError
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -225,6 +226,55 @@ def test_daily_quota_uses_jst_and_returns_next_midnight():
         "remaining": 6,
         "resetsAt": "2026-11-04T00:00:00+09:00",
     }
+
+
+def test_reservation_fallback_classifies_live_lock_when_cancellation_reasons_missing():
+    now = datetime.now(timezone.utc)
+    table = Mock()
+    table.get_item.side_effect = [
+        {},
+        {"Item": {"jobId": "other-job", "expiresAt": int(now.timestamp()) + 60}},
+    ]
+
+    response = research_api.classify_reservation_conflict(
+        table, "user-1", "550e8400-e29b-41d4-a716-446655440000", now, {},
+    )
+
+    assert response["statusCode"] == 409
+    assert json.loads(response["body"])["error"] == "ResearchAlreadyRunning"
+
+
+def test_reservation_fallback_classifies_daily_attempt_limit():
+    now = datetime.now(timezone.utc)
+    table = Mock()
+    table.get_item.side_effect = [
+        {}, {}, {"Item": {"count": 2}},
+        {"Item": {"count": research_job_store.DAILY_ATTEMPT_LIMIT}},
+    ]
+
+    response = research_api.classify_reservation_conflict(
+        table, "user-1", "550e8400-e29b-41d4-a716-446655440000", now, {},
+    )
+
+    assert response["statusCode"] == 429
+    assert json.loads(response["body"])["error"] == "DailyAttemptLimitExceeded"
+
+
+def test_reservation_failure_log_records_codes_but_not_identifiers(capsys):
+    error = ClientError({
+        "Error": {"Code": "TransactionCanceledException", "Message": "private detail"},
+        "CancellationReasons": [{"Code": "ConditionalCheckFailed"}, {"Code": "None"}],
+    }, "TransactWriteItems")
+
+    research_api._log_reservation_failure(error)
+
+    event = json.loads(capsys.readouterr().out)
+    assert event == {
+        "event": "research_reservation_failed",
+        "errorCode": "TransactionCanceledException",
+        "cancellationReasons": ["ConditionalCheckFailed", "None"],
+    }
+    assert "private detail" not in json.dumps(event)
 
 
 @patch.dict("os.environ", {
