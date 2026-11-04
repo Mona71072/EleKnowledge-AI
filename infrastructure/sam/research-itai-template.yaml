@@ -1,0 +1,392 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Isolated itai-only RAG research API and worker. Does not update the existing itai Phase 2 stack.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev]
+  ResearchModeEnabled:
+    Type: String
+    Default: 'off'
+    AllowedValues: ['off', 'beta', 'on']
+  AllowedIPList:
+    Type: CommaDelimitedList
+    Description: Existing itai API IP allowlist. Supply from the approved itai Phase 2 configuration.
+  WebAclArn:
+    Type: String
+    Description: Existing Regional WebACL ARN. This stack adds only a new association.
+  ProjectName:
+    Type: String
+    Default: EleKnowledge
+  CostProjectName:
+    Type: String
+    Default: ele-knowledge
+    AllowedValues: [ele-knowledge]
+  CostUsage:
+    Type: String
+    Default: development
+    AllowedValues: [development]
+  KnowledgeBaseId:
+    Type: String
+    AllowedPattern: '^[A-Z0-9]{10}$'
+  BedrockModelId:
+    Type: String
+    Default: global.anthropic.claude-sonnet-5
+    AllowedValues: [global.anthropic.claude-sonnet-5]
+  RagLogicVersion:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{7,40}$'
+    Description: Reviewed source Git SHA deployed by this isolated stack
+  BedrockModelIdType:
+    Type: String
+    Default: system-profile
+    AllowedValues: [system-profile]
+  KnowledgeBaseDataSourceBucket:
+    Type: String
+  KnowledgeBaseSourcePrefix:
+    Type: String
+    Default: docs/
+  ChatLogsTableName:
+    Type: String
+    Default: chatlogs-itai
+  RagSearchType:
+    Type: String
+    Default: HYBRID
+    AllowedValues: [HYBRID, SEMANTIC]
+  KbProfileJson:
+    Type: String
+    Default: ''
+  ModelProfileJson:
+    Type: String
+    Default: ''
+  WorkerReservedConcurrency:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 20
+
+Conditions:
+  ResearchEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Not [!Equals [!Ref ResearchModeEnabled, 'off']]
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures:
+      - x86_64
+
+Resources:
+  ResearchJobsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ResearchEnabled
+    Properties:
+      TableName: !Sub rag-research-jobs-itai
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: userId-createdAt-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+        - Key: Purpose
+          Value: itai-rag-research-validation
+
+  ResearchFailureQueue:
+    Type: AWS::SQS::Queue
+    Condition: ResearchEnabled
+    Properties:
+      QueueName: rag-research-failures-itai
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: gyoumu012Project
+          Value: !Ref CostProjectName
+        - Key: gyoumu012Component
+          Value: rag
+        - Key: gyoumu012Usage
+          Value: !Ref CostUsage
+        - Key: Purpose
+          Value: itai-rag-research-validation
+
+  ResearchApiRole:
+    Type: AWS::IAM::Role
+    Condition: ResearchEnabled
+    Properties:
+      RoleName: rag-research-api-itai-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ResearchJobsReadAndTransact
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:TransactWriteItems
+                Resource:
+                  - !GetAtt ResearchJobsTable.Arn
+                  - !Sub ${ResearchJobsTable.Arn}/index/userId-createdAt-index
+        - PolicyName: OwnChatLogsReadAndSave
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatLogsTableName}
+        - PolicyName: InvokeOnlyResearchWorker
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ResearchWorker.Arn
+
+  ResearchWorkerRole:
+    Type: AWS::IAM::Role
+    Condition: ResearchEnabled
+    Properties:
+      RoleName: rag-research-worker-itai-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ResearchKnowledgeBaseRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:Retrieve
+                Resource: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
+        - PolicyName: ResearchModelInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5
+                Condition:
+                  StringLike:
+                    bedrock:InferenceProfileArn: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+        - PolicyName: ResearchJobAndChatPersistence
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:TransactWriteItems
+                Resource: !GetAtt ResearchJobsTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:TransactWriteItems
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatLogsTableName}
+        - PolicyName: ResearchFailureDestination
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt ResearchFailureQueue.Arn
+
+  ResearchApi:
+    Type: AWS::Serverless::Api
+    Condition: ResearchEnabled
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W1028
+    Properties:
+      Name: rag-research-api-itai
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+        MaxAge: "'3600'"
+      Auth:
+        AddDefaultAuthorizerToCorsPreflight: false
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn:
+              Fn::ImportValue: !Sub ${ProjectName}-${Environment}-CognitoUserPoolArn
+        ResourcePolicy:
+          IpRangeWhitelist: !Ref AllowedIPList
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          ThrottlingBurstLimit: 20
+          ThrottlingRateLimit: 5
+          LoggingLevel: INFO
+          DataTraceEnabled: false
+          MetricsEnabled: true
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+        Purpose: itai-rag-research-validation
+
+  ResearchApiFunction:
+    Type: AWS::Serverless::Function
+    Condition: ResearchEnabled
+    Properties:
+      FunctionName: rag-research-api-itai
+      CodeUri: ../../lambda/rag/rag-function/
+      Handler: research_api.lambda_handler
+      Role: !GetAtt ResearchApiRole.Arn
+      Timeout: 25
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          RESEARCH_MODE_ENABLED: !Ref ResearchModeEnabled
+          RESEARCH_JOBS_TABLE: !Ref ResearchJobsTable
+          RESEARCH_WORKER_FUNCTION: !Ref ResearchWorker
+          CHATLOGS_TABLE: !Ref ChatLogsTableName
+          CHATLOGS_METRIC_SHARDS: "10"
+          RAG_LOGIC_VERSION: !Ref RagLogicVersion
+      Events:
+        ResearchCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ResearchApi
+            Path: /rag/research
+            Method: POST
+        ResearchStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ResearchApi
+            Path: /rag/research/{jobId}
+            Method: GET
+        ResearchSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ResearchApi
+            Path: /rag/research
+            Method: GET
+        ResearchQuota:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ResearchApi
+            Path: /rag/research/quota
+            Method: GET
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+        Purpose: itai-rag-research-validation
+
+  ResearchApiWebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Condition: ResearchEnabled
+    DependsOn: ResearchApiFunction
+    Properties:
+      WebACLArn: !Ref WebAclArn
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${ResearchApi}/stages/${Environment}
+
+  ResearchWorker:
+    Type: AWS::Serverless::Function
+    Condition: ResearchEnabled
+    Properties:
+      FunctionName: rag-research-worker-itai
+      CodeUri: ../../lambda/rag/rag-function/
+      Handler: research_worker.lambda_handler
+      Role: !GetAtt ResearchWorkerRole.Arn
+      Timeout: 300
+      MemorySize: 1024
+      ReservedConcurrentExecutions: !Ref WorkerReservedConcurrency
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 120
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt ResearchFailureQueue.Arn
+      Environment:
+        Variables:
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+          RAG_LOGIC_VERSION: !Ref RagLogicVersion
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_REQUEST_STYLE: auto
+          BEDROCK_MAX_ATTEMPTS: '1'
+          GENERATION_THINKING: disabled
+          GENERATION_EFFORT: low
+          RAG_SEARCH_TYPE: !Ref RagSearchType
+          KB_PROFILE_JSON: !Ref KbProfileJson
+          MODEL_PROFILE_JSON: !Ref ModelProfileJson
+          RERANK_MODEL_ARN: ''
+          RERANK_MAX_CANDIDATES: '30'
+          QUERY_REWRITE_MODEL_ID: ''
+          KB_SOURCE_BUCKET: !Ref KnowledgeBaseDataSourceBucket
+          KB_SOURCE_PREFIX: !Ref KnowledgeBaseSourcePrefix
+          CHATLOGS_TABLE: !Ref ChatLogsTableName
+          CHATLOGS_METRIC_SHARDS: "10"
+          RESEARCH_JOBS_TABLE: !Ref ResearchJobsTable
+          CITATION_URI_MODE: s3
+          DOCUMENTS_BUCKET: ''
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+        Purpose: itai-rag-research-validation
+
+Outputs:
+  ResearchApiUrl:
+    Condition: ResearchEnabled
+    Description: itai-only RAG research API URL
+    Value: !Sub https://${ResearchApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}

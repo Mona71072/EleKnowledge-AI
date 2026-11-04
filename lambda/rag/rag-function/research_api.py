@@ -102,10 +102,13 @@ def _accepted_existing_job(table, job_id: str, user_id: str, headers: dict):
     quota = get_daily_quota(table, user_id, datetime.now(JST))
     payload = {
         "jobId": job_id, "sessionId": job.get("sessionId"),
+        "userMessageId": job.get("userMessageId"),
         "status": job.get("status"), "quota": quota,
     }
     if job.get("status") == "queued":
         payload["pollAfterMs"] = 5000
+    elif job.get("status") == "completed":
+        payload["pollAfterMs"] = 0
     return _response(202, payload, headers)
 
 

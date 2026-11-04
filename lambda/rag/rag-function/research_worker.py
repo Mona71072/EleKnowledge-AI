@@ -404,11 +404,7 @@ def run_research(app, question, filters, *, progress, deadline):
         "searchFailures": search_failures,
         "verificationStatus": check_status,
         "risk": plan["risk"],
-        "evidence": [
-            {"id": item["id"], "sourceUri": item["uri"],
-             "pageNumber": app.extract_page_number(item["metadata"]), "score": item["score"]}
-            for item in evidence
-        ],
+        "evidence": [{"id": item["id"]} for item in evidence],
     }
     return {"content": content, "citations": citations, "sourceDocuments": source_documents, "research": research}
 

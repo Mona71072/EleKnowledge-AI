@@ -112,6 +112,12 @@ export default function ChatPage() {
   const [researchJob, setResearchJob] = useState<ResearchJobStatus | null>(null);
   const [researchRateLimited, setResearchRateLimited] = useState(false);
   const researchPollerRef = useRef<JobPoller | null>(null);
+  const pendingResearchRequestRef = useRef<{
+    query: string;
+    sessionId: string | null;
+    clientRequestId: string;
+    userMessageId: string;
+  } | null>(null);
   const [currentSession, setCurrentSession] = useState<string | null>(null);
   // admin が失敗一覧から他ユーザーのセッションを開いたとき true（閲覧のみ・送信不可）
   const [readOnlySession, setReadOnlySession] = useState(false);
@@ -183,6 +189,7 @@ export default function ChatPage() {
   const selectedModelLabel = selectedModelOption?.label || selectedModel;
 
   const API_URL = process.env.NEXT_PUBLIC_RAG_API_URL || '';
+  const RESEARCH_API_URL = process.env.NEXT_PUBLIC_RESEARCH_API_URL || API_URL;
   const CHAT_API_URL = process.env.NEXT_PUBLIC_CHAT_API_URL || '';
 
   // 空状態のクリック可能な質問サジェスト（ホーム画面のチップと同一）
@@ -324,7 +331,7 @@ const normalizeTableMarkdown = (text: string): string => {
       const token = await getAuthToken();
       if (!token) return;
       try {
-        const response = await axios.get<ResearchQuota>(`${API_URL}/rag/research/quota`, {
+        const response = await axios.get<ResearchQuota>(`${RESEARCH_API_URL}/rag/research/quota`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setResearchQuota(response.data);
@@ -342,7 +349,7 @@ const normalizeTableMarkdown = (text: string): string => {
         if (!token) throw Object.assign(new Error('Authentication required'), { status: 401 });
         try {
           const response = await axios.get<ResearchJobStatus>(
-            `${API_URL}/rag/research/${encodeURIComponent(jobId)}`,
+            `${RESEARCH_API_URL}/rag/research/${encodeURIComponent(jobId)}`,
             { headers: { Authorization: `Bearer ${token}` } },
           );
           return response.data;
@@ -380,7 +387,7 @@ const normalizeTableMarkdown = (text: string): string => {
             const token = await getAuthToken();
             if (!token) return;
             try {
-              const response = await axios.get<ResearchQuota>(`${API_URL}/rag/research/quota`, {
+              const response = await axios.get<ResearchQuota>(`${RESEARCH_API_URL}/rag/research/quota`, {
                 headers: { Authorization: `Bearer ${token}` },
               });
               setResearchQuota(response.data);
@@ -413,7 +420,7 @@ const normalizeTableMarkdown = (text: string): string => {
     try {
       const token = await getAuthToken();
       if (!token) return;
-      const response = await axios.get<{ job: ResearchJobStatus | null }>(`${API_URL}/rag/research`, {
+      const response = await axios.get<{ job: ResearchJobStatus | null }>(`${RESEARCH_API_URL}/rag/research`, {
         params: { sessionId },
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -604,6 +611,7 @@ const normalizeTableMarkdown = (text: string): string => {
   const fetchSessionMessages = async (sessionId: string, mode: ChatMode = ragMode) => {
     try {
       researchPollerRef.current?.stopAll();
+      pendingResearchRequestRef.current = null;
       setResearchJob(null);
       setResearchRateLimited(false);
       const token = await getAuthToken();
@@ -643,15 +651,33 @@ const normalizeTableMarkdown = (text: string): string => {
   const handleSendMessage = async () => {
     if (!input.trim() || loading || researchIsRunning || !userId || readOnlySession) return;
 
+    const trimmedQuery = input.trim();
+    if (answerMode === 'research' && researchModeAvailable) {
+      const pending = pendingResearchRequestRef.current;
+      if (!pending || pending.query !== trimmedQuery || pending.sessionId !== currentSession) {
+        pendingResearchRequestRef.current = {
+          query: trimmedQuery,
+          sessionId: currentSession,
+          clientRequestId: crypto.randomUUID(),
+          userMessageId: `research-user-${crypto.randomUUID()}`,
+        };
+      }
+    }
+    const pendingResearchRequest = pendingResearchRequestRef.current;
+
     const userMessage: Message = {
-      id: `msg_${Date.now()}`,
+      id: answerMode === 'research' && researchModeAvailable
+        ? pendingResearchRequest?.userMessageId || `msg_${Date.now()}`
+        : `msg_${Date.now()}`,
       role: 'user',
       content: input,
       timestamp: new Date().toISOString()
     };
 
     // ローカル UI 更新
-    setMessages([...messages, userMessage]);
+    setMessages((previous) => previous.some((message) => message.id === userMessage.id)
+      ? previous
+      : [...previous, userMessage]);
     setInput('');
     // textareaの高さをリセット
     if (textareaRef.current) {
@@ -669,10 +695,10 @@ const normalizeTableMarkdown = (text: string): string => {
       };
 
       if (answerMode === 'research' && researchModeAvailable) {
-        const response = await axios.post(`${API_URL}/rag/research`, {
+        const response = await axios.post(`${RESEARCH_API_URL}/rag/research`, {
           sessionId: currentSession,
           query: input,
-          clientRequestId: crypto.randomUUID(),
+          clientRequestId: pendingResearchRequest?.clientRequestId,
           filters: effectiveFilters,
         }, {
           headers: {
@@ -686,6 +712,7 @@ const normalizeTableMarkdown = (text: string): string => {
             ? { ...message, id: data.userMessageId }
             : message));
         }
+        pendingResearchRequestRef.current = null;
         if (data.sessionId) setCurrentSession(data.sessionId);
         if (data.quota) setResearchQuota(data.quota);
         if (data.responseType === 'clarify') {

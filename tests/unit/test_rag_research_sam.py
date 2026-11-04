@@ -8,7 +8,7 @@ import pytest
 @pytest.fixture(scope="module")
 def template():
     from test_iam_function_permissions import _template
-    return _template("phase2-template.yaml")
+    return _template("research-itai-template.yaml")
 
 
 def _function(template, name):
@@ -25,15 +25,16 @@ def test_research_mode_is_off_by_default_and_resources_are_dev_conditional(templ
     parameter = template["Parameters"]["ResearchModeEnabled"]
     assert parameter["Default"] == "off"
     assert parameter["AllowedValues"] == ["off", "beta", "on"]
-    condition = json.dumps(template["Conditions"]["ResearchModeResourcesEnabled"])
+    condition = json.dumps(template["Conditions"]["ResearchEnabled"])
     assert "Environment" in condition and "dev" in condition
     assert "ResearchModeEnabled" in condition and "off" in condition
 
     for name in (
-        "ResearchJobsTable", "ResearchFailureQueue", "ResearchApiLambdaRole",
-        "ResearchWorkerLambdaRole", "ResearchApiFunction", "ResearchWorkerFunction",
+        "ResearchJobsTable", "ResearchFailureQueue", "ResearchApiRole",
+        "ResearchWorkerRole", "ResearchApiFunction", "ResearchWorker",
+        "ResearchApi", "ResearchApiWebAclAssociation",
     ):
-        assert template["Resources"][name]["Condition"] == "ResearchModeResourcesEnabled"
+        assert template["Resources"][name]["Condition"] == "ResearchEnabled"
 
 
 def test_jobs_table_has_expiry_and_user_session_index(template):
@@ -61,19 +62,20 @@ def test_api_routes_and_role_are_separate_from_bedrock_worker(template):
     assert "bedrock:InvokeModel" not in _actions(template, "ResearchApiFunction")
     assert "bedrock:Retrieve" not in _actions(template, "ResearchApiFunction")
     assert "lambda:InvokeFunction" in _actions(template, "ResearchApiFunction")
+    assert all(event["Properties"]["RestApiId"] == "ResearchApi" for event in api["Events"].values())
 
 
 def test_worker_is_async_only_bounded_and_has_failure_destination(template):
-    worker = _function(template, "ResearchWorkerFunction")
+    worker = _function(template, "ResearchWorker")
     assert worker["Handler"] == "research_worker.lambda_handler"
     assert "Events" not in worker
-    assert worker["ReservedConcurrentExecutions"] == "ResearchWorkerReservedConcurrency"
+    assert worker["ReservedConcurrentExecutions"] == "WorkerReservedConcurrency"
     assert worker["EventInvokeConfig"]["MaximumRetryAttempts"] == 0
     assert worker["EventInvokeConfig"]["MaximumEventAgeInSeconds"] == 120
     destination = worker["EventInvokeConfig"]["DestinationConfig"]["OnFailure"]
     assert destination["Type"] == "SQS"
     assert destination["Destination"] == "ResearchFailureQueue.Arn"
-    actions = _actions(template, "ResearchWorkerFunction")
+    actions = _actions(template, "ResearchWorker")
     assert {"bedrock:Retrieve", "bedrock:InvokeModel", "sqs:SendMessage"}.issubset(actions)
     assert "dynamodb:Scan" not in actions
     assert "lambda:InvokeFunction" not in actions
