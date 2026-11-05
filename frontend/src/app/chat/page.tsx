@@ -112,6 +112,7 @@ export default function ChatPage() {
   const [researchJob, setResearchJob] = useState<ResearchJobStatus | null>(null);
   const [researchRateLimited, setResearchRateLimited] = useState(false);
   const researchPollerRef = useRef<JobPoller | null>(null);
+  const loginRedirectedRef = useRef(false);
   const pendingResearchRequestRef = useRef<{
     query: string;
     sessionId: string | null;
@@ -316,26 +317,46 @@ const normalizeTableMarkdown = (text: string): string => {
 };
 
   // 認可トークン取得関数
-  const getAuthToken = async (): Promise<string | null> => {
+  const handleAuthenticationError = (err: unknown): boolean => {
+    const status = axios.isAxiosError(err)
+      ? err.response?.status
+      : err instanceof Error && 'status' in err ? err.status : undefined;
+    if (status !== 401) return false;
+    researchPollerRef.current?.stopAll();
+    setLoading(false);
+    setIsLoadingSessions(false);
+    setError('ログインの有効期限が切れました。もう一度ログインしてください。');
+    if (!loginRedirectedRef.current) {
+      loginRedirectedRef.current = true;
+      router.replace('/login?next=%2Fchat');
+    }
+    return true;
+  };
+
+  const getAuthToken = async (): Promise<string> => {
     try {
       const session = await fetchAuthSession();
-      return session.tokens?.idToken?.toString() || null;
+      const token = session.tokens?.idToken?.toString();
+      if (!token) throw Object.assign(new Error('Authentication required'), { status: 401 });
+      return token;
     } catch (err) {
-      console.error('Error fetching auth token:', err);
-      return null;
+      if (err instanceof Error && ['NotAuthorizedException', 'UserUnAuthenticatedException'].includes(err.name)) {
+        throw Object.assign(new Error('Authentication required'), { status: 401 });
+      }
+      throw err;
     }
   };
 
   useEffect(() => {
     const refreshQuota = async () => {
-      const token = await getAuthToken();
-      if (!token) return;
       try {
+        const token = await getAuthToken();
         const response = await axios.get<ResearchQuota>(`${RESEARCH_API_URL}/rag/research/quota`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setResearchQuota(response.data);
-      } catch {
+      } catch (err) {
+        if (handleAuthenticationError(err)) return;
         setResearchQuota(null);
       }
     };
@@ -345,15 +366,17 @@ const normalizeTableMarkdown = (text: string): string => {
   useEffect(() => {
     const poller = createJobPoller({
       fetchJob: async (jobId) => {
-        const token = await getAuthToken();
-        if (!token) throw Object.assign(new Error('Authentication required'), { status: 401 });
         try {
+          const token = await getAuthToken();
           const response = await axios.get<ResearchJobStatus>(
             `${RESEARCH_API_URL}/rag/research/${encodeURIComponent(jobId)}`,
             { headers: { Authorization: `Bearer ${token}` } },
           );
           return response.data;
         } catch (error: unknown) {
+          if (handleAuthenticationError(error)) {
+            throw Object.assign(new Error('Authentication required'), { status: 401 });
+          }
           const status = axios.isAxiosError(error) ? error.response?.status : undefined;
           throw Object.assign(new Error('Research status request failed'), { status });
         }
@@ -384,14 +407,14 @@ const normalizeTableMarkdown = (text: string): string => {
         if (result.status === 'completed' || result.status === 'failed') {
           setLoading(false);
           void (async () => {
-            const token = await getAuthToken();
-            if (!token) return;
             try {
+              const token = await getAuthToken();
               const response = await axios.get<ResearchQuota>(`${RESEARCH_API_URL}/rag/research/quota`, {
                 headers: { Authorization: `Bearer ${token}` },
               });
               setResearchQuota(response.data);
-            } catch {
+            } catch (err) {
+              if (handleAuthenticationError(err)) return;
               setResearchQuota(null);
             }
           })();
@@ -433,7 +456,8 @@ const normalizeTableMarkdown = (text: string): string => {
           pollAfterMs: job.pollAfterMs,
         });
       }
-    } catch {
+    } catch (err) {
+      if (handleAuthenticationError(err)) return;
       // Old sessions and API deployments without the feature have nothing to resume.
     }
   };
@@ -595,6 +619,7 @@ const normalizeTableMarkdown = (text: string): string => {
       });
       setSessions(response.data.sessions || []);
     } catch (err: any) {
+      if (handleAuthenticationError(err)) return;
       // err.config は headers.Authorization（ID トークン）を含むためログに出さない
       console.error('Error fetching sessions:', {
         message: err.message,
@@ -643,7 +668,8 @@ const normalizeTableMarkdown = (text: string): string => {
       setReadOnlySession(Boolean(response.data.readOnly));
       if (!response.data.readOnly && mode === 'normal') void resumeResearchJob(sessionId);
     } catch (err) {
-      console.error('Error fetching messages:', err);
+      if (handleAuthenticationError(err)) return;
+      console.error('Error fetching messages');
       setError('メッセージ取得に失敗しました');
     }
   };
@@ -794,6 +820,7 @@ const normalizeTableMarkdown = (text: string): string => {
         await fetchSessionMessages(response.data.sessionId, ragMode);
       }
     } catch (err: any) {
+      if (handleAuthenticationError(err)) return;
       // err.config は headers.Authorization（ID トークン）を含むためログに出さない
       console.error('Error sending RAG query:', {
         message: err.message,

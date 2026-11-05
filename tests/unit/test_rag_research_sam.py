@@ -21,6 +21,19 @@ def _actions(template, function_name):
     return _policy_actions(_policies(template, role))
 
 
+def test_gateway_errors_have_cors_without_changing_auth_or_status(template):
+    api = _function(template, "ResearchApi")
+    for response_type in ("DEFAULT_4XX", "DEFAULT_5XX"):
+        response = api["GatewayResponses"][response_type]
+        assert "StatusCode" not in response
+        headers = response["ResponseParameters"]["Headers"]
+        assert headers["Access-Control-Allow-Origin"] == api["Cors"]["AllowOrigin"]
+        assert headers["Access-Control-Allow-Headers"] == api["Cors"]["AllowHeaders"]
+    assert api["Auth"]["DefaultAuthorizer"] == "CognitoAuthorizer"
+    assert api["Auth"]["AddDefaultAuthorizerToCorsPreflight"] is False
+    assert api["Auth"]["ResourcePolicy"]["IpRangeWhitelist"] == "AllowedIPList"
+
+
 def test_research_mode_is_off_by_default_and_resources_are_dev_conditional(template):
     parameter = template["Parameters"]["ResearchModeEnabled"]
     assert parameter["Default"] == "off"
