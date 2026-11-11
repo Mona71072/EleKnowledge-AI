@@ -17,7 +17,7 @@ MESSAGES = {400: '入力内容を確認してください。', 401: '認証が�
 # Each deployed function serves only its own routes, as a second guard behind API Gateway wiring.
 RESPONSIBILITIES = {
     'intake': {'contribute', 'list', 'detail', 'transition', 'pending', 'operation', 'me'},
-    'editorial': {'card', 'draft', 'review-requests', 'decisions'},
+    'editorial': {'card', 'draft', 'review-requests', 'decisions', 'sample-checks'},
     'publication': {'publish', 'withdraw'},
     'reader': {'published'},
     'recovery': {'retry'},
@@ -40,7 +40,8 @@ def route(method, path):
     name = {('contributions', 'GET', None): 'detail', ('contributions', 'PATCH', None): 'transition',
             ('cards', 'GET', None): 'card', ('cards', 'PUT', 'draft'): 'draft',
             ('cards', 'POST', 'review-requests'): 'review-requests',
-            ('cards', 'POST', 'decisions'): 'decisions', ('cards', 'POST', 'publish'): 'publish',
+            ('cards', 'POST', 'decisions'): 'decisions',
+            ('cards', 'POST', 'sample-checks'): 'sample-checks', ('cards', 'POST', 'publish'): 'publish',
             ('cards', 'POST', 'withdraw'): 'withdraw', ('published', 'GET', None): 'published',
             ('operations', 'GET', None): 'operation',
             ('operations', 'POST', 'retry'): 'retry'}.get((group, method, action))
@@ -123,9 +124,9 @@ def handle(event, service=None, responsibility=None, allowed_origin=None):
             result = service.card_detail(claims, identifier)
         elif name == 'draft':
             result = service.save_draft(claims, key, identifier, expected(), data)
-        elif name in {'review-requests', 'decisions', 'publish'}:
+        elif name in {'review-requests', 'decisions', 'sample-checks', 'publish'}:
             action = {'review-requests': service.review, 'decisions': service.decide,
-                      'publish': service.publish}[name]
+                      'sample-checks': service.sample_check, 'publish': service.publish}[name]
             result = action(claims, key, identifier, expected(), data)
         elif name == 'withdraw':
             result = service.publish(claims, key, identifier, expected(), data, withdraw=True)

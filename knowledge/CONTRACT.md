@@ -29,7 +29,7 @@ model_scope:                   # 製品系列〜ドア型式の値は registry/a
   scope_verified_by: ""        # verified のとき必須: 適用範囲を確認した人の名前
   scope_verified_at: ""        # verified のとき必須: 確認日 YYYY-MM-DD
 source_refs:
-  # 参照元（利用者・AIが辿る原情報）は次の4種類を「出典」と呼ぶ（draft_record は写し索引）
+  # 参照元（利用者・AIが辿る原情報）は次の5種類を「出典」と呼ぶ（draft_record は写し索引）
   - ref_type: lists_item      # Microsoft Lists の list_item_id（スナップショット上の項目番号）
     list_item_id: "417"
     source_id: ""             # evidence_sources.source_id（任意・監査用）
@@ -47,6 +47,9 @@ source_refs:
     law_id: ""                      # 同表のフォルダ名（S3 / メタデータ）
     retrieval: "mode=law"           # dev の法令チャット。本番は設計書どおり未有効可
     law_rag_status: current         # 一覧外（告示・条例等）は付けない
+  - ref_type: knowhow               # 人が書いたもの・現場報告（2026-11-11 追加）
+    knowhow_id: ""                  # 共通知識の候補 ID など、記録を辿れる ID
+    origin: editor                  # editor（担当者の記述）| field_report（現場報告）。knowhow だけが持ち、必須
   # 下記は原情報ではなく、Vault 写しの棚位置（照合・編集用。出典の代わりに使わない）
   - ref_type: draft_record
     record_id: ""

@@ -29,7 +29,7 @@ const NON_CARD_FILES = new Set([
   `${CARD_ROOT}/INDEX.md`, `${CARD_ROOT}/README.md`, `${CARD_ROOT}/TEMPLATE.md`, `${CARD_ROOT}/_SOURCE-LEGEND.md`,
 ]);
 // SYNC: must equal SOURCE_TYPES in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
-const SOURCE_REF_TYPES = new Set(['lists_item', 'onenote_page', 'kb_document', 'law_rag']);
+const SOURCE_REF_TYPES = new Set(['lists_item', 'onenote_page', 'kb_document', 'law_rag', 'knowhow']);
 // SYNC: must equal SOURCE_ID_KEYS in knowhow_retrieval.py and KNOWHOW_SOURCE_IDS in knowledge-research.mjs
 // (tests/unit/test_knowhow_contract_sync.py).
 const SOURCE_ID_KEYS = Object.freeze({
@@ -37,12 +37,16 @@ const SOURCE_ID_KEYS = Object.freeze({
   onenote_page: 'onenote_id',
   kb_document: 'document_number',
   law_rag: 'law_id',
+  knowhow: 'knowhow_id',
 });
+// Route of a person-written or field-report source (design 2026-11-11 §4.7.2). Only knowhow refs carry it.
+// SYNC: must equal KNOWHOW_ORIGINS in knowhow_retrieval.py and knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
+const KNOWHOW_ORIGINS = new Set(['editor', 'field_report']);
 // SYNC: keys must equal SOURCE_REF_KEYS in knowhow_retrieval.py and KNOWHOW_SOURCE_FIELDS in
 // knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 const SOURCE_REF_KEYS = new Set([
   'ref_type', 'list_item_id', 'onenote_id', 'source_id', 'document_number', 'kb_filename',
-  'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator',
+  'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator', 'knowhow_id', 'origin',
 ]);
 // Editor-only annotations on source refs. They are dropped at build and never reach the index.
 const SOURCE_REF_ANNOTATION_KEYS = new Set([
@@ -245,8 +249,10 @@ function sourceRefs(metadata) {
     const identityField = SOURCE_ID_KEYS[ref.ref_type];
     const id = ref[identityField];
     if (id === undefined || id === null) fail('A source reference is missing its stable identity.');
+    if ((ref.ref_type === 'knowhow') !== (ref.origin !== undefined)
+      || (ref.origin !== undefined && !KNOWHOW_ORIGINS.has(ref.origin))) fail('A knowhow source reference needs origin editor or field_report.');
     const result = { ref_type: ref.ref_type };
-    for (const key of ['list_item_id', 'onenote_id', 'source_id', 'document_number', 'kb_filename', 'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator']) {
+    for (const key of ['list_item_id', 'onenote_id', 'source_id', 'document_number', 'kb_filename', 'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator', 'knowhow_id', 'origin']) {
       const value = ref[key];
       if (value === undefined || value === null || value === '') continue;
       result[key] = safeScalar(value, 'Source reference field', { allowSlash: SOURCE_REF_FREE_TEXT_KEYS.has(key) });

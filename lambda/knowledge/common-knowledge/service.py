@@ -5,6 +5,7 @@ import re
 import time
 import uuid
 
+import second_review
 from storage import digest
 
 
@@ -15,6 +16,7 @@ KINDS = {'case_summary', 'practice_guide', 'term_foundation'}
 BUNDLE_KEYS = ('candidateId', 'candidateRevision', 'kind', 'applicability', 'sourceRefs',
                'audience', 'domain', 'expiresAt', 'unknowns', 'knowledgeId', 'workingRevision',
                'hashContractVersion', 'rawSha256')
+SAMPLE_RESULTS = {'confirmed', 'needs_fix'}
 TRANSITIONS = {'unconfirmed': {'in_review', 'held'}, 'in_review': {'held', 'rejected'},
                'held': {'in_review'}, 'awaiting_review': {'in_review', 'held'},
                'reflected': {'in_review'}, 'rejected': set()}
@@ -148,8 +150,8 @@ class Service:
                 result = execute(db, operation)
                 self.fault('before_projection_commit')
                 action = request[0] if isinstance(request, list) else 'contribute'
-                role = {'decision': 'approve', 'publish': 'publish', 'withdraw': 'publish',
-                        'contribute': 'contribute'}.get(action, 'edit')
+                role = {'decision': 'approve', 'sample': 'approve', 'publish': 'publish',
+                        'withdraw': 'publish', 'contribute': 'contribute'}.get(action, 'edit')
                 detail = request[-1] if isinstance(request, list) and isinstance(request[-1], dict) else {}
                 db.put('event', operation, {
                     'operationId': operation, 'actor': actor, 'target': target,
@@ -277,7 +279,8 @@ class Service:
 
     def validate_draft(self, data):
         exact(data, ('candidateId', 'candidateRevision', 'kind', 'markdown', 'applicability',
-                     'sourceRefs', 'audience', 'domain', 'expiresAt', 'unknowns'))
+                     'sourceRefs', 'audience', 'domain', 'expiresAt', 'unknowns'), ('secondReview',))
+        self.validate_declaration(data.get('secondReview', []))
         require(data['kind'] in KINDS)
         text(data['markdown'], 256 * 1024)
         require(len(data['markdown'].encode('utf-8')) <= 256 * 1024)
@@ -295,6 +298,12 @@ class Service:
             require(source['claimType'] in {'ai_hypothesis', 'technician_statement', 'source_verified'}
                     and type(source['verified']) is bool)
         require(type(data['expiresAt']) is int and data['expiresAt'] > self.clock())
+
+    def validate_declaration(self, declared):
+        """作成者が申告する §4.3 の例外。空なら申告なし（コードの規則による印は別に付く）。"""
+        require(isinstance(declared, list) and len(declared) <= len(second_review.REASONS)
+                and len(set(declared)) == len(declared)
+                and all(reason in second_review.REASONS for reason in declared))
 
     def evidence_authorized(self, version):
         """A client verified flag is insufficient: require the protected evidence registry."""
@@ -319,8 +328,10 @@ class Service:
         require(ID.fullmatch(identifier))
         self.validate_draft(data)
         raw = data['markdown'].encode('utf-8')
-        fields = {k: v for k, v in data.items() if k != 'markdown'}
+        # The declaration is a ledger mark, not part of the bundle hash contract (i1-json-lf-v1).
+        fields = {k: v for k, v in data.items() if k not in {'markdown', 'secondReview'}}
         return self._draft(claims, key, identifier, working_revision, fields, raw,
+                           data.get('secondReview', []),
                            ['draft', identifier, working_revision, data],
                            lambda operation: self.work.put(identifier, raw, operation))
 
@@ -328,17 +339,19 @@ class Service:
         """CLI: pin a version already written to the working bucket (e.g. by the development agent)."""
         require(ID.fullmatch(identifier))
         exact(data, ('candidateId', 'candidateRevision', 'kind', 'applicability', 'sourceRefs',
-                     'audience', 'domain', 'expiresAt', 'unknowns', 'workVersionId'))
+                     'audience', 'domain', 'expiresAt', 'unknowns', 'workVersionId'), ('secondReview',))
         require(isinstance(data['workVersionId'], str) and 0 < len(data['workVersionId']) <= 1024)
         raw = self.work.read(identifier, data['workVersionId'])
         require(raw is not None, 409, 'WorkVersionMissing')
-        fields = {k: v for k, v in data.items() if k != 'workVersionId'}
-        self.validate_draft({**fields, 'markdown': raw.decode('utf-8')})
+        fields = {k: v for k, v in data.items() if k not in {'workVersionId', 'secondReview'}}
+        self.validate_draft({**fields, 'markdown': raw.decode('utf-8'),
+                             'secondReview': data.get('secondReview', [])})
         return self._draft(claims, key, identifier, working_revision, fields, raw,
+                           data.get('secondReview', []),
                            ['register', identifier, working_revision, data],
                            lambda operation: data['workVersionId'])
 
-    def _draft(self, claims, key, identifier, working_revision, fields, raw, request, write):
+    def _draft(self, claims, key, identifier, working_revision, fields, raw, declared, request, write):
         with self.store.unit() as db:
             self.candidate(db, fields['candidateId'], claims, 'edit')
         def save(db, operation):
@@ -355,6 +368,7 @@ class Service:
                           and item['targetRevision'] == working_revision)
             require((card['candidateId'] == item['candidateId'] or correction)
                     and card['workingRevision'] == working_revision, 409, 'VersionConflict')
+            previous = None
             if correction:
                 previous = card['versions'].get(str(working_revision))
                 require(previous and previous['status'] == 'approved'
@@ -367,8 +381,10 @@ class Service:
             bundle_hash = digest(to_canonical(metadata))
             work_version = write(operation)
             self.fault('after_work')
+            marks = second_review.assess(raw.decode('utf-8'), fields, declared, previous)
             card['versions'][str(version)] = {**metadata, 'bundleHash': bundle_hash,
-                'workVersionId': work_version, 'editor': claims['sub'], 'status': 'draft'}
+                'workVersionId': work_version, 'editor': claims['sub'], 'status': 'draft',
+                'secondReview': marks}
             card.update({'workingRevision': version, 'review': None})
             item.update({'state': 'in_review', 'candidateRevision': item['candidateRevision'] + 1})
             item['targetLinks'] = sorted(set([*item['targetLinks'], identifier]))
@@ -376,7 +392,7 @@ class Service:
             db.put('card', identifier, card)
             return {'knowledgeId': identifier, 'workingRevision': version,
                     'candidateRevision': item['candidateRevision'], 'bundleHash': bundle_hash,
-                    'rawSha256': digest(raw), 'workVersionId': work_version}
+                    'rawSha256': digest(raw), 'workVersionId': work_version, 'secondReview': marks}
         return self.mutate(claims, key, 'candidate:' + fields['candidateId'], request, save)
 
     def pinned(self, identifier, version):
@@ -434,15 +450,19 @@ class Service:
                     and card['review']['workVersionId'] == version['workVersionId']
                     and version['bundleHash'] == data['bundleHash']
                     and item['state'] == 'awaiting_review', 409, 'ReviewStale')
-            require(version['editor'] != claims['sub'] and item['submittedBy'] != claims['sub'],
-                    403, 'SelfApprovalDenied')
+            # Design 2026-11-11 §4.3: self-approval stays denied only for versions marked as exceptions;
+            # versions saved before the mark existed count as exceptions. Other self-approvals become
+            # sample-check targets (§4.2).
+            marks = version.get('secondReview') or second_review.legacy()
+            own = version['editor'] == claims['sub'] or item['submittedBy'] == claims['sub']
+            require(not (own and marks['required']), 403, 'SelfApprovalDenied')
             require(version['expiresAt'] > self.clock(), 409, 'Expired')
             self.verify_bundle(version)
             if data['decision'] == 'approve':
                 raw = self.pinned(identifier, version)
                 approval = {**card['review'], 'approvalId': operation, 'actor': claims['sub'],
                             'role': 'approve', 'reason': data['reason'], 'at': int(self.clock()),
-                            'versionBundle': version}
+                            'selfApproved': own, 'secondReview': marks, 'versionBundle': version}
                 # Approval time must survive retries after the canonical copy succeeds but the
                 # ledger does not: use the durable acceptance timestamp of this operation.
                 stamp = db.get('operation-intent', operation)
@@ -451,7 +471,10 @@ class Service:
                 approved_key = f'{identifier}/{revision}/{version["bundleHash"]}'
                 self.canonical.approve(approved_key, raw, to_canonical(approval))
                 self.fault('after_approved')
-                version.update({'status': 'approved', 'approvalId': operation, 'approvedKey': approved_key})
+                version.update({'status': 'approved', 'approvalId': operation, 'approvedKey': approved_key,
+                                'approvedBy': claims['sub'], 'selfApproved': own})
+                if own:
+                    version['sampleCheck'] = {'status': 'pending'}
                 item['state'] = 'reflected'
             else:
                 item['state'] = 'in_review'
@@ -460,9 +483,38 @@ class Service:
             db.put('candidate', card['candidateId'], item)
             db.put('card', identifier, card)
             return {'knowledgeId': identifier, 'revision': revision, 'state': item['state'],
-                    'approvalId': version.get('approvalId'), 'approvedKey': version.get('approvedKey')}
+                    'approvalId': version.get('approvalId'), 'approvedKey': version.get('approvedKey'),
+                    'selfApproved': version.get('selfApproved', False),
+                    'sampleCheck': (version.get('sampleCheck') or {}).get('status')}
         return self.mutate(claims, key, 'candidate:' + self._candidate_id(identifier),
                            ['decision', identifier, revision, data], decide)
+
+    def sample_check(self, claims, key, identifier, revision, data):
+        """Record another person's sample check of a self-approved version (design 2026-11-11 §4.2).
+        Publication is unchanged: needs_fix is a record for the correction flow, not a withdrawal."""
+        exact(data, ('approvalId', 'result', 'reason'))
+        require(data['result'] in SAMPLE_RESULTS)
+        text(data['reason'])
+        require(isinstance(data['approvalId'], str) and 0 < len(data['approvalId']) <= 80)
+        with self.store.unit() as db:
+            self.card(db, identifier, claims, 'approve')
+        def check(db, operation):
+            card = self.card(db, identifier, claims, 'approve')
+            version = card['versions'].get(str(revision))
+            require(version is not None and version['status'] == 'approved'
+                    and version.get('approvalId') == data['approvalId'], 409, 'VersionConflict')
+            require((version.get('sampleCheck') or {}).get('status') == 'pending',
+                    409, 'SampleCheckNotPending')
+            require(claims['sub'] not in {version.get('approvedBy'), version['editor']},
+                    403, 'SelfCheckDenied')
+            stamp = db.get('operation-intent', operation)
+            version['sampleCheck'] = {'status': data['result'], 'checkId': operation,
+                                      'actor': claims['sub'], 'reason': data['reason'],
+                                      'at': stamp['at'] if stamp else int(self.clock())}
+            db.put('card', identifier, card)
+            return {'knowledgeId': identifier, 'revision': revision, **version['sampleCheck']}
+        return self.mutate(claims, key, 'sample:' + identifier,
+                           ['sample', identifier, revision, data], check)
 
     def publish(self, claims, key, identifier, generation, data, withdraw=False):
         exact(data, ('reason',) if withdraw else ('reason', 'revision', 'approvalId'))
@@ -558,4 +610,6 @@ class Service:
             return self.register_draft(claims, key, *request[1:])
         if action in {'review', 'decision'}:
             return (self.review if action == 'review' else self.decide)(claims, key, *request[1:])
+        if action == 'sample':
+            return self.sample_check(claims, key, *request[1:])
         return self.publish(claims, key, target.split(':', 1)[1], *request[1:], withdraw=action == 'withdraw')

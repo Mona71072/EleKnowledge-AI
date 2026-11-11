@@ -10,11 +10,15 @@ const KNOWHOW_SOURCE_IDS = Object.freeze({
   onenote_page: 'onenote_id',
   kb_document: 'document_number',
   law_rag: 'law_id',
+  knowhow: 'knowhow_id',
 });
+// SYNC: must equal KNOWHOW_ORIGINS in knowhow_retrieval.py and build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
+const KNOWHOW_ORIGINS = new Set(['editor', 'field_report']);
 // SYNC: must equal SOURCE_REF_KEYS in knowhow_retrieval.py and build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
 const KNOWHOW_SOURCE_FIELDS = new Set([
   'ref_type', 'source_id', 'list_item_id', 'onenote_id', 'document_number',
   'kb_filename', 'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator',
+  'knowhow_id', 'origin',
 ]);
 // SYNC: must equal MODEL_SCOPE_KEYS in knowhow_retrieval.py and build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
 const KNOWHOW_SCOPE_FIELDS = new Set([
@@ -222,6 +226,8 @@ function cleanKnowhowSourceRef(value) {
   if (!identityKey || typeof value[identityKey] !== 'string' || !value[identityKey].trim()) return null;
   const otherIdentityKeys = Object.values(KNOWHOW_SOURCE_IDS).filter((key) => key !== identityKey);
   if (otherIdentityKeys.some((key) => Object.hasOwn(value, key))) return null;
+  if ((value.ref_type === 'knowhow') !== Object.hasOwn(value, 'origin')
+    || (Object.hasOwn(value, 'origin') && !KNOWHOW_ORIGINS.has(value.origin))) return null;
   const clean = {};
   for (const [key, item] of Object.entries(value)) {
     if (typeof item !== 'string' || item.length > 500 || !item.trim()

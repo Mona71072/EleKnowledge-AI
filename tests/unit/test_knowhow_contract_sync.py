@@ -101,6 +101,8 @@ def test_source_types_and_identity_keys_match_across_lambda_builder_and_frontend
     assert set(lambda_module.SOURCE_TYPES) == _js_set(BUILD_SCRIPT, "SOURCE_REF_TYPES")
     assert dict(lambda_module.SOURCE_ID_KEYS) == _js_string_map(BUILD_SCRIPT, "SOURCE_ID_KEYS")
     assert dict(lambda_module.SOURCE_ID_KEYS) == _js_string_map(FRONTEND_LIB, "KNOWHOW_SOURCE_IDS")
+    assert set(lambda_module.KNOWHOW_ORIGINS) == _js_set(BUILD_SCRIPT, "KNOWHOW_ORIGINS")
+    assert set(lambda_module.KNOWHOW_ORIGINS) == _js_set(FRONTEND_LIB, "KNOWHOW_ORIGINS")
 
 
 def test_scope_status_values_and_date_pattern_match_between_lambda_and_builder():

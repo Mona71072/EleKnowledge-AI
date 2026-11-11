@@ -31,7 +31,7 @@ const scopeLabels: Record<string, string> = {
 const refLabels: Record<string, string> = {
   list_item_id: 'Lists項目', onenote_id: 'OneNoteページ', source_id: '出典ID', document_number: '資料番号',
   kb_filename: 'KB資料名', kb_verify_status: 'KB確認状況', page_role: 'ページの役割', law_id: '法令ID',
-  law_title: '法令名', locator: '参照箇所',
+  law_title: '法令名', locator: '参照箇所', knowhow_id: 'ノウハウの記録', origin: '経路',
 };
 
 // Unknown keys fall back to the raw key so a label never renders as "undefined".

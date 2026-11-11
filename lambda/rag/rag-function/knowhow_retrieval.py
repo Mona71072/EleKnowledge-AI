@@ -41,19 +41,23 @@ ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 BODY_HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
-SOURCE_TYPES = frozenset({"lists_item", "onenote_page", "kb_document", "law_rag"})
+SOURCE_TYPES = frozenset({"lists_item", "onenote_page", "kb_document", "law_rag", "knowhow"})
 # SYNC: must equal SOURCE_REF_KEYS in build-senpai-index.mjs and KNOWHOW_SOURCE_FIELDS in knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 SOURCE_REF_KEYS = frozenset({
     "ref_type", "source_id", "list_item_id", "onenote_id", "document_number",
     "kb_filename", "kb_verify_status", "page_role", "law_id", "law_title",
-    "locator",
+    "locator", "knowhow_id", "origin",
 })
 SOURCE_ID_KEYS = {
     "lists_item": "list_item_id",
     "onenote_page": "onenote_id",
     "kb_document": "document_number",
     "law_rag": "law_id",
+    "knowhow": "knowhow_id",
 }
+# 人が書いたもの・現場報告を出典にするときの経路（設計 2026-11-11 §4.7.2）。knowhow だけが持つ。
+# SYNC: must equal KNOWHOW_ORIGINS in build-senpai-index.mjs and knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
+KNOWHOW_ORIGINS = frozenset({"editor", "field_report"})
 # SYNC: must equal MODEL_SCOPE_KEYS in build-senpai-index.mjs and KNOWHOW_SCOPE_FIELDS in knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 MODEL_SCOPE_KEYS = frozenset({
     "control_methods", "door_families", "door_types", "excludes",
@@ -139,6 +143,8 @@ def _validate_source_refs(source_refs: Any) -> None:
             raise KnowhowIndexError("source reference identity is invalid")
         if any(field in ref for field in SOURCE_ID_KEYS.values() if field != identity_key):
             raise KnowhowIndexError("source reference identity type is invalid")
+        if (ref_type == "knowhow") != ("origin" in ref) or ref.get("origin", "editor") not in KNOWHOW_ORIGINS:
+            raise KnowhowIndexError("source reference origin is invalid")
         for key, value in ref.items():
             if not isinstance(value, str) or not _safe_text(value, 500):
                 raise KnowhowIndexError("source reference value is invalid")

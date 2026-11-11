@@ -209,3 +209,18 @@ test('a URL or control character in the title is rejected like other scalars, wh
   const ok = await makeRoot(t, { 'KH-G-1.md': card({ title: '"D14 DCB/DOB 構成"' }) });
   assert.deepEqual((await check(ok, { ledger: false })).failures, []);
 });
+
+// ---- design 2026-11-11 §4.7.2: person-written and field-report sources
+test('a knowhow source reference needs origin editor or field_report', async (t) => {
+  const withRefs = (id, refs) => card({ id }).replace(
+    '  - ref_type: lists_item\n    list_item_id: SYNTH-1', refs.join('\n'));
+  const files = {
+    'KH-G-1.md': withRefs('KH-G-1', ['  - ref_type: knowhow', '    knowhow_id: CAND-1', '    origin: field_report']),
+    'KH-G-2.md': withRefs('KH-G-2', ['  - ref_type: knowhow', '    knowhow_id: CAND-2']),
+    'KH-G-3.md': withRefs('KH-G-3', ['  - ref_type: knowhow', '    knowhow_id: CAND-3', '    origin: ai']),
+    'KH-G-4.md': withRefs('KH-G-4', ['  - ref_type: lists_item', '    list_item_id: SYNTH-4', '    origin: editor']),
+  };
+  const result = await check(await makeRoot(t, files), { ledger: false });
+  assert.equal(result.valid, 1);
+  assert.deepEqual(result.failures.map((failure) => path.basename(failure.path)).sort(), ['KH-G-2.md', 'KH-G-3.md', 'KH-G-4.md']);
+});

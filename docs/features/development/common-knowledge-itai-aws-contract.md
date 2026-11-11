@@ -62,7 +62,7 @@ Service内の直接SQLを廃し、台帳を「作業単位（unit）」と「一
 | Lambda | ルート | 台帳 | 配布S3 | その他 |
 | --- | --- | --- | --- | --- |
 | intake | `POST/GET /knowledge/contributions`、`GET/PATCH .../{id}`、`GET /knowledge/operations`、`GET .../operations/{id}` | 読取・Query・transaction内の書込 | なし | cursor秘密のGetSecretValue |
-| editorial | `GET /cards/{id}`、`PUT .../draft`、`POST .../review-requests`・`/decisions` | 同上 | なし | Git（未設定のため権限なし） |
+| editorial | `GET /cards/{id}`、`PUT .../draft`、`POST .../review-requests`・`/decisions`・`/sample-checks`（2026-11-11 追加・未配備。[I1 契約](common-knowledge-i1-contract.md)の自己承認の例外） | 同上 | なし | Git（未設定のため権限なし） |
 | publication | `POST .../publish`・`/withdraw` | 同上 | artifact/manifest/受付票のGet・Put | Git読取（同上） |
 | reader | `GET /knowledge/published/{id}` | なし | artifact/manifestのGetのみ | なし |
 | recovery | `POST /knowledge/operations/{id}/retry` | 同上 | publicationと同じ | 保存済み要求を元の操作として再認可する。新規操作は受けない |

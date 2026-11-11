@@ -10,7 +10,10 @@ type Candidate = {
   context?: string; summary?: string; targetLinks?: string[];
   targetKnowledgeId?: string; targetRevision?: number; expiresAt?: number;
 };
-type Version = { bundleHash: string; rawSha256: string; approvalId?: string; status: string; kind: string };
+type Version = {
+  bundleHash: string; rawSha256: string; approvalId?: string; status: string; kind: string;
+  secondReview?: { required: boolean; declared: string[]; detected: string[]; terms: string[] };
+};
 type Card = {
   knowledgeId: string; workingRevision: number; markdown: string;
   versions: Record<string, Version>; review?: { reviewRequestId: string; bundleHash: string } | null;
@@ -171,7 +174,10 @@ export function CommonKnowledgeInbox() {
       { bundleHash: version.bundleHash, reason }, card.workingRevision);
     setCard({ ...card, review });
     if (selected) setSelected({ ...selected, state: 'awaiting_review', candidateRevision: selected.candidateRevision + 1 });
-    setMessage('特定版を技術確認待ちにしました。別の確認者が内容を確認してください。');
+    // 印の無い版（WP2 より前）は例外として扱う（service.decide と同じ）。
+    setMessage(version.secondReview?.required === false
+      ? '特定版を技術確認待ちにしました。通常の変更のため本人も承認できます（承認後に抜き取り確認の対象になります）。'
+      : '特定版を技術確認待ちにしました。安全・法令・適用範囲などの例外に当たるため、別の確認者が内容を確認してください。');
   }
 
   async function decide(decision: string) {

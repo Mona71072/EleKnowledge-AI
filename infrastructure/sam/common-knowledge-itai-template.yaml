@@ -763,6 +763,12 @@ Resources:
             RestApiId: !Ref CommonKnowledgeApi
             Path: /knowledge/cards/{id}/decisions
             Method: post
+        SampleCheck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommonKnowledgeApi
+            Path: /knowledge/cards/{id}/sample-checks
+            Method: post
 
   PublicationFunction:
     Type: AWS::Serverless::Function

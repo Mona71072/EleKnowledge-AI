@@ -30,6 +30,7 @@ function sourceLabel(ref: SourceRef): string {
   if (kind === 'onenote_page') return `OneNote ${displayValue(ref.onenote_id)}`;
   if (kind === 'kb_document') return `KB ${displayValue(ref.document_number)}`;
   if (kind === 'law_rag') return `法令RAG ${displayValue(ref.law_title || ref.law_id)}`;
+  if (kind === 'knowhow') return `${ref.origin === 'field_report' ? '現場報告' : '担当者の記述'} ${displayValue(ref.knowhow_id)}`;
   if (kind === 'draft_record') return `照合用写し ${displayValue(ref.record_id)}`;
   return `参照元 ${displayValue(kind)}`;
 }

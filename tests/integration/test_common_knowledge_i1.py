@@ -68,16 +68,20 @@ def contribution(kind='unknown_term', suffix='A'):
     return value
 
 
-def draft(identifier, now, revision=2):
-    return {'candidateId': identifier, 'candidateRevision': revision, 'kind': 'term_foundation',
+def draft(identifier, now, revision=2, **overrides):
+    return {**{'candidateId': identifier, 'candidateRevision': revision, 'kind': 'term_foundation',
             'markdown': '# 合成の用語Z\n\n架空機種Aの改訂1だけに適用する説明。\n',
             'applicability': '架空機種A・改訂1。他の機種には適用しない。',
             'sourceRefs': [{'id': 'SYN-ORIGINAL', 'version': '1', 'locator': 'p.1',
                             'sha256': 'a' * 64, 'claimType': 'source_verified', 'verified': True}],
-            'domain': 'synthetic', 'audience': 'synthetic', 'expiresAt': now + 3600, 'unknowns': []}
+            'domain': 'synthetic', 'audience': 'synthetic', 'expiresAt': now + 3600, 'unknowns': []},
+            **overrides}
 
 
-def saved(service, now, kind='unknown_term', suffix='A'):
+SAFETY_MARKDOWN = '# 合成の用語Z\n\n架空機種Aで感電のおそれがある作業の説明。\n'
+
+
+def saved(service, now, kind='unknown_term', suffix='A', **overrides):
     if kind == 'correction':
         _, previous_card, approval = approved(service, now, 'field_report', 'PREVIOUS')
         assert call(service, 'publisher', 'POST', 'cards/' + previous_card + '/publish',
@@ -90,7 +94,7 @@ def saved(service, now, kind='unknown_term', suffix='A'):
                 {'state': 'in_review', 'reason': '確認開始'}, 1, 'receive-' + suffix)[0] == 200
     card = 'KH-SYN-PREVIOUS' if kind == 'correction' else 'KH-SYN-' + suffix
     status, saved = call(service, 'editor', 'PUT', 'cards/' + card + '/draft',
-                         draft(identifier, now), 1 if kind == 'correction' else 0, 'save-' + suffix)
+                         draft(identifier, now, **overrides), 1 if kind == 'correction' else 0, 'save-' + suffix)
     assert status == 200, saved
     return identifier, card, saved
 
@@ -166,8 +170,10 @@ def test_authorization_confirmation_origin_and_version_guards(env):
 
 
 def test_review_stale_evidence_and_self_approval(env):
+    """Self-approval stays denied for a version marked as a §4.3 exception (here: safety wording)."""
     service, now = env
-    identifier, card, version = saved(service, now[0])
+    identifier, card, version = saved(service, now[0], markdown=SAFETY_MARKDOWN)
+    assert version['secondReview']['required'] and version['secondReview']['detected'] == ['safety_legal']
     status, review = call(service, 'editor', 'POST', 'cards/' + card + '/review-requests',
                          {'bundleHash': version['bundleHash'], 'reason': '確認依頼'}, 1, 'review')
     assert status == 200
@@ -184,7 +190,7 @@ def test_review_stale_evidence_and_self_approval(env):
     oversized['markdown'] = '合' * 90000
     with pytest.raises(Failure):
         service.validate_draft(oversized)
-    edited = draft(identifier, now[0], 4)
+    edited = draft(identifier, now[0], 4, markdown=SAFETY_MARKDOWN)
     edited['sourceRefs'][0]['verified'] = False
     status, newer = call(service, 'editor', 'PUT', 'cards/' + card + '/draft', edited, 1, 'edit')
     assert status == 200, newer
