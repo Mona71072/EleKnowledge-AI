@@ -7,13 +7,28 @@ from __future__ import annotations
 
 import json
 import hashlib
+import importlib.util
 import math
 import os
 import re
+import sys
 import time
 import unicodedata
 from datetime import datetime
 from typing import Any
+
+try:
+    import vocabulary_generated as _vocabulary
+except ModuleNotFoundError as exc:
+    # Lambda puts sibling modules on sys.path; scripts and tests may load this file by path.
+    if exc.name != 'vocabulary_generated':
+        raise
+    _vocabulary_spec = importlib.util.spec_from_file_location(
+        'knowhow_vocabulary_runtime', os.path.join(os.path.dirname(__file__), 'vocabulary_generated.py')
+    )
+    _vocabulary = importlib.util.module_from_spec(_vocabulary_spec)
+    sys.modules[_vocabulary_spec.name] = _vocabulary
+    _vocabulary_spec.loader.exec_module(_vocabulary)
 
 
 MAX_INDEX_BYTES = 8 * 1024 * 1024
@@ -60,19 +75,13 @@ POSITIVE_SCOPE_KEYS = (
 )
 MODEL_CLASSIFY_KEYS = ("product_lines", "model_abbreviations", "lists_model_label", "observed_on")
 # Keys mirror app.UI_MODEL_FILTERS; values are normalized aliases found in card scopes.
-MODEL_ALIASES = {
-    "AXIEZ": frozenset({"axiez", "axiez(ke-wf・ke-hf)", "駅舎エレ"}),
-    "AXIEZ-LINKs": frozenset({"axiez-links"}),
-    "NEXCUBE": frozenset({"nexcube", "nexcube limited", "特注機械室レスエレベーター"}),
-    "メルシティ": frozenset({"メルシティ"}),
-    "メルワイド": frozenset({"メルワイド"}),
-    "エスカレーター": frozenset({"エスカレーター", "escalator"}),
-}
+# Generated from knowledge/registry/applicability-vocabulary.json (vocabulary_generated.py).
+MODEL_ALIASES = _vocabulary.MODEL_ALIASES
 # SYNC: must equal KNOWHOW_MODEL_FITS in knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 MODEL_FIT_VALUES = frozenset({"matched", "general", "other_product", "unknown"})
 ESCALATOR_KEY = "エスカレーター"
-GENERIC_ELEVATOR_LABEL = "全エレ機種"
-GENERIC_ESCALATOR_LABEL = "全エス機種"
+GENERIC_ELEVATOR_LABEL = _vocabulary.GENERIC_ELEVATOR_LABEL
+GENERIC_ESCALATOR_LABEL = _vocabulary.GENERIC_ESCALATOR_LABEL
 
 _cache: dict[str, Any] = {"identity": None, "expires": 0.0, "index": None,
                          "version_id": None, "etag": None}

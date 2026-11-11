@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseKnowledgeMarkdown } from '../../frontend/src/lib/knowledge-workbench.mjs';
+import { GENERIC_ELEVATOR_LABEL, GENERIC_ESCALATOR_LABEL, MODEL_ALIASES } from './vocabulary.generated.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const frontendRequire = createRequire(path.resolve(scriptDirectory, '../../frontend/package.json'));
@@ -71,19 +72,10 @@ const SCOPE_STATUSES = new Set(['verified', 'unverified']);
 const SCOPE_DATE = /^\d{4}-\d{2}-\d{2}$/u;
 // A verified scope only filters when one of these fields holds a recognized product or generic label
 // (mirrors MODEL_CLASSIFY_KEYS / MODEL_ALIASES / GENERIC_* in knowhow_retrieval.py). Values are compared
-// after NFKC + lower-casing + trimming, so the alias lists below are already normalized.
+// after NFKC + lower-casing + trimming, so the generated alias lists are already normalized.
+// MODEL_ALIASES / GENERIC_* come from vocabulary.generated.mjs (source: knowledge/registry/applicability-vocabulary.json).
 // SYNC: tests/unit/test_knowhow_contract_sync.py compares all four with the Lambda.
 const MODEL_CLASSIFY_KEYS = new Set(['product_lines', 'model_abbreviations', 'lists_model_label', 'observed_on']);
-const MODEL_ALIASES = Object.freeze({
-  'AXIEZ': ['axiez', 'axiez(ke-wf・ke-hf)', '駅舎エレ'],
-  'AXIEZ-LINKs': ['axiez-links'],
-  'NEXCUBE': ['nexcube', 'nexcube limited', '特注機械室レスエレベーター'],
-  'メルシティ': ['メルシティ'],
-  'メルワイド': ['メルワイド'],
-  'エスカレーター': ['エスカレーター', 'escalator'],
-});
-const GENERIC_ELEVATOR_LABEL = '全エレ機種';
-const GENERIC_ESCALATOR_LABEL = '全エス機種';
 const RECOGNIZED_MODEL_LABELS = new Set([
   ...Object.values(MODEL_ALIASES).flat(), GENERIC_ELEVATOR_LABEL.normalize('NFKC').toLowerCase(), GENERIC_ESCALATOR_LABEL.normalize('NFKC').toLowerCase(),
 ]);

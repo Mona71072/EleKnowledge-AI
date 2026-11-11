@@ -1,3 +1,5 @@
+import { KB_MODEL_KEYS } from '../data/kb-model-types.generated.mjs';
+
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_QUERY_LENGTH = 2_000;
@@ -23,8 +25,8 @@ const KNOWHOW_SCOPE_FIELDS = new Set([
 ]);
 // SYNC: must equal MODEL_FIT_VALUES in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
 const KNOWHOW_MODEL_FITS = new Set(['matched', 'general', 'other_product', 'unknown']);
-// SYNC: must equal the MODEL_ALIASES keys in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
-const KNOWHOW_MODEL_PRODUCTS = new Set(['AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター']);
+// Generated from knowledge/registry/applicability-vocabulary.json; equals the MODEL_ALIASES keys in knowhow_retrieval.py.
+const KNOWHOW_MODEL_PRODUCTS = new Set(KB_MODEL_KEYS);
 const RESPONSE_FIELDS = [
   'documentName',
   'title',

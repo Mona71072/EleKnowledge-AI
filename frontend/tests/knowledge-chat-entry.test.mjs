@@ -21,6 +21,7 @@ function loadTsx(path, mocks) {
   const localRequire = (name) => {
     if (Object.hasOwn(mocks, name)) return mocks[name];
     if (name === './SenpaiConversationSidebar') return loadTsx('../src/components/knowledge/SenpaiConversationSidebar.tsx', {});
+    if (name === './kb-model-types.generated.mjs') return require('../src/data/kb-model-types.generated.mjs');
     if (name === '@/data/kbModelTypes') return loadTsx('../src/data/kbModelTypes.ts', {});
     if (name === '@/lib/knowledge-senpai-synthesis.mjs') return { requestSenpaiSynthesis: async () => ({}) };
     if (name === '@/lib/knowledge-senpai-field-report.mjs') return require('../src/lib/knowledge-senpai-field-report.mjs');

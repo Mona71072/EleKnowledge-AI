@@ -35,6 +35,7 @@ function loadTsx(path) {
   const compiled = { exports: {} };
   const localRequire = (name) => {
     if (/^\.\/Senpai/u.test(name)) return loadTsx(`../src/components/knowledge/${name.slice(2)}.tsx`);
+    if (name === './kb-model-types.generated.mjs') return require('../src/data/kb-model-types.generated.mjs');
     if (name === '@/data/kbModelTypes') return loadTsx('../src/data/kbModelTypes.ts');
     if (name.startsWith('@/lib/')) return require(`../src/lib/${name.slice(6)}`);
     return require(name);

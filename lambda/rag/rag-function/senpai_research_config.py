@@ -2,11 +2,12 @@
 import os
 from dataclasses import dataclass
 
+import vocabulary_generated as vocabulary
+
 # 画面の機種キー（rag-function の UI_MODEL_FILTERS と同じ6つ）。
 # SYNC: tests/unit/test_senpai_research_steps.py::test_ui_model_types_match_rag_ui_model_filters
-UI_MODEL_TYPES = (
-    'AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター',
-)
+# 値の正本は knowledge/registry/applicability-vocabulary.json（vocabulary_generated.py に生成）。
+UI_MODEL_TYPES = tuple(vocabulary.UI_MODEL_FILTERS)
 QUESTION_MAX_CHARS = 2000
 POLL_AFTER_MS = 1500
 STATUS_VALUES = ('queued', 'running', 'completed', 'failed')

@@ -56,6 +56,8 @@ publication_status: not_published
 cloud_approval: not_reviewed
 ```
 
+機種キー・機種の別名・汎用ラベル（`全エレ機種` / `全エス機種`）は [registry/applicability-vocabulary.json](registry/applicability-vocabulary.json) から生成したコード（Lambda・索引作成・画面）が使う。語彙ファイルを変えたら `python scripts/knowledge/generate_vocabulary.py` を実行し、生成物も一緒にコミットする（古いままだと `tests/unit/test_applicability_vocabulary.py` が失敗する）。
+
 ### 適用範囲の検証（`scope_status`）
 
 > 最終検証: 2026-10-20 — `check` の合成カードテスト（誤字・未来日・ファイル名・フォルダー外・ledger）と実カード398枚での `check` 成功。AWS 上の動作は未確認。

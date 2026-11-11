@@ -1,6 +1,7 @@
 import { KnowledgeResearchError } from './knowledge-research.mjs';
 import { mergeResearchSteps, normalizeSenpaiResearchResult } from './knowledge-senpai-research.mjs';
 import { composeClarifyQuestion } from './knowledge-senpai-research-view.mjs';
+import { KB_MODEL_KEYS } from '../data/kb-model-types.generated.mjs';
 
 const MODES = ['normal', 'law'];
 const MAX_QUERY_LENGTH = 2_000;
@@ -23,8 +24,8 @@ function freezeCopy(value) {
   return Object.freeze(copy);
 }
 
-// SYNC: must equal kbModelTypes.ts ALL_MODEL_TYPES values and RAG UI_MODEL_FILTERS keys (tests/knowledge-senpai-model-types-sync.test.mjs).
-export const SENPAI_MODEL_TYPES = new Set(['AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター']);
+// Generated from knowledge/registry/applicability-vocabulary.json (same keys as ALL_MODEL_TYPES and RAG UI_MODEL_FILTERS).
+export const SENPAI_MODEL_TYPES = new Set(KB_MODEL_KEYS);
 
 /** Return a saved model filter only when it is one of the known UI keys; otherwise undefined. */
 export function normalizeSavedModelType(value) {

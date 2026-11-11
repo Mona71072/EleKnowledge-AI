@@ -3,10 +3,13 @@
 語彙ファイルは APPLICABILITY-TAXONOMY.md をもとに作成し、値の正本として運用する。
 次がこの語彙と一致することを確かめる。
 
-- 画面の機種一覧（frontend/src/data/kbModelTypes.ts）と、サーバーの UI_MODEL_FILTERS（app.py）
+- 生成物（scripts/knowledge/generate_vocabulary.py が書く 3 ファイル）が、生成し直した内容と一致すること
+- 画面の機種一覧（kb-model-types.generated.mjs → kbModelTypes.ts）と、サーバーの UI_MODEL_FILTERS（app.py）
 - ノウハウ検索の機種の別名（knowhow_retrieval.py の MODEL_ALIASES。索引作成側とは既存の同期テストで一致）
 - 調査ジョブが質問中の機種を判定する呼び名（senpai_research_understand.py の MODEL_ALIASES）
 - テーマカードの model_scope に書かれた値
+
+コード側の値は生成物から import する（WP1、方法 A）。照合はこのファイルで語彙から独立に組み立てた期待値と比べる。
 
 症状・部位・条件（symptoms / conditions）と、原文を写す欄（lists_model_label など）は対象外。
 """
@@ -25,10 +28,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 VOCAB_PATH = ROOT / "knowledge/registry/applicability-vocabulary.json"
 CARDS = ROOT / "knowledge/cards"
-FRONTEND_MODELS = ROOT / "frontend/src/data/kbModelTypes.ts"
-RAG_APP = ROOT / "lambda/rag/rag-function/app.py"
+FRONTEND_MODELS = ROOT / "frontend/src/data/kb-model-types.generated.mjs"
+GENERATOR = ROOT / "scripts/knowledge/generate_vocabulary.py"
 RETRIEVAL = ROOT / "lambda/rag/rag-function/knowhow_retrieval.py"
-UNDERSTAND = ROOT / "lambda/rag/rag-function/senpai_research_understand.py"
 AXES = ("product_lines", "machine_room", "control_methods", "model_abbreviations",
         "guide_systems", "door_families", "door_types")
 # 2026-11-11 時点で、検索の機種フィルタ（knowhow_retrieval.MODEL_ALIASES）が認識しない許容の表記。
@@ -54,22 +56,19 @@ def _ui_entries(vocab: dict) -> dict:
     return {e["ui_filter"]["key"]: e for e in vocab["axes"]["product_lines"] if e.get("ui_filter")}
 
 
-def _py_tuple_map(path: Path, name: str) -> dict:
-    """`NAME = { 'KEY': ('a', 'b'), ... }` を読む（Lambda を import せずに照合するため）。"""
-    text = path.read_text(encoding="utf-8")
-    block = re.search(rf"^{name} = \{{(.*?)^\}}", text, re.DOTALL | re.MULTILINE)
-    assert block, f"{name} not found in {path.name}"
-    result = ast.literal_eval("{" + block.group(1) + "}")
-    assert result, f"{name} is empty in {path.name}"
-    return {key: tuple(values) for key, values in result.items()}
+def _generator():
+    spec = importlib.util.spec_from_file_location("generate_vocabulary_under_test", GENERATOR)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _frontend_models() -> dict:
     text = FRONTEND_MODELS.read_text(encoding="utf-8")
-    block = re.search(r"export const ALL_MODEL_TYPES[^=]*=\s*\[(.*?)\];", text, re.DOTALL)
-    assert block, "ALL_MODEL_TYPES not found"
+    block = re.search(r"export const KB_MODEL_TYPES = Object\.freeze\(\[(.*?)\]\);", text, re.DOTALL)
+    assert block, "KB_MODEL_TYPES not found"
     result = {}
-    for value, targets in re.findall(r"value:\s*'([^']+)'.*?targets:\s*\[([^\]]*)\]", block.group(1), re.DOTALL):
+    for value, targets in re.findall(r"value:\s*'([^']+)'.*?targets:\s*(?:Object\.freeze\()?\[([^\]]*)\]", block.group(1), re.DOTALL):
         result[value] = tuple(re.findall(r"'([^']+)'", targets))
     return result
 
@@ -121,9 +120,9 @@ def test_frontend_model_list_matches_vocabulary():
     assert _frontend_models() == expected
 
 
-def test_server_ui_model_filters_match_vocabulary():
+def test_server_ui_model_filters_match_vocabulary(rag_app):
     expected = {key: tuple(e["ui_filter"]["kb_model_types"]) for key, e in _ui_entries(_vocab()).items()}
-    assert _py_tuple_map(RAG_APP, "UI_MODEL_FILTERS") == expected
+    assert rag_app.UI_MODEL_FILTERS == expected
 
 
 def test_retrieval_model_aliases_match_vocabulary():
@@ -138,9 +137,28 @@ def test_retrieval_model_aliases_match_vocabulary():
     assert module.GENERIC_ESCALATOR_LABEL == labels["escalator"]
 
 
-def test_question_aliases_match_vocabulary():
+def test_question_aliases_match_vocabulary(load_rag_module):
     expected = {key: tuple(e["question_aliases"]) for key, e in _ui_entries(_vocab()).items()}
-    assert _py_tuple_map(UNDERSTAND, "MODEL_ALIASES") == expected
+    understand = load_rag_module("senpai_research_understand_vocab", "senpai_research_understand.py")
+    assert understand.MODEL_ALIASES == expected
+    # 機種の選択肢はプロンプトにも出す。キーの順は語彙ファイルの順。
+    assert " / ".join(expected) + " のいずれか" in understand.SYSTEM_PROMPT
+
+
+# --- 生成物 ---------------------------------------------------------------------
+
+def test_generated_files_are_up_to_date():
+    """生成スクリプトを実行し直した内容が、Git の生成物と一致すること（改行は LF に揃えて比べる）。"""
+    stale = _generator().stale_outputs(ROOT)
+    assert not stale, "生成物が古い。python scripts/knowledge/generate_vocabulary.py を実行する: " + ", ".join(stale)
+
+
+def test_generated_files_carry_do_not_edit_header():
+    generator = _generator()
+    for rel in generator.render_all(_vocab()):
+        head = (ROOT / rel).read_text(encoding="utf-8").splitlines()[:2]
+        assert "生成物。直接編集しない。元: knowledge/registry/applicability-vocabulary.json。" in head[0], rel
+        assert "再生成: python scripts/knowledge/generate_vocabulary.py" in head[1], rel
 
 
 # --- カードとの一致 ---------------------------------------------------------------

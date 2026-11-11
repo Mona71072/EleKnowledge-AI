@@ -91,3 +91,23 @@ related-code:
 - 設計の全体は、設計書の §6（WP1〜WP8）と §7（決定事項・確認事項）にある。
 - WP1 は他の WP に依存しない。PR #200（承認の 2 段階）との優先が未決でも着手できる。
 - Windows の注意: pytest は `--basetemp` を作業用の一時領域に向ける。Python で書くファイルは `newline="\n"` で書く（CRLF だと生成物の比較がずれる）。
+
+## 実装記録（2026-11-11）
+
+> 最終検証: 2026-11-11 — `itai` ブランチの作業ツリーで生成・テストを実行（AWS・デプロイは未実施）。
+
+- 生成スクリプト `scripts/knowledge/generate_vocabulary.py`（`--check` で生成物が最新かだけ確かめる）。生成物は 3 つ:
+  `lambda/rag/rag-function/vocabulary_generated.py`、`scripts/knowledge/vocabulary.generated.mjs`、`frontend/src/data/kb-model-types.generated.mjs`。
+  `.gitattributes` で 3 つとも `eol=lf`。
+- **プロンプトとの違い:** フロント用は `.ts` ではなく `.mjs` にした。`knowledge-research.mjs`・`knowledge-senpai-chat.mjs` を
+  `node --test` で直接 import するため（Node は `.ts` をそのまま読めない）。`kbModelTypes.ts` がこれを import し、型と export 名は保つ。
+- 置き換えた定数: `app.py` の `UI_MODEL_FILTERS`、`knowhow_retrieval.py` の `MODEL_ALIASES`・汎用ラベル、
+  `senpai_research_understand.py` の `MODEL_ALIASES`（＝`QUESTION_MODEL_ALIASES`）とプロンプト中の機種の選択肢、
+  `senpai_research_config.py` の `UI_MODEL_TYPES`、`build-senpai-index.mjs` の `MODEL_ALIASES`・汎用ラベル、
+  `kbModelTypes.ts` の `ALL_MODEL_TYPES`、`knowledge-research.mjs` の `KNOWHOW_MODEL_PRODUCTS`、`knowledge-senpai-chat.mjs` の `SENPAI_MODEL_TYPES`。
+- 置き換え前（`fecc85ab`）の値と、置き換え後の値が同一であることを、両方を読み込んで比べて確認した（画面の機種一覧 6 件・UI_MODEL_FILTERS・
+  検索の別名・索引作成の別名・質問中の呼び名・汎用ラベル・調査ジョブのプロンプト文字列）。
+- **手書きで残るもの（別の Lambda で CodeUri が違うため）:** `lambda/chat/chat-management/app.py` の `SENPAI_MODEL_TYPES`、
+  `lambda/rag/senpai-field-report/field_report_vocab.py` の `MODEL_TYPES`。どちらも既存の同期テスト
+  （`test_senpai_history.py`・`test_senpai_field_report_sync.py`）が生成物と照合する。
+  `app.py` の `HANDLED_MODEL_TYPES`（共有 KB の取扱 model_type 27 件）は語彙ファイルの対象外。

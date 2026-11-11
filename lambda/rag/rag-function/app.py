@@ -44,6 +44,19 @@ except ModuleNotFoundError as exc:
     log_unknown_model_once = _model_profile_module.log_unknown_model_once
 
 try:
+    import vocabulary_generated as _vocabulary
+except ModuleNotFoundError as exc:
+    # Lambda puts sibling modules on sys.path; scripts and tests may load this file by path.
+    if exc.name != 'vocabulary_generated':
+        raise
+    _vocabulary_spec = importlib.util.spec_from_file_location(
+        'rag_vocabulary_runtime', os.path.join(os.path.dirname(__file__), 'vocabulary_generated.py')
+    )
+    _vocabulary = importlib.util.module_from_spec(_vocabulary_spec)
+    sys.modules[_vocabulary_spec.name] = _vocabulary
+    _vocabulary_spec.loader.exec_module(_vocabulary)
+
+try:
     from knowhow_retrieval import (
         KnowhowIndexError, derive_kb_hints, load_index, search_index, retrieve_cards,
     )
@@ -283,14 +296,8 @@ HANDLED_MODEL_TYPES = frozenset({
 # UI項目別の実測母数（AXIEZ 1,137 / AXIEZ-LINKs 913 / NEXCUBE 485 /
 # メルシティ 292 / メルワイド 291 / エスカレーター 83 ＋共通819常時）:
 # docs/rag-model-filter-mapping-2026-08-26.md §1（PR #54）
-UI_MODEL_FILTERS = {
-    'AXIEZ': ('AXIEZ', 'AXIEZ(KE-WF・KE-HF)', '駅舎エレ'),
-    'AXIEZ-LINKs': ('AXIEZ-LINKs',),
-    'NEXCUBE': ('NEXCUBE', 'NEXCUBE Limited', '特注機械室レスエレベーター'),
-    'メルシティ': ('メルシティ',),
-    'メルワイド': ('メルワイド',),
-    'エスカレーター': ('エスカレーター',),
-}
+# 値の正本は knowledge/registry/applicability-vocabulary.json（vocabulary_generated.py に生成）。
+UI_MODEL_FILTERS = _vocabulary.UI_MODEL_FILTERS
 
 # spec モードで参照する資料カテゴリ（本命: C / TI / 据付基準）。
 # 旧実装は 'D資料' を強制していたが、この KB に D資料 は存在せず必ず 0 件になっていた。
