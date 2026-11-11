@@ -1,5 +1,5 @@
 ---
-status: draft
+status: production
 last-verified: "2026-10-19"
 related-code:
   - knowledge/CONTRACT.md

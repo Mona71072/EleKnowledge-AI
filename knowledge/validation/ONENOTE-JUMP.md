@@ -1,5 +1,5 @@
 ---
-status: draft
+status: production
 last-verified: "2026-10-20"
 related-code:
   - scripts/knowledge/build_onenote_jump_index.py

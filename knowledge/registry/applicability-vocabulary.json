@@ -1,0 +1,207 @@
+{
+  "schema_version": 1,
+  "status": "production",
+  "description": "テーマカードの適用範囲（model_scope）の語彙。APPLICABILITY-TAXONOMY.md をもとに作成し、値の正本として運用する。カード・画面の機種一覧・検索の別名・質問中の機種の呼び名との一致を tests/unit/test_applicability_vocabulary.py で検査する。",
+  "created_from": "knowledge/registry/APPLICABILITY-TAXONOMY.md",
+  "created_at": "2026-11-11",
+  "maintainers": ["itai", "mona"],
+  "out_of_scope": ["symptoms", "conditions", "lists_model_label", "observed_on", "may_apply_to", "excludes", "scope_note"],
+  "generic_labels": {
+    "elevator": "全エレ機種",
+    "escalator": "全エス機種"
+  },
+  "axes": {
+    "product_lines": [
+      {
+        "value": "AXIEZ",
+        "admitted": [],
+        "deprecated": [],
+        "ui_filter": {
+          "key": "AXIEZ",
+          "kb_model_types": ["AXIEZ", "AXIEZ(KE-WF・KE-HF)", "駅舎エレ"],
+          "extra_card_aliases": []
+        },
+        "question_aliases": ["axiez", "アクシーズ"],
+        "related": {
+          "machine_room": ["MRL"],
+          "control_methods": ["VFGLB", "VFGLB-JB"],
+          "model_abbreviations": ["KE-PF", "KE-RF", "KE-RFS", "KE-BF", "KE-WF", "KE-HF", "KE-SA", "KE-SAT", "KM-SA", "KM-SAT"]
+        },
+        "note": "AXIEZ-LINKs とは別製品（制御方式・巻上機の位置が異なる）。駅舎用（KE-SA 等）は UI では AXIEZ に含める。"
+      },
+      {
+        "value": "AXIEZ-LINKs",
+        "admitted": ["AXIEZ-LINKS"],
+        "deprecated": [],
+        "ui_filter": {
+          "key": "AXIEZ-LINKs",
+          "kb_model_types": ["AXIEZ-LINKs"],
+          "extra_card_aliases": []
+        },
+        "question_aliases": ["links", "リンクス"],
+        "related": {
+          "machine_room": ["MRL"],
+          "control_methods": ["VFGLF"]
+        },
+        "note": "制御方式は Lists・Vault 上 VFGLF と書かれることが多い。"
+      },
+      {
+        "value": "NEXCUBE",
+        "admitted": ["Nexcube"],
+        "deprecated": ["NEXWAY"],
+        "ui_filter": {
+          "key": "NEXCUBE",
+          "kb_model_types": ["NEXCUBE", "NEXCUBE Limited", "特注機械室レスエレベーター"],
+          "extra_card_aliases": []
+        },
+        "question_aliases": ["nexcube", "ネクスキューブ"],
+        "related": {
+          "machine_room": ["MR"],
+          "control_methods": ["VFGLB-WB", "VFGLB-K", "VFGH", "VFEL"],
+          "model_abbreviations": ["KM-LD", "CM-LB", "CM-MA", "ME-CH", "ME-CM", "ME-BL"]
+        },
+        "note": "NEXWAY は NEXCUBE の海外呼称（2026-10-20）。カードでは NEXCUBE を使う。"
+      },
+      {
+        "value": "メルシティ",
+        "admitted": ["MELCITY"],
+        "deprecated": [],
+        "ui_filter": {
+          "key": "メルシティ",
+          "kb_model_types": ["メルシティ"],
+          "extra_card_aliases": []
+        },
+        "question_aliases": ["メルシティ", "melcity"],
+        "related": {
+          "machine_room": ["MRL"],
+          "control_methods": ["VFGR"],
+          "model_abbreviations": ["AC-PB", "AC-CB"]
+        },
+        "note": ""
+      },
+      {
+        "value": "メルワイド",
+        "admitted": ["MELWIDE"],
+        "deprecated": [],
+        "ui_filter": {
+          "key": "メルワイド",
+          "kb_model_types": ["メルワイド"],
+          "extra_card_aliases": []
+        },
+        "question_aliases": ["メルワイド", "melwide"],
+        "related": {
+          "machine_room": ["MRL"],
+          "control_methods": ["VFGR"],
+          "model_abbreviations": ["AC-PB", "AC-CB"]
+        },
+        "note": ""
+      },
+      {
+        "value": "エスカレーター",
+        "admitted": ["escalator"],
+        "deprecated": [],
+        "ui_filter": {
+          "key": "エスカレーター",
+          "kb_model_types": ["エスカレーター"],
+          "extra_card_aliases": ["escalator"]
+        },
+        "question_aliases": ["エスカレーター", "escalator", "エスカ"],
+        "related": {
+          "control_methods": ["SVFC"],
+          "model_abbreviations": ["S1UJ1", "S6UJ1", "ZJ2", "ZJ2S"]
+        },
+        "note": "エスカのカードはエレの制御方式（VF で始まるもの）の軸に載せない。エスカの制御方式は SV で始まる（例: SVFC）。"
+      },
+      {
+        "value": "elecall",
+        "kind": "add_on",
+        "admitted": ["エレコール"],
+        "deprecated": [],
+        "ui_filter": null,
+        "question_aliases": [],
+        "related": {},
+        "note": "エレコール。エレベーターと併用して運用する付加仕様の製品（itai、2026-11-11）。機種ではないため、画面の機種一覧と機種フィルタの対象にしない。"
+      }
+    ],
+    "machine_room": [
+      { "value": "MRL", "admitted": [], "deprecated": [], "note": "機械室なし。" },
+      { "value": "MR", "admitted": [], "deprecated": ["CMR"], "note": "機械室あり。提供画像 catalog の CMR はカードでは MR と書く。" }
+    ],
+    "control_methods": [
+      { "value": "VFGLB", "admitted": [], "deprecated": [], "note": "AXIEZ。VFGLF とは別の制御方式。" },
+      { "value": "VFGLB-JB", "admitted": [], "deprecated": [], "note": "catalog の結合セルで要再確認。" },
+      { "value": "VFGLB-WB", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "VFGLB-K", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "VFGLF", "admitted": [], "deprecated": [], "note": "AXIEZ-LINKs / NEXIEZ 系。" },
+      { "value": "VFGH", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "VFGL", "admitted": [], "deprecated": [], "note": "駅舎用。" },
+      { "value": "VFGR", "admitted": [], "deprecated": [], "note": "MELCITY / MELWIDE。" },
+      { "value": "VFEL", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "SVFC", "admitted": [], "deprecated": [], "note": "エスカレーター用の制御方式（SV で始まる制御方式はエスカレーター用。itai、2026-11-11）。" }
+    ],
+    "model_abbreviations": [
+      { "value": "KE-PF", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KE-RF", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KE-RFS", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KE-BF", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KE-WF", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KE-HF", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KM-LD", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "CM-LB", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "CM-MA", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "ME-CH", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "ME-CM", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "ME-BL", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "AC-PB", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "AC-CB", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KF-ETC", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KF-MTC", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "FE-TA", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "FM-TA", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KE-SA", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KE-SAT", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KM-SA", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KM-SAT", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "S1UJ1", "admitted": [], "deprecated": [], "note": "エスカレーター（S1000）。" },
+      { "value": "S6UJ1", "admitted": [], "deprecated": [], "note": "エスカレーター（S600）。" },
+      { "value": "ZJ2", "admitted": [], "deprecated": [], "note": "エスカレーター。" },
+      { "value": "ZJ2S", "admitted": [], "deprecated": [], "note": "エスカレーター。" }
+    ],
+    "guide_systems": [
+      { "value": "roller_guide", "admitted": [], "deprecated": [], "note": "ローラーガイド。" }
+    ],
+    "door_families": [
+      { "value": "L型", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "K型", "admitted": [], "deprecated": [], "note": "" }
+    ],
+    "door_types": [
+      { "value": "LV5K", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "LV5K-2S", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "LV5K-CO/2S", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "LV6K", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "LV6K-CO/2S", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "LV6K-CO/2S/SS/2CO", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "LV0K-7-2S", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "KV4K-3", "admitted": ["KV4"], "deprecated": [], "note": "戸閉装置型名。KV4 は略称。" },
+      { "value": "K4N-2", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "2S", "admitted": [], "deprecated": [], "note": "" },
+      { "value": "気配りドア付", "admitted": [], "deprecated": [], "note": "付加機能。" },
+      { "value": "HMS", "admitted": [], "deprecated": [], "note": "付加機能。" },
+      { "value": "MBS", "admitted": [], "deprecated": [], "note": "付加機能。" },
+      { "value": "CM-LB戸短検出（ラッチあり）", "admitted": [], "deprecated": [], "note": "要確認: 型式コードではなく説明の可能性。カード 1 枚で使用（2026-11-11）。" },
+      { "value": "M系2S/2CO低速", "admitted": [], "deprecated": [], "note": "要確認: 型式コードではなく説明の可能性。カード 1 枚で使用（2026-11-11）。" }
+    ]
+  },
+  "misplaced": [
+    { "axis": "control_methods", "value": "LINKS", "move_to_axis": "product_lines", "move_to_value": "AXIEZ-LINKs", "note": "製品名が制御方式の欄にある。" },
+    { "axis": "control_methods", "value": "AXIEZ-LINKS", "move_to_axis": "product_lines", "move_to_value": "AXIEZ-LINKs", "note": "製品名が制御方式の欄にある。" },
+    { "axis": "control_methods", "value": "AXIEZ", "move_to_axis": "product_lines", "move_to_value": "AXIEZ", "note": "製品名が制御方式の欄にある。" },
+    { "axis": "control_methods", "value": "CM-MA", "move_to_axis": "model_abbreviations", "move_to_value": "CM-MA", "note": "機種略称が制御方式の欄にある。" },
+    { "axis": "control_methods", "value": "KM-LD", "move_to_axis": "model_abbreviations", "move_to_value": "KM-LD", "note": "機種略称が制御方式の欄にある。" },
+    { "axis": "control_methods", "value": "KM-SA", "move_to_axis": "model_abbreviations", "move_to_value": "KM-SA", "note": "機種略称が制御方式の欄にある。" },
+    { "axis": "model_abbreviations", "value": "NEXWAY", "move_to_axis": "product_lines", "move_to_value": "NEXCUBE", "note": "NEXWAY は NEXCUBE の海外呼称で、機種略称ではない。" },
+    { "axis": "door_types", "value": "L型", "move_to_axis": "door_families", "move_to_value": "L型", "note": "ドアの大分類がドア型式の欄にある。" },
+    { "axis": "guide_systems", "value": "メンテコン", "move_to_axis": null, "move_to_value": null, "note": "要確認: ガイド方式ではない可能性。置き場を決める。" },
+    { "axis": "door_families", "value": "タッチレス乗場・かご内", "move_to_axis": null, "move_to_value": null, "note": "要確認: L型 / K型の大分類ではない。置き場を決める。" }
+  ]
+}

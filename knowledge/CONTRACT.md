@@ -11,7 +11,7 @@ status: draft | approved | retired
 card_version: 1
 title: "人が読むテーマ名（IDを含めない）"
 symptoms: []                   # 検索用
-model_scope:
+model_scope:                   # 製品系列〜ドア型式の値は registry/applicability-vocabulary.json にあるものを使う（tests/unit/test_applicability_vocabulary.py が検査）
   lists_model_label: []        # Lists スナップショット § の Model 行をそのまま（略称≠制御のとき必須）
   product_lines: []            # AXIEZ, Nexcube, AXIEZ-LINKs, MELCITY …
   machine_room: []             # 機械室大分け: MRL | MR のみ（Lists MRL機種/MR機種）。catalog 画像の CMR 表記は MR に読み替え。不明は空

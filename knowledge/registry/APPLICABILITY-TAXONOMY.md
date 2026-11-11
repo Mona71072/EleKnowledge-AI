@@ -1,15 +1,21 @@
 ---
-status: draft
+status: production
 last-verified: "2026-10-19"
 related-code:
   - knowledge/drafts/ELV_機種略称・制御方式一覧_提供画像.md
   - knowledge/drafts/u形エスカレーター_機種一覧.md
   - knowledge/CONTRACT.md
+  - knowledge/registry/applicability-vocabulary.json
+  - tests/unit/test_applicability_vocabulary.py
 ---
 
 # 適用範囲の整理軸（機種・制御方式・Vault 棚）
 
-テーマカードは **Lists の `Model` 欄をそのまま信じず**、次の層を分けて書く。正本の対応表は Vault 写し（出典ではないが **索引として必読**）。
+> 最終検証: 2026-11-11 — 本節のみ。語彙ファイルの作成と、`tests/unit/test_applicability_vocabulary.py` の実行（カード 398 枚・画面の機種一覧・UI_MODEL_FILTERS・2 か所の MODEL_ALIASES との照合）。以下の各節の内容は再検証していない。
+
+**値の正本は [applicability-vocabulary.json](./applicability-vocabulary.json)**（本書をもとに 2026-11-11 作成。管理者は itai と mona）。`model_scope` の製品系列・機械室・制御方式・機種略称・ガイド方式・ドアの大分類・ドア型式の値は、この語彙にあるものを使う。新しい値は、使う前に語彙ファイルへ追加する（テストが、語彙に無い値を使ったカードを失敗にする）。症状と部位・条件（`symptoms`・`conditions`）は語彙の対象外。本書は、軸の意味と書き分けの規則を説明する。
+
+テーマカードは **Lists の `Model` 欄をそのまま信じず**、次の層を分けて書く。対応表を作るときの出典は Vault 写し（出典ではないが **索引として必読**）。値は上の語彙ファイルに載せる。
 
 | 層 | 意味 | 正本 |
 | --- | --- | --- |
@@ -127,6 +133,12 @@ AXIEZ と AXIEZ-LINKs は、制御方式だけでなく**据付・機械（巻�
 **Vault category:** `エスカ機種一覧` / `エスカ（u形）` / `総点(u型エス)` 等
 
 u 形: 機種略称 S1UJ1(S1000), S6UJ1(S600) 等 — 詳細は structured_data。エスカカードは **`product_lines: [エスカレーター]`**（配列。単数の `product_line` は未知キーとして `check` が失敗する） と **`model_abbreviations`** を必須とし、エレの VFGH/VFGLB 軸に載せない。
+
+**制御方式:** エスカレーターの制御方式は **SV で始まる**（例: `SVFC`）。エレベーターの制御方式（VF で始まるもの）と混同しない（itai、2026-11-11）。
+
+### 付加仕様の製品
+
+**エレコール（`elecall`）** は、エレベーターと併用して運用する付加仕様の製品（itai、2026-11-11）。機種ではないため、`product_lines` に書く場合も画面の機種一覧・機種フィルタの対象にしない（語彙ファイルでは `kind: add_on`）。
 
 ---
 
