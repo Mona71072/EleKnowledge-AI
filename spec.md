@@ -64,8 +64,11 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 
 ### 🔧 運用・改善・評価
 
+> 最終検証: 2026-10-20 — SAMデプロイ引継ぎ手順の索引リンクを追加・確認。他の運用項目やAWS現況の再検証は含まない。
+
 | 項目 | 現在の状態 | 参照先 |
 |------|------------|--------|
+| SAM デプロイ引継ぎ | mona向けの説明用ドラフト。コマンド構文と記録・設定を照合。AWS実行は未実施 | [SAMデプロイ手順・よくあるミスと対策](docs/sam-deploy-handoff.md) |
 | AWS リソース・運用 | 2026-09-30 開発環境の読み取り専用スナップショット。IaC との差・未確認項目を含む | [AWS Resource Map](docs/aws-resource-map.md) ／ [運用ランブック](docs/ops-runbook.md) ／ [文書整備状況の確認記録](docs/verification-2026-09-30-current-state.md) |
 | コスト配分タグ | 2026-10-15に3キーを104リソースへ付与・再読取確認。管理部門での有効化・請求への反映は未確認 | [タグ運用](docs/ops-cost-allocation-tags.md) ／ [リソース別台帳](docs/cost-allocation-resource-register.md) |
 | 日次 KPI v2 | 設計。AWS の毎時ルールは確認したが、現在の aggregator は日次 UTC 集計 | [KPI v2 設計](docs/design-2026-09-10-metrics-v2.md) |
