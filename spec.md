@@ -56,7 +56,7 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 | 法令チャット（developプレリリース） | [法令RAG設計](docs/features/development/legal-rag-design.md) ／ [法令API補足](docs/api/legal-chat.md) | Amplify job 64でdevelopへ公開反映済み。法令カードと法令画面への遷移を実確認。itai配信版の実アカウント操作はユーザー確認済み。対象はdev全ユーザー、実費は今後確認。[対象一覧](docs/features/development/legal-rag-target-laws.md) ／ [公開・受入手順](docs/legal-chat-prerelease.md) ／ [確認記録](docs/verification-2026-10-09-legal-chat-prerelease.md) |
 | RAG の 2 モード化（通常モード＋じっくりモード。設計段階） | [設計（合意済み・未実装）](docs/design-2026-09-24-rag-two-modes.md) | 決定: [docs/decisions-2026-09-24-rag-two-modes.md](docs/decisions-2026-09-24-rag-two-modes.md) ／ 調査: [docs/survey-2026-09-24-agentic-rag.md](docs/survey-2026-09-24-agentic-rag.md) ／ [KB 修正依頼台帳](docs/kb-change-requests.md) |
 | Know-how Knowledge Layer（設計段階・未確定） | [docs/design-2026-10-01-knowhow-flywheel.md](docs/design-2026-10-01-knowhow-flywheel.md) | 調査: [docs/survey-2026-10-01-knowhow-flywheel.md](docs/survey-2026-10-01-knowhow-flywheel.md) |
-| 製品用語・基礎知識のAI共有（共同確認中） | [初期構想](docs/concept-2026-10-21-product-domain-knowledge.md) | ノウハウと共通管理。開発中はGit正本、運用開始時にS3へ切替。キーマンの内容承認と管理者のapproved保存・公開を分離する方針。itai専用S3検証実装は存在するが、二段階承認・業務用移行・KB接続は未受入。 |
+| 製品用語・基礎知識のAI共有（開発中・実装受入前） | [初期構想](docs/concept-2026-10-21-product-domain-knowledge.md) ／ [ノウハウ設計](docs/design-2026-10-01-knowhow-flywheel.md) | 決定: 2026-11-05からブレーキ（BK）系1単元の試行を開始し、開発中の内容確認・承認者と読者はmona・itaiのみ。公開版は版ごと無期限、草案は60日保持（暫定）。Git→S3切替はitaiが担当し、1単元試行後・運用開始直前に全カードを移行（暫定。運用開始日は未定）。Git側に承認記録がないため引継ぎせず、試行単元は二段階承認を新規実施。共通知識実装は#195に含めず別PR。管理者識別はCognito `admin`＋認可表の分野制約、停止はadmin全員（暫定）。AWS共有環境・KB取込・両AIの本番参照は未受入。 |
 
 ### 📖 利用者向け案内
 
