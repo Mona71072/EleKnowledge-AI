@@ -105,13 +105,92 @@ def test_misplaced_entries_point_to_known_values():
             assert item["move_to_value"] in targets, f"{item['value']} の移し先 {item['move_to_value']} が語彙に無い"
 
 
-def test_related_values_exist_in_their_axes():
+def _all_items(vocab: dict) -> list:
+    return [e for entries in vocab["axes"].values() for e in entries] + [
+        e for entries in vocab["items"].values() for e in entries
+    ]
+
+
+def test_every_item_has_unique_stable_id():
+    """項目台帳の ID（知識マップ設計 §4.1）。ID は種類の接頭辞を持ち、重複しない。"""
     vocab = _vocab()
-    for entry in vocab["axes"]["product_lines"]:
-        for axis, values in (entry.get("related") or {}).items():
-            known = {e["value"] for e in vocab["axes"][axis]}
-            missing = set(values) - known
-            assert not missing, f"{entry['value']} の related.{axis} に語彙に無い値: {sorted(missing)}"
+    assert vocab["schema_version"] == 2
+    ids = [e["id"] for e in _all_items(vocab)]
+    assert len(ids) == len(set(ids)), "ID が重複している"
+    assert all(re.match(r"^[a-z_]+:.+", i) for i in ids)
+
+
+def test_item_relations_point_to_existing_items_with_source():
+    """項目同士の関係（R1・R2）は、存在する ID を指し、出典を持つ（知識マップ設計 §4.1 ルール 3）。"""
+    vocab = _vocab()
+    ids = {e["id"] for e in _all_items(vocab)}
+    for entry in _all_items(vocab):
+        for relation in entry.get("relations", []):
+            assert relation["type"] in ("related", "successor_of"), relation
+            assert relation["target"] in ids, f"{entry['id']} → 存在しない ID {relation['target']}"
+            assert relation.get("source"), f"{entry['id']} → {relation['target']} に出典が無い"
+
+
+LAW_LIST = ROOT / "docs/features/development/legal-rag-target-laws.md"
+KB_INDEX = ROOT / "knowledge/registry/kb-document-index.jsonl"
+KB_REF_RESOLUTION = ROOT / "knowledge/registry/kb-ref-resolution.jsonl"
+
+
+def _jsonl(path: Path) -> list:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_law_items_match_target_law_list():
+    """法令の項目は法令対象一覧（53 件）と一致する。ID は版を含まない e-Gov の法令ID。"""
+    folders = set(re.findall(r"`(\d{3}[A-Z0-9]{12}_\d{8}_[A-Z0-9]+)`", LAW_LIST.read_text(encoding="utf-8")))
+    laws = _vocab()["items"]["laws"]
+    assert {law["current_folder"] for law in laws} == folders
+    assert all(law["id"] == "law:" + law["current_folder"].split("_")[0] for law in laws)
+
+
+def test_kb_value_map_covers_every_kb_value():
+    """KB の model_type・category のすべての値に、対応（mapped / all_models / needs_review）が決まっている（§4.8.3）。
+
+    needs_review は未判断であって取扱外ではない。取扱外にするには業務スコープの共同確認が要る。
+    """
+    vocab = _vocab()
+    kb_map = vocab["kb_value_map"]
+    ids = {e["id"] for e in _all_items(vocab)}
+    rows = _jsonl(KB_INDEX)
+    assert {r["catalog_as_of"] for r in rows} == {kb_map["as_of"]}
+    elements = {e.strip() for r in rows for e in re.split(r"\s*/\s*", r["model_type"]) if e.strip()}
+    categories = {r["category"] for r in rows}
+    for key, values in (("model_type", elements), ("category", categories)):
+        mapped = {e["kb_value"]: e for e in kb_map[key]}
+        assert set(mapped) == values, f"{key}: 対応の無い値 {sorted(values - set(mapped))} / 古い値 {sorted(set(mapped) - values)}"
+        for entry in mapped.values():
+            assert entry["status"] in ("mapped", "all_models", "needs_review")
+            assert bool(entry["maps_to"]) == (entry["status"] == "mapped"), entry
+            assert set(entry["maps_to"]) <= ids, entry
+
+
+def test_card_kb_references_resolve_to_kb_documents():
+    """カードの kb_document の解決先（kb-ref-resolution）が、KB の一覧に実在する。"""
+    filenames = {r["filename"] for r in _jsonl(KB_INDEX)}
+    broken = [
+        f"{r['knowledge_id']}: {r['document_number']} → {r['kb_filename']}"
+        for r in _jsonl(KB_REF_RESOLUTION)
+        if r.get("kb_filename") and r["kb_filename"] not in filenames
+    ]
+    assert not broken, "KB の一覧に無い資料への解決:\n" + "\n".join(broken)
+
+
+def test_card_law_references_point_to_law_items():
+    """カードの law_rag の law_id は、法令の項目（版を含まない ID）に解決できる。"""
+    law_ids = {law["id"] for law in _vocab()["items"]["laws"]}
+    unknown = []
+    for path in sorted(CARDS.glob("*/*.md")):
+        match = re.match(r"---\r?\n(.*?)\r?\n---", path.read_text(encoding="utf-8"), re.DOTALL)
+        meta = yaml.safe_load(match.group(1)) or {}
+        for ref in meta.get("source_refs") or []:
+            if ref.get("ref_type") == "law_rag" and "law:" + str(ref.get("law_id", "")).split("_")[0] not in law_ids:
+                unknown.append(f"{path.name}: {ref.get('law_id')}")
+    assert not unknown, "法令の項目に無い law_id:\n" + "\n".join(unknown)
 
 
 # --- コードとの一致 ---------------------------------------------------------------
