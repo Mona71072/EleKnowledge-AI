@@ -285,7 +285,7 @@ def build_completion_transaction(
                     ":result": {
                         "searchCount": research.get("searchCount", 0),
                         "evidenceCount": research.get("evidenceCount", 0),
-                        "risk": research.get("risk", "medium"),
+                        "risk": research.get("risk", "high"),
                         "evidence": research.get("evidence", []),
                     },
                     ":resultId": message["messageId"],

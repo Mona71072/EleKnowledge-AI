@@ -19,6 +19,8 @@ class KbProfile:
     category_key: str = "category"
     model_type_filter_operator: str = "listContains"
     search_type: str = "HYBRID"
+    # 資料の版を持つメタデータキー。空は「版のメタデータなし」（共有 KB は 2026-11 時点で版のキーを持たない）。
+    version_key: str = ""
 
     def __post_init__(self):
         if self.model_type_filter_operator not in {'listContains', 'equals', 'in'}:
@@ -66,6 +68,10 @@ def _validate_override(overrides: dict) -> dict:
             ):
                 raise TypeError("KB profile field page_number_keys must be a non-empty string array")
             validated[key] = tuple(value)
+        elif key == "version_key":
+            if not isinstance(value, str):
+                raise TypeError("KB profile field version_key must be a string")
+            validated[key] = value
         elif key == "search_type":
             if value not in ("HYBRID", "SEMANTIC"):
                 raise ValueError("KB profile search_type must be HYBRID or SEMANTIC")

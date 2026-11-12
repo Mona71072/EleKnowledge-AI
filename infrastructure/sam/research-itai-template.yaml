@@ -62,6 +62,12 @@ Parameters:
   ModelProfileJson:
     Type: String
     Default: ''
+  ResearchEscalationContactsJson:
+    Type: String
+    Default: '{}'
+    Description: >-
+      JSON object of escalation contacts per domain (safety / legal / work_permission / other).
+      Empty means not configured; the answer then shows the contact as unset.
   WorkerReservedConcurrency:
     Type: Number
     Default: 5
@@ -401,6 +407,7 @@ Resources:
           CHATLOGS_TABLE: !Ref ChatLogsTableName
           CHATLOGS_METRIC_SHARDS: "10"
           RESEARCH_JOBS_TABLE: !Ref ResearchJobsTable
+          RESEARCH_ESCALATION_CONTACTS: !Ref ResearchEscalationContactsJson
           CITATION_URI_MODE: s3
           DOCUMENTS_BUCKET: ''
       Tags:

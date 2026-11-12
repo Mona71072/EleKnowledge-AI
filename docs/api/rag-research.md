@@ -96,3 +96,30 @@ related-code:
 固定手順で計画、並列検索、根拠選定、統合、照合を行う。検索は最大8回、根拠はscore 0.3以上・1資料3件まで・合計20件・各2,000文字まで。根拠0件では作文しない。計画・統合・照合の各JSONはスキーマと根拠IDを検査する。
 
 workerはqueued状態・dispatch期限・ACTIVEロックを条件付きトランザクションでclaimし、以後の進捗・完了・失敗更新は自分のleaseTokenが一致する場合だけ受理する。回答assistantメッセージ保存、job完了、ACTIVEロック解除は1つのトランザクションで行う。非同期起動は再試行0回、最大イベント経過120秒、失敗記録は専用SQSへ送る。
+
+## 回答の安全の関門（段階 1'）
+
+> 最終検証: 2026-11-12 — `itai` ブランチの `research_worker.py` を design-2026-09-24-rag-two-modes.md §11.3（PR #206）に合わせて改修し、単体テストで確認。実モデル・実 KB での確認は配備後に記録する。
+
+設計 §11.3 の要件を、現行のじっくりモードのワーカーでコードとして強制する。エンジン統合・結果の契約・根拠の保持と再利用は段階 2' で扱う。
+
+| # | 要件 | 受け入れ条件（単体テスト） |
+|---|---|---|
+| G1 | 主張の機種と根拠の機種は、語彙（`knowledge/registry/applicability-vocabulary.json` → `vocabulary_generated.py`）と取扱機種で正規化し、要素単位の完全一致で照合する | `AXIEZ` の主張が `AXIEZ-LINKs` だけの根拠を引くと不採用。辞書にない機種名の主張は不採用。主張が引く根拠は、すべて同じ機種か共通資料でなければならない |
+| G2 | 共通資料（model_type が `*` / `general` / 無し）は機種付きの主張を裏付けてよい。根拠一覧に「共通資料」と表示する | 共通資料の根拠で機種付きの主張が採用され、根拠一覧に「共通資料」が出る |
+| G3 | 機種の付かない主張が、異なる機種の根拠を引く場合は採用しない（確認できなかった点へ回す。機種ごとの欄への振り分けは 2'） | `AXIEZ` と `NEXCUBE` の根拠を同時に引く機種なしの主張は不採用 |
+| G4 | 照合で否定された主張・照合できなかった主張は、本文を回答にも chatlogs にも出さない。件数だけを示す | 回答本文と `research` に否定された主張の文が含まれない。`research.unsupportedClaimCount` に件数が入る |
+| G5 | 高リスクの質問では、結論を「■判断は確認先で行う」欄に置き、裏付けの状態を示す（裏付けあり / 未確認 N 件） | 照合で裏付けのある結論が「裏付けあり」として確認先の欄に出る。未確認の結論は件数だけ |
+| G6 | リスク判定に失敗した場合（計画の JSON 不正・値が範囲外）は `high` として扱う | `normalize_plan({})` の `risk` が `high` |
+| G7 | 根拠ごとに本文の SHA-256 と版を持つ。版のメタデータキーは `KB_PROFILE_JSON` の `version_key`（既定は空＝版なし）。同じ資料名で版が異なる根拠を 1 つの主張にまとめない | 版の異なる同名資料を引く主張は不採用。`research.evidence[]` に `textHash`・`version` が入る |
+| G8 | 確認先は業務の種類（`safety` / `legal` / `work_permission` / `other`）ごとに `RESEARCH_ESCALATION_CONTACTS`（JSON）で持つ。未設定の種類は「未設定」と分かる表示にする | 設定なしで高リスクの回答に「確認先: 未設定」が出る。不正な JSON は空として扱う |
+| G9 | 回答に出す資料名・ページは、保存した根拠のメタデータからコードで組み立てる。根拠 ID（E1〜E20）は回答本文に出さず、内部の照合と `research.claims[].evidenceIds` にだけ残す | 回答本文に `E1` などの番号が出ない。主張の末尾に資料名とページが出る。主張本文中の括弧付き根拠 ID は取り除く |
+
+### 既知の欠落
+
+- **KB に版のメタデータがない。** 共有 KB のメタデータキーは category / model_type / filename / file_path だけで（`app.py` の `build_kb_filter` の注記）、`version_key` を設定できる値がない。そのため G7 の版の照合は、現在は実質的に働かない（全根拠の `version` が `null`）。本文のハッシュは記録する。ファイル名から版を推定する方法は、KB の実データを調べてから判断する。
+- 確認先の中身（業務の種類ごとの担当）は未決（design §11.11）。既定値は空で、表示は「未設定」になる。
+
+### `research` の項目（段階 1' 時点）
+
+`claims`（採用した主張。`evidenceIds` は内部 ID）、`differences`、`unknownPoints`、`unsupportedClaimCount`、`verificationStatus`（`complete` / `unavailable` / `not_needed`）、`risk`、`domain`、`searchCount`、`evidenceCount`、`searchFailures`、`evidence[]`（`id`・`documentName`・`page`・`modelScope`（`common` / `specific`）・`textHash`・`version`）。根拠の本文は保存しない。
