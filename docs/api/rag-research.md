@@ -99,7 +99,7 @@ workerはqueued状態・dispatch期限・ACTIVEロックを条件付きトラン
 
 ## 回答の安全の関門（段階 1'）
 
-> 最終検証: 2026-11-12 — `itai` ブランチの `research_worker.py` を design-2026-09-24-rag-two-modes.md §11.3（PR #206）に合わせて改修し、単体テストで確認。実モデル・実 KB での確認は配備後に記録する。
+> 最終検証: 2026-11-12 — 単体テスト（18 件）、`EleKnowledge-itai-research` への配備（`234167b1`）とワーカーの読み込み確認、同じコードを手元から実 KB（VQV81CNYU4）・実モデルにつないだ 3 問の確認。画面からの通し確認は未実施。
 
 設計 §11.3 の要件を、現行のじっくりモードのワーカーでコードとして強制する。エンジン統合・結果の契約・根拠の保持と再利用は段階 2' で扱う。
 
@@ -123,3 +123,16 @@ workerはqueued状態・dispatch期限・ACTIVEロックを条件付きトラン
 ### `research` の項目（段階 1' 時点）
 
 `claims`（採用した主張。`evidenceIds` は内部 ID）、`differences`、`unknownPoints`、`unsupportedClaimCount`、`verificationStatus`（`complete` / `unavailable` / `not_needed`）、`risk`、`domain`、`searchCount`、`evidenceCount`、`searchFailures`、`evidence[]`（`id`・`documentName`・`page`・`modelScope`（`common` / `specific`）・`textHash`・`version`）。根拠の本文は保存しない。
+
+### 実機確認（2026-11-12、`234167b1`）
+
+同じコードを手元から実 KB・実モデル（Sonnet 5）につないで `run_research` を流した。配備した Lambda は、存在しない jobId での起動で読み込みと終了だけを確認した（`research_job_missing`）。
+
+| 質問 | 結果 |
+|---|---|
+| AXIEZとNEXCUBEで据付時の違いを比較してください | 採用 8 件・不採用 0 件。機種ごとの欄の主張は、引用した資料の機種と一致。回答本文に根拠番号なし。共通資料に「共通資料」の表示あり |
+| 安全回路をジャンパーした状態で試運転しても問題ないですか？ | risk=high・domain=safety。裏付けのある結論 2 件を「判断は確認先で行う」欄に［裏付けあり］で表示。未確認の結論 1 件・その他 2 件は件数だけ。「確認先（安全）: 未設定」 |
+| ホームエレベーターの家庭用電源工事の費用相場はいくらですか？ | 主張 0 件。確認できなかった点だけを表示 |
+
+- **初回配備（`d6a93c87`）で見つけて直した不具合:** モデルが共通資料の model_type「general」を主張の機種にそのまま書き、辞書にない機種として正しい主張が全件不採用になった。`general` 等は機種なしの主張として扱うよう修正した（G1）。
+- **関門の範囲外の課題（4' の評価で見る）:** 主張の本文が引用資料より広い機種名で書かれることがある（例: AXIEZ(KE-WF・KE-HF) の資料を引いて「AXIEZの適用工法は」と書く）。機種の欄は正しいが、本文の言い換えまではコードで照合していない。根拠が見つからない質問でも score 0.3 以上の根拠が 20 件選ばれ、根拠資料の一覧に関係の薄い資料が並ぶ。
