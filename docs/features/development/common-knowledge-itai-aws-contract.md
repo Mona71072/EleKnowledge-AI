@@ -270,3 +270,11 @@ AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタッ�
 - RAG 側: `itai` の `2e62e647` を `feature/itai検証T0-T1` に取り込み（`e8b91a13`、push 済み）、T0-T1 の手順（接続設定は公開版 release の t24 のまま）で changeset `t26-knowhow-only-e8b91a13`（7 件 Modify、Replacement・削除なし）を実行し UPDATE_COMPLETE。`RAG_LOGIC_VERSION=e8b91a13`、release・読者・照合は維持。配備した RAG の Python 32 ファイル（`knowhow_answer.py` を含む）がコミットと一致。
 - 画面: Amplify itai のブランチ環境変数に `NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY=true` を追加（既存 7 件は値を変えずに書き戻し、合計 8 件）。`amplify.yml` に同名の変数は無い。`itai` の push で配信する。
 - 戻し方: 画面は同じ変数を外して再配信（従来の 2 列に戻る）。RAG は t25 の packaged テンプレート（`deployment-artifacts/5c266d57…/template.yaml`）で changeset を作る（`knowhowOnly` を送らない限り従来の経路のため、画面だけ戻しても動く）。
+
+### 回答本文の資料名・カード名の引用リンク（2026-11-12）
+
+> 最終検証: 2026-11-12 — 専用検査・build したコードの照合（32 ファイル）・changeset の全件確認・配備後の環境変数と配備コードの照合。画面での確認は Amplify の配信後に行う。
+
+- RAG 側はノウハウ回答の指示文 1 行（カードの `title` をそのまま書かせる）だけ。`itai` の `5696cff1` を `feature/itai検証T0-T1` に取り込み（`2f92bdf5`、push 済み）、changeset `t27-card-title-2f92bdf5`（7 件 Modify、Replacement・削除なし）で UPDATE_COMPLETE。`RAG_LOGIC_VERSION=2f92bdf5`、release・照合は維持。配備コード 32 ファイルがコミットと一致。
+- 画面（先輩チャット・通常チャットのリンク表示）は `itai` の push で配信する。
+- 戻し方: RAG は t26 の packaged テンプレート（`deployment-artifacts/e8b91a13…/template.yaml`）で changeset を作る。画面は `itai` の該当コミットを戻して再配信。
