@@ -163,6 +163,49 @@ def deployed():
     return _DEPLOYED
 
 
+MIGRATION_EVENT = 'commonKnowledgeMigration'
+SUB = re.compile(r'^[A-Za-z0-9:_@./+-]{1,200}$')
+
+
+def is_migration(event):
+    """API Gateway events always carry httpMethod/requestContext; a direct invoke carries neither."""
+    return (isinstance(event, dict) and MIGRATION_EVENT in event
+            and 'httpMethod' not in event and 'requestContext' not in event)
+
+
+def handle_migration(event, service=None):
+    """WP3 one-card migration (design 2026-11-11 §4.11), reached only by a direct Lambda invoke.
+
+    SECURITY: the route is not on API Gateway; only IAM principals allowed lambda:InvokeFunction on
+    the recovery function can call it. The actor named in the event is still authorized by the
+    protected grant table (edit + approve + publish), exactly like an API caller. No card text is logged.
+    """
+    try:
+        require(service is not None, 503, 'StorageNotConfigured')
+        exact(event, (MIGRATION_EVENT,))
+        body = event[MIGRATION_EVENT]
+        exact(body, ('actor', 'idempotencyKey', 'knowledgeId', 'data'))
+        require(isinstance(body['actor'], str) and SUB.fullmatch(body['actor']) is not None)
+        service.begin_request()
+        result = service.migrate({'sub': body['actor']}, body['idempotencyKey'],
+                                 body['knowledgeId'], body['data'])
+        return {'status': 200, 'result': result}
+    except Failure as error:
+        status, code = error.status, error.code
+    except Contention:
+        status, code = 503, 'ConcurrentUpdate'
+    except (ValueError, TypeError, KeyError, UnicodeError):
+        status, code = 400, 'ValidationError'
+    except Exception:  # External adapter errors never expose paths, content or traces.
+        status, code = 503, 'DependencyUnavailable'
+    return {'status': status, 'code': code}
+
+
 def lambda_handler(event, context):
     service, responsibility, origin = deployed()
+    if is_migration(event):
+        # Only the recovery function holds ledger + working + approved/ + manifests/ + published/.
+        if responsibility != 'recovery':
+            return {'status': 404, 'code': 'NotFound'}
+        return handle_migration(event, service)
     return handle(event, service, responsibility or 'reader', origin)

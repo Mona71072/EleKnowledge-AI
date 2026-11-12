@@ -151,7 +151,8 @@ class Service:
                 self.fault('before_projection_commit')
                 action = request[0] if isinstance(request, list) else 'contribute'
                 role = {'decision': 'approve', 'sample': 'approve', 'publish': 'publish',
-                        'withdraw': 'publish', 'contribute': 'contribute'}.get(action, 'edit')
+                        'withdraw': 'publish', 'contribute': 'contribute',
+                        'migrate': 'migrate'}.get(action, 'edit')
                 detail = request[-1] if isinstance(request, list) and isinstance(request[-1], dict) else {}
                 db.put('event', operation, {
                     'operationId': operation, 'actor': actor, 'target': target,
@@ -516,6 +517,102 @@ class Service:
         return self.mutate(claims, key, 'sample:' + identifier,
                            ['sample', identifier, revision, data], check)
 
+    def migrate(self, claims, key, identifier, data):
+        """WP3 (design 2026-11-11 §4.11): register one Git card as approved and published, in one
+        idempotent operation. The caller already wrote the converted card to drafts/ (workVersionId).
+
+        This bypasses the review request on purpose (decided 2026-11-12): the evidence is one
+        registry entry for the Git migration inventory, not per-source entries. Everything else is
+        the normal contract: the caller needs edit, approve and publish grants, the working version
+        is pinned by sha256, approved/ is an immutable copy, the manifest CAS starts at generation 0.
+        Versions with a §4.3 exception mark are published and wait for another person's sample check.
+        """
+        exact(data, ('workVersionId', 'rawSha256', 'kind', 'applicability', 'domain', 'audience',
+                     'expiresAt', 'evidence', 'cardVersion', 'reason'))
+        require(isinstance(identifier, str) and ID.fullmatch(identifier))
+        require(isinstance(data['workVersionId'], str) and 0 < len(data['workVersionId']) <= 1024)
+        require(isinstance(data['rawSha256'], str) and re.fullmatch('[0-9a-f]{64}', data['rawSha256']))
+        require(data['kind'] in {'case_summary', 'practice_guide'})
+        text(data['applicability'])
+        text(data['domain'], 200)
+        text(data['audience'], 200)
+        text(data['reason'])
+        require(type(data['expiresAt']) is int and data['expiresAt'] > self.clock())
+        require(type(data['cardVersion']) is int and data['cardVersion'] > 0)
+        exact(data['evidence'], ('id', 'version', 'locator', 'sha256'))
+        for field in ('id', 'version', 'locator'):
+            text(data['evidence'][field], 200)
+        require(isinstance(data['evidence']['sha256'], str)
+                and re.fullmatch('[0-9a-f]{64}', data['evidence']['sha256']))
+        for permission in ('edit', 'approve', 'publish'):
+            self.authorize(claims, permission, data['domain'], data['audience'])
+        actor = claims['sub']
+
+        def run(db, operation):
+            for permission in ('edit', 'approve', 'publish'):
+                self.authorize(claims, permission, data['domain'], data['audience'])
+            require(db.get('card', identifier) is None, 409, 'AlreadyExists')
+            raw = self.work.read(identifier, data['workVersionId'])
+            require(raw is not None and digest(raw) == data['rawSha256'], 409, 'WorkVersionConflict')
+            markdown = raw.decode('utf-8')
+            require('\r' not in markdown, 400, 'LfRequired')
+            text(markdown, 256 * 1024)
+            require(len(raw) <= 256 * 1024)
+            frontmatter = markdown.split('\n---\n', 1)[0]
+            require(markdown.startswith('---\n')
+                    and f'\nknowledge_id: {identifier}\n' in frontmatter + '\n', 400, 'IdentifierMismatch')
+            stamp = db.get('operation-intent', operation)
+            at = stamp['at'] if stamp else int(self.clock())
+            evidence = data['evidence']
+            fields = {'candidateId': operation, 'candidateRevision': 1, 'kind': data['kind'],
+                      'applicability': data['applicability'],
+                      'sourceRefs': [{**evidence, 'claimType': 'technician_statement', 'verified': True}],
+                      'audience': data['audience'], 'domain': data['domain'],
+                      'expiresAt': data['expiresAt'], 'unknowns': []}
+            metadata = {**fields, 'knowledgeId': identifier, 'workingRevision': 1,
+                        'hashContractVersion': 'i1-json-lf-v1', 'rawSha256': data['rawSha256']}
+            self.evidence_authorized(metadata)
+            bundle_hash = digest(to_canonical(metadata))
+            marks = second_review.assess(markdown, fields, [], None)
+            migration = {'cardVersion': data['cardVersion'], 'evidenceId': evidence['id'],
+                         'evidenceVersion': evidence['version'], 'locator': evidence['locator']}
+            version = {**metadata, 'bundleHash': bundle_hash, 'workVersionId': data['workVersionId'],
+                       'editor': actor, 'secondReview': marks, 'migration': migration}
+            approved_key = f'{identifier}/1/{bundle_hash}'
+            approval = {'reviewRequestId': None, 'revision': 1, 'bundleHash': bundle_hash,
+                        'workVersionId': data['workVersionId'], 'approvalId': operation, 'actor': actor,
+                        'role': 'approve', 'reason': data['reason'], 'at': at, 'selfApproved': True,
+                        'secondReview': marks, 'migration': migration, 'versionBundle': version}
+            self.canonical.approve(approved_key, raw, to_canonical(approval))
+            self.fault('after_approved')
+            bundle = {**{k: metadata[k] for k in BUNDLE_KEYS}, 'bundleHash': bundle_hash}
+            manifest = self.canonical.compare_swap(identifier, 0, approved_key, operation, bundle)
+            require(manifest is not None, 409, 'ManifestConflict')
+            self.fault('after_manifest')
+            self.canonical.project(identifier)
+            version.update({'status': 'approved', 'approvalId': operation, 'approvedKey': approved_key,
+                            'approvedBy': actor, 'selfApproved': True})
+            if marks['required']:
+                version['sampleCheck'] = {'status': 'pending'}
+            db.put('candidate', operation, {
+                'candidateId': operation, 'candidateRevision': 1, 'candidateType': 'migration',
+                'schemaVersion': 1, 'submittedBy': actor, 'submittedAt': at,
+                'expiresAt': data['expiresAt'], 'state': 'reflected', 'domain': data['domain'],
+                'audience': data['audience'], 'summary': identifier + ' の移行',
+                'context': data['reason'], 'originRef': {'id': evidence['locator'],
+                                                         'revision': data['cardVersion']},
+                'retentionPolicyId': 'migration', 'targetLinks': [identifier],
+                'revisions': [{'revision': 1, 'context': data['reason'], 'actor': actor}]})
+            db.put('card', identifier, {'knowledgeId': identifier, 'workingRevision': 1,
+                                        'candidateId': operation, 'versions': {'1': version},
+                                        'review': None})
+            return {'knowledgeId': identifier, 'workingRevision': 1, 'bundleHash': bundle_hash,
+                    'rawSha256': data['rawSha256'], 'approvalId': operation,
+                    'approvedKey': approved_key, 'generation': manifest['generation'],
+                    'secondReview': marks['required'],
+                    'sampleCheck': (version.get('sampleCheck') or {}).get('status')}
+        return self.mutate(claims, key, 'migration:' + identifier, ['migrate', identifier, data], run)
+
     def publish(self, claims, key, identifier, generation, data, withdraw=False):
         exact(data, ('reason',) if withdraw else ('reason', 'revision', 'approvalId'))
         text(data['reason'])
@@ -612,4 +709,6 @@ class Service:
             return (self.review if action == 'review' else self.decide)(claims, key, *request[1:])
         if action == 'sample':
             return self.sample_check(claims, key, *request[1:])
+        if action == 'migrate':
+            return self.migrate(claims, key, *request[1:])
         return self.publish(claims, key, target.split(':', 1)[1], *request[1:], withdraw=action == 'withdraw')

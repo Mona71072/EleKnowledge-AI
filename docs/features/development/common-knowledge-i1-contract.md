@@ -40,6 +40,22 @@ related-code:
 - **抜き取り確認:** 本人が承認した版は `sampleCheck: pending` になる。承認者・編集者以外で `approve` 権限を持つ人が `POST /knowledge/cards/{id}/sample-checks`（`If-Match`: 版、本文 `approvalId`・`result`: `confirmed` | `needs_fix`・`reason`）で結果を記録する。記録は 1 回だけ（2 回目は 409 `SampleCheckNotPending`）。`needs_fix` は記録だけで、公開は止めない（直しは訂正の流れで行う）。
 - 公開・停止・再開・競合の挙動は変えていない。
 
+## Git のカードの移行（2026-11-12 追加、ノウハウ管理の見直し WP3）
+
+> 最終検証: 2026-11-12 — `itai` ブランチの合成試験（`tests/integration/test_common_knowledge_migration.py`）と、実カード 398 枚での `plan`（エラー 0）。AWS への配備・実行はしていない。
+
+設計: `docs/design-2026-11-11-knowledge-governance.md` §4.11・WP3。2026-11-12 の itai の決定: 398 枚すべてを公開し、例外の印が付いた版は抜き取り確認待ちにする／移行は専用の操作で行い、確認依頼を通さない／分野・読者は `elevator-knowhow` / `all-users`／承認束の期限は 3 年（再検証の期限は WP8 で別に持つ）。確信度・所有者・再検証の期限は付けない（WP2 と同じく範囲外）。
+
+- **手順:** `scripts/knowledge/migrate_cards_to_s3.py` の `plan` → 認可表の準備 → `apply` → `verify`。
+  - `plan`: 指定コミットの Git の blob（作業ツリーの改行に依存しない）を読み、`card-versions.jsonl` と版・hash を照合する。frontmatter だけを変換する（旧項目 `review_status`・`publication_status`・`cloud_approval` を外す、`status: approved`、語彙ファイルの置き場違いのうち移し先があるものを移して `card_version` を 1 上げる。移し先が要確認のものは変えない）。変換は再解析して期待値と一致することを確かめる。出力は `inventory.jsonl`（ID・Git の版と hash・移行後の版と hash・例外の印・直した値）、変換後のカード、`plan.json`、認可表の根拠に足す 1 件（`policy-evidence-entry.json`）。AWS には触れない。
+  - 認可表（運用者が手で行う）: 根拠 `GIT-CARDS-MIGRATION`（version = コミット、sha256 = `inventory.jsonl` の hash、`independent: true`、期限は束と同じ）と、移行する人の `edit`・`approve`・`publish`（`elevator-knowhow` / `all-users`）。
+  - `apply`: 変換後のカードを作業用 `drafts/` に書き（同じ内容の現行版があれば再利用）、復旧用 Lambda を **直接呼び出し**（API Gateway には出さない）で 1 枚ずつ移行する。
+  - `verify`: manifest と `published/` を読み、件数・ID・本文の hash を `inventory.jsonl` と照合する（読み取りのみ）。
+- **移行の操作（`Service.migrate`）:** 1 枚を 1 つの冪等な操作で「作業版の登録 → 承認（`approved/` へ不変コピー、承認記録の理由は「移行による一括登録（Git コミット）」、`selfApproved: true`、`migration` に元の版・根拠・Git 上の位置）→ 公開（manifest generation 0 → 1）」まで行い、最後に台帳（種類 `migration` の候補・単元の版 1）を書く。呼び出す人に `edit`・`approve`・`publish` の 3 つが要る。作業用の版は sha256 で固定し、本文の `knowledge_id` が対象と一致しなければ 400。台帳に同じ ID の単元が既にあれば 409 `AlreadyExists`（作り直しで上書きしない）。冪等キーは ID・本文 hash・期限・分野・読者から作るため、中断しても同じコマンドで再実行すれば同じ結果になる。
+- **根拠:** 出典ごとの根拠台帳は作らず、`sourceRefs` は根拠 `GIT-CARDS-MIGRATION` の 1 件（locator = Git 上のパス、`claimType: technician_statement`）にする。カードの `source_refs` と `model_scope` は公開本文の frontmatter にそのまま残る（検索の機種フィルタは WP4 でここを読む）。
+- **例外の印:** 通常の作業版と同じ規則（`second_review.assess`）で付ける。印が付いた版（2026-11-12 時点の plan で 71 枚）は `sampleCheck: pending` にし、もう 1 人が `/sample-checks` で記録する。公開は止めない。印の無い版には抜き取り確認を付けない（通常の自己承認と違う点。全件を検証済みで移す決定に合わせた）。
+- **直接呼び出しの境界:** `lambda_handler` は、`httpMethod`・`requestContext` が無く `commonKnowledgeMigration` だけを持つイベントを、復旧用の関数でだけ受ける（他の関数は 404）。呼べるのは `lambda:InvokeFunction` を持つ IAM 主体だけ。イベントの `actor`（Cognito sub）は認可表で判定する。Lambda からは呼び出した IAM 主体を確かめられないため、記録されるのは `actor` だけである。
+
 ## 受入条件
 
 合成3入口を投函→一覧→編集→Git保存→異なる確認者の特定版承認→正本反映→別操作公開→両AI読取→停止まで通す。再起動後も候補・版・操作・公開状態を保持する。未認証、閲覧だけのadmin、共有範囲外、偽造本人、自己承認、未確認根拠、同語別機種、版競合、同キー異要求、Git障害、Git成功後投影障害、manifest競合、期限切れ、停止後の引用・履歴再利用、manifest取得不能を否定検証する。

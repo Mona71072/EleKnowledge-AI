@@ -65,7 +65,7 @@ Service内の直接SQLを廃し、台帳を「作業単位（unit）」と「一
 | editorial | `GET /cards/{id}`、`PUT .../draft`、`POST .../review-requests`・`/decisions`・`/sample-checks`（2026-11-11 追加・未配備。[I1 契約](common-knowledge-i1-contract.md)の自己承認の例外） | 同上 | なし | Git（未設定のため権限なし） |
 | publication | `POST .../publish`・`/withdraw` | 同上 | artifact/manifest/受付票のGet・Put | Git読取（同上） |
 | reader | `GET /knowledge/published/{id}` | なし | artifact/manifestのGetのみ | なし |
-| recovery | `POST /knowledge/operations/{id}/retry` | 同上 | publicationと同じ | 保存済み要求を元の操作として再認可する。新規操作は受けない |
+| recovery | `POST /knowledge/operations/{id}/retry` | 同上 | publicationと同じ | 保存済み要求を元の操作として再認可する。API からの新規操作は受けない。例外: Git のカードの移行（WP3、2026-11-12 追加・未配備）は API に出さず、この関数の直接呼び出しで受ける（[I1 契約](common-knowledge-i1-contract.md)の「Git のカードの移行」） |
 
 全関数は認可表（別DynamoDB表）を `GetItem` だけで読む。認可表が空なら全操作403、共有許可も無いので投函も403。書込は `dynamodb:EnclosingOperation=TransactWriteItems` の条件付きで、単独の Put/Delete を許さない。Scanは許可しない。各Lambdaは自分の責任外のルートを404にする（API Gatewayの配線誤りへの二重防御）。
 
