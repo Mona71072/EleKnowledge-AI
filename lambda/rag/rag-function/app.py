@@ -2059,14 +2059,13 @@ def _trace_candidates(results: list, selected_results: list, excluded_results: l
     """候補行と理由別の除外件数を返す。"""
     min_score = selection_min_score(mode)
     selected_ids = {id(r) for r in (selected_results or [])}
-    # Law references combine selected chunks by URI, so preserve the exact source chunks.
-    law_selected = {}
-    law_selected_ids = set()
-    for row in selected_results or []:
-        if '_lawReferenceText' in row:
-            uri = (row.get('metadata') or {}).get(KB_PROFILE.source_uri_key, '') or ''
-            law_selected.setdefault(uri, row)
-            law_selected_ids.update(row.get('_lawSourceResultIds') or [])
+    # Map each law source chunk to the prepared document reference that includes it.
+    law_references_by_source_id = {}
+    for reference in selected_results or []:
+        if '_lawReferenceText' not in reference:
+            continue
+        for source_id in reference.get('_lawSourceResultIds') or []:
+            law_references_by_source_id[source_id] = reference
     law_text_used = set()
     counts = {'model_scope': len(excluded_results or []),
               'dedupe': sum((dedupe_counts or {}).values()),
@@ -2080,11 +2079,13 @@ def _trace_candidates(results: list, selected_results: list, excluded_results: l
         text_source = None
         if excluded_by:
             selected = False
-        elif law_selected:
-            selected = id(result) in law_selected_ids
-            if selected and uri not in law_text_used:
-                text_source = law_selected[uri]
-                law_text_used.add(uri)
+        elif law_references_by_source_id:
+            law_reference = law_references_by_source_id.get(id(result))
+            selected = law_reference is not None
+            reference_id = id(law_reference) if selected else None
+            if selected and reference_id not in law_text_used:
+                text_source = law_reference
+                law_text_used.add(reference_id)
         else:
             selected = id(result) in selected_ids
             text_source = result if selected else None
@@ -2168,6 +2169,12 @@ def _build_request_trace(*, event, mode, response_type, query, composed_query,
     candidates, excluded_counts = _trace_candidates(
         results or [], selected_results or [], excluded, dedupe_counts or {}, mode, rank_key,
     )
+    selected_count = (
+        len({source_id for reference in selected_results or []
+             for source_id in (reference.get('_lawSourceResultIds') or [])})
+        if mode == 'law'
+        else len(selected_results or [])
+    )
     kb_id = next((a.get('kbId') for a in attempts if a.get('kbId')), None) or (
         (LAW_KNOWLEDGE_BASE_ID if mode == 'law' else KNOWLEDGE_BASE_ID) or None
     )
@@ -2216,7 +2223,7 @@ def _build_request_trace(*, event, mode, response_type, query, composed_query,
         gate={'responseType': response_type, 'weak': bool(weak), 'scores': scores,
               'thresholds': [WEAK_TOP_SCORE, selection_min_score(mode)],
               'rankKey': rank_key or 'score',
-              'selectedCount': len(selected_results or []),
+              'selectedCount': selected_count,
               'excludedCounts': excluded_counts},
         candidates=candidates,
         generation=generation,

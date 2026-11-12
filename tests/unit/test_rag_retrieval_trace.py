@@ -496,6 +496,10 @@ def test_law_trace_marks_all_contributing_chunks_once_per_reference(rag_app):
         "_lawReferenceText": "第一の断片\n第二の断片",
         "_lawSourceResultIds": [id(result) for result in selected],
     }
+    reference["metadata"] = {
+        **reference["metadata"],
+        rag_app.KB_PROFILE.source_uri_key: "s3://normalized/legal/article.txt",
+    }
 
     rows, counts = rag_app._trace_candidates(selected, [reference], [], {}, "law")
 
