@@ -249,3 +249,14 @@ AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタッ�
 - **配備:** 接続設定の release を新しいものにして生成し直した runtime は、t23 との差が `KNOWHOW_RELEASE_ID`（RAG・ワーカー）と索引キーの既定値の 3 か所だけ。t23 の packaged テンプレートに同じ置き換えを当て（コードの置き場は同じ）、changeset `t24-published-release`（7 件 Modify、コード変更なし・Replacement なし）で UPDATE_COMPLETE。`KnowhowIndexKey=indexes/3917c4ac….json`、`KnowhowCanonicalBucket` は正本バケット（照合を有効化）。
 - **確認:** 「1D2G 調整前に戸開しない。PAD の取付を確認したい」で 3 枚が返り、3 枚とも manifest の照合を通った（すべて `approved`）。
 - **戻し方:** `restore-git-index` と同じ（`KnowhowIndexKey` を `acde2268…`、`KnowhowCanonicalBucket` を空）に加えて、`KNOWHOW_RELEASE_ID` を旧 release に戻す必要があるため、t23 の packaged テンプレート（`deployment-artifacts/e104a022…/template.yaml`）で changeset を作る。旧 release・旧索引は消していない。
+
+### 質問の文言からの機種の絞り込みを配備（2026-11-12）
+
+> 最終検証: 2026-11-12 — 生成テンプレートの差分（t24 との差は `RagLogicVersion` だけ）、専用検査（SAM lint・変換・名前分離・WAF 依存）、changeset の全件確認、配備後の環境変数、配備コード 31 ファイルとコミットの照合。先輩チャットの画面での確認は未実施。
+
+仕様: [先輩チャットからMarkdownを探してKBを確認する](knowledge-markdown-retrieval.md)の「質問の文言から機種を読み取って絞り込む」。
+
+- `itai` の `e6c1b31e` の RAG 側を `feature/itai検証T0-T1` に取り込み（`5c266d57`、origin へ push 済み）、T0-T1 の手順で生成（接続設定は公開版 release の t24 のまま）・検査・build・package した。
+- changeset `t25-question-model-5c266d57`: 7 件 Modify（関数 4 のコード、RAG・ワーカーの `RAG_LOGIC_VERSION`、API 本体 2 と Role 1 は関数 ARN の再評価）、Replacement・削除なし。UPDATE_COMPLETE、失敗イベントなし。
+- 配備後: `RAG_LOGIC_VERSION=5c266d57`、release `3917c4ac…`・読者 `all-users`・照合は維持。配備した RAG の Python 31 ファイル（`question_model.py`・`vocabulary_generated.py` を含む）がコミットと一致。
+- 戻し方: t24 の packaged テンプレート（`deployment-artifacts/e104a022…/template-t24.yaml`）で changeset を作る（release・照合は t24 と同じ）。
