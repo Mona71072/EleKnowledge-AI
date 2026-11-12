@@ -444,7 +444,7 @@ def test_law_path_saves_law_kb_and_truncated_full_text(rag_app, monkeypatch, han
     full_text = "法" * 3000
     monkeypatch.setattr(rag_app, "prepare_law_references", lambda selected, **kwargs: [
         {**selected[0], "_lawReferenceText": full_text, "_lawReferenceCoverage": "full",
-         "_lawReferenceReason": "complete"}])
+         "_lawReferenceReason": "complete", "_lawSourceResultIds": [id(selected[0])]}])
     monkeypatch.setattr(rag_app, "generate_response_with_claude", lambda *args, **kwargs: (
         "法令の回答", {"promptVersion": "law-p", "modelId": "m1", "requestStyle": "invoke",
                    "thinking": {}, "inputTokens": 1, "outputTokens": 1,

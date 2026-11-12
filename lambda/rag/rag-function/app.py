@@ -1292,6 +1292,7 @@ def prepare_law_references(selected_results: list, request_deadline=None,
         if remaining <= 0:
             break
         result = dict(results[0])
+        result['_lawSourceResultIds'] = [id(source) for source in results]
         metadata = result.get('metadata', {}) or {}
         text = '\n'.join(chunk_text(item).strip() for item in results).strip()
         coverage = 'partial'
@@ -2058,12 +2059,14 @@ def _trace_candidates(results: list, selected_results: list, excluded_results: l
     """候補行と理由別の除外件数を返す。"""
     min_score = selection_min_score(mode)
     selected_ids = {id(r) for r in (selected_results or [])}
-    # 法令は資料ごとに新しい dict へまとめ直すため、URI で突き合わせる
+    # Law references combine selected chunks by URI, so preserve the exact source chunks.
     law_selected = {}
+    law_selected_ids = set()
     for row in selected_results or []:
         if '_lawReferenceText' in row:
             uri = (row.get('metadata') or {}).get(KB_PROFILE.source_uri_key, '') or ''
             law_selected.setdefault(uri, row)
+            law_selected_ids.update(row.get('_lawSourceResultIds') or [])
     law_text_used = set()
     counts = {'model_scope': len(excluded_results or []),
               'dedupe': sum((dedupe_counts or {}).values()),
@@ -2078,7 +2081,7 @@ def _trace_candidates(results: list, selected_results: list, excluded_results: l
         if excluded_by:
             selected = False
         elif law_selected:
-            selected = uri in law_selected
+            selected = id(result) in law_selected_ids
             if selected and uri not in law_text_used:
                 text_source = law_selected[uri]
                 law_text_used.add(uri)
