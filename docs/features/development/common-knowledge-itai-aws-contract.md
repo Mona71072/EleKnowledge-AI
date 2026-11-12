@@ -221,5 +221,14 @@ AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタッ�
 - **配備元の食い違い:** `EleKnowledge-itai-phase2` は `feature/itai検証T0-T1`（`9fa0c8fa`）のテンプレートから配備されている。`itai` ブランチの phase2 テンプレートには、そのスタックにある `ValidationChatLogsTable`・WAF の関連付け 2・ログのグループ 6 が無く、`itai` から配備すると削除される。そのため `itai` のテンプレート・コードでは配備していない。
 - **実施したこと（パラメータだけ）:** 公開版 398 枚から作った索引（`sha256:3917c4ac…`、移行一覧と件数・本文 hash が一致、停止中の検証カード 1 件は除外）を、従来の索引と同じ検証用バケットの `indexes/` に追加した。changeset `wp4-published-index`（配備中のテンプレートのまま、`KnowhowIndexKey` だけ変更。7 件 Modify・Replacement なし。RAG と調査ワーカーの環境変数、両 Role の GetObject 対象、関数 ARN の再評価）を実行し UPDATE_COMPLETE。
 - **配備中のコードで動くことの確認:** `9fa0c8fa` の `parse_index` が新しい索引（398 枚、すべて `status: approved`）を受け付け、検索も返すことをローカルで確認した。
-- **まだ入っていないもの:** 使う直前の manifest 照合（`confirm_published`）、画面の注意表示、`MELCITY`・`MELWIDE` の別名は `itai` ブランチ（`12361a37`）にだけあり、配備中の RAG にも Amplify itai にも入っていない。停止したカードは、索引を作り直してパラメータを切り替えるまで回答に出うる。
+- **（同日、下の「照合の配備」で解消）** 使う直前の manifest 照合と `MELCITY`・`MELWIDE` の別名は、`feature/itai検証T0-T1` に取り込んで配備した。画面の注意表示は `itai` ブランチ（`12361a37`）にだけあり、Amplify itai には未配信。
+
+### 照合の配備（`feature/itai検証T0-T1` の `e104a022`、2026-11-12）
+
+- itai の WP4 のうち RAG 側（`confirm_published`・先輩チャットと調査ジョブへの適用・テンプレートのパラメータと IAM・機種の別名）を T0-T1 へ取り込んだ。T0-T1 の配備手順（`scripts/knowledge/prepare-itai-stack.py build` → `validate-itai-stack.py` → SAM build・package → changeset）で、私有の上書き設定に `KnowhowCanonicalBucket`（共通知識の正本バケット）・`KnowhowAudiences=all-users`・T0-T1 で増えた調査ジョブの 2 パラメータ（テンプレートの既定値）を足した。ソースは `git archive`（LF）から作り、配備した RAG の Python 29 ファイルがコミットと一致。
+- itai の判断（2026-11-12）で、T0-T1 の先頭に積んで配備したため、`9fa0c8fa` 以降の未配備の 9 コミット（先輩調査の進捗停止・根拠判定・十分性の改善）も同時に入った。
+- changeset `t23-wp4-guard-e104a022`: 9 件 Modify（API 本体 2、関数 4 のコード・環境変数・Role、Role のポリシー 3、ワーカーのタイムアウト）、Replacement・削除なし。UPDATE_COMPLETE、失敗イベントなし。生成テンプレートのリソースは前回と同じ 28 件（検証用の履歴表・WAF の関連付け・ログのグループを含む）。
+- 配備後: RAG の環境変数は索引 `indexes/3917c4ac…`・読者 `all-users`・正本バケット指定・`RAG_LOGIC_VERSION=e104a022`。IAM シミュレーションで、RAG の Role は正本バケットの `manifests/*` の GetObject だけ許可、`published/` の読み取りと書込みは拒否。両 API の Regional WAF の関連付けは維持。
+- 未確認: 先輩チャット・調査ジョブでの実回答（有料呼び出しのため未実施。ブラウザで 1 問確認する）。
+- 戻し方: 前回の生成物（t8、`9fa0c8fa`）の packaged テンプレートで changeset を作るか、`KnowhowCanonicalBucket` を空にして照合だけを止める。
 - **戻し方:** `KnowhowIndexKey` を旧値 `indexes/acde2268….json`（Git の取込一覧から作った索引）に戻す changeset を、同じ手順（配備中のテンプレートのまま）で実行する。旧索引は消していない。
