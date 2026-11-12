@@ -462,6 +462,50 @@ def test_law_path_saves_law_kb_and_truncated_full_text(rag_app, monkeypatch, han
     assert row["textTruncated"] is True and row["originalLength"] == 3000
 
 
+def test_law_trace_marks_only_selected_source_chunks(rag_app):
+    uri = "s3://law/kb/egov/123.txt"
+    selected = _kb_result(uri=uri, score=0.9, text="採用する断片")
+    below_threshold = _kb_result(uri=uri, score=0.01, text="採用しない断片")
+    reference = {
+        **selected,
+        "_lawReferenceText": "採用する断片",
+        "_lawSourceResultIds": [id(selected)],
+    }
+
+    rows, counts = rag_app._trace_candidates(
+        [selected, below_threshold], [reference], [], {}, "law",
+    )
+
+    assert rows[0]["sourceUri"] == uri
+    assert rows[0]["selected"] is True
+    assert rows[0]["modelInputText"] == "採用する断片"
+    assert rows[1]["selected"] is False
+    assert rows[1]["excludedBy"] == "below_threshold"
+    assert "modelInputText" not in rows[1]
+    assert counts["below_threshold"] == 1
+
+
+def test_law_trace_marks_all_contributing_chunks_once_per_reference(rag_app):
+    uri = "s3://law/kb/egov/123.txt"
+    selected = [
+        _kb_result(uri=uri, score=0.9, text="第一の断片"),
+        _kb_result(uri=uri, score=0.8, text="第二の断片"),
+    ]
+    reference = {
+        **selected[0],
+        "_lawReferenceText": "第一の断片\n第二の断片",
+        "_lawSourceResultIds": [id(result) for result in selected],
+    }
+
+    rows, counts = rag_app._trace_candidates(selected, [reference], [], {}, "law")
+
+    assert [row["selected"] for row in rows] == [True, True]
+    assert rows[0]["modelInputText"] == "第一の断片\n第二の断片"
+    assert "modelInputText" not in rows[1]
+    assert counts["below_threshold"] == 0
+    assert counts["limit"] == 0
+
+
 # --- 露出制御・ログ ---
 
 def test_telemetry_does_not_log_trace_payload(capsys, rag_app):
