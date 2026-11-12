@@ -170,6 +170,10 @@ def test_routes_map_to_their_responsibility_and_cursor_secret_only_on_intake(tem
             assert name in app.RESPONSIBILITIES[responsibility], (function, path)
     api = template['Resources']['CommonKnowledgeApi']['Properties']
     assert api['Auth']['DefaultAuthorizer'] == 'CognitoAuthorizer'
-    assert api['Auth']['ResourcePolicy'] == {'IpRangeWhitelist': 'AllowedIPList'}
+    # Whole-API IP restriction in two statements (per-route pairs exceeded the 8192-byte policy limit).
+    assert api['Auth']['ResourcePolicy'] == {'CustomStatements': [
+        {'Effect': 'Allow', 'Principal': '*', 'Action': 'execute-api:Invoke', 'Resource': 'execute-api:/*'},
+        {'Effect': 'Deny', 'Principal': '*', 'Action': 'execute-api:Invoke', 'Resource': 'execute-api:/*',
+         'Condition': {'NotIpAddress': {'aws:SourceIp': 'AllowedIPList'}}}]}
     assert api['Cors']['AllowOrigin'] == "'${CorsAllowedOrigin}'" and api['MethodSettings'][0]['ThrottlingRateLimit']
     assert 'authorization' not in api['AccessLogSetting']['Format'].lower()

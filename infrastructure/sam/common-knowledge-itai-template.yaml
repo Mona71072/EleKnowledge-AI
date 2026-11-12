@@ -374,8 +374,22 @@ Resources:
           CognitoAuthorizer:
             UserPoolArn:
               Fn::ImportValue: !Sub ${CognitoExportPrefix}-CognitoUserPoolArn
+        # IP restriction for the whole API in two statements. SAM's IpRangeWhitelist writes one
+        # Allow+Deny pair with every IP per route; at 15 routes that exceeded API Gateway's
+        # 8192-byte policy limit (2026-11-12 rollback). Same effect: only AllowedIPList may invoke.
         ResourcePolicy:
-          IpRangeWhitelist: !Ref AllowedIPList
+          CustomStatements:
+            - Effect: Allow
+              Principal: '*'
+              Action: execute-api:Invoke
+              Resource: execute-api:/*
+            - Effect: Deny
+              Principal: '*'
+              Action: execute-api:Invoke
+              Resource: execute-api:/*
+              Condition:
+                NotIpAddress:
+                  aws:SourceIp: !Ref AllowedIPList
       AccessLogSetting:
         DestinationArn: !GetAtt ApiAccessLogGroup.Arn
         Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","requestTime":"$context.requestTime","requestTimeEpoch":"$context.requestTimeEpoch","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","errorType":"$context.error.responseType","wafResponseCode":"$context.wafResponseCode"}'
