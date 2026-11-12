@@ -513,7 +513,7 @@ def test_law_trace_marks_all_contributing_chunks_once_per_reference(rag_app):
     )
 
     assert trace["gate"]["selectedCount"] == 2
-    assert sum(row.get("modelInputText") is not None for row in trace["candidates"]) == 1
+    assert sum(row.get("text") is not None for row in trace["candidates"]) == 1
 
 
 # --- 露出制御・ログ ---
