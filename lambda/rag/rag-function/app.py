@@ -1,4 +1,5 @@
 """EleKnowledge RAG Lambda: Knowledge Base 検索と Bedrock 生成。"""
+import hashlib
 import json
 import os
 import importlib.util
@@ -42,6 +43,17 @@ except ModuleNotFoundError as exc:
     _model_profile_spec.loader.exec_module(_model_profile_module)
     get_model_profile = _model_profile_module.get_model_profile
     log_unknown_model_once = _model_profile_module.log_unknown_model_once
+try:
+    import retrieval_trace as retrieval_trace_module
+except ModuleNotFoundError as exc:
+    if exc.name != 'retrieval_trace':
+        raise
+    _retrieval_trace_spec = importlib.util.spec_from_file_location(
+        'rag_retrieval_trace_runtime', os.path.join(os.path.dirname(__file__), 'retrieval_trace.py')
+    )
+    retrieval_trace_module = importlib.util.module_from_spec(_retrieval_trace_spec)
+    sys.modules[_retrieval_trace_spec.name] = retrieval_trace_module
+    _retrieval_trace_spec.loader.exec_module(retrieval_trace_module)
 
 
 def _utc_now_iso() -> str:
@@ -548,11 +560,13 @@ def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: 
                              citations: list = None, source_documents: list = None,
                              response_type: str = None, page_candidates: list = None,
                              clarify_questions: list = None, query_filters: dict = None,
-                             session_title: str = None, rag_mode: str = 'normal'):
+                             session_title: str = None, rag_mode: str = 'normal',
+                             retrieval_trace: dict = None):
     """Save message to DynamoDB with TTL.
 
     responseType / pageCandidates / clarifyQuestions / queryFilters も保存し、
     履歴と失敗一覧から意図・条件を遡れるようにする。
+    retrievalTrace は assistant 項目にだけ付ける（設計 docs/design-2026-09-10-retrieval-trace.md §3）。
     """
     message_id = generate_message_id()
     ttl_timestamp = int(time.time()) + (60 * 24 * 60 * 60)  # 60 days (hot window; full history archived to S3 via stream)
@@ -596,9 +610,36 @@ def save_message_to_dynamodb(session_id: str, user_id: str, role: str, content: 
     if session_title:
         # 履歴一覧の見出し。生成は最初のやりとりだけなので、その1件に持たせる
         item['sessionTitle'] = session_title
+    if retrieval_trace is not None:
+        trace = retrieval_trace_module.enforce_trace_size(
+            retrieval_trace, base_item_bytes=retrieval_trace_module.json_bytes(item),
+        )
+        item['retrievalTrace'] = _to_dynamodb_value(trace)
 
-    chatlogs_table.put_item(Item=item)
+    try:
+        chatlogs_table.put_item(Item=item)
+    except Exception as exc:  # noqa: BLE001
+        if 'retrievalTrace' not in item:
+            raise
+        # トレースは任意情報。回答の保存をトレースで失敗させない（同じ messageId で再保存）
+        print(json.dumps({
+            'event': 'retrieval_trace_dropped',
+            'errorType': type(exc).__name__,
+        }, separators=(',', ':')))
+        item.pop('retrievalTrace', None)
+        chatlogs_table.put_item(Item=item)
     return message_id
+
+
+def _to_dynamodb_value(value):
+    """DynamoDB の resource シリアライザは float を受け付けないため Decimal にする。"""
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {key: _to_dynamodb_value(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_to_dynamodb_value(child) for child in value]
+    return value
 
 
 def build_kb_filter(filters: dict = None, categories: list = None) -> dict:
@@ -763,11 +804,13 @@ def query_knowledge_base(query: str, filters: dict = None, number_of_results: in
         if kb_filter:
             retrieval_config['vectorSearchConfiguration']['filter'] = kb_filter
 
+        retrieve_started = time.perf_counter()
         response = bedrock_agent.retrieve(
             knowledgeBaseId=KNOWLEDGE_BASE_ID,
             retrievalQuery={'text': query},
             retrievalConfiguration=retrieval_config
         )
+        retrieve_ms = int((time.perf_counter() - retrieve_started) * 1000)
 
         raw_results = response.get('retrievalResults', []) or []
         if raw_results and all(
@@ -784,7 +827,7 @@ def query_knowledge_base(query: str, filters: dict = None, number_of_results: in
         # 1) 取扱機種スコープ（機種未指定でも適用。共通文書は残る）
         # 2) 機種絞り込みの要素完全一致
         results = [
-            r for r in response.get('retrievalResults', [])
+            r for r in raw_results
             if in_service_scope(r.get('metadata') or {})
         ]
         model_type = (filters or {}).get('modelType')
@@ -793,10 +836,23 @@ def query_knowledge_base(query: str, filters: dict = None, number_of_results: in
                 r for r in results
                 if model_type_matches(r.get('metadata') or {}, model_type)
             ]
-        response['retrievalResults'] = results
+        kept_ids = {id(r) for r in results}
+        rerank_trace = {}
         response['retrievalResults'] = rerank_retrieval_results(
-            response['retrievalResults'], query, request_deadline=request_deadline
+            results, query, request_deadline=request_deadline, trace=rerank_trace,
         )
+        # 検索トレース用（UI・生成には渡らない）。機種スコープ／機種指定で落とした候補も残す
+        response['_traceSearch'] = {
+            'kbId': KNOWLEDGE_BASE_ID or None,
+            'searchType': KB_PROFILE.search_type,
+            'filters': filters or {},
+            'requested': number_of_results,
+            'returned': len(raw_results),
+            'afterPostFilter': len(results),
+            'latencyMs': retrieve_ms,
+            'rerank': rerank_trace,
+            'excludedByModelScope': [r for r in raw_results if id(r) not in kept_ids],
+        }
 
         return response
 
@@ -812,6 +868,7 @@ def query_law_knowledge_base(query: str, number_of_results: int = 30) -> dict:
     ):
         raise PermissionError('Law RAG is not enabled for this environment')
 
+    retrieve_started = time.perf_counter()
     response = bedrock_agent.retrieve(
         knowledgeBaseId=LAW_KNOWLEDGE_BASE_ID,
         retrievalQuery={'text': query},
@@ -823,6 +880,8 @@ def query_law_knowledge_base(query: str, number_of_results: int = 30) -> dict:
             }
         },
     )
+    retrieve_ms = int((time.perf_counter() - retrieve_started) * 1000)
+    returned_count = len(response.get('retrievalResults', []) or [])
     for result in response.get('retrievalResults', []):
         metadata = result.get('metadata', {}) or {}
         for target_key, managed_key in (
@@ -845,6 +904,19 @@ def query_law_knowledge_base(query: str, number_of_results: int = 30) -> dict:
         result for result in response.get('retrievalResults', [])
         if is_current_law_article_result(result)
     ]
+    # 検索トレース用。現行条文以外を落とした件数は returned - afterPostFilter で分かる
+    response['_traceSearch'] = {
+        'kbId': LAW_KNOWLEDGE_BASE_ID or None,
+        'searchType': 'MANAGED',
+        'filters': {},
+        'requested': number_of_results,
+        'returned': returned_count,
+        'afterPostFilter': len(response['retrievalResults']),
+        'latencyMs': retrieve_ms,
+        'rerank': {'enabled': False, 'status': 'skipped', 'reason': 'law_mode',
+                   'modelId': None, 'callCount': 0, 'latencyMs': 0},
+        'excludedByModelScope': [],
+    }
     return response
 
 
@@ -861,9 +933,24 @@ def optional_feature_budget_allows(deadline, connect_timeout: float,
 
 
 def rerank_retrieval_results(retrieval_results: list, query: str,
-                             request_deadline=None) -> list:
-    """Optionally attach Bedrock Rerank scores without changing KB scores."""
+                             request_deadline=None, trace: dict = None) -> list:
+    """Optionally attach Bedrock Rerank scores without changing KB scores.
+
+    trace を渡すと、適用・スキップ・フォールバックの結果と回数・時間を書き込む（検索トレース用）。
+    """
+    started = time.perf_counter()
+
+    def finish(status, reason=None):
+        if trace is not None:
+            trace.update({
+                'enabled': bool(RERANK_MODEL_ARN), 'modelId': RERANK_MODEL_ARN or None,
+                'status': status, 'reason': reason,
+                'callCount': trace.get('callCount', 0),
+                'latencyMs': int((time.perf_counter() - started) * 1000),
+            })
+
     if not RERANK_MODEL_ARN or not retrieval_results:
+        finish('skipped', 'disabled' if not RERANK_MODEL_ARN else 'no_candidates')
         return retrieval_results
 
     candidates = []
@@ -888,6 +975,7 @@ def rerank_retrieval_results(retrieval_results: list, query: str,
         })
 
     if not candidates:
+        finish('skipped', 'no_text_candidates')
         return retrieval_results
 
     if not optional_feature_budget_allows(
@@ -897,9 +985,12 @@ def rerank_retrieval_results(retrieval_results: list, query: str,
         RERANK_MAX_ATTEMPTS,
     ):
         print('[rag] rerank skipped reason=deadline')
+        finish('skipped', 'deadline')
         return retrieval_results
 
     try:
+        if trace is not None:
+            trace['callCount'] = 1
         response = _get_rerank_client().rerank(
             queries=[{'type': 'TEXT', 'textQuery': {'text': query}}],
             sources=candidates,
@@ -924,19 +1015,25 @@ def rerank_retrieval_results(retrieval_results: list, query: str,
                 **ranked_results[original_index],
                 'rerankScore': float(relevance_score),
             }
+        applied = any('rerankScore' in row for row in ranked_results)
+        finish('applied' if applied else 'skipped', None if applied else 'empty_response')
         return ranked_results
     except Exception as exc:
         # Do not expose the query, document text, or SDK error details in logs.
         print(f'[rag] rerank fallback error_type={type(exc).__name__}')
+        finish('fallback', type(exc).__name__)
         return retrieval_results
 
 
-def merge_retrieval_results(*result_lists: list) -> list:
+def merge_retrieval_results(*result_lists: list, dedupe_counts: dict = None) -> list:
     """
     Merge multiple retrievalResults lists and keep the best score per unique chunk.
     Uniqueness is determined by (source_uri, content_text).
+
+    dedupe_counts を渡すと、残した候補の id() ごとに統合して落とした件数を入れる（検索トレース用）。
     """
     best = {}
+    dropped = {}
     for results in result_lists:
         for r in results or []:
             metadata = r.get("metadata", {}) or {}
@@ -947,12 +1044,26 @@ def merge_retrieval_results(*result_lists: list) -> list:
             chunk_id = metadata.get(KB_PROFILE.chunk_id_key, "") or ""
             key = (source_uri, text, chunk_id)
             prev = best.get(key)
+            if prev:
+                dropped[key] = dropped.get(key, 0) + 1
             if not prev or (r.get("score", 0.0) or 0.0) > (prev.get("score", 0.0) or 0.0):
                 best[key] = r
+    if dedupe_counts is not None:
+        for key, row in best.items():
+            dedupe_counts[id(row)] = dropped.get(key, 0)
     # Return in descending score order
     merged = list(best.values())
     merged.sort(key=lambda x: x.get("score", 0.0) or 0.0, reverse=True)
     return merged
+
+
+# 弱い検索ゲートの上位スコア閾値（検索トレースの gate.thresholds にも記録する）
+WEAK_TOP_SCORE = 0.22
+
+
+def selection_min_score(mode: str = "normal") -> float:
+    """select_retrieval_results の最低スコア。検索トレースの除外理由と共有する。"""
+    return 0.2 if mode == "spec" else 0.3
 
 
 def is_weak_retrieval(retrieval_results: list, mode: str = "normal") -> bool:
@@ -965,7 +1076,7 @@ def is_weak_retrieval(retrieval_results: list, mode: str = "normal") -> bool:
     if not retrieval_results:
         return True
     top_score = max((r.get("score", 0.0) or 0.0) for r in retrieval_results)
-    if mode != "spec" and top_score < 0.22:
+    if mode != "spec" and top_score < WEAK_TOP_SCORE:
         return True
     # score はあっても select 閾値未満なら Claude に渡る根拠が無い
     if not select_retrieval_results(retrieval_results, mode=mode):
@@ -1044,24 +1155,42 @@ QUERY_REWRITE_SYSTEM_PROMPT = """あなたは検索語を補うだけのアシ�
 
 
 def maybe_rewrite_search_query(query: str, chat_history: list = None,
-                               request_deadline=None) -> str:
-    """Rewrite a contextual query when explicitly enabled, otherwise preserve it."""
+                               request_deadline=None, return_trace: bool = False):
+    """Rewrite a contextual query when explicitly enabled, otherwise preserve it.
+
+    return_trace=True のときは (検索語, 結果の記述) を返す（検索トレース用）。
+    """
     # Default OFF must be a complete no-op: no clock read, log, or client access.
     if not QUERY_REWRITE_MODEL_ID:
+        if return_trace:
+            return query, {'enabled': False, 'modelId': None, 'status': 'skipped',
+                           'reason': 'disabled', 'rewrittenQuery': None,
+                           'callCount': 0, 'latencyMs': 0}
         return query
 
     started = time.monotonic()
+    outcome = {'enabled': True, 'modelId': QUERY_REWRITE_MODEL_ID, 'status': 'skipped',
+               'reason': None, 'rewrittenQuery': None, 'callCount': 0, 'latencyMs': 0}
 
     def log(reason):
         elapsed_ms = int((time.monotonic() - started) * 1000)
+        outcome['latencyMs'] = elapsed_ms
+        outcome['reason'] = None if reason == 'rewritten' else reason
+        outcome['status'] = 'applied' if reason == 'rewritten' else (
+            'fallback' if reason.startswith('error_type_') or reason == 'invalid_output'
+            else 'skipped'
+        )
         print(f'[rag] query_rewrite reason={reason} elapsed_ms={elapsed_ms}')
+
+    def result(value):
+        return (value, dict(outcome)) if return_trace else value
 
     if not chat_history:
         log('no_history')
-        return query
+        return result(query)
     if last_assistant_was_clarify(chat_history):
         log('clarify_followup')
-        return query
+        return result(query)
     if not optional_feature_budget_allows(
         request_deadline,
         min(2, QUERY_REWRITE_TIMEOUT_SECONDS),
@@ -1069,7 +1198,7 @@ def maybe_rewrite_search_query(query: str, chat_history: list = None,
         RERANK_MAX_ATTEMPTS,
     ):
         log('deadline')
-        return query
+        return result(query)
 
     history_lines = []
     for message in chat_history[-4:]:
@@ -1090,6 +1219,7 @@ def maybe_rewrite_search_query(query: str, chat_history: list = None,
 
     try:
         rewrite_messages = [{'role': 'user', 'content': prompt}]
+        outcome['callCount'] = 1
         rewritten, _, _ = invoke_generation(
             _get_query_rewrite_client(), QUERY_REWRITE_MODEL_ID,
             QUERY_REWRITE_SYSTEM_PROMPT, rewrite_messages,
@@ -1099,12 +1229,13 @@ def maybe_rewrite_search_query(query: str, chat_history: list = None,
         rewritten = (rewritten or '').strip()
         if not rewritten or '\n' in rewritten or '\r' in rewritten or len(rewritten) > 200:
             log('invalid_output')
-            return query
+            return result(query)
         log('rewritten')
-        return rewritten
+        outcome['rewrittenQuery'] = rewritten
+        return result(rewritten)
     except Exception as exc:
         log(f'error_type_{type(exc).__name__}')
-        return query
+        return result(query)
 
 
 def normalize_mode_and_filters(mode: str, filters: dict = None) -> tuple:
@@ -1657,9 +1788,12 @@ def extract_response_text(response_body: dict) -> str:
 
 def generate_response_with_claude(query: str, kb_results: dict, chat_history: list = None,
                                   mode: str = "normal", search_query: str = None,
-                                  rank_key: str = None) -> str:
+                                  rank_key: str = None, return_meta: bool = False):
     """
     設定された Bedrock モデルと Knowledge Base の検索結果から回答を生成する。
+
+    return_meta=True のときは (本文, 生成メタ) を返す（検索トレース用）。生成メタは
+    promptVersion・modelId・requestStyle・thinking・トークン数・停止理由・時間を持つ。
 
     Args:
         query: Raw user turn (saved to history as-is)
@@ -1721,12 +1855,29 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
             query, selected_results, chat_history, search_query=search_query
         )
 
-        assistant_message, _, _ = invoke_generation(
+        generation_started = time.perf_counter()
+        assistant_message, usage, stop_reason = invoke_generation(
             bedrock_runtime, BEDROCK_MODEL_ID, system_prompt, messages,
             call_name='answer',
         )
-        
-        return assistant_message
+        if not return_meta:
+            return assistant_message
+        usage = usage or {}
+        request_body = build_generation_request(system_prompt, [], BEDROCK_MODEL_ID)
+        thinking = request_body.get('thinking') or {}
+        return assistant_message, {
+            'promptVersion': retrieval_trace_module.prompt_version(system_prompt),
+            'modelId': BEDROCK_MODEL_ID,
+            'requestStyle': get_model_profile(BEDROCK_MODEL_ID).api,
+            'thinking': {
+                'type': thinking.get('type'),
+                'effort': (request_body.get('output_config') or {}).get('effort'),
+            },
+            'inputTokens': usage.get('inputTokens'),
+            'outputTokens': usage.get('outputTokens'),
+            'stopReason': stop_reason,
+            'latencyMs': int((time.perf_counter() - generation_started) * 1000),
+        }
         
     except ClientError as e:
         print(f"[rag] stage=generation {telemetry._exception_label(e)}")
@@ -1743,12 +1894,11 @@ def select_retrieval_results(retrieval_results: list, mode: str = "normal",
     if not retrieval_results:
         return []
 
+    min_score = selection_min_score(mode)
     if mode == "spec":
-        min_score = 0.2
         limit = 30
         max_chunks_per_doc = 3
     else:
-        min_score = 0.3
         limit = 10
         max_chunks_per_doc = 2
 
@@ -1861,6 +2011,215 @@ def build_references_block(selected_results: list) -> str:
         lines.append("")  # blank line between entries
 
     return "\n".join(lines).strip()
+
+
+# --- 検索トレース（docs/design-2026-09-10-retrieval-trace.md） ---
+# UI・生成には渡さず、assistant 項目の retrievalTrace にだけ保存する。CloudWatch には出さない。
+
+IMAGE_REFERENCE_PLACEHOLDER = "[図表] この資料の該当箇所は画像です。添付画像を参照してください。"
+
+
+def _trace_reference_text(result: dict) -> tuple:
+    """AI に渡した本文（build_references_block と同じ文字列）を最大 1,200 字で返す。
+
+    法令は全文補完した本文をそのまま渡すが、トレースには先頭 1,200 字だけを残し、
+    元の文字数と切り詰めの有無を記録する。
+    """
+    if '_lawReferenceText' in result:
+        return retrieval_trace_module.model_input_text(result.get('_lawReferenceText') or '')
+    text, truncated, length = retrieval_trace_module.model_input_text(chunk_text(result))
+    if not text:
+        return IMAGE_REFERENCE_PLACEHOLDER, False, 0
+    return text, truncated, length
+
+
+def _trace_metadata_text(value):
+    """Athena の列を string に固定するため、配列のメタデータはカンマ区切りにする。"""
+    if isinstance(value, (list, tuple)):
+        return ','.join(str(v) for v in value)
+    return value
+
+
+def _trace_sorted(results: list, rank_key: str = None) -> list:
+    """select_retrieval_results と同じ並び順。"""
+    if rank_key is None:
+        return sorted(results, key=lambda r: r.get('score', 0.0) or 0.0, reverse=True)
+
+    def sort_key(result):
+        rank_value = result.get(rank_key)
+        if rank_value is None:
+            return (False, result.get('score', 0.0) or 0.0)
+        return (True, rank_value)
+    return sorted(results, key=sort_key, reverse=True)
+
+
+def _trace_candidates(results: list, selected_results: list, excluded_results: list,
+                      dedupe_counts: dict, mode: str, rank_key: str = None) -> tuple:
+    """候補行と理由別の除外件数を返す。"""
+    min_score = selection_min_score(mode)
+    selected_ids = {id(r) for r in (selected_results or [])}
+    # 法令は資料ごとに新しい dict へまとめ直すため、URI で突き合わせる
+    law_selected = {}
+    for row in selected_results or []:
+        if '_lawReferenceText' in row:
+            uri = (row.get('metadata') or {}).get(KB_PROFILE.source_uri_key, '') or ''
+            law_selected.setdefault(uri, row)
+    law_text_used = set()
+    counts = {'model_scope': len(excluded_results or []),
+              'dedupe': sum((dedupe_counts or {}).values()),
+              'below_threshold': 0, 'limit': 0}
+    rows = []
+    ordered = [(r, None) for r in _trace_sorted(results or [], rank_key)]
+    ordered += [(r, 'model_scope') for r in (excluded_results or [])]
+    for rank, (result, excluded_by) in enumerate(ordered, start=1):
+        metadata = result.get('metadata', {}) or {}
+        uri = metadata.get(KB_PROFILE.source_uri_key, '') or ''
+        text_source = None
+        if excluded_by:
+            selected = False
+        elif law_selected:
+            selected = uri in law_selected
+            if selected and uri not in law_text_used:
+                text_source = law_selected[uri]
+                law_text_used.add(uri)
+        else:
+            selected = id(result) in selected_ids
+            text_source = result if selected else None
+        score = result.get('score')
+        if not selected and not excluded_by:
+            excluded_by = 'below_threshold' if (score or 0.0) < min_score else 'limit'
+            counts[excluded_by] += 1
+        row = {
+            'rank': rank,
+            'sourceUri': uri or None,
+            'documentName': uri.rsplit('/', 1)[-1] if uri else metadata.get('title'),
+            'pageNumber': extract_page_number(metadata),
+            'chunkId': metadata.get(KB_PROFILE.chunk_id_key),
+            'score': score,
+            'rerankScore': result.get('rerankScore'),
+            'modelType': _trace_metadata_text(metadata.get(KB_PROFILE.model_type_key)),
+            'category': _trace_metadata_text(metadata.get(KB_PROFILE.category_key)),
+            'hasImage': bool(chunk_image_b64(result)),
+            'selected': selected,
+            'excludedBy': excluded_by,
+            'dedupeCount': int((dedupe_counts or {}).get(id(result), 0) or 0),
+        }
+        if text_source is not None:
+            text, truncated, length = _trace_reference_text(text_source)
+            row.update({'modelInputText': text, 'textTruncated': truncated,
+                        'originalLength': length})
+        rows.append(row)
+    return rows, counts
+
+
+def _trace_feature_total(rows: list, default: dict) -> dict:
+    """検索ごとの rerank 記録を 1 リクエスト分にまとめる（回数・時間は合算）。"""
+    rows = [row for row in rows if isinstance(row, dict) and row]
+    if not rows:
+        return default
+    applied = next((row for row in reversed(rows) if row.get('status') == 'applied'), None)
+    combined = dict(applied or rows[-1])
+    combined['callCount'] = sum(int(row.get('callCount', 0) or 0) for row in rows)
+    combined['latencyMs'] = sum(int(row.get('latencyMs', 0) or 0) for row in rows)
+    return combined
+
+
+def _kb_profile_hash() -> str:
+    profile = getattr(KB_PROFILE, '__dict__', None) or {}
+    return hashlib.sha256(json.dumps(
+        profile, ensure_ascii=False, sort_keys=True, default=str,
+        separators=(',', ':')).encode('utf-8')).hexdigest()
+
+
+def build_request_trace(*, event, mode: str, response_type: str, query: str,
+                        composed_query: str = None, message_id: str = None,
+                        search_attempts: list = None, rewrite: dict = None,
+                        results: list = None, selected_results: list = None,
+                        dedupe_counts: dict = None, weak: bool = False,
+                        generation_meta: dict = None, started_at: float = None,
+                        rank_key: str = None):
+    """1 回の RAG 応答の retrievalTrace を組み立てる（clarify / not_found / pages 共通）。
+
+    トレースは任意情報なので、組み立てに失敗しても応答は止めず None を返す。
+    """
+    try:
+        return _build_request_trace(
+            event=event, mode=mode, response_type=response_type, query=query,
+            composed_query=composed_query, message_id=message_id,
+            search_attempts=search_attempts, rewrite=rewrite, results=results,
+            selected_results=selected_results, dedupe_counts=dedupe_counts, weak=weak,
+            generation_meta=generation_meta, started_at=started_at, rank_key=rank_key,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(json.dumps({'event': 'retrieval_trace_failed',
+                          'errorType': type(exc).__name__}, separators=(',', ':')))
+        return None
+
+
+def _build_request_trace(*, event, mode, response_type, query, composed_query,
+                         message_id, search_attempts, rewrite, results, selected_results,
+                         dedupe_counts, weak, generation_meta, started_at, rank_key) -> dict:
+    profile_hash = _kb_profile_hash()
+    attempts = search_attempts or []
+    excluded = [row for attempt in attempts for row in (attempt.get('excludedByModelScope') or [])]
+    candidates, excluded_counts = _trace_candidates(
+        results or [], selected_results or [], excluded, dedupe_counts or {}, mode, rank_key,
+    )
+    kb_id = next((a.get('kbId') for a in attempts if a.get('kbId')), None) or (
+        (LAW_KNOWLEDGE_BASE_ID if mode == 'law' else KNOWLEDGE_BASE_ID) or None
+    )
+    attempt_rows = [{
+        'stage': attempt.get('stage') or 'unknown',
+        'query': attempt.get('query'),
+        'searchType': attempt.get('searchType'),
+        'filters': attempt.get('filters') or {},
+        'scope': {'profileHash': profile_hash, 'kbId': attempt.get('kbId')},
+        'requested': attempt.get('requested'),
+        'returned': attempt.get('returned'),
+        'afterPostFilter': attempt.get('afterPostFilter'),
+        'latencyMs': attempt.get('latencyMs'),
+    } for attempt in attempts]
+    rerank = _trace_feature_total(
+        [attempt.get('rerank') for attempt in attempts],
+        {'enabled': bool(RERANK_MODEL_ARN), 'status': 'skipped',
+         'reason': 'not_run' if RERANK_MODEL_ARN else 'disabled',
+         'modelId': RERANK_MODEL_ARN or None, 'callCount': 0, 'latencyMs': 0},
+    )
+    rewrite = rewrite or {'enabled': bool(QUERY_REWRITE_MODEL_ID), 'status': 'skipped',
+                          'reason': 'not_run' if QUERY_REWRITE_MODEL_ID else 'disabled',
+                          'rewrittenQuery': None, 'modelId': QUERY_REWRITE_MODEL_ID or None,
+                          'callCount': 0, 'latencyMs': 0}
+    scores = [row.get('score') for row in _trace_sorted(results or [])
+              if row.get('score') is not None][:retrieval_trace_module.MAX_CANDIDATES]
+    generation = None
+    generation_config = None
+    if generation_meta is not None:
+        generation = {key: generation_meta.get(key) for key in
+                      ('inputTokens', 'outputTokens', 'stopReason', 'latencyMs')}
+        generation_config = {key: generation_meta.get(key) for key in
+                             ('modelId', 'requestStyle', 'thinking')}
+    return retrieval_trace_module.build_retrieval_trace(
+        logic_version=telemetry.rag_logic_version(),
+        prompt_version_value=(generation_meta or {}).get('promptVersion'),
+        request_id=telemetry.request_id_of(event) or None,
+        kb_id=kb_id,
+        profile_hash=profile_hash,
+        data_source_sync_at=None,
+        message_id=message_id,
+        composed_query=composed_query if composed_query and composed_query != query else None,
+        search_attempts=attempt_rows,
+        rewrite=rewrite,
+        rerank=rerank,
+        gate={'responseType': response_type, 'weak': bool(weak), 'scores': scores,
+              'thresholds': [WEAK_TOP_SCORE, selection_min_score(mode)],
+              'rankKey': rank_key or 'score',
+              'selectedCount': len(selected_results or []),
+              'excludedCounts': excluded_counts},
+        candidates=candidates,
+        generation=generation,
+        generation_config=generation_config,
+        total_ms=telemetry.elapsed_ms(started_at) if started_at is not None else None,
+    )
 
 
 def _law_metadata_value(metadata: dict, key: str) -> str:
@@ -2400,6 +2759,10 @@ def handle_rag_request(event, context, started_at):
                 clarify_questions=clarify_questions,
                 query_filters=filters or {},
                 rag_mode=mode,
+                retrieval_trace=build_request_trace(
+                    event=event, mode=mode, response_type=response_type, query=query,
+                    message_id=user_message_id, started_at=started_at,
+                ),
             )
             return {
                 'statusCode': 200,
@@ -2420,19 +2783,28 @@ def handle_rag_request(event, context, started_at):
             }
 
         # --- retrieve ---
+        # 検索トレース用（UI・生成には渡さない）
+        trace_attempts = []
+        rewrite_trace = None
+        dedupe_counts = {}
         if mode == 'law':
-            search_query = normalize_query_text(
-                compose_search_query(query, chat_history)
-            ) or query
+            composed_query = compose_search_query(query, chat_history)
+            search_query = normalize_query_text(composed_query) or query
             kb_results = query_law_knowledge_base(search_query)
             retrieval_results = kb_results.get('retrievalResults', []) or []
+            trace_attempts.append({**(kb_results.pop('_traceSearch', None) or {}),
+                                   'stage': 'law', 'query': search_query})
+            rewrite_trace = {'enabled': False, 'status': 'skipped', 'reason': 'law_mode',
+                             'rewrittenQuery': None, 'modelId': None,
+                             'callCount': 0, 'latencyMs': 0}
         else:
             # Normal: 正規化 + 本命優先 retrieve +（必要なら）略語展開
             # WHY 本命優先: docs/decisions-2026-07-29-rag-nuance.md §3
             # 聞き返し後は追記を直前質問と結合（design §4）
-            search_query = compose_search_query(query, chat_history)
-            search_query = maybe_rewrite_search_query(
-                search_query, chat_history, request_deadline=request_deadline
+            composed_query = compose_search_query(query, chat_history)
+            search_query, rewrite_trace = maybe_rewrite_search_query(
+                composed_query, chat_history, request_deadline=request_deadline,
+                return_trace=True,
             )
             original_query = search_query
             normalized_query = normalize_query_text(original_query)
@@ -2443,6 +2815,8 @@ def handle_rag_request(event, context, started_at):
                 q1, filters, number_of_results=30, request_deadline=request_deadline
             )
             priority_expanded = bool(kb_results_1.pop('_priorityExpanded', False))
+            trace_attempts.append({**(kb_results_1.pop('_traceSearch', None) or {}),
+                                   'stage': 'initial', 'query': q1})
             results_1 = kb_results_1.get("retrievalResults", []) or []
             selected_1 = select_retrieval_results(
                 results_1, mode="normal", rank_key=RERANK_RANK_KEY
@@ -2454,11 +2828,16 @@ def handle_rag_request(event, context, started_at):
                     request_deadline=request_deadline,
                 )
                 priority_expanded = priority_expanded or bool(kb_results_2.pop('_priorityExpanded', False))
+                trace_attempts.append({**(kb_results_2.pop('_traceSearch', None) or {}),
+                                       'stage': 'abbreviation_expansion',
+                                       'query': expanded_query})
                 results_2 = kb_results_2.get("retrievalResults", []) or []
             else:
                 results_2 = []
 
-            merged_results = merge_retrieval_results(results_1, results_2)
+            merged_results = merge_retrieval_results(
+                results_1, results_2, dedupe_counts=dedupe_counts,
+            )
             kb_results = {
                 **kb_results_1,
                 "retrievalResults": merged_results,
@@ -2502,6 +2881,15 @@ def handle_rag_request(event, context, started_at):
                 response_type=response_type, page_candidates=page_candidates,
                 query_filters=filters or {},
                 rag_mode=mode,
+                # not_found は生成モデルに何も渡さないため selected は空にする（設計 §3）
+                retrieval_trace=build_request_trace(
+                    event=event, mode=mode, response_type=response_type, query=query,
+                    composed_query=composed_query, message_id=user_message_id,
+                    search_attempts=trace_attempts, rewrite=rewrite_trace,
+                    results=retrieval_results, selected_results=[],
+                    dedupe_counts=dedupe_counts, weak=True, started_at=started_at,
+                    rank_key=RERANK_RANK_KEY,
+                ),
             )
             for doc in source_documents:
                 doc['relevance'] = float(doc['relevance'])
@@ -2540,11 +2928,22 @@ def handle_rag_request(event, context, started_at):
                 route=telemetry.route_of(event),
                 started_at=started_at,
             )
-        ai_response = generate_response_with_claude(
+        # 生成に渡す根拠（generate_response_with_claude 内の選別と同じもの）
+        selected_for_model = (
+            kb_results.get('_lawSelectedResults') if mode == 'law'
+            else select_retrieval_results(retrieval_results, mode=mode, rank_key=RERANK_RANK_KEY)
+        ) or []
+        generated = generate_response_with_claude(
             query, kb_results, chat_history, mode,
             search_query=search_query,
             rank_key=RERANK_RANK_KEY,
+            return_meta=True,
         )
+        # 生成メタはトレース用の任意情報。本文だけが返る実装（テストの差し替え等）でも応答は続ける
+        if isinstance(generated, tuple):
+            ai_response, generation_meta = generated
+        else:
+            ai_response, generation_meta = generated, None
         if mode != 'law' and not filters.get('modelType') and page_candidates:
             # 機種未指定の一般検索であることを明示（断定防止）
             ai_response = (
@@ -2580,6 +2979,14 @@ def handle_rag_request(event, context, started_at):
             page_candidates=page_candidates,
             query_filters=filters or {},
             rag_mode=mode,
+            retrieval_trace=build_request_trace(
+                event=event, mode=mode, response_type=response_type, query=query,
+                composed_query=composed_query, message_id=user_message_id,
+                search_attempts=trace_attempts, rewrite=rewrite_trace,
+                results=retrieval_results, selected_results=selected_for_model,
+                dedupe_counts=dedupe_counts, generation_meta=generation_meta,
+                started_at=started_at, rank_key=RERANK_RANK_KEY,
+            ),
         )
 
         for doc in source_documents:
