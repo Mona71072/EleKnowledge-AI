@@ -405,7 +405,7 @@ function validateModelType(modelType) {
  * @param {{baseUrl:string, getToken:()=>Promise<string|null|undefined>, fetchImpl?:typeof fetch, mode:'normal'|'law', query:string, sessionId?:string, signal?:AbortSignal, timeoutMs?:number, includeKnowhow?:boolean, modelType?:string}} options
  * `modelType` is a UI model key sent as a filter for normal mode only; law mode ignores it.
  */
-export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS, includeKnowhow, modelType, senpaiConversationId, senpaiTurnId }) {
+export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS, includeKnowhow, knowhowOnly, modelType, senpaiConversationId, senpaiTurnId }) {
   const endpoint = safeEndpoint(baseUrl);
   const normalizedQuery = validateQuery(query, mode);
   if (includeKnowhow !== undefined && typeof includeKnowhow !== 'boolean') {
@@ -413,6 +413,10 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
   }
   if (includeKnowhow === true && mode !== 'normal') {
     fail('validation', 'ノウハウMarkdown検索は技術KBでのみ利用できます');
+  }
+  // D16: ノウハウだけで答える（技術KB・法令KBを検索しない）。ノウハウ検索の指定と一緒にだけ使える。
+  if (knowhowOnly !== undefined && (typeof knowhowOnly !== 'boolean' || (knowhowOnly && includeKnowhow !== true))) {
+    fail('validation', 'ノウハウだけの回答の指定を確認してください');
   }
   const normalizedModelType = validateModelType(modelType);
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -470,7 +474,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
         response = await fetchImpl(`${endpoint}/rag/query`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: normalizedQuery, mode, filters: mode === 'normal' && normalizedModelType ? { modelType: normalizedModelType } : {}, ...(sessionId !== undefined ? { sessionId } : {}), ...(includeKnowhow === true ? { includeKnowhow: true } : {}), ...(senpaiConversationId !== undefined ? { senpaiConversationId, senpaiTurnId } : {}) }),
+          body: JSON.stringify({ query: normalizedQuery, mode, filters: mode === 'normal' && normalizedModelType ? { modelType: normalizedModelType } : {}, ...(sessionId !== undefined ? { sessionId } : {}), ...(includeKnowhow === true ? { includeKnowhow: true } : {}), ...(knowhowOnly === true ? { knowhowOnly: true } : {}), ...(senpaiConversationId !== undefined ? { senpaiConversationId, senpaiTurnId } : {}) }),
           signal: controller.signal,
         });
       } catch {

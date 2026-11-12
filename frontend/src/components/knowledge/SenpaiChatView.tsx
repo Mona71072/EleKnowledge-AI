@@ -28,7 +28,7 @@ export type SenpaiChatViewProps = {
   onSelectConversation: (conversationId: string) => void;
   onSynthesize: (turnId: number) => void;
   onResend: (options: ResendOptions) => void;
-  flags: { research: boolean; fieldReports: boolean; synthesis: boolean };
+  flags: { research: boolean; fieldReports: boolean; synthesis: boolean; knowhowOnly?: boolean };
   developerView: boolean;
   onToggleDeveloperView: () => void;
   /** ⋯メニューの開閉（省略すると、ブラウザ任せの開閉になる）。 */
@@ -92,7 +92,9 @@ export function SenpaiChatView({ snapshot, history, flags, transcriptRef, onTran
   const researchUnavailable = !flags.research && Boolean(latestTurn?.research);
   const continuationPaused = isContinuationPaused(snapshot, flags.research);
   const disabled = snapshot.running || continuationPaused || history.opening;
-  const disclaimer = flags.research
+  const disclaimer = flags.knowhowOnly
+    ? 'ノウハウは正規文書ではありません。重要な判断は出典の正規文書で確認してください'
+    : flags.research
     ? '重要な判断は出典で確認してください（ノウハウは未承認）'
     : 'ローカルファイルは送信されません。重要な判断は出典で確認してください';
   const answeringClarify = latestTurn?.research?.status === 'completed' && latestTurn.research.result?.kind === 'clarify';
@@ -130,7 +132,7 @@ export function SenpaiChatView({ snapshot, history, flags, transcriptRef, onTran
                     conversationId={snapshot.conversationId} report={turn.senpaiTurnId ? props.reports[turn.senpaiTurnId] : undefined}
                     onReportSent={props.onReportSent} developerView={flags.research && props.developerView}
                     canReport={reportable(turn, flags.fieldReports)} synthesisEnabled={flags.synthesis}
-                    onSynthesize={props.onSynthesize}
+                    onSynthesize={props.onSynthesize} knowhowOnly={flags.knowhowOnly}
                     onResend={turn.research && turn === latestTurn && !snapshot.running ? props.onResend : undefined}
                   />
                 ))}

@@ -314,7 +314,7 @@ test('renders returned Markdown as escaped collapsed text with status, identity,
   assert.match(html, /<details/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;本文/);
   assert.doesNotMatch(html, /<img\b|href="javascript:/);
-  assert.match(html, /技術的な根拠や承認を示しません/);
+  assert.match(html, /ノウハウは正規文書ではありません/);
 });
 
 test('explains that Markdown retrieval is server-authorized and does not upload a local vault or edit files', () => {
@@ -815,4 +815,31 @@ test('a question that could not be sent is put back in the input instead of bein
   const view = render();
   assert.equal(findElement(view, (el) => el.type === 'textarea').props.value, '送れなかった長い質問');
   assert.match(renderToStaticMarkup(view), /質問を送信できませんでした/);
+});
+
+test('D16: with NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY the turn shows one knowhow answer and a link to じっくり調べる', () => {
+  const answer = {
+    mode: 'normal', query: 'アクシーズで戸開しない', content: '※ノウハウは現場の経験から整理した参考情報で、正規文書ではありません。\n\n該当するノウハウはありません。',
+    responseType: 'not_found', sessionId: 'session-tech', messageId: 'm1', receivedAt: '2026-10-20T00:00:00Z',
+    sourceDocuments: [], pageCandidates: [], clarifyQuestions: [],
+    knowhow: { status: 'not_found', indexVersion: `sha256:${'a'.repeat(64)}`, searchTerms: [], matches: [] },
+  };
+  const initialSnapshot = { running: false, turns: [{ id: 1, query: 'アクシーズで戸開しない', normal: lane('success', { answer }), law: lane('paused') }] };
+  process.env.NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY = 'true';
+  try {
+    const render = loadInteractiveChat({
+      initialSnapshot,
+      createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+    });
+    render();
+    const html = renderToStaticMarkup(render());
+    assert.match(html, /aria-label="ノウハウからの回答"/);
+    assert.doesNotMatch(html, /aria-label="法令KBからの回答"|aria-label="技術KBからの回答"/);
+    assert.match(html, /該当するノウハウはありません/);
+    assert.doesNotMatch(html, /このKBでは該当情報を確認できませんでした/);
+    assert.match(html, /href="\/chat\?research=1&amp;q=%E3%82%A2/);
+    assert.match(html, /じっくり調べるで確かめる/);
+  } finally {
+    delete process.env.NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY;
+  }
 });

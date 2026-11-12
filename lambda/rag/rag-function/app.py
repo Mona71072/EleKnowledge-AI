@@ -88,6 +88,18 @@ except ModuleNotFoundError as exc:
     sys.modules[_question_model_spec.name] = question_model
     _question_model_spec.loader.exec_module(question_model)
 
+try:
+    import knowhow_answer
+except ModuleNotFoundError as exc:
+    if exc.name != 'knowhow_answer':
+        raise
+    _knowhow_answer_spec = importlib.util.spec_from_file_location(
+        'rag_knowhow_answer', os.path.join(os.path.dirname(__file__), 'knowhow_answer.py')
+    )
+    knowhow_answer = importlib.util.module_from_spec(_knowhow_answer_spec)
+    sys.modules[_knowhow_answer_spec.name] = knowhow_answer
+    _knowhow_answer_spec.loader.exec_module(knowhow_answer)
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -2461,6 +2473,12 @@ def handle_rag_request(event, context, started_at):
             return validation_error('includeKnowhow must be a boolean')
         if include_knowhow and requested_mode == 'law':
             return validation_error('includeKnowhow is supported only in normal mode')
+        # D16（設計 rag-two-modes §11.13）: 先輩チャットをノウハウだけで答える。技術KB・法令KBは検索しない。
+        knowhow_only = body.get('knowhowOnly', False)
+        if type(knowhow_only) is not bool:
+            return validation_error('knowhowOnly must be a boolean')
+        if knowhow_only and not include_knowhow:
+            return validation_error('knowhowOnly requires includeKnowhow')
         if include_knowhow and (
             ENVIRONMENT != 'dev' or not KNOWHOW_ENABLED or not is_admin_caller(event)
         ):
@@ -2653,6 +2671,53 @@ def handle_rag_request(event, context, started_at):
                         'message': 'ノウハウ検索を利用できません。時間をおいて再度お試しください。',
                     }, ensure_ascii=False),
                 }
+
+        if knowhow_only:
+            response_type, ai_response = knowhow_answer.answer(
+                query, knowhow_payload, chat_history,
+                lambda system_prompt, messages: invoke_generation(
+                    bedrock_runtime, BEDROCK_MODEL_ID, system_prompt, messages, call_name='knowhow_answer',
+                )[0],
+            )
+            if model_from_question:
+                ai_response = question_model.notice(model_from_question) + '\n' + ai_response
+            session_title = _fallback_session_title(query) if not chat_history else None
+            user_message_id = save_message_to_dynamodb(
+                session_id=session_id, user_id=user_id, role='user', content=query,
+                rag_mode=mode,
+                senpai_conversation_id=senpai_conversation_id if senpai_tagged else None,
+                senpai_turn_id=senpai_turn_id if senpai_tagged else None,
+            )
+            if not chat_history:
+                enqueue_session_title(session_id, user_message_id, user_id, query)
+            ai_message_id = save_message_to_dynamodb(
+                session_id=session_id, user_id=user_id, role='assistant',
+                content=ai_response, response_type=response_type,
+                query_filters=filters or {},
+                rag_mode=mode,
+                senpai_conversation_id=senpai_conversation_id if senpai_tagged else None,
+                senpai_turn_id=senpai_turn_id if senpai_tagged else None,
+                knowhow=knowhow_payload,
+            )
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': json.dumps({
+                    'sessionId': session_id,
+                    **senpai_response_fields,
+                    'sessionTitle': session_title,
+                    'userMessageId': user_message_id,
+                    'aiMessageId': ai_message_id,
+                    'responseType': response_type,
+                    'clarifyQuestions': [],
+                    'pageCandidates': [],
+                    'content': ai_response,
+                    'citations': [],
+                    'sourceDocuments': [],
+                    'knowhow': knowhow_payload,
+                    'timestamp': _utc_now_iso()
+                }, ensure_ascii=False)
+            }
 
         # --- Phase1: 聞き返しゲート（検索前） ---
         # 法令modeは設備症状用の聞き返しルールと通常KBの機種filterを使わない。

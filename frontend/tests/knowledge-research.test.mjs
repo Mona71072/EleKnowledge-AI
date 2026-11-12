@@ -714,3 +714,18 @@ test('rejects malformed model fit fields instead of rendering them', async () =>
     await assert.rejects(queryWithKnowhow(knowhow), (error) => error.code === 'invalid_response', JSON.stringify(extra));
   }
 });
+
+test('D16: knowhowOnly is sent only together with includeKnowhow', async () => {
+  const bodies = [];
+  await queryKnowledgeSource({
+    baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '先輩相談', includeKnowhow: true, knowhowOnly: true,
+    fetchImpl: fetchOk(normalPayloadWithKnowhow(knowhowPayload()), (_url, init) => bodies.push(JSON.parse(init.body))),
+  });
+  assert.deepEqual(bodies[0], { query: '先輩相談', mode: 'normal', filters: {}, includeKnowhow: true, knowhowOnly: true });
+  for (const options of [{ knowhowOnly: true }, { includeKnowhow: true, knowhowOnly: 'true' }]) {
+    await assert.rejects(queryKnowledgeSource({
+      baseUrl: BASE, getToken: async () => TOKEN, mode: 'normal', query: '先輩相談', ...options,
+      fetchImpl: fetchOk(normalPayload()),
+    }), (error) => error.code === 'validation');
+  }
+});

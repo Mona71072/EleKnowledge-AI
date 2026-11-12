@@ -5,11 +5,16 @@ import { LaneReply, SynthesisSection } from './SenpaiLegacyLanes';
 import { SenpaiFieldReportForm } from './SenpaiFieldReportForm';
 import { SenpaiResearchAnswer } from './SenpaiResearchAnswer';
 
+/** 通常チャットを、じっくり調べるを選んだ状態で、質問を入れて開く（送信は利用者が行う）。 */
+export function researchHref(query: string) {
+  return `/chat?research=1&q=${encodeURIComponent(query)}`;
+}
+
 /** 聞き直し・もう一度試す。補足つきの相談では、検索に使う質問（query）のほかに補足も渡して、同じ見え方で残す。 */
 export type ResendOptions = { query: string; modelType?: string; supplement?: string; supplementOf?: string };
 
 /** 1回の相談: 右寄せの質問の吹き出しと、枠なしの回答。 */
-export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conversationId, report, onReportSent, developerView, canReport, synthesisEnabled, onSynthesize, onResend }: {
+export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conversationId, report, onReportSent, developerView, canReport, synthesisEnabled, onSynthesize, onResend, knowhowOnly }: {
   turn: Turn;
   running: boolean;
   conversationId?: string;
@@ -22,6 +27,8 @@ export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conv
   onSynthesize: (turnId: number) => void;
   /** 最新の調査の相談にだけ渡す（聞き直し・もう一度試す）。 */
   onResend?: (options: ResendOptions) => void;
+  /** D16: ノウハウだけで答える画面。法令KBの回答がある過去の相談は従来の 2 列で表示する。 */
+  knowhowOnly?: boolean;
 }) {
   const resend = onResend
     ? (options: ResendOptions) => onResend({ ...options, ...(turn.supplement && turn.supplementOf ? { supplement: turn.supplement, supplementOf: turn.supplementOf } : {}) })
@@ -44,6 +51,21 @@ export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conv
           <h3 className="mb-1.5 text-xs font-medium text-gray-500">工技先輩</h3>
           {turn.research ? (
             <SenpaiResearchAnswer research={turn.research} anchorPrefix={`senpai-turn-${turn.id}`} selectedModel={turn.modelType} developerView={developerView} query={turn.query} onResend={resend} actions={reportForm} />
+          ) : knowhowOnly && turn.law.status !== 'success' ? (
+            <div className="space-y-4">
+              <section aria-label="ノウハウからの回答" className="min-w-0 space-y-2">
+                <h4 className="text-xs font-medium text-gray-500">ノウハウ</h4>
+                <LaneReply lane={turn.normal} mode="normal" selectedModel={turn.modelType} label="ノウハウ" />
+              </section>
+              {turn.normal.status !== 'loading' && (
+                <p className="text-xs text-gray-500">
+                  技術資料・法令で確かめるときは{' '}
+                  <a href={researchHref(turn.query)} className="text-gray-800 underline underline-offset-2">じっくり調べるで確かめる</a>
+                  （通常チャットに質問を入れて開きます。送信すると、じっくり調べるの回数を使います）
+                </p>
+              )}
+              {reportForm && <div className="-mx-1 flex flex-wrap items-center">{reportForm}</div>}
+            </div>
           ) : (
             <div className="space-y-4">
               <SynthesisSection turn={turn} running={running} onSynthesize={onSynthesize} synthesisEnabled={synthesisEnabled} />

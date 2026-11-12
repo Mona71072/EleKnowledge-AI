@@ -382,3 +382,55 @@ def test_model_in_the_question_is_not_applied_outside_the_senpai_chat(rag_app, m
     monkeypatch.setattr(rag_app, "needs_clarify", lambda q, filters, history: (seen.update(filters=dict(filters)) or (False, [])))
     rag_app.handle_rag_request(_event({"query": "アクシーズのかごの走行中振動"}), None, 0)
     assert "modelType" not in seen["filters"]
+
+
+def _knowhow_only(rag_app, monkeypatch, index=None):
+    _configure_successful_pipeline(rag_app, monkeypatch)
+    if index is not None:
+        monkeypatch.setattr(rag_app, "load_index", lambda **_kwargs: index)
+    calls = {"retrieve": 0, "generate": []}
+    monkeypatch.setattr(rag_app, "retrieve_for_normal_query",
+                        lambda *_a, **_k: calls.__setitem__("retrieve", calls["retrieve"] + 1) or {"retrievalResults": []})
+    monkeypatch.setattr(rag_app, "needs_clarify", lambda *_a: (_ for _ in ()).throw(AssertionError("clarify gate used")))
+    monkeypatch.setattr(rag_app, "invoke_generation",
+                        lambda _client, _model, system, messages, **_k: calls["generate"].append((system, messages)) or ("ノウハウの整理", {}, "end_turn"))
+    return calls
+
+
+def test_knowhow_only_answers_from_cards_without_kb_search(rag_app, monkeypatch):
+    """D16（設計 rag-two-modes §11.13）: 先輩チャットはノウハウだけで答え、技術KB・法令KBを検索しない。"""
+    calls = _knowhow_only(rag_app, monkeypatch)
+    response = rag_app.handle_rag_request(
+        _event({"query": "かごの走行中振動", "includeKnowhow": True, "knowhowOnly": True}), None, 0)
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 200 and body["responseType"] == "pages"
+    assert calls["retrieve"] == 0 and len(calls["generate"]) == 1
+    system, messages = calls["generate"][0]
+    assert "検証済みのノウハウカードだけ" in system
+    final = messages[-1]["content"]
+    assert "KH-SYN-001" in final[0]["text"] and "かごの走行中振動" in final[-1]["text"]
+    assert body["content"].startswith("※ノウハウは現場の経験から整理した参考情報で、正規文書ではありません。")
+    assert body["content"].endswith("ノウハウの整理")
+    assert body["citations"] == [] and body["sourceDocuments"] == [] and body["knowhow"]["matches"]
+
+
+def test_knowhow_only_without_a_match_does_not_call_the_model(rag_app, monkeypatch):
+    calls = _knowhow_only(rag_app, monkeypatch)
+    response = rag_app.handle_rag_request(
+        _event({"query": "まったく関係のない質問ZZQQ", "includeKnowhow": True, "knowhowOnly": True}), None, 0)
+    body = json.loads(response["body"])
+    assert body["responseType"] == "not_found" and calls["generate"] == [] and calls["retrieve"] == 0
+    assert "該当するノウハウはありません" in body["content"]
+
+
+def test_knowhow_only_adds_the_safety_notice_in_code(rag_app, monkeypatch):
+    _knowhow_only(rag_app, monkeypatch)
+    response = rag_app.handle_rag_request(
+        _event({"query": "かごの走行中振動のとき作業してもよいか", "includeKnowhow": True, "knowhowOnly": True}), None, 0)
+    assert "安全・法令・作業可否に関わる内容は、ここでは断定しません" in json.loads(response["body"])["content"]
+
+
+def test_knowhow_only_is_validated(rag_app, monkeypatch):
+    _knowhow_only(rag_app, monkeypatch)
+    for body in ({"query": "かご", "knowhowOnly": True}, {"query": "かご", "includeKnowhow": True, "knowhowOnly": "true"}):
+        assert rag_app.handle_rag_request(_event(body), None, 0)["statusCode"] == 400

@@ -555,3 +555,18 @@ test('cancelling a later search does not discard an in-flight synthesis of an ea
   assert.equal(chat.getSnapshot().turns[0].synthesis.status, 'success');
   chat.dispose();
 });
+
+test('D16: with modes [normal] only the knowhow lane is queried and the law lane stays paused', async () => {
+  const calls = [];
+  const chat = createSenpaiChat({ modes: ['normal'], querySource: async (request) => { calls.push(request.mode); return answer(request.mode, 'normal-session', 'ノウハウの質問'); } });
+  await chat.send('ノウハウの質問');
+  await chat.send('続きの質問');
+  assert.deepEqual(calls, ['normal', 'normal']);
+  const [first, second] = chat.getSnapshot().turns;
+  assert.equal(first.normal.status, 'success');
+  assert.equal(first.law.status, 'paused');
+  assert.match(first.law.message, /ノウハウだけで答えます/);
+  assert.equal(second.law.status, 'paused');
+  assert.throws(() => createSenpaiChat({ modes: ['law'], querySource: async () => null }), (error) => error.code === 'validation');
+  assert.throws(() => createSenpaiChat({ modes: ['normal', 'other'], querySource: async () => null }), (error) => error.code === 'validation');
+});

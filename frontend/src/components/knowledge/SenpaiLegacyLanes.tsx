@@ -93,8 +93,9 @@ function KnowhowReferences({ answer, selectedModel }: { answer: import('@/lib/kn
   );
 }
 
-export function LaneReply({ lane, mode, selectedModel }: { lane: SenpaiChatLane; mode: KnowledgeResearchMode; selectedModel?: string }) {
-  const name = mode === 'law' ? '法令KB' : '技術KB';
+/** `label` を渡すと、その名前で表示し、該当なしでもサーバーの本文（注意・定型文）を出す（先輩チャットのノウハウだけの回答）。 */
+export function LaneReply({ lane, mode, selectedModel, label }: { lane: SenpaiChatLane; mode: KnowledgeResearchMode; selectedModel?: string; label?: string }) {
+  const name = label ?? (mode === 'law' ? '法令KB' : '技術KB');
   if (lane.status === 'loading') return <p role="status" className="text-sm text-gray-600">{name}を検索しています…</p>;
   if (lane.status === 'error') return <p role="alert" className="text-sm text-red-700">{lane.message || `${name}への問い合わせに失敗しました。設定・通信状態を確認してください。`}</p>;
   if (lane.status === 'cancelled') return <p role="status" className="text-sm text-gray-600">{name}への検索は中止されました。</p>;
@@ -106,7 +107,7 @@ export function LaneReply({ lane, mode, selectedModel }: { lane: SenpaiChatLane;
   const candidates = answer.pageCandidates || [];
   return (
     <div className="space-y-3">
-      {answer.responseType === 'not_found' ? (
+      {answer.responseType === 'not_found' && !label ? (
         <p className="text-sm text-gray-900">このKBでは該当情報を確認できませんでした。</p>
       ) : answer.responseType === 'clarify' ? (
         <div className="text-sm text-gray-900">
@@ -153,7 +154,7 @@ export function LaneReply({ lane, mode, selectedModel }: { lane: SenpaiChatLane;
           </ul>
         </div>
       )}
-      {answer.sessionId && (
+      {answer.sessionId && !label && (
         <Link href={buildChatSessionHref(answer.sessionId, mode)} className="inline-flex text-xs text-gray-500 underline underline-offset-2">
           {mode === 'law' ? '法令チャットの履歴を開く' : '技術チャットの履歴を開く'}
         </Link>

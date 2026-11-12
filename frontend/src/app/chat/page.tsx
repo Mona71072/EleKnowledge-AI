@@ -516,6 +516,11 @@ const normalizeTableMarkdown = (text: string): string => {
       dirty = true;
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
+    // 先輩チャットの「じっくり調べるで確かめる」(?research=1&q=...)。選んだ状態で開くだけで、送信は利用者が行う。
+    if (params.get('research') === '1' && initialMode !== 'law' && RESEARCH_MODE_SETTING !== 'off') {
+      setAnswerMode('research');
+      dirty = true;
+    }
     if (sessionId) {
       dirty = true;
       // setRagMode は次の描画まで反映されないため、取得モードは明示的に渡す（既定の ragMode は古い）

@@ -65,6 +65,17 @@ knowhow: {
 - **機種の別名:** 語彙ファイルの許容表記 `MELCITY`・`MELWIDE` を検索の別名に足した（itai、2026-11-12）。`product_lines: [MELCITY]` のカード 1 枚がメルシティとして認識される（適用範囲は未確認のため、検索から外れることはない）。
 - **回答の記録:** 先輩チャットは使ったカードの ID と版を chatlogs に保存済み。じっくり調べるはノウハウを使っていないため、統合（PR #206）の後に同じ項目を保存する。
 
+## ノウハウだけで答える（D16、2026-11-12）
+
+> 最終検証: 2026-11-12 — 単体試験（`tests/unit/test_knowhow_api.py` の knowhowOnly 4 件、`frontend/tests/knowledge-research.test.mjs`・`knowledge-senpai-chat.test.mjs`・`knowledge-chat-entry.test.mjs` の D16）と型検査。AWS への配備・画面での確認は itai AWS 契約の実施記録を参照。
+
+設計: `docs/design-2026-09-24-rag-two-modes.md` §11.13（PR #206、D16。2026-11-12 に mona が検索方針は Yes）。
+
+- **API:** `POST /rag/query` に `knowhowOnly: true`（`includeKnowhow: true` と一緒にだけ指定できる。違えば 400）。ノウハウ検索（公開版の索引・manifest の照合・機種の読み取り）の後、技術KB の検索・聞き返し・法令KB は行わない。カードが 1 枚以上あれば、カードだけを渡した専用の指示文（`lambda/rag/rag-function/knowhow_answer.py`）で AI が短く答える。カードが無ければ AI を呼ばず「該当するノウハウはありません。…「じっくり調べる」を使ってください。」を `not_found` で返す。応答の形は従来と同じ（`citations`・`sourceDocuments`・`pageCandidates` は空、`knowhow` あり）。
+- **注意はコードで付ける:** 回答の先頭に「※ノウハウは現場の経験から整理した参考情報で、正規文書ではありません。作業の判断は、出典の正規文書で確かめてください。」。質問に安全・法令・作業可否の語があれば「※安全・法令・作業可否に関わる内容は、ここでは断定しません。「じっくり調べる」か正式資料で確認してください。」も付ける。
+- **画面:** `NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY=true` のとき、先輩チャットは技術KB の欄（ノウハウだけ）だけに問い合わせ、法令KB・調査ジョブ・まとめは使わない。回答は「ノウハウ」の 1 欄で表示し、その下に「じっくり調べるで確かめる」（`/chat?research=1&q=…`。通常チャットを、じっくり調べるを選んで質問を入れた状態で開く。送信は利用者が行い、じっくり調べるの回数を使う）。法令KB の回答がある過去の相談は従来の 2 列で表示する。
+- **まだ行っていないこと（§11.13 のうち）:** カードの出典資料へのリンク（今はカードの出典の ID を表示）、「結果を残す」を共通知識の受け付け口へ送ること（WP5 と合わせる）、撤回したカードを引用した過去の回答への表示（WP8）、調査ジョブ・まとめのコードと資源の削除（§11 の手順 5'、明示合意の後）。
+
 ## 質問の文言から機種を読み取って絞り込む（2026-11-12）
 
 > 最終検証: 2026-11-12 — 単体試験（`tests/unit/test_question_model.py`・`tests/unit/test_knowhow_api.py`・`tests/unit/test_senpai_research_runner.py`）。AWS への配備は実施記録（itai AWS 契約）を参照。

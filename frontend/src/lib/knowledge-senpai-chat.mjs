@@ -8,6 +8,7 @@ const MAX_QUERY_LENGTH = 2_000;
 const MAX_RESTORED_TURNS = 500;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const LANE_STATUSES = new Set(['success', 'error', 'cancelled', 'paused']);
+const KNOWHOW_ONLY_LAW_MESSAGE = '先輩チャットはノウハウだけで答えます（法令KBは検索しません）';
 const MAX_SYNTHESIS_LENGTH = 32_000;
 const RESEARCH_LANE_MESSAGE = 'この相談は調査ジョブで実行されたため、技術KB・法令KBの個別回答はありません。続けるには新しい相談を始めてください';
 const RESEARCH_FAILED_MESSAGE = '調査に失敗しました。時間をおいて再度お試しください';
@@ -195,8 +196,14 @@ function validateRestore(input) {
  */
 export function createSenpaiChat({
   querySource, synthesisSource, researchSource, onChange = () => {}, createId = defaultCreateId, now = Date.now,
+  modes = MODES,
 }) {
   if (typeof querySource !== 'function' && typeof researchSource !== 'function') throw chatError('検索サービスの設定を確認してください');
+  // D16: 先輩チャットをノウハウだけにするときは ['normal'] だけを問い合わせる。法令の欄は送らずに休止の表示にする。
+  if (!Array.isArray(modes) || !modes.includes('normal') || !modes.every((mode) => MODES.includes(mode))) {
+    throw chatError('検索先の設定を確認してください');
+  }
+  const activeModes = MODES.filter((mode) => modes.includes(mode));
   if (typeof createId !== 'function') throw chatError('相談履歴の識別情報を作成できませんでした');
 
   let turns = [];
@@ -388,12 +395,13 @@ export function createSenpaiChat({
       id: turnId, senpaiTurnId, query: normalizedQuery,
       ...(modelType ? { modelType } : {}),
       normal: pausedReasons.normal ? makeLane('paused', pausedReasons.normal) : makeLane('loading'),
-      law: pausedReasons.law ? makeLane('paused', pausedReasons.law) : makeLane('loading'),
+      law: !activeModes.includes('law') ? makeLane('paused', KNOWHOW_ONLY_LAW_MESSAGE)
+        : pausedReasons.law ? makeLane('paused', pausedReasons.law) : makeLane('loading'),
     }];
     active = run;
     running = true;
     notify();
-    await Promise.all(MODES.filter((mode) => !pausedReasons[mode]).map((mode) => runLane(run, mode, normalizedQuery, modelType)));
+    await Promise.all(activeModes.filter((mode) => !pausedReasons[mode]).map((mode) => runLane(run, mode, normalizedQuery, modelType)));
     if (isCurrent(run)) {
       checkSessionCollision(run);
       running = false;
