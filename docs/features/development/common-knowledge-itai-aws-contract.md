@@ -240,3 +240,12 @@ AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタッ�
 - **原因:** itai phase2 のノウハウ検索は `KNOWHOW_BACKEND=managed`（専用 Bedrock KB `EleKnowledge-itai-knowhow-kb-v2` の Retrieve）で、`retrieve_cards` が索引の版と `KNOWHOW_RELEASE_ID`（KB に取り込んだ release、`acde2268…`）の一致を検査する。公開版から作った索引（`3917c4ac…`）へ `KnowhowIndexKey` だけを切り替えたため、この検査で `KnowhowIndexError` → 503 になった。上の「実施したこと」で「配備中のコードで動く」と確認したのは `parse_index`・`search_index`（local 方式）であり、managed 方式の検査を見落とした。
 - **戻し:** changeset `restore-git-index`（配備中のテンプレートのまま、`KnowhowIndexKey` を `acde2268…` へ、`KnowhowCanonicalBucket` を空へ。7 件 Modify・Replacement なし）で UPDATE_COMPLETE。索引と release が一致し、照合は無効（Git 由来の索引の本文 hash は変換前で、公開版と一致しないため、照合を有効にすると全カードが除かれる）。RAG のコードは `e104a022` のまま。
 - **公開版へ切り替えるには:** 公開版 398 枚を新しい release（`releases/3917c4ac…/`）として専用 KB に投入・同期し（Bedrock の取込に費用が発生する）、`t3-connection-approved.json` 相当の接続設定の `releaseId` を新しい release にして T0-T1 の手順で再生成・配備する。そのうえで `KnowhowCanonicalBucket` を指定して照合を有効にする。
+
+### 公開版の release を専用 KB に投入し、公開版へ切り替え（2026-11-12）
+
+> 最終検証: 2026-11-12 — 取込ジョブの統計と KB の文書一覧（新 release の 398 件すべて INDEXED、ID が索引と一致）、changeset の全件確認、配備後の RAG・ワーカーの環境変数、配備コードと同じ経路（`retrieve_cards` → `confirm_published`）での検索 1 回（有料の Retrieve 1 回）。先輩チャットの画面での実回答は未確認。
+
+- **release の投入:** 公開版の索引（`sha256:3917c4ac…`）から、T3 と同じ形式の取込物 797 件（索引 1、文書 398、メタデータ 398）を作り、専用バケットの `releases/3917c4ac…/` へ上書きなしで配置して一覧の過不足が無いことを確かめ、取込ジョブ `K2JYW2KEQB` を 1 回実行した（COMPLETE、新規 398・失敗 0、旧 release は変更なし）。手順は `feature/itai検証T0-T1` の `sync-managed-cards.py` の置き先検証・配置・同期の関数を再利用する私有スクリプト（T0-T1 の `.private-knowhow/t24-release-published.py`）で行った。KB の検索は `release_id` で絞るため、旧 release の文書は混ざらない。
+- **配備:** 接続設定の release を新しいものにして生成し直した runtime は、t23 との差が `KNOWHOW_RELEASE_ID`（RAG・ワーカー）と索引キーの既定値の 3 か所だけ。t23 の packaged テンプレートに同じ置き換えを当て（コードの置き場は同じ）、changeset `t24-published-release`（7 件 Modify、コード変更なし・Replacement なし）で UPDATE_COMPLETE。`KnowhowIndexKey=indexes/3917c4ac….json`、`KnowhowCanonicalBucket` は正本バケット（照合を有効化）。
+- **確認:** 「1D2G 調整前に戸開しない。PAD の取付を確認したい」で 3 枚が返り、3 枚とも manifest の照合を通った（すべて `approved`）。
+- **戻し方:** `restore-git-index` と同じ（`KnowhowIndexKey` を `acde2268…`、`KnowhowCanonicalBucket` を空）に加えて、`KNOWHOW_RELEASE_ID` を旧 release に戻す必要があるため、t23 の packaged テンプレート（`deployment-artifacts/e104a022…/template.yaml`）で changeset を作る。旧 release・旧索引は消していない。
