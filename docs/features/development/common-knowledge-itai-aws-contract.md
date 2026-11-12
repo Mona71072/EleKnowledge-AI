@@ -232,3 +232,11 @@ AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタッ�
 - 未確認: 先輩チャット・調査ジョブでの実回答（有料呼び出しのため未実施。ブラウザで 1 問確認する）。
 - 戻し方: 前回の生成物（t8、`9fa0c8fa`）の packaged テンプレートで changeset を作るか、`KnowhowCanonicalBucket` を空にして照合だけを止める。
 - **戻し方:** `KnowhowIndexKey` を旧値 `indexes/acde2268….json`（Git の取込一覧から作った索引）に戻す changeset を、同じ手順（配備中のテンプレートのまま）で実行する。旧索引は消していない。
+
+### 503 と戻し（2026-11-12）
+
+> 最終検証: 2026-11-12 — itai の先輩チャットで「ノウハウMarkdownの検索準備ができていません」（503）を画面で確認、RAG Lambda の環境変数を実査、戻しの changeset 実行後の環境変数を実査。戻し後の画面は未確認。
+
+- **原因:** itai phase2 のノウハウ検索は `KNOWHOW_BACKEND=managed`（専用 Bedrock KB `EleKnowledge-itai-knowhow-kb-v2` の Retrieve）で、`retrieve_cards` が索引の版と `KNOWHOW_RELEASE_ID`（KB に取り込んだ release、`acde2268…`）の一致を検査する。公開版から作った索引（`3917c4ac…`）へ `KnowhowIndexKey` だけを切り替えたため、この検査で `KnowhowIndexError` → 503 になった。上の「実施したこと」で「配備中のコードで動く」と確認したのは `parse_index`・`search_index`（local 方式）であり、managed 方式の検査を見落とした。
+- **戻し:** changeset `restore-git-index`（配備中のテンプレートのまま、`KnowhowIndexKey` を `acde2268…` へ、`KnowhowCanonicalBucket` を空へ。7 件 Modify・Replacement なし）で UPDATE_COMPLETE。索引と release が一致し、照合は無効（Git 由来の索引の本文 hash は変換前で、公開版と一致しないため、照合を有効にすると全カードが除かれる）。RAG のコードは `e104a022` のまま。
+- **公開版へ切り替えるには:** 公開版 398 枚を新しい release（`releases/3917c4ac…/`）として専用 KB に投入・同期し（Bedrock の取込に費用が発生する）、`t3-connection-approved.json` 相当の接続設定の `releaseId` を新しい release にして T0-T1 の手順で再生成・配備する。そのうえで `KnowhowCanonicalBucket` を指定して照合を有効にする。
