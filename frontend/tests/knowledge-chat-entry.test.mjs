@@ -843,3 +843,32 @@ test('D16: with NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY the turn shows one knowhow answe
     delete process.env.NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY;
   }
 });
+
+test('cited card titles and returned document names become links; unknown names and links stay text', () => {
+  const card = {
+    knowledgeId: 'KH-1001', cardVersion: 3, sha256: 'b'.repeat(64), title: '仮設材の固定方法',
+    status: 'approved', usage: 'navigation_only', body: '本文', searchTerms: [], sourceRefs: [], modelScope: {},
+  };
+  const answer = {
+    mode: 'normal', query: '仮設材', responseType: 'pages', sessionId: 'session-tech', messageId: 'm-1',
+    content: '「仮設材の固定方法」によると…。[外部](https://evil.example) と 「存在しないカード」。',
+    receivedAt: '2026-10-20T00:00:00Z', sourceDocuments: [], pageCandidates: [], clarifyQuestions: [],
+    knowhow: { status: 'matched', indexVersion: `sha256:${'a'.repeat(64)}`, searchTerms: [], matches: [card] },
+  };
+  const initialSnapshot = { running: false, turns: [{ id: 1, query: '仮設材', normal: lane('success', { answer }), law: lane('paused') }] };
+  process.env.NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY = 'true';
+  try {
+    const render = loadInteractiveChat({
+      initialSnapshot,
+      createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+    });
+    render();
+    const html = renderToStaticMarkup(render());
+    assert.match(html, /<a href="#lane-normal-m-1-card-KH-1001"[^>]*>仮設材の固定方法<\/a>/);
+    assert.match(html, /<summary id="lane-normal-m-1-card-KH-1001"/);
+    assert.doesNotMatch(html, /evil\.example/);
+    assert.match(html, /存在しないカード/);
+  } finally {
+    delete process.env.NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY;
+  }
+});

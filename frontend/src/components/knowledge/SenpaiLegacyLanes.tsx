@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import type { SenpaiChatLane, SenpaiChatTurn } from '@/lib/knowledge-senpai-chat.mjs';
 import { KNOWHOW_NOT_OFFICIAL_NOTICE, knowhowStatusLabel, modelFitNotice, scopeUnverifiedNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
-import { SenpaiMarkdown } from './SenpaiMarkdown';
+import { SenpaiMarkdown, type SenpaiLinkTarget } from './SenpaiMarkdown';
+import { knowhowCardAnchor } from '@/lib/citation-links.mjs';
 import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
 import {
   researchSourceHref,
@@ -48,6 +49,11 @@ function scopeValue(key: string, value: string | string[]) {
   return (Array.isArray(value) ? value.join('、') : value) || '未記載';
 }
 
+/** 回答ごとの、カードへのアンカーの接頭辞（同じ画面に複数の相談が並ぶため、回答の識別子を入れる）。 */
+function cardPrefix(answer: import('@/lib/knowledge-research.mjs').ResearchAnswer, mode: KnowledgeResearchMode) {
+  return `lane-${mode}-${String(answer.messageId || 'answer').replace(/[^A-Za-z0-9-]/gu, '-')}`;
+}
+
 function KnowhowReferences({ answer, selectedModel }: { answer: import('@/lib/knowledge-research.mjs').ResearchAnswer; selectedModel?: string }) {
   const knowhow = answer.knowhow;
   if (!knowhow) return null;
@@ -70,7 +76,7 @@ function KnowhowReferences({ answer, selectedModel }: { answer: import('@/lib/kn
             {modelFitNotice(match, selectedModel) && <p role="note" className="mt-2 text-amber-700">{modelFitNotice(match, selectedModel)}</p>}
             {scopeUnverifiedNotice(match) && <p role="note" className="mt-1 text-gray-600">{scopeUnverifiedNotice(match)}</p>}
             <details className="mt-2">
-              <summary className="cursor-pointer font-medium text-gray-600">適用条件・出典と本文を確認</summary>
+              <summary id={knowhowCardAnchor(cardPrefix(answer, 'normal'), match.knowledgeId)} className="cursor-pointer font-medium text-gray-600">適用条件・出典と本文を確認</summary>
               <dl className="mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 break-words text-gray-700">
                 <dt className="text-gray-500">ノウハウID</dt><dd>{match.knowledgeId}</dd>
                 <dt className="text-gray-500">本文の識別値</dt><dd className="break-all font-mono">{match.sha256}</dd>
@@ -94,6 +100,17 @@ function KnowhowReferences({ answer, selectedModel }: { answer: import('@/lib/kn
 }
 
 /** `label` を渡すと、その名前で表示し、該当なしでもサーバーの本文（注意・定型文）を出す（先輩チャットのノウハウだけの回答）。 */
+/** 本文の資料名（返した資料）とカード名（参照したノウハウ）を、出典・カードへのリンクにする一覧。 */
+function laneLinkTargets(answer: import('@/lib/knowledge-research.mjs').ResearchAnswer, mode: KnowledgeResearchMode): SenpaiLinkTarget[] {
+  const documents = (answer.sourceDocuments || []).map((source) => ({
+    names: [source.documentName, source.title], href: researchSourceHref(source, mode),
+  }));
+  const cards = mode === 'normal' ? (answer.knowhow?.matches || []).map((match) => ({
+    names: [match.title], href: `#${knowhowCardAnchor(cardPrefix(answer, mode), match.knowledgeId)}`,
+  })) : [];
+  return [...cards, ...documents];
+}
+
 export function LaneReply({ lane, mode, selectedModel, label }: { lane: SenpaiChatLane; mode: KnowledgeResearchMode; selectedModel?: string; label?: string }) {
   const name = label ?? (mode === 'law' ? '法令KB' : '技術KB');
   if (lane.status === 'loading') return <p role="status" className="text-sm text-gray-600">{name}を検索しています…</p>;
@@ -116,7 +133,7 @@ export function LaneReply({ lane, mode, selectedModel, label }: { lane: SenpaiCh
         </div>
       ) : (
         answer.content
-          ? <SenpaiMarkdown markdown={answer.content} knownRefs={NO_REFS} anchorPrefix={`lane-${mode}`} variant="plain" />
+          ? <SenpaiMarkdown markdown={answer.content} knownRefs={NO_REFS} anchorPrefix={`lane-${mode}`} variant="plain" linkTargets={laneLinkTargets(answer, mode)} />
           : <p className="text-sm leading-6 text-gray-800">回答本文がありません。</p>
       )}
       {mode === 'normal' && <KnowhowReferences answer={answer} selectedModel={selectedModel} />}

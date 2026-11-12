@@ -15,6 +15,7 @@ import { ChatMessageFeedback } from '@/components/chat/ChatMessageFeedback';
 import { ProductWishModal } from '@/components/chat/ProductWishModal';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { documentHref, documentHrefWithPage } from '@/lib/documents';
+import { linkCitedNames } from '@/lib/citation-links.mjs';
 import { getAnnouncements, Announcement } from '@/lib/announcements';
 import { NoticeBanner } from '@/components/announcements/NoticeBanner';
 import { resolveInitialChatMode } from '@/lib/chat-session-link.mjs';
@@ -1408,7 +1409,16 @@ const normalizeTableMarkdown = (text: string): string => {
                                 </>
                               ) : (
                                 <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-                                  {normalizeTableMarkdown(streamingMessages[message.id] || message.content)}
+                                  {/* 本文の資料名を、この回答の参考資料へのリンクにする（返した資料の名前だけ） */}
+                                  {linkCitedNames(
+                                    normalizeTableMarkdown(streamingMessages[message.id] || message.content),
+                                    message.role === 'assistant'
+                                      ? getUniqueDocs(message.sourceDocuments).map((doc) => ({
+                                        names: [doc.documentName, doc.title],
+                                        href: doc.lawCitation?.sourceUrl || documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id }),
+                                      }))
+                                      : [],
+                                  )}
                                 </ReactMarkdown>
                               )}
                             </div>
