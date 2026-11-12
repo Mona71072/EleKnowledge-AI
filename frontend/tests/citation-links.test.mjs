@@ -33,3 +33,39 @@ test('returns the input unchanged without targets', () => {
 test('card anchors are stable and safe', () => {
   assert.equal(knowhowCardAnchor('senpai-turn-1', 'KH-ALL-1D2G_PAD.324'), 'senpai-turn-1-card-KH-ALL-1D2G-PAD-324');
 });
+
+const PAGED = {
+  names: ['TI-1158.pdf'],
+  href: '/doc?uri=s3%3A%2F%2Fb%2FTI-1158.pdf',
+  pageHref: (page) => `/doc?uri=s3%3A%2F%2Fb%2FTI-1158.pdf#page=${page}`,
+};
+
+test('links "name p.N" to that page when the target can open pages', () => {
+  // じっくりモードの回答は「資料名 p.N」で根拠を示す（2026-11-12 段階 1'）。
+  assert.equal(
+    linkCitedNames('値は10です（TI-1158.pdf p.3 / TI-1158 P.12）', [PAGED]),
+    '値は10です（[TI-1158.pdf p.3](</doc?uri=s3%3A%2F%2Fb%2FTI-1158.pdf#page=3>) / [TI-1158 P.12](</doc?uri=s3%3A%2F%2Fb%2FTI-1158.pdf#page=12>)）',
+  );
+  assert.equal(
+    linkCitedNames('- TI-1158.pdf p.45（共通資料）', [PAGED]),
+    '- [TI-1158.pdf p.45](</doc?uri=s3%3A%2F%2Fb%2FTI-1158.pdf#page=45>)（共通資料）',
+  );
+});
+
+test('keeps the document link when the page is absent, invalid or not supported', () => {
+  assert.equal(linkCitedNames('TI-1158.pdf を参照', [PAGED]), '[TI-1158.pdf](</doc?uri=s3%3A%2F%2Fb%2FTI-1158.pdf>) を参照');
+  assert.equal(
+    linkCitedNames('TI-1158.pdf p.12345', [PAGED]),
+    '[TI-1158.pdf](</doc?uri=s3%3A%2F%2Fb%2FTI-1158.pdf>) p.12345',
+  );
+  // 法令は e-Gov の URL のまま（ページ指定を付けない）。
+  const law = { names: ['昭和二十五年法律第二百一号 第三十四条'], href: 'https://laws.e-gov.go.jp/law/325AC0000000201#Mp-At_34' };
+  assert.equal(
+    linkCitedNames('昭和二十五年法律第二百一号 第三十四条 p.2', [law]),
+    '[昭和二十五年法律第二百一号 第三十四条](<https://laws.e-gov.go.jp/law/325AC0000000201#Mp-At_34>) p.2',
+  );
+  assert.equal(
+    linkCitedNames('TI-1158.pdf p.3', [{ ...PAGED, pageHref: () => 'bad href' }]),
+    '[TI-1158.pdf](</doc?uri=s3%3A%2F%2Fb%2FTI-1158.pdf>) p.3',
+  );
+});

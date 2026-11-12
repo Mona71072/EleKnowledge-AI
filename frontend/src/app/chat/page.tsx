@@ -1409,14 +1409,21 @@ const normalizeTableMarkdown = (text: string): string => {
                                 </>
                               ) : (
                                 <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-                                  {/* 本文の資料名を、この回答の参考資料へのリンクにする（返した資料の名前だけ） */}
+                                  {/* 本文の資料名を、この回答の参考資料へのリンクにする（返した資料の名前だけ）。
+                                      「資料名 p.N」は該当ページを開く。法令は法令チャットと同じ e-Gov の URL（lawCitation.sourceUrl）で、ページは付けない。 */}
                                   {linkCitedNames(
                                     normalizeTableMarkdown(streamingMessages[message.id] || message.content),
                                     message.role === 'assistant'
-                                      ? getUniqueDocs(message.sourceDocuments).map((doc) => ({
-                                        names: [doc.documentName, doc.title],
-                                        href: doc.lawCitation?.sourceUrl || documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id }),
-                                      }))
+                                      ? getUniqueDocs(message.sourceDocuments).map((doc) => {
+                                        const ctx = { sessionId: currentSession, messageId: message.id };
+                                        return doc.lawCitation
+                                          ? { names: [doc.documentName, doc.title], href: doc.lawCitation.sourceUrl }
+                                          : {
+                                            names: [doc.documentName, doc.title],
+                                            href: documentHref(doc.sourceUri, ctx),
+                                            pageHref: (page: number) => documentHrefWithPage(doc.sourceUri, page, ctx),
+                                          };
+                                      })
                                       : [],
                                   )}
                                 </ReactMarkdown>

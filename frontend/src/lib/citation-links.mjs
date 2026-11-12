@@ -8,6 +8,9 @@ const EXISTING_LINK = /(!?\[[^\]\n]*\]\([^)\n]*\))/u;
 const WORD_CHAR = /[0-9A-Za-z_]/u;
 const MIN_NAME_LENGTH = 4;
 const MAX_TARGETS = 50;
+// 資料名の直後のページ表記（「TI-1158.pdf p.3」「TI-1158 P.12」）。
+const PAGE_SUFFIX = String.raw`(?:[ \u3000]?[pP]\.[ ]?([1-9][0-9]{0,3}))?`;
+const MAX_PAGE = 9999;
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
@@ -24,31 +27,49 @@ function nameVariants(name) {
   return withoutExtension !== trimmed && withoutExtension.length >= MIN_NAME_LENGTH ? [trimmed, withoutExtension] : [trimmed];
 }
 
+function safeHref(href) {
+  return typeof href === 'string' && href && !/[<>\s]/u.test(href) ? href : undefined;
+}
+
 /**
+ * 回答本文の資料名を、返した資料へのリンクにする。
+ * 資料名の直後に「p.N」があり、対象が `pageHref` を持つときは、そのページを開くリンクにする（「p.N」もリンクに含める）。
+ * `pageHref` を持たない対象（法令の e-Gov URL など）は、ページ表記があっても `href` のまま。
+ *
  * @param {string} markdown
- * @param {ReadonlyArray<{names: ReadonlyArray<string|undefined|null>, href: string|undefined|null}>} targets
+ * @param {ReadonlyArray<{names: ReadonlyArray<string|undefined|null>, href: string|undefined|null, pageHref?: (page: number) => string|undefined|null}>} targets
  * @returns {string}
  */
 export function linkCitedNames(markdown, targets) {
   if (typeof markdown !== 'string' || !markdown || !Array.isArray(targets) || targets.length === 0) return markdown;
-  const hrefByName = new Map();
+  const targetByName = new Map();
   for (const target of targets.slice(0, MAX_TARGETS)) {
-    if (!target || typeof target.href !== 'string' || !target.href || /[<>\s]/u.test(target.href)) continue;
+    const href = safeHref(target?.href);
+    if (!href) continue;
+    const pageHref = typeof target.pageHref === 'function' ? target.pageHref : undefined;
     for (const name of target.names || []) {
       if (!usableName(name)) continue;
       for (const variant of nameVariants(name)) {
-        if (!hrefByName.has(variant)) hrefByName.set(variant, target.href);
+        if (!targetByName.has(variant)) targetByName.set(variant, { href, pageHref });
       }
     }
   }
-  if (hrefByName.size === 0) return markdown;
-  const names = [...hrefByName.keys()].sort((left, right) => right.length - left.length);
-  const pattern = new RegExp(names.map(escapeRegExp).join('|'), 'gu');
-  const linkText = (text) => text.replace(pattern, (match, offset, whole) => {
+  if (targetByName.size === 0) return markdown;
+  const names = [...targetByName.keys()].sort((left, right) => right.length - left.length);
+  const pattern = new RegExp(`(${names.map(escapeRegExp).join('|')})${PAGE_SUFFIX}`, 'gu');
+  const linkText = (text) => text.replace(pattern, (match, name, page, offset, whole) => {
     const before = whole[offset - 1] ?? '';
+    const afterName = whole[offset + name.length] ?? '';
     const after = whole[offset + match.length] ?? '';
-    if ((WORD_CHAR.test(match[0]) && WORD_CHAR.test(before)) || (WORD_CHAR.test(match.at(-1)) && WORD_CHAR.test(after))) return match;
-    return `[${match}](<${hrefByName.get(match)}>)`;
+    if (WORD_CHAR.test(name[0]) && WORD_CHAR.test(before)) return match;
+    if (WORD_CHAR.test(name.at(-1)) && WORD_CHAR.test(afterName)) return match;
+    const target = targetByName.get(name);
+    const pageNumber = page ? Number(page) : undefined;
+    const pageLink = pageNumber && pageNumber <= MAX_PAGE && !WORD_CHAR.test(after) && target.pageHref
+      ? safeHref(target.pageHref(pageNumber))
+      : undefined;
+    if (pageLink) return `[${match}](<${pageLink}>)`;
+    return `[${name}](<${target.href}>)${match.slice(name.length)}`;
   });
   return markdown.split(CODE_SEGMENT).map((part, index) => (
     index % 2 === 1 ? part : part.split(EXISTING_LINK).map((piece, pieceIndex) => (pieceIndex % 2 === 1 ? piece : linkText(piece))).join('')
