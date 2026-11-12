@@ -179,3 +179,35 @@ AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタッ�
 - 費用: Secrets Manager 1件（約0.40 USD/月）に加え、作業用バケットの保存量・版数に比例する従量（現状数KB）。他は従来どおり従量で僅少。ブラウザ確認の質問によるBedrock呼出しのみ発生。料金表は今回照会していない概算。
 - 停止: `CommonKnowledgeEnabled=false` の更新、または認可表の削除で全操作403。Amplifyは `ITAI_*` 変数を外せば共有devのRAG/チャットに戻る。
 - rollback: スタックは他から参照されない。作業用バケットはRetain（固定した版を消さないため、版削除はポリシーで拒否）。公開中の知識はない（停止済み）。
+
+## Git のカードの移行（WP3）の配備と実施（2026-11-12）
+
+> 最終検証: 2026-11-12 — changeset の全件確認、配備後の AWS 実査（配備コードの hash・API ポリシー・未認証の応答）、移行 398 枚の結果と `verify`、読み取り用 Lambda の直接呼び出しでの公開版読み取り。
+
+契約: [I1 契約](common-knowledge-i1-contract.md)の「Git のカードの移行」。手順書は `scripts/knowledge/migrate_cards_to_s3.py` の docstring。
+
+### 配備（WP2・WP3 のコードを同時に反映）
+
+| changeset | 内容 | 結果 |
+| --- | --- | --- |
+| `wp2-wp3-41f78de5` | 5 関数のコード、`/sample-checks` のルート（API 本体・Lambda Permission 1・API Deployment の付け替え）。10 件、Replacement なし | **UPDATE_ROLLBACK_COMPLETE**。API のリソースポリシーが上限 8192 バイトを超えた（SAM の `IpRangeWhitelist` がルートごとに IP 10 件入りの許可・拒否の組を書き、15 ルートで超過） |
+| `wp2-wp3-policy-a5bfb447` | 上と同じ 10 件。IP 制限を API 全体の 2 文（`execute-api:/*` の許可と、`AllowedIPList` 以外からの拒否）に変更 | UPDATE_COMPLETE、失敗イベントなし |
+
+- 配備物は `git archive`（`core.autocrlf=false`）から作り、zip 内 6 ファイルの SHA256 がコミット `a5bfb447` の blob と一致。5 関数とも同一コード、フラグ true のまま。
+- API ポリシーは 648 バイト（許可 1・拒否 1、IP 10 件）。許可された IP から、トークンなしの `/knowledge/me`・`/sample-checks` は 401、未定義ルートは 403（変更前と同じ）。
+- 認可表（ユーザーが put-item を実行）: 根拠 `GIT-CARDS-MIGRATION`（version = `a5bfb447`、sha256 = 移行一覧の hash、期限 3 年）を追加。本アカウントに `elevator-knowhow` / `all-users` の閲覧・編集・承認・公開・読取を 2026-11-26 まで付与。他の主体（11-05 で期限切れ）は変更なし。
+
+### 移行の実施
+
+- `plan`（コミット `a5bfb447`）: 398 枚、エラー 0。例外の印 71、置き場違いの修正 14（版を 1 上げた）、移し先が要確認のため変えなかった 2、旧項目を外した 6。
+- `apply`: 1 枚（`KH-ALL-1D2G-PAD-REVERSED-324`）で試行 → `verify` 一致、同じコマンドの再実行で同じ結果・作業用の版は 1 つのまま → 全件を実行。398 枚すべて 200、manifest generation はすべて 1、抜き取り確認待ち 71・なし 327。
+- `verify`: 398 件中 398 件で、公開中・束の本文 hash・`published/` の本文 hash が移行一覧と一致。
+- 読み取り: 読み取り用 Lambda を本アカウントの claims で直接呼び出し、修正したカード（版 2、`product_lines: AXIEZ-LINKs`）と通常のカードが 200、存在しない ID が 404 `NotPublished`。
+
+### 未実施・残り
+
+- 先輩チャットとじっくり調べるの読み取り元は、まだ Git の索引のまま（WP4 で公開版へ切り替える）。公開版から作った索引の照合（設計 §4.11 の手順 4）も WP4 で行う。
+- 抜き取り確認待ち 71 枚は、もう 1 人（mona）の `approve` 権限が要る。mona の権限は期限切れのまま。
+- 2 つ目のアカウント・mona への `elevator-knowhow` / `all-users` の読取付与は未実施。利用者全員に読ませる付与の方式は WP4 で決める。
+- 費用: S3 オブジェクト約 2,400 件（数 MB）、Lambda 呼び出し約 800 回、DynamoDB の書込。いずれも従量で僅少（料金表は今回照会していない概算）。
+- 戻し方: カードごとに `/withdraw` で停止できる（manifest generation 2、`published/` から外れる）。台帳・`approved/` は不変の記録として残る。Git の `knowledge/cards/` はそのまま残しており、凍結は WP4 の切り替え後に行う。
