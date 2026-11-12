@@ -260,3 +260,13 @@ AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタッ�
 - changeset `t25-question-model-5c266d57`: 7 件 Modify（関数 4 のコード、RAG・ワーカーの `RAG_LOGIC_VERSION`、API 本体 2 と Role 1 は関数 ARN の再評価）、Replacement・削除なし。UPDATE_COMPLETE、失敗イベントなし。
 - 配備後: `RAG_LOGIC_VERSION=5c266d57`、release `3917c4ac…`・読者 `all-users`・照合は維持。配備した RAG の Python 31 ファイル（`question_model.py`・`vocabulary_generated.py` を含む）がコミットと一致。
 - 戻し方: t24 の packaged テンプレート（`deployment-artifacts/e104a022…/template-t24.yaml`）で changeset を作る（release・照合は t24 と同じ）。
+
+### 先輩チャットをノウハウだけで答える（D16）の配備（2026-11-12）
+
+> 最終検証: 2026-11-12 — 生成テンプレートの専用検査、build したコードとコミットの照合（32 ファイル）、changeset の全件確認、配備後の環境変数と配備コードの照合、Amplify itai のブランチ環境変数の読み戻し。画面での確認は Amplify の配信後に行う。
+
+仕様: [先輩チャットからMarkdownを探してKBを確認する](knowledge-markdown-retrieval.md)の「ノウハウだけで答える（D16）」。
+
+- RAG 側: `itai` の `2e62e647` を `feature/itai検証T0-T1` に取り込み（`e8b91a13`、push 済み）、T0-T1 の手順（接続設定は公開版 release の t24 のまま）で changeset `t26-knowhow-only-e8b91a13`（7 件 Modify、Replacement・削除なし）を実行し UPDATE_COMPLETE。`RAG_LOGIC_VERSION=e8b91a13`、release・読者・照合は維持。配備した RAG の Python 32 ファイル（`knowhow_answer.py` を含む）がコミットと一致。
+- 画面: Amplify itai のブランチ環境変数に `NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY=true` を追加（既存 7 件は値を変えずに書き戻し、合計 8 件）。`amplify.yml` に同名の変数は無い。`itai` の push で配信する。
+- 戻し方: 画面は同じ変数を外して再配信（従来の 2 列に戻る）。RAG は t25 の packaged テンプレート（`deployment-artifacts/5c266d57…/template.yaml`）で changeset を作る（`knowhowOnly` を送らない限り従来の経路のため、画面だけ戻しても動く）。
