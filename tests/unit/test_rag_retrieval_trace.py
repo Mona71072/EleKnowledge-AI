@@ -505,6 +505,16 @@ def test_law_trace_marks_all_contributing_chunks_once_per_reference(rag_app):
     assert counts["below_threshold"] == 0
     assert counts["limit"] == 0
 
+    trace = rag_app._build_request_trace(
+        event={}, mode="law", response_type="pages", query="法令の質問",
+        composed_query=None, message_id="message-1", search_attempts=[], rewrite={},
+        results=selected, selected_results=[reference], dedupe_counts={}, weak=False,
+        generation_meta=None, started_at=None, rank_key=None,
+    )
+
+    assert trace["gate"]["selectedCount"] == 2
+    assert sum(row.get("modelInputText") is not None for row in trace["candidates"]) == 1
+
 
 # --- 露出制御・ログ ---
 
