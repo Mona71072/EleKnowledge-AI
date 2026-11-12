@@ -279,6 +279,80 @@ def clear_cache() -> None:
     """Clear process-local cache; exposed for deterministic unit tests."""
     _cache.update(identity=None, expires=0.0, index=None, version_id=None, etag=None)
     _feature_cache.update(signature=None, value=None)
+    _manifest_cache.clear()
+
+
+# WP4 (design 2026-11-11 §4.11 step 5, §4.12): an index built from the common-knowledge published
+# versions is re-checked against the manifest before a card reaches an answer, so a withdrawn card,
+# a newer published version, another audience or an expired bundle drops out within the cache TTL
+# without rebuilding the index. Fail-closed: an unreadable manifest store raises KnowhowIndexError.
+_manifest_cache: dict[str, tuple[float, dict | None]] = {}
+MANIFEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+
+
+def published_guard_config() -> tuple[str, frozenset[str]] | None:
+    """(canonical bucket, allowed audiences) when the guard is configured, else None."""
+    bucket = os.environ.get("KNOWHOW_CANONICAL_BUCKET", "").strip()
+    audiences = frozenset(value.strip() for value in os.environ.get("KNOWHOW_AUDIENCES", "").split(",")
+                          if value.strip())
+    if not bucket:
+        return None
+    if len(bucket) > 255 or not audiences:
+        raise KnowhowIndexError("published guard is misconfigured")
+    return bucket, audiences
+
+
+def _published_manifest(s3_client, bucket: str, knowledge_id: str, current: float) -> dict | None:
+    cached = _manifest_cache.get(knowledge_id)
+    if cached and current < cached[0]:
+        return cached[1]
+    try:
+        response = s3_client.get_object(Bucket=bucket, Key=f"manifests/{knowledge_id}.json")
+        raw = response["Body"].read(64 * 1024 + 1)
+        if len(raw) > 64 * 1024:
+            raise KnowhowIndexError("manifest is too large")
+        manifest = json.loads(raw)
+    except KnowhowIndexError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - S3 details never reach clients
+        code = getattr(exc, "response", {}).get("Error", {}).get("Code") if hasattr(exc, "response") else None
+        if code in ("NoSuchKey", "404"):
+            manifest = None
+        else:
+            raise KnowhowIndexError("published manifest is unavailable") from exc
+    _manifest_cache[knowledge_id] = (current + CACHE_TTL_SECONDS, manifest)
+    return manifest
+
+
+def confirm_published(cards: list[dict], *, s3_client=None, now: float | None = None,
+                      monotonic: float | None = None) -> list[dict]:
+    """Keep only cards whose exact body is the active published version for an allowed audience.
+
+    Without ``KNOWHOW_CANONICAL_BUCKET`` the cards are returned unchanged (the Git-built index).
+    """
+    config = published_guard_config()
+    if config is None or not cards:
+        return cards
+    bucket, audiences = config
+    if s3_client is None:
+        import boto3
+        s3_client = boto3.client("s3")
+    wall = time.time() if now is None else now
+    current = time.monotonic() if monotonic is None else monotonic
+    kept = []
+    for card in cards:
+        knowledge_id = card.get("knowledgeId")
+        if not isinstance(knowledge_id, str) or not MANIFEST_ID_PATTERN.fullmatch(knowledge_id):
+            continue
+        manifest = _published_manifest(s3_client, bucket, knowledge_id, current)
+        bundle = (manifest or {}).get("bundle") or {}
+        if (manifest and manifest.get("active")
+                and bundle.get("knowledgeId") == knowledge_id
+                and bundle.get("rawSha256") == card.get("sha256")
+                and bundle.get("audience") in audiences
+                and isinstance(bundle.get("expiresAt"), int) and bundle["expiresAt"] > wall):
+            kept.append(card)
+    return kept
     _validated.update(index=None, fingerprint=None)
 
 

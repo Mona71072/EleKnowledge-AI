@@ -52,6 +52,19 @@ knowhow: {
 
 これはclarify、not_found、pagesの各応答で同じ契約とする。該当カードが0件なら「該当なし」とKB検索のみの状態を表示する。索引が利用不可であることとカードが見つからないことを混同しない。
 
+## 公開版からの索引と、使う直前の照合（2026-11-12、ノウハウ管理の見直し WP4）
+
+> 最終検証: 2026-11-12 — 合成試験（`tests/unit/test_knowhow_published_guard.py`・`tests/integration/test_knowhow_published_index.py`）と、itai 専用環境の公開版 398 枚からの索引作成（Lambda の索引検査を通過）。AWS の RAG Lambda への配備は本節の下の実施記録を参照。
+
+設計: `docs/design-2026-11-11-knowledge-governance.md` §4.11 手順 4・5、§4.12。WP3 でカードの正本を共通知識の S3 に移したため、先輩の索引も S3 の公開版から作る。
+
+- **索引の元:** `scripts/knowledge/snapshot_published_cards.py` が manifest と `published/` を読み（読み取りのみ）、公開中・読者が `all-users`・束の期限内のカードだけを、本文を manifest の hash と照合して書き出す。`--inventory` で WP3 の移行一覧と件数・hash を照合する。続けて `node scripts/knowledge/build-senpai-index.mjs build-published . <書き出し先>` が、Git の索引と同じカード検査で `.private-knowhow/index-published.json` を作る。本文は `status: approved` でなければ失敗する。索引の書式は変えていない（`sha256` は公開本文の hash）。Git の取込一覧（`build`）は、切り替えまでの戻し先として残す。
+- **使う直前の照合:** RAG Lambda は、検索で選んだカードごとに `manifests/{id}.json` を読み、公開中で、本文の hash が索引と同じで、読者が `KNOWHOW_AUDIENCES`（既定 `all-users`）に含まれ、束の期限内のものだけを使う（`confirm_published`）。停止・新しい版の公開・期限切れは、索引を作り直さなくても 60 秒以内に回答から外れる。manifest を読めないときは 503（推測で使わない）。先輩チャットと先輩の調査ジョブの両方に適用する。`KnowhowCanonicalBucket` が空なら照合しない（共有 dev は従来どおり）。IAM は `manifests/*` の GetObject だけで、一覧・書込みは付けない。
+- **未検証のカードは出ない:** 索引に入るのは公開版（WP3 で検証済みとして登録した版）だけである。
+- **画面の表示（コードで付ける）:** ノウハウ欄に「ノウハウは正規文書ではありません。根拠は正式資料で確認してください。」を常に出す。公開版のカードは「検証済み（参照用）」、適用範囲を担当者が確認していないカード（`scope_status` が `verified` 以外）には「機種の適用範囲は未確認です。」を出す。先輩の調査ジョブの回答はカードの適用範囲を返さないため、全般の注意だけを出す。「再確認待ち」は再検証の期限（WP8）ができてから付ける。
+- **機種の別名:** 語彙ファイルの許容表記 `MELCITY`・`MELWIDE` を検索の別名に足した（itai、2026-11-12）。`product_lines: [MELCITY]` のカード 1 枚がメルシティとして認識される（適用範囲は未確認のため、検索から外れることはない）。
+- **回答の記録:** 先輩チャットは使ったカードの ID と版を chatlogs に保存済み。じっくり調べるはノウハウを使っていないため、統合（PR #206）の後に同じ項目を保存する。
+
 ## 先輩の検索ルールと機種フィルタ（2026-10-20 方針）
 
 > 最終検証: 2026-10-21 — 評価ケースの終了コード（eval_senpai_retrieval.py:121-125 と `--index`）を照合し文書を修正。点数の付け方の改訂は単体テスト（tests/unit/test_knowhow_scoring.py）と、実カード 398 枚から作った評価用の索引（評価後に削除）で確認。2026-10-20 の合成カードの単体テスト（検索・索引検証・キュー生成）、合成索引での評価ケース実行、実カード398枚でのキュー生成、`modelFit` の判定・API・フロント（検証と画面の注意表示）の合成テストの結果は変更なし。AWS上・実画面の動作は未確認。

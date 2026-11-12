@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import type { SenpaiChatLane, SenpaiChatTurn } from '@/lib/knowledge-senpai-chat.mjs';
-import { modelFitNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
+import { KNOWHOW_NOT_OFFICIAL_NOTICE, knowhowStatusLabel, modelFitNotice, scopeUnverifiedNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
 import { SenpaiMarkdown } from './SenpaiMarkdown';
 import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
 import {
@@ -57,17 +57,18 @@ function KnowhowReferences({ answer, selectedModel }: { answer: import('@/lib/kn
   return (
     <section aria-label="参照したノウハウMarkdown" className="rounded-xl bg-gray-50 p-3">
       <h5 className="text-xs font-medium text-gray-700">参照したノウハウMarkdown</h5>
-      <p className="mt-1 text-xs leading-5 text-gray-500">参考候補です。技術的な根拠や承認を示しません。</p>
+      <p className="mt-1 text-xs leading-5 text-gray-500">参考候補です。{KNOWHOW_NOT_OFFICIAL_NOTICE}</p>
       <ul className="mt-2 space-y-3">
         {knowhow.matches.map((match) => (
           <li key={`${match.knowledgeId}-${match.cardVersion}`} className="rounded-lg bg-white p-3 text-xs text-gray-800">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold">{match.title}</span>
               <span>v{match.cardVersion}</span>
-              <span className="text-amber-700">{match.status === 'draft' ? '未承認（下書き）' : '承認済みカード・参照用のみ'}</span>
+              <span className="text-amber-700">{knowhowStatusLabel(match)}</span>
               <span className="text-gray-500">参照用のみ</span>
             </div>
             {modelFitNotice(match, selectedModel) && <p role="note" className="mt-2 text-amber-700">{modelFitNotice(match, selectedModel)}</p>}
+            {scopeUnverifiedNotice(match) && <p role="note" className="mt-1 text-gray-600">{scopeUnverifiedNotice(match)}</p>}
             <details className="mt-2">
               <summary className="cursor-pointer font-medium text-gray-600">適用条件・出典と本文を確認</summary>
               <dl className="mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 break-words text-gray-700">

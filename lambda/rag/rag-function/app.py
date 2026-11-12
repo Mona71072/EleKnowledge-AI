@@ -58,7 +58,7 @@ except ModuleNotFoundError as exc:
 
 try:
     from knowhow_retrieval import (
-        KnowhowIndexError, derive_kb_hints, load_index, search_index, retrieve_cards,
+        KnowhowIndexError, confirm_published, derive_kb_hints, load_index, search_index, retrieve_cards,
     )
 except ModuleNotFoundError as exc:
     if exc.name != 'knowhow_retrieval':
@@ -74,6 +74,7 @@ except ModuleNotFoundError as exc:
     load_index = _knowhow_module.load_index
     search_index = _knowhow_module.search_index
     retrieve_cards = _knowhow_module.retrieve_cards
+    confirm_published = _knowhow_module.confirm_published
 
 
 def _utc_now_iso() -> str:
@@ -2610,6 +2611,10 @@ def handle_rag_request(event, context, started_at):
                 knowhow_result = knowhow_search(
                     knowhow_index, knowhow_search_query, model_type=filters.get('modelType')
                 )
+                # WP4: only the active published version (manifest) for an allowed audience is used.
+                confirmed = confirm_published(knowhow_result['matches'])
+                knowhow_result = {**knowhow_result, 'matches': confirmed,
+                                  'status': 'matched' if confirmed else 'not_found'}
                 knowhow_hints = derive_kb_hints(knowhow_result['matches'])
                 knowhow_payload = {
                     'status': knowhow_result['status'],

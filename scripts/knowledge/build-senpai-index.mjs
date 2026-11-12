@@ -412,6 +412,47 @@ export async function buildKnowhowIndex({ root, manifest, generatedAt = new Date
   return assembleIndex(selected, generatedAt);
 }
 
+const PUBLISHED_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
+
+/**
+ * WP4 (design 2026-11-11 §4.11–4.12): build the Senpai index from a local snapshot of the
+ * common-knowledge published versions (snapshot_published_cards.py), not from Git.
+ * Every entry's body must match the manifest's rawSha256 and declare `status: approved`;
+ * the same card validation as the Git build applies. `sha256` in the index is the published
+ * rawSha256, which the RAG Lambda re-checks against the manifest before using a card.
+ */
+export async function buildPublishedIndex({ snapshotDir, generatedAt = new Date().toISOString(), today = utcToday() }) {
+  if (!validIsoDate(generatedAt)) fail('generatedAt must be an ISO timestamp.');
+  const { resolved } = await rootInfo(snapshotDir);
+  const listing = JSON.parse(await readFile(path.join(resolved, 'published.json'), 'utf8'));
+  exactKeys(listing, new Set(['schemaVersion', 'purpose', 'audiences', 'snapshotAt', 'entries']), 'Published listing');
+  if (listing.schemaVersion !== 1 || listing.purpose !== 'common-knowledge-published') fail('Published listing purpose or schema is invalid.');
+  if (!Array.isArray(listing.entries) || listing.entries.length === 0 || listing.entries.length > MAX_CARDS) {
+    fail('Published listing entries are empty or exceed the limit.');
+  }
+  const seen = new Set();
+  const selected = [];
+  for (const entry of listing.entries) {
+    exactKeys(entry, new Set(['knowledgeId', 'generation', 'rawSha256', 'bundleHash', 'audience', 'expiresAt']), 'Published entry');
+    if (typeof entry.knowledgeId !== 'string' || !PUBLISHED_ID.test(entry.knowledgeId)) fail('Published knowledge ID is invalid.');
+    if (seen.has(entry.knowledgeId)) fail('Published listing contains a duplicate knowledge ID.');
+    seen.add(entry.knowledgeId);
+    if (typeof entry.rawSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(entry.rawSha256)) fail('Published hash is invalid.');
+    const relativePath = `cards/${entry.knowledgeId}.md`;
+    const absolutePath = await checkNoSymlinkPath(resolved, relativePath);
+    if ((await lstat(absolutePath)).size > MAX_SOURCE_BYTES) fail('A published card exceeds the 256 KiB limit.');
+    const markdown = await readFile(absolutePath, 'utf8');
+    const sha256 = digest(markdown);
+    if (sha256 !== entry.rawSha256) fail(`Published card ${entry.knowledgeId} does not match its manifest hash.`);
+    const parsed = parseKnowledgeMarkdown(markdown);
+    if (parsed.id !== entry.knowledgeId) fail(`Published card ${entry.knowledgeId} declares another knowledge_id.`);
+    if (parsed.metadata.status !== 'approved') fail(`Published card ${entry.knowledgeId} is not status: approved.`);
+    if (parsed.body.length > MAX_CARD_BODY_CHARS) fail('A Markdown card body exceeds the 16,000 character limit.');
+    selected.push(indexCard({ parsed, metadata: parsed.metadata, sha256 }, today));
+  }
+  return assembleIndex(selected, generatedAt);
+}
+
 async function writePrivateOutput(root, filename, value) {
   const { resolved } = await rootInfo(root);
   const privateDirectory = path.join(resolved, '.private-knowhow');
@@ -694,7 +735,13 @@ async function main(args) {
     process.stdout.write(`Index built: ${index.cards.length} explicitly selected cards; index ${index.indexVersion}. No upload was performed.\n`);
     return;
   }
-  fail('Usage: build-senpai-index.mjs inventory <root> | build <root> <manifest.json> | ledger <root> | check <root> [--eval-index <path>] [--json] [--no-ledger]');
+  if (command === 'build-published' && manifestPath) {
+    const index = await buildPublishedIndex({ snapshotDir: manifestPath });
+    await writePrivateOutput(root, 'index-published.json', index);
+    process.stdout.write(`Index built from published versions: ${index.cards.length} cards; index ${index.indexVersion}. No upload was performed.\n`);
+    return;
+  }
+  fail('Usage: build-senpai-index.mjs inventory <root> | build <root> <manifest.json> | build-published <root> <snapshotDir> | ledger <root> | check <root> [--eval-index <path>] [--json] [--no-ledger]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

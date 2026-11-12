@@ -196,7 +196,8 @@ class RagDeps:
                 else:
                     result = app.search_index(index, query, model_type=model_type,
                                               max_matches=KNOWHOW_CANDIDATES_PER_QUERY)
-                ranked_lists.append(result['matches'])
+                # WP4: drop cards that are not the active published version for an allowed audience.
+                ranked_lists.append(app.confirm_published(result['matches']))
         except app.KnowhowIndexError as error:
             raise errors.KnowhowUnavailable('knowhow index unavailable') from error
         cards = _select_knowhow_cards(ranked_lists)

@@ -203,3 +203,14 @@ test('screen readers hear "調査中です" once and the outcome once, never the
   assert.equal(nextAnnouncement(true, { running: false, turns: [{ normal: { status: 'success' }, law: { status: 'error' } }] }), '回答ができました');
   assert.equal(nextAnnouncement(true, { running: false, turns: [{ normal: { status: 'error' }, law: { status: 'error' } }] }), '');
 });
+
+test('WP4: ノウハウの状態と適用範囲の注意はコードで付ける', async () => {
+  const { knowhowStatusLabel, scopeUnverifiedNotice, KNOWHOW_NOT_OFFICIAL_NOTICE } = await import('../src/lib/knowledge-senpai-model-fit.mjs');
+  assert.equal(knowhowStatusLabel({ status: 'approved' }), '検証済み（参照用）');
+  assert.equal(knowhowStatusLabel({ status: 'draft' }), '未承認（下書き）');
+  assert.equal(scopeUnverifiedNotice({ modelScope: {} }), '機種の適用範囲は未確認です。');
+  assert.equal(scopeUnverifiedNotice({ modelScope: { scope_status: 'unverified' } }), '機種の適用範囲は未確認です。');
+  assert.equal(scopeUnverifiedNotice({ modelScope: { scope_status: 'verified' } }), null);
+  assert.equal(scopeUnverifiedNotice({}), null);
+  assert.match(KNOWHOW_NOT_OFFICIAL_NOTICE, /正規文書ではありません/);
+});

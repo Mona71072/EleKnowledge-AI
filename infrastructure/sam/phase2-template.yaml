@@ -196,6 +196,20 @@ Parameters:
     AllowedPattern: '^$|^[A-Za-z0-9._/-]{1,512}$'
     Description: Fixed key for the Senpai navigation index; no prefix listing is granted
 
+  KnowhowCanonicalBucket:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: >-
+      Common-knowledge canonical bucket (manifests/). When set, each Senpai card is re-checked
+      against its publication manifest before use (design 2026-11-11 WP4). Empty keeps the Git index.
+
+  KnowhowAudiences:
+    Type: String
+    Default: 'all-users'
+    AllowedPattern: '^[A-Za-z0-9_-]{1,64}(,[A-Za-z0-9_-]{1,64}){0,4}$'
+    Description: Comma-separated publication audiences the Senpai chat may use
+
   LawDataBucketName:
     Type: String
     Default: ''
@@ -464,6 +478,9 @@ Conditions:
     - !Equals [!Ref KnowhowEnabled, 'true']
     - !Not [!Equals [!Ref KnowhowIndexBucket, '']]
     - !Not [!Equals [!Ref KnowhowIndexKey, '']]
+  KnowhowPublishedGuardEnabled: !And
+    - !Condition KnowhowIndexDevEnabled
+    - !Not [!Equals [!Ref KnowhowCanonicalBucket, '']]
   SenpaiSynthesisDevEnabled: !And
     - !Equals [!Ref Environment, dev]
     - !Equals [!Ref SenpaiSynthesisEnabled, 'true']
@@ -717,6 +734,13 @@ Resources:
                     - s3:GetObject
                   Resource: !Sub arn:aws:s3:::${KnowhowIndexBucket}/${KnowhowIndexKey}
                 - !Ref AWS::NoValue
+              - !If
+                - KnowhowPublishedGuardEnabled
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource: !Sub arn:aws:s3:::${KnowhowCanonicalBucket}/manifests/*
+                - !Ref AWS::NoValue
 
   ChatLambdaRole:
     Type: AWS::IAM::Role
@@ -790,6 +814,8 @@ Resources:
           # never signs a URL for a previously configured admin index.
           KNOWHOW_INDEX_BUCKET: !Ref KnowhowIndexBucket
           KNOWHOW_INDEX_KEY: !Ref KnowhowIndexKey
+          KNOWHOW_CANONICAL_BUCKET: !If [KnowhowPublishedGuardEnabled, !Ref KnowhowCanonicalBucket, '']
+          KNOWHOW_AUDIENCES: !Ref KnowhowAudiences
           ENVIRONMENT: !Ref Environment
           ADMIN_GROUP_NAME: admin
           LAW_DATA_BUCKET_NAME: !If [LawFullTextDevEnabled, !Ref LawDataBucketName, '']
@@ -1335,6 +1361,13 @@ Resources:
                     Resource: !Sub arn:aws:s3:::${KnowhowIndexBucket}/${KnowhowIndexKey}
                   - !Ref AWS::NoValue
                 - !If
+                  - KnowhowPublishedGuardEnabled
+                  - Effect: Allow
+                    Action:
+                      - s3:GetObject
+                    Resource: !Sub arn:aws:s3:::${KnowhowCanonicalBucket}/manifests/*
+                  - !Ref AWS::NoValue
+                - !If
                   - LawFullTextDevEnabled
                   - Effect: Allow
                     Action: s3:GetObject
@@ -1393,6 +1426,8 @@ Resources:
           KNOWHOW_ENABLED: !If [KnowhowIndexDevEnabled, 'true', 'false']
           KNOWHOW_INDEX_BUCKET: !Ref KnowhowIndexBucket
           KNOWHOW_INDEX_KEY: !Ref KnowhowIndexKey
+          KNOWHOW_CANONICAL_BUCKET: !If [KnowhowPublishedGuardEnabled, !Ref KnowhowCanonicalBucket, '']
+          KNOWHOW_AUDIENCES: !Ref KnowhowAudiences
           ENVIRONMENT: !Ref Environment
           ADMIN_GROUP_NAME: admin
           LAW_DATA_BUCKET_NAME: !If [LawFullTextDevEnabled, !Ref LawDataBucketName, '']

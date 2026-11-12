@@ -19,8 +19,8 @@ MODEL_ALIASES = {
     "AXIEZ": frozenset({"axiez", "axiez(ke-wf・ke-hf)", "駅舎エレ"}),
     "AXIEZ-LINKs": frozenset({"axiez-links"}),
     "NEXCUBE": frozenset({"nexcube", "nexcube limited", "特注機械室レスエレベーター"}),
-    "メルシティ": frozenset({"メルシティ"}),
-    "メルワイド": frozenset({"メルワイド"}),
+    "メルシティ": frozenset({"メルシティ", "melcity"}),
+    "メルワイド": frozenset({"メルワイド", "melwide"}),
     "エスカレーター": frozenset({"エスカレーター", "escalator"}),
 }
 

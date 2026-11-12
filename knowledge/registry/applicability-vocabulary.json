@@ -69,7 +69,7 @@
         "ui_filter": {
           "key": "メルシティ",
           "kb_model_types": ["メルシティ"],
-          "extra_card_aliases": []
+          "extra_card_aliases": ["MELCITY"]
         },
         "question_aliases": ["メルシティ", "melcity"],
         "related": {
@@ -86,7 +86,7 @@
         "ui_filter": {
           "key": "メルワイド",
           "kb_model_types": ["メルワイド"],
-          "extra_card_aliases": []
+          "extra_card_aliases": ["MELWIDE"]
         },
         "question_aliases": ["メルワイド", "melwide"],
         "related": {

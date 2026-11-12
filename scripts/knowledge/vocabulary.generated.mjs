@@ -6,8 +6,8 @@ export const MODEL_ALIASES = Object.freeze({
   'AXIEZ': Object.freeze(['axiez', 'axiez(ke-wf・ke-hf)', '駅舎エレ']),
   'AXIEZ-LINKs': Object.freeze(['axiez-links']),
   'NEXCUBE': Object.freeze(['nexcube', 'nexcube limited', '特注機械室レスエレベーター']),
-  'メルシティ': Object.freeze(['メルシティ']),
-  'メルワイド': Object.freeze(['メルワイド']),
+  'メルシティ': Object.freeze(['メルシティ', 'melcity']),
+  'メルワイド': Object.freeze(['メルワイド', 'melwide']),
   'エスカレーター': Object.freeze(['エスカレーター', 'escalator']),
 });
 export const GENERIC_ELEVATOR_LABEL = '全エレ機種';

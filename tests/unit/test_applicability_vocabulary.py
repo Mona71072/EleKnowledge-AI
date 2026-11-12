@@ -33,8 +33,9 @@ GENERATOR = ROOT / "scripts/knowledge/generate_vocabulary.py"
 RETRIEVAL = ROOT / "lambda/rag/rag-function/knowhow_retrieval.py"
 AXES = ("product_lines", "machine_room", "control_methods", "model_abbreviations",
         "guide_systems", "door_families", "door_types")
-# 2026-11-11 時点で、検索の機種フィルタ（knowhow_retrieval.MODEL_ALIASES）が認識しない許容の表記。
-KNOWN_FILTER_GAPS = ["MELCITY", "MELWIDE"]
+# 検索の機種フィルタ（knowhow_retrieval.MODEL_ALIASES）が認識しない許容の表記。
+# 2026-11-12 itai 決定（WP4）で MELCITY・MELWIDE を別名に足したため、穴は無い。
+KNOWN_FILTER_GAPS = []
 
 
 def _vocab() -> dict:
