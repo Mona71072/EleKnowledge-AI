@@ -34,6 +34,11 @@ RISK_DOMAINS = ("safety", "legal", "work_permission", "other")
 DOMAIN_LABELS = {"safety": "安全", "legal": "法令", "work_permission": "作業可否", "other": "その他"}
 MAX_CONTACT_CHARS = 200
 ESCALATION_CONTACTS_ENV = "RESEARCH_ESCALATION_CONTACTS"
+# 主張の機種として書かれても「機種なし」と同じに扱う値（共通資料の model_type と、語彙の全機種ラベル）。
+_COMMON_CLAIM_MODELS = frozenset(
+    unicodedata.normalize("NFKC", value).strip().lower()
+    for value in ("*", "general", vocabulary.GENERIC_ELEVATOR_LABEL, vocabulary.GENERIC_ESCALATOR_LABEL)
+)
 # 主張本文に紛れた「（E1 / E2）」のような括弧書きの根拠ID。番号は利用者に見せない（G9）。
 _BRACKETED_REFS = re.compile(r"[（(]\s*(E\d{1,2}(?:\s*[,、/・]\s*E\d{1,2})*)\s*[)）]")
 
@@ -273,6 +278,9 @@ def validate_claims(claims, evidence, handled_models=()):
             rejected.append(claim)
             continue
         cited = [evidence_by_id[ref] for ref in refs]
+        if claim.get("modelType") and _norm(claim["modelType"]) in _COMMON_CLAIM_MODELS:
+            # 共通資料の model_type（general 等）をそのまま書いた主張は、機種なしの主張として扱う。
+            claim = {**claim, "modelType": None}
         if (
             not _models_consistent(claim.get("modelType"), cited, handled_models)
             or not _versions_consistent(cited)

@@ -105,7 +105,7 @@ workerはqueued状態・dispatch期限・ACTIVEロックを条件付きトラン
 
 | # | 要件 | 受け入れ条件（単体テスト） |
 |---|---|---|
-| G1 | 主張の機種と根拠の機種は、語彙（`knowledge/registry/applicability-vocabulary.json` → `vocabulary_generated.py`）と取扱機種で正規化し、要素単位の完全一致で照合する | `AXIEZ` の主張が `AXIEZ-LINKs` だけの根拠を引くと不採用。辞書にない機種名の主張は不採用。主張が引く根拠は、すべて同じ機種か共通資料でなければならない |
+| G1 | 主張の機種と根拠の機種は、語彙（`knowledge/registry/applicability-vocabulary.json` → `vocabulary_generated.py`）と取扱機種で正規化し、要素単位の完全一致で照合する | `AXIEZ` の主張が `AXIEZ-LINKs` だけの根拠を引くと不採用。辞書にない機種名の主張は不採用。主張が引く根拠は、すべて同じ機種か共通資料でなければならない。主張の機種が `*` / `general` / 全エレ機種 / 全エス機種なら、機種なしの主張として扱う |
 | G2 | 共通資料（model_type が `*` / `general` / 無し）は機種付きの主張を裏付けてよい。根拠一覧に「共通資料」と表示する | 共通資料の根拠で機種付きの主張が採用され、根拠一覧に「共通資料」が出る |
 | G3 | 機種の付かない主張が、異なる機種の根拠を引く場合は採用しない（確認できなかった点へ回す。機種ごとの欄への振り分けは 2'） | `AXIEZ` と `NEXCUBE` の根拠を同時に引く機種なしの主張は不採用 |
 | G4 | 照合で否定された主張・照合できなかった主張は、本文を回答にも chatlogs にも出さない。件数だけを示す | 回答本文と `research` に否定された主張の文が含まれない。`research.unsupportedClaimCount` に件数が入る |

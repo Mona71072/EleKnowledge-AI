@@ -377,3 +377,19 @@ def test_answer_shows_document_names_not_evidence_ids():
     assert valid[0]["evidenceIds"] == ["E1", "E2"]
     assert re.search(r"\bE[12]\b", content) is None
     assert content.count("- TI-1158.pdf p.3") == 1
+
+
+def test_common_model_value_in_claim_is_treated_as_no_model():
+    # 実機確認（2026-11-12）で、モデルが共通資料の model_type「general」をそのまま書き、正しい主張が全件落ちた。
+    evidence = [_evidence("E1", "general"), _evidence("E2", ["general"]), _evidence("E3", "AXIEZ")]
+    claims = [
+        {"text": "a", "evidenceIds": ["E1"], "modelType": "general", "section": "conclusion"},
+        {"text": "b", "evidenceIds": ["E2", "E3"], "modelType": "*", "section": "conclusion"},
+        {"text": "c", "evidenceIds": ["E1"], "modelType": "全エレ機種", "section": "conclusion"},
+    ]
+
+    valid, rejected = research_worker.validate_claims(claims, evidence)
+
+    assert [claim["text"] for claim in valid] == ["a", "b", "c"]
+    assert all(claim["modelType"] is None for claim in valid)
+    assert rejected == []
