@@ -11,7 +11,9 @@ related-code: lambda/rag/rag-function/app.py, lambda/chat/chat-management/app.py
 > #137 の設定と KB 版を含め、AI に渡した抜粋だけを保存する必要がある。
 > CloudWatch の会話 ID はログ契約に反し、「KB に無い」は同期済み内容との照合なしに確定できない。
 
-> **状態:** 設計（実装前）。決定の経緯は issue #86（コメント 2・3・16）。実装は初週の P1。
+> 2026-11-12 改訂（itai）: 9/25 の実装（`feature/retrieval-trace`）は PR にならず develop に入っておらず、dev の会話記録・アーカイブに `retrievalTrace` は 0 件だった。その間に develop の RAG は法令モード（#158）・Converse 対応（#153）・ログ共通項目（#181）・日別集計 GSI（#183）で大きく変わったため、現行 develop の上で作り直す。本改訂は作り直しに必要な差分（§3.1 法令モード、§3.2 値の決め方、§5 読み出し経路、§9 分割、§10 決定、§11 配備後の確認）だけを足し、第 1 版の項目一覧（§3）は変えない。
+
+> **状態:** 設計。第 1 版の実装は作り直し中（2026-11-12）。決定の経緯は issue #86（コメント 2・3・16）。
 
 ## 1. 目的
 
@@ -29,6 +31,15 @@ Bedrock の invocation logging は採用しない（Retrieve 結果が記録さ�
 | DynamoDB 項目上限 | 400 KB |
 | 保全経路 | chatlogs Stream → `eleknowledge-chat-archive-dev` → S3 → Glue `chatlogs_archive`。バージョニングと失敗保全は develop にマージ済みの #96 の内容（ハンドラの `failed/` 保存ではなく S3 OnFailure の `payload`） |
 | Bedrock 応答の `usage` | `input_tokens` / `output_tokens`（現在は破棄） |
+
+> 最終検証: 2026-11-12 — develop `bea56ee7` のコード照合と dev Lambda の設定読み取り（下の追記行だけ。上の表は 9/10 実測のまま）
+
+| 項目（2026-11-12 追記） | 値 |
+|---|---|
+| 生成の呼び出し | `invoke_generation` が本文・`usage`・停止理由を返す（InvokeModel と Converse の両方。`model_profile` の `api` で切替） |
+| dev の RAG 設定 | リランク無効（`RERANK_MODEL_ARN` 空）、検索語の書き換え無効（`QUERY_REWRITE_MODEL_ID` 空）、法令モード有効、`RAG_LOGIC_VERSION` は配備済み |
+| chatlogs の GSI | `userId-timestamp-index` と `metricDayShard-timestamp-index`。どちらも `ProjectionType: ALL` のため、トレースは GSI にも複製される |
+| トレースを読む既存コード | 失敗一覧（#114）の `traceSummary`（管理者向け）。項目名は確定版より前のもの |
 
 ## 3. データ設計
 
@@ -192,7 +203,41 @@ assistant メッセージ項目に属性 `retrievalTrace`（Map）を追加す�
 
 後回しにする項目: 候補全件の本文、S3 退避、管理者向け trace API／画面、1 件ごとの USD 推定値と単価管理、AI 振り分け結果の保存、じっくりモード用の拡張。`searchAttempts[]` は将来の検索段階を表せる形にする。
 
+### 3.1 法令モード（2026-11-12 追加）
+
+> 最終検証: 2026-11-12 — develop `bea56ee7` の `query_law_knowledge_base`・`prepare_law_references`・`build_references_block` の照合
+
+法令モード（`ragMode=law`）も同じスキーマで保存する。項目は増やさず、値で区別する。
+
+| 項目 | 法令モードの値 |
+|---|---|
+| `kb.kbId` | 法令用 KB の ID（`LAW_KNOWLEDGE_BASE_ID`） |
+| `searchAttempts[].stage` / `searchType` | `law` / `MANAGED` |
+| `searchAttempts[].returned` / `afterPostFilter` | Retrieve の件数 / 現行条文に絞った後の件数 |
+| `rewrite` / `rerank` | 使わないため `status=skipped`、`reason=law_mode` |
+| `candidates[].selected` | 原文を補って AI に渡した資料（資料の URI で突き合わせる） |
+| `candidates[].text` | AI に渡した全文補完済みの本文の**先頭 1,200 字**。`originalLength` に全文の文字数、`textTruncated` に切り詰めの有無を入れる（全文は保存しない） |
+
+同じ資料の候補が複数あるときは、本文は最初の 1 件にだけ入れる（法令は資料ごとに 1 本へまとめて渡すため）。
+
+### 3.2 値の決め方（2026-11-12 追加）
+
+> 最終検証: 2026-11-12 — develop `bea56ee7` の `select_retrieval_results`・`is_weak_retrieval`・`merge_retrieval_results` の照合
+
+- `excludedBy`: 機種スコープ・機種指定で落とした候補は `model_scope`。それ以外で選ばれなかった候補は、選別の最低スコア（normal 0.3、spec 0.2）未満なら `below_threshold`、以上なら `limit`（文書ごとの上限・同一本文・全体上限）。閾値は選別処理と同じ関数から取り、トレース側に直書きしない
+- `gate.thresholds`: `[弱い検索の上位スコア閾値 0.22, 選別の最低スコア]`
+- `gate.excludedCounts.dedupe`: 2 回の検索（初回・略語展開）と同一検索内の重複を統合して落とした件数。残した候補の `dedupeCount` にも入れる
+- not_found: 生成モデルに何も渡さないため `selected` は全件 false、`selectedCount` は 0（画面に出す低信頼の手がかり 2 件は `pageCandidates` に残る）
+- `generation.requestStyle`: `invoke` または `converse`。`thinking` は実際に送った設定（`build_generation_request` の結果）
+- `promptVersion`: 実際に使ったシステムプロンプト（通常・法令で別）の SHA-256 先頭 12 桁。生成しない clarify / not_found は `unknown`
+- `modelType` / `category`: KB のメタデータが配列のときはカンマ区切りの文字列にする（§6 の Athena 列を string に固定するため）
+- トレースの組み立てや保存に失敗しても回答は返す。組み立ての失敗は `retrieval_trace_failed`、保存の失敗（項目サイズ超過など）は `retrieval_trace_dropped` を例外の型名だけでログに出し、トレースなしで保存し直す
+
 ## 4. 実装箇所（`lambda/rag/rag-function/app.py`）
+
+> 最終検証: 2026-11-12 — 作り直しで現行 develop に合わせた点だけを下に注記。番号の項目は 9/25 の記述のまま
+
+**作り直しでの読み替え（2026-11-12）:** 生成は `invoke_generation` が `usage` と停止理由を既に返すため、`generate_response_with_claude` は既定の戻り値（本文）を変えず、`return_meta=True` のときだけ `(本文, 生成メタ)` を返す（評価スクリプトなど既存の呼び出しを壊さない）。検索語の書き換えも同様に `return_trace=True` のときだけ結果の記述を返す。組み立ては `build_request_trace`（clarify / not_found / pages / 法令の共通）にまとめ、純粋関数は `retrieval_trace.py`（9/25 の実装を流用）に置く。
 
 1. `time.perf_counter()` で retrieve（`retrieve_for_normal_query` 2 回分）と generate（`invoke_model`）を計測
 2. `generate_response_with_claude` が `usage` と `stop_reason` を返せるように、戻り値を `(text, meta)` に変更（呼び出し側 1 か所）。`extract_response_text` は develop にマージ済みの #90 の変更を使う
@@ -207,9 +252,12 @@ assistant メッセージ項目に属性 `retrievalTrace`（Map）を追加す�
 | 経路 | 扱い |
 |---|---|
 | `GET /chat/sessions/{id}/messages`（利用者） | `retrievalTrace` を **除外**（chat-management `get_session_messages` で pop） |
-| `GET /chat/admin/failures`（管理者） | 第 1 版では変更しない。#104 が予定する `traceSummary` は出さない。#104 側の記述を合わせるのは、本設計に Yes が出たあとの #104 への追記で行う |
+| `GET /chat/admin/failures`（管理者） | `traceSummary`（要約だけ）を返す。#114（2026-10-04 マージ）で画面まで実装済みのため、実態に合わせて第 1 版でも出す（2026-11-12 改訂）。要約は候補配列（上限 30）ではなく `gate` の集計値から作る: `mergedCount`＝採用＋閾値未満＋上限超過、`selectedCount`、`excludedByModelScope`、`topScore`＝`gate.scores` の最大、トークン数、`latencyMs`＝`{retrieve: 検索試行の合計, generate, total}`。トレース本体は返さない |
+| `GET /chat/sessions`（会話一覧） | 一覧に使う属性だけを `ProjectionExpression` で読む（2026-11-12 追加）。Lambda へ運ぶ量は減るが、DynamoDB の読み取り容量と 1 MB のページ区切りは項目サイズで決まるため減らない |
 | 管理者向け専用 trace API／画面 | 後回し。第 1 版は Athena で参照 |
 | S3 アーカイブ / Athena | 全文を保持。バケットは既存のアクセス制御（管理者ロール・Athena ワークグループ） |
+
+**項目が大きくなる影響（2026-11-12 追記）:** トレースで assistant 項目は約 2〜3 倍（16〜26 KB → 50〜60 KB 見込み）になり、GSI 2 つにも複製される。現行の利用量（64 日で質問 224 件）では費用・遅延とも小さい。会話一覧（`userId` の GSI を Query）と失敗一覧（Scan、最大 25 ページ）は 1 MB ごとのページ数が増えるため、利用者 1 人あたりの会話が数百件を超える、または失敗一覧の取りこぼしが出たら、トレースを S3 へ逃がす（§3 の後回し項目）か GSI の射影を絞る。
 | CloudWatch Logs | [RAG 運用ログ契約](./features/development/rag-observability-contract.md) のみ。詳細トレースとの相関には `requestId` を使う |
 
 ## 6. Athena（Glue テーブル）
@@ -259,16 +307,21 @@ ORDER BY a.newimage.messageid, c.rank;
 - `generate_response_with_claude` の戻り値変更（既存テストの更新）
 - chat-management: 利用者向け応答に `retrievalTrace` が含まれない
 - 保存項目のサイズ試算（実 KB で 5 問流して項目サイズを記録し、本設計の見積と比較する）
+- **全経路の保存（2026-11-12 追加）:** clarify・not_found・pages・法令の 4 経路すべてで、ハンドラが `retrieval_trace` を保存に渡すこと。`app.py` の書き換えで保存の呼び出しが抜けたら落ちるテストにする（今回の未記録の再発防止）
+- 組み立て・保存の失敗で回答が止まらないこと。ログに検索語・本文・ID が出ないこと
+- 会話一覧がトレースを読まないこと
 
 ## 9. 実装分割（PR）
 
+> 最終検証: 2026-11-12 — 作り直しの分割（itai 決定）
+
 | 順 | PR | 内容 | デプロイ |
 |---|---|---|---|
-| 1 | `feat(rag)` | 計測・トレース組み立て・保存・構造化ログ 1 行・`RAG_LOGIC_VERSION` | phase2 |
-| 2 | `fix(chat)` | 利用者向け応答から除外 | phase2 |
-| 3 | `feat(chat-archive)` | Glue テーブルに retrievaltrace 列 | chat-archive |
-| 4 | 後続 | 単価管理 + USD 推定コスト（必要性を再確認して着手） | — |
-| 5 | `docs` | `docs/data-model.md`（production、事前確認要）、`docs/api/chat.md` | — |
+| 1 | 実装（作り直し） | RAG の計測・組み立て・保存（4 経路）と、chat-management の利用者向け応答からの除外・失敗一覧の要約・会話一覧の属性指定を 1 本にまとめる（同時に入らないと利用者向け API にトレースが出るため）。`docs/data-model.md`・`docs/api/chat.md`（production）の更新も同じ PR に入れる（事前確認のうえ） | phase2 |
+| 2 | `feat(chat-archive)` | Glue テーブルに retrievaltrace 列。分析は生の JSONL でもできるため急がない | chat-archive |
+| 3 | 後続 | 単価管理 + USD 推定コスト（必要性を再確認して着手） | — |
+
+`RAG_LOGIC_VERSION` は配備済みのため、この PR では足さない。mona の `feature/retrieval-trace` は、作り直しの PR がマージされたら閉じる（mona の Yes を得てから）。
 
 ## 10. 第1版の決定
 
@@ -276,3 +329,17 @@ ORDER BY a.newimage.messageid, c.rank;
 - 項目サイズを実測し、400 KB に近づいた場合は本文を黙って落とさず `truncatedTrace` と理由を記録する。S3 退避は後続
 - `RAG_LOGIC_VERSION` はデプロイ元 commit の短縮 SHA とする。SAM パラメータから環境変数へ渡し、未設定時は `unknown` を保存する
 - `priorityExpanded`、`count1/count2`、`usedAbbrevExpansion` と重複レイテンシ項目は第 1 版の trace に保存しない。検索段階・計測は `searchAttempts[]` と `generation` にまとめる
+- （2026-11-12 itai）法令モードも第 1 版の対象にする（§3.1）。本文は他と同じく 1,200 字まで
+- （2026-11-12 itai）失敗一覧の `traceSummary` は出す（§5）。会話一覧は属性を絞って読む
+- （2026-11-12 itai）再発防止は指標を足さず、全経路のテスト（§8）と配備後の 1 件確認（§11）で行う
+
+## 11. 配備後の確認（2026-11-12 追加）
+
+phase2 の配備後、1 問流して、その回答の項目に `retrievalTrace` が付いていることを 1 件確かめる（件数だけを見る。中身は画面に出さない）。付いていなければ、配備を記録する PR・issue に「未記録」と書く。
+
+```bash
+aws dynamodb scan --table-name chatlogs-dev --select COUNT \
+  --filter-expression "attribute_exists(retrievalTrace)"
+```
+
+9/25 の実装が入ったと思われたまま 7 週間記録されなかった反省から、指標・アラームは置かず、この確認とテストで代える（itai 2026-11-12）。
