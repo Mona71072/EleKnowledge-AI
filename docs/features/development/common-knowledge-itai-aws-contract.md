@@ -211,3 +211,15 @@ AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタッ�
 - 2 つ目のアカウント・mona への `elevator-knowhow` / `all-users` の読取付与は未実施。利用者全員に読ませる付与の方式は WP4 で決める。
 - 費用: S3 オブジェクト約 2,400 件（数 MB）、Lambda 呼び出し約 800 回、DynamoDB の書込。いずれも従量で僅少（料金表は今回照会していない概算）。
 - 戻し方: カードごとに `/withdraw` で停止できる（manifest generation 2、`published/` から外れる）。台帳・`approved/` は不変の記録として残る。Git の `knowledge/cards/` はそのまま残しており、凍結は WP4 の切り替え後に行う。
+
+## 先輩の索引を公開版へ切り替え（WP4、2026-11-12）
+
+> 最終検証: 2026-11-12 — 公開版の書き出しと移行一覧の照合、配備中の RAG コード（`9fa0c8fa`）での索引検査と検索、changeset の全件確認、切り替え後の RAG Lambda の環境変数。先輩チャットでの実回答は未確認。
+
+仕様: [先輩チャットからMarkdownを探してKBを確認する](knowledge-markdown-retrieval.md)の「公開版からの索引と、使う直前の照合」。
+
+- **配備元の食い違い:** `EleKnowledge-itai-phase2` は `feature/itai検証T0-T1`（`9fa0c8fa`）のテンプレートから配備されている。`itai` ブランチの phase2 テンプレートには、そのスタックにある `ValidationChatLogsTable`・WAF の関連付け 2・ログのグループ 6 が無く、`itai` から配備すると削除される。そのため `itai` のテンプレート・コードでは配備していない。
+- **実施したこと（パラメータだけ）:** 公開版 398 枚から作った索引（`sha256:3917c4ac…`、移行一覧と件数・本文 hash が一致、停止中の検証カード 1 件は除外）を、従来の索引と同じ検証用バケットの `indexes/` に追加した。changeset `wp4-published-index`（配備中のテンプレートのまま、`KnowhowIndexKey` だけ変更。7 件 Modify・Replacement なし。RAG と調査ワーカーの環境変数、両 Role の GetObject 対象、関数 ARN の再評価）を実行し UPDATE_COMPLETE。
+- **配備中のコードで動くことの確認:** `9fa0c8fa` の `parse_index` が新しい索引（398 枚、すべて `status: approved`）を受け付け、検索も返すことをローカルで確認した。
+- **まだ入っていないもの:** 使う直前の manifest 照合（`confirm_published`）、画面の注意表示、`MELCITY`・`MELWIDE` の別名は `itai` ブランチ（`12361a37`）にだけあり、配備中の RAG にも Amplify itai にも入っていない。停止したカードは、索引を作り直してパラメータを切り替えるまで回答に出うる。
+- **戻し方:** `KnowhowIndexKey` を旧値 `indexes/acde2268….json`（Git の取込一覧から作った索引）に戻す changeset を、同じ手順（配備中のテンプレートのまま）で実行する。旧索引は消していない。
