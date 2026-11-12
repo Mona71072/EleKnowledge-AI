@@ -3,9 +3,9 @@
 
 // 機種キー → カードの model_scope に書かれた値の別名（NFKC・小文字化済み）。build-senpai-index.mjs が使う。
 export const MODEL_ALIASES = Object.freeze({
-  'AXIEZ': Object.freeze(['axiez', 'axiez(ke-wf・ke-hf)', '駅舎エレ']),
-  'AXIEZ-LINKs': Object.freeze(['axiez-links']),
-  'NEXCUBE': Object.freeze(['nexcube', 'nexcube limited', '特注機械室レスエレベーター']),
+  'AXIEZ': Object.freeze(['axiez', 'axiez(ke-wf・ke-hf)', '駅舎エレ', 'アクシーズ']),
+  'AXIEZ-LINKs': Object.freeze(['axiez-links', 'links', 'アクシーズリンクス', 'リンクス']),
+  'NEXCUBE': Object.freeze(['nexcube', 'nexcube limited', '特注機械室レスエレベーター', 'ネクスキューブ']),
   'メルシティ': Object.freeze(['メルシティ', 'melcity']),
   'メルワイド': Object.freeze(['メルワイド', 'melwide']),
   'エスカレーター': Object.freeze(['エスカレーター', 'escalator']),

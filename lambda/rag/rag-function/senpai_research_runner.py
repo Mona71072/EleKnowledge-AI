@@ -74,7 +74,7 @@ def _step_understand(ctx: RunContext) -> None:
     ctx.understanding = parsed or understand.fallback_understanding()
     if not ctx.understanding.get('aspects'):
         ctx.understanding['aspects'] = understand._aspects(None, ctx.question, ctx.understanding.get('intent'))
-    ctx.model_type = understand.effective_model_type(ctx.ui_model, ctx.understanding)
+    ctx.model_type = understand.effective_model_type(ctx.ui_model, ctx.understanding, ctx.question)
     ctx.recorder.end(handle, 'done', detail=_understand_detail(ctx))
 
 

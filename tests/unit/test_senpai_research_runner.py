@@ -273,7 +273,8 @@ def test_unparseable_understanding_falls_back_to_original_question(runner):
     assert done["detailJa"] == "整理できなかったため元の質問で検索"
     assert [q for q, _ in deps.tech_calls] == [QUESTION]
     assert deps.law_calls == [QUESTION]  # 整理できないときは法令を省略しない
-    assert outcome["result"]["understanding"]["modelType"] is None
+    # 質問に「LINKs」だけがあるので、AI が読めなくても AXIEZ-LINKs にする（2026-11-12 itai 決定）
+    assert outcome["result"]["understanding"]["modelType"] == "AXIEZ-LINKs"
     assert outcome["debug"]["understandingRaw"]["fallback"] is True
 
 
@@ -295,8 +296,9 @@ def test_model_type_without_evidence_is_not_invented(runner):
     invented = _understanding(modelType="NEXCUBE", modelEvidence="ネクスキューブ")
     deps = FakeDeps(understand=invented)
     outcome, *_ = _run(runner, deps)
-    assert {m for _, m in deps.tech_calls} == {None}
-    assert outcome["result"]["understanding"]["modelType"] is None
+    # 根拠の無い NEXCUBE は採らず、質問にある「LINKs」から AXIEZ-LINKs にする（2026-11-12 itai 決定）
+    assert {m for _, m in deps.tech_calls} == {"AXIEZ-LINKs"}
+    assert outcome["result"]["understanding"]["modelType"] == "AXIEZ-LINKs"
 
 
 # ---------------------------------------------------------------- ノウハウ

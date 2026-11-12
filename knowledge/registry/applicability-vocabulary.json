@@ -19,7 +19,7 @@
         "ui_filter": {
           "key": "AXIEZ",
           "kb_model_types": ["AXIEZ", "AXIEZ(KE-WF・KE-HF)", "駅舎エレ"],
-          "extra_card_aliases": []
+          "extra_card_aliases": ["アクシーズ"]
         },
         "question_aliases": ["axiez", "アクシーズ"],
         "related": {
@@ -36,9 +36,9 @@
         "ui_filter": {
           "key": "AXIEZ-LINKs",
           "kb_model_types": ["AXIEZ-LINKs"],
-          "extra_card_aliases": []
+          "extra_card_aliases": ["LINKs", "アクシーズリンクス", "リンクス"]
         },
-        "question_aliases": ["links", "リンクス"],
+        "question_aliases": ["axiez-links", "axiez links", "アクシーズリンクス", "links", "リンクス"],
         "related": {
           "machine_room": ["MRL"],
           "control_methods": ["VFGLF"]
@@ -52,7 +52,7 @@
         "ui_filter": {
           "key": "NEXCUBE",
           "kb_model_types": ["NEXCUBE", "NEXCUBE Limited", "特注機械室レスエレベーター"],
-          "extra_card_aliases": []
+          "extra_card_aliases": ["ネクスキューブ"]
         },
         "question_aliases": ["nexcube", "ネクスキューブ"],
         "related": {

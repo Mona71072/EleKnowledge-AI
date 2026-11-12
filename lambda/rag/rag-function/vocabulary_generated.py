@@ -16,9 +16,9 @@ UI_MODEL_FILTERS = {
 
 # 機種キー → カードの model_scope に書かれた値の別名（NFKC・小文字化済み）。
 MODEL_ALIASES = {
-    "AXIEZ": frozenset({"axiez", "axiez(ke-wf・ke-hf)", "駅舎エレ"}),
-    "AXIEZ-LINKs": frozenset({"axiez-links"}),
-    "NEXCUBE": frozenset({"nexcube", "nexcube limited", "特注機械室レスエレベーター"}),
+    "AXIEZ": frozenset({"axiez", "axiez(ke-wf・ke-hf)", "駅舎エレ", "アクシーズ"}),
+    "AXIEZ-LINKs": frozenset({"axiez-links", "links", "アクシーズリンクス", "リンクス"}),
+    "NEXCUBE": frozenset({"nexcube", "nexcube limited", "特注機械室レスエレベーター", "ネクスキューブ"}),
     "メルシティ": frozenset({"メルシティ", "melcity"}),
     "メルワイド": frozenset({"メルワイド", "melwide"}),
     "エスカレーター": frozenset({"エスカレーター", "escalator"}),
@@ -27,7 +27,7 @@ MODEL_ALIASES = {
 # 機種キー → 質問中の呼び名（調査ジョブが質問から機種を判定するときに使う）。
 QUESTION_MODEL_ALIASES = {
     "AXIEZ": ("axiez", "アクシーズ"),
-    "AXIEZ-LINKs": ("links", "リンクス"),
+    "AXIEZ-LINKs": ("axiez-links", "axiez links", "アクシーズリンクス", "links", "リンクス"),
     "NEXCUBE": ("nexcube", "ネクスキューブ"),
     "メルシティ": ("メルシティ", "melcity"),
     "メルワイド": ("メルワイド", "melwide"),

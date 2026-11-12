@@ -2,6 +2,7 @@
 import senpai_research_config as config
 import senpai_research_text as text_util
 import vocabulary_generated as vocabulary
+import question_model
 import re
 
 INTENTS = ('procedure', 'cause', 'spec_value', 'legal', 'other')
@@ -120,9 +121,11 @@ def fallback_understanding() -> dict:
     }
 
 
-def effective_model_type(ui_model_type, understanding: dict):
-    """画面で選ばれた機種が最優先。なければ質問から根拠をもって読めたものだけ。"""
-    return ui_model_type or understanding.get('modelType')
+def effective_model_type(ui_model_type, understanding: dict, question=None):
+    """画面で選ばれた機種が最優先。なければ質問から根拠をもって読めたもの。AI が読めなかったときは、
+    質問に 1 機種の呼び名だけがあればそれを使う（question_model、2026-11-12 itai 決定）。"""
+    return (ui_model_type or understanding.get('modelType')
+            or (question_model.model_from_question(question) if question else None))
 
 
 def public_understanding(understanding: dict, *, model_type) -> dict:

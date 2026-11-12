@@ -76,6 +76,18 @@ except ModuleNotFoundError as exc:
     retrieve_cards = _knowhow_module.retrieve_cards
     confirm_published = _knowhow_module.confirm_published
 
+try:
+    import question_model
+except ModuleNotFoundError as exc:
+    if exc.name != 'question_model':
+        raise
+    _question_model_spec = importlib.util.spec_from_file_location(
+        'rag_question_model', os.path.join(os.path.dirname(__file__), 'question_model.py')
+    )
+    question_model = importlib.util.module_from_spec(_question_model_spec)
+    sys.modules[_question_model_spec.name] = question_model
+    _question_model_spec.loader.exec_module(question_model)
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -2539,6 +2551,13 @@ def handle_rag_request(event, context, started_at):
             return validation_error('filters.modelType must be a string')
 
         mode, filters = normalize_mode_and_filters(requested_mode, filters)
+        # 先輩チャットだけ（2026-11-12 itai 決定）: 機種が未選択で、質問に 1 機種の呼び名だけがあれば、
+        # 画面で選んだのと同じ絞り込み（技術KBのフィルタ・ノウハウの機種判定・聞き返し）にする。
+        model_from_question = None
+        if include_knowhow and mode != 'law' and not filters.get('modelType'):
+            model_from_question = question_model.model_from_question(query)
+            if model_from_question:
+                filters['modelType'] = model_from_question
 
         # Generate new session ID if not provided
         if not session_id:
@@ -2650,6 +2669,8 @@ def handle_rag_request(event, context, started_at):
         )
         if should_clarify:
             ai_response = build_clarify_content(clarify_questions)
+            if model_from_question:
+                ai_response = question_model.notice(model_from_question) + '\n\n' + ai_response
             response_type = 'clarify'
             session_title = _fallback_session_title(query) if not chat_history else None
             user_message_id = save_message_to_dynamodb(
@@ -2754,6 +2775,8 @@ def handle_rag_request(event, context, started_at):
                 '対象の法令・工事条件を補足するか、e-Gov原文をご確認ください。'
                 if mode == 'law' else build_not_found_content(filters)
             )
+            if model_from_question:
+                ai_response = question_model.notice(model_from_question) + '\n\n' + ai_response
             citations, source_documents = extract_citations(
                 kb_results, mode, rank_key=RERANK_RANK_KEY
             )
@@ -2835,6 +2858,8 @@ def handle_rag_request(event, context, started_at):
             search_query=search_query,
             rank_key=RERANK_RANK_KEY,
         )
+        if model_from_question:
+            ai_response = question_model.notice(model_from_question) + '\n\n' + ai_response
         if mode != 'law' and not filters.get('modelType') and page_candidates:
             # 機種未指定の一般検索であることを明示（断定防止）
             ai_response = (

@@ -348,3 +348,37 @@ def test_model_fit_is_returned_only_when_a_model_filter_is_selected(rag_app, mon
     assert filtered["KH-SYN-ESC"]["modelFitProducts"] == ["エスカレーター"]
     assert filtered["KH-SYN-001"]["modelFit"] in {"matched", "general", "unknown"}
     assert "modelFitProducts" not in filtered["KH-SYN-001"]
+
+
+def test_model_named_in_the_question_is_applied_like_the_ui_filter(rag_app, monkeypatch):
+    """2026-11-12 itai 決定: 先輩チャットで機種が未選択なら、質問に 1 機種の呼び名だけがあれば絞り込む。"""
+    _configure_successful_pipeline(rag_app, monkeypatch)
+    monkeypatch.setattr(rag_app, "load_index", lambda **_kwargs: _two_product_index())
+    seen = {}
+    monkeypatch.setattr(rag_app, "needs_clarify", lambda q, filters, history: (seen.update(filters=dict(filters)) or (False, [])))
+
+    response = rag_app.handle_rag_request(_event({"query": "アクシーズのかごの走行中振動", "includeKnowhow": True}), None, 0)
+    body = json.loads(response["body"])
+    explicit = rag_app.handle_rag_request(_event({"query": "アクシーズのかごの走行中振動", "includeKnowhow": True,
+                                                  "filters": {"modelType": "AXIEZ"}}), None, 0)
+    assert _matched_ids(response) == _matched_ids(explicit)
+    assert seen["filters"]["modelType"] == "AXIEZ"
+    assert "質問の文言から機種を AXIEZ と判断して絞り込みました" in json.dumps(body, ensure_ascii=False)
+
+    # UI selection wins; two models or none leave the request unfiltered.
+    for query, filters, expected in (
+        ("アクシーズのかごの走行中振動", {"modelType": "NEXCUBE"}, "NEXCUBE"),
+        ("アクシーズとリンクスのかごの走行中振動", {}, None),
+        ("かごの走行中振動", {}, None),
+    ):
+        seen.clear()
+        rag_app.handle_rag_request(_event({"query": query, "includeKnowhow": True, "filters": filters}), None, 0)
+        assert seen["filters"].get("modelType") == expected, query
+
+
+def test_model_in_the_question_is_not_applied_outside_the_senpai_chat(rag_app, monkeypatch):
+    _configure_successful_pipeline(rag_app, monkeypatch)
+    seen = {}
+    monkeypatch.setattr(rag_app, "needs_clarify", lambda q, filters, history: (seen.update(filters=dict(filters)) or (False, [])))
+    rag_app.handle_rag_request(_event({"query": "アクシーズのかごの走行中振動"}), None, 0)
+    assert "modelType" not in seen["filters"]
