@@ -10,6 +10,7 @@ GET /admin/metrics?period=today|week|month     旧形式（現行 UI 用。UI �
 """
 import json
 import os
+import re
 import statistics
 from datetime import date, datetime, timedelta, timezone
 
@@ -688,6 +689,20 @@ def status_for(name: str, value: float) -> str:
     return 'critical'
 
 
+MONTH_PATTERN = re.compile(r'^\d{4}-\d{2}$')
+
+
+class InvalidQueryError(Exception):
+    """クエリパラメータの形式不正（400 で返す）。"""
+
+
+def _parse_query_date(value: str) -> date:
+    try:
+        return datetime.fromisoformat(value).date()
+    except ValueError:
+        raise InvalidQueryError('from / to は YYYY-MM-DD 形式で指定してください') from None
+
+
 def resolve_range(qs: dict):
     period = (qs.get('period') or 'week').lower()
     today = _today_jst()
@@ -696,8 +711,8 @@ def resolve_range(qs: dict):
     elif period == 'month':
         start = today - timedelta(days=29)
     elif period == 'custom' and qs.get('from') and qs.get('to'):
-        start = datetime.fromisoformat(qs['from']).date()
-        return start, datetime.fromisoformat(qs['to']).date(), 'custom'
+        start = _parse_query_date(qs['from'])
+        return start, _parse_query_date(qs['to']), 'custom'
     else:  # week (default)
         start = today - timedelta(days=6)
         period = 'week'
@@ -786,10 +801,12 @@ def handle_dashboard(qs: dict) -> dict:
 def handle_cost(qs: dict) -> dict:
     now = _now()
     month = qs.get('month') or now.strftime('%Y-%m')
+    if not MONTH_PATTERN.match(month):
+        raise InvalidQueryError('month は YYYY-MM 形式で指定してください')
     try:
         datetime.strptime(month, '%Y-%m')
     except ValueError:
-        month = now.strftime('%Y-%m')
+        raise InvalidQueryError('month は YYYY-MM 形式で指定してください') from None
     cost_rows = query_cost_month(month)
     first = date.fromisoformat(f'{month}-01')
     daily_rows = query_snapshots('overall', first, first + timedelta(days=31))
@@ -817,6 +834,8 @@ def lambda_handler(event, context):
         hourly = query_hourly(end_date) if period == 'today' else None
         return _response(200, build_payload(items, period, hourly))
 
+    except InvalidQueryError as e:
+        return _response(400, {'error': 'ValidationError', 'message': str(e)})
     except ClientError as e:
         print(f"[metrics-read] ClientError: {e}")
         return _response(500, {'error': 'InternalServerError', 'message': 'Failed to load metrics'})

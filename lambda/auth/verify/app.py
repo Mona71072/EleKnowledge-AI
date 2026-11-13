@@ -67,6 +67,12 @@ cognito_client = boto3.client('cognito-idp')
 USER_POOL_ID = os.environ.get('COGNITO_USER_POOL_ID')
 CLIENT_ID = os.environ.get('COGNITO_CLIENT_ID')
 
+RATE_LIMIT_ERROR_CODES = frozenset({
+    'TooManyRequestsException',
+    'LimitExceededException',
+    'TooManyFailedAttemptsException',
+})
+
 
 def lambda_handler(event, context):
     """
@@ -149,6 +155,15 @@ def lambda_handler(event, context):
                 'body': json.dumps({
                     'error': 'AlreadyConfirmedError',
                     'message': 'User is already confirmed'
+                })
+            }
+        elif error_code in RATE_LIMIT_ERROR_CODES:
+            return {
+                'statusCode': 429,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'TooManyRequests',
+                    'message': '試行回数が多すぎます。しばらく待ってから再度お試しください。'
                 })
             }
         else:

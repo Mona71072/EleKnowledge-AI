@@ -135,3 +135,40 @@ def test_login_mfa_challenge_returns_4xx_without_session_token(caplog):
     assert "secret-challenge-session-token" not in response["body"]
     assert "secret-challenge-session-token" not in caplog.text
     module.cognito_client.get_user.assert_not_called()
+
+
+@pytest.mark.parametrize("code", [
+    "TooManyRequestsException",
+    "LimitExceededException",
+    "TooManyFailedAttemptsException",
+])
+def test_verify_rate_limit_errors_return_429_without_provider_message(code):
+    module = _load_auth_app("verify")
+    module.cognito_client.confirm_sign_up.side_effect = ClientError(
+        {"Error": {"Code": code, "Message": "secret-cognito-detail"}},
+        "ConfirmSignUp",
+    )
+
+    response = module.lambda_handler({"body": json.dumps(AUTH_CASES["verify"])}, None)
+
+    assert response["statusCode"] == 429
+    payload = json.loads(response["body"])
+    assert payload["error"] == "TooManyRequests"
+    assert "secret-cognito-detail" not in response["body"]
+
+
+@pytest.mark.parametrize("code,status", [
+    ("CodeMismatchException", 400),
+    ("ExpiredCodeException", 400),
+    ("UserNotFoundException", 404),
+    ("NotAuthorizedException", 403),
+])
+def test_verify_existing_error_statuses_unchanged(code, status):
+    module = _load_auth_app("verify")
+    module.cognito_client.confirm_sign_up.side_effect = ClientError(
+        {"Error": {"Code": code, "Message": "m"}}, "ConfirmSignUp"
+    )
+
+    response = module.lambda_handler({"body": json.dumps(AUTH_CASES["verify"])}, None)
+
+    assert response["statusCode"] == status

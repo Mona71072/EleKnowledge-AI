@@ -43,8 +43,10 @@ def query_dynamodb(construction_number: str) -> Dict[str, Any]:
         if not item:
             raise DBSearchError("該工事番号の現場情報が見つかりません")
         return item
+    except DBSearchError:
+        raise
     except Exception as e:
-        logger.error(f"DynamoDBエラー: {str(e)}")
+        logger.error(f"DynamoDBエラー: {type(e).__name__}")
         raise DBSearchError("データベース接続に失敗しました")
 
 

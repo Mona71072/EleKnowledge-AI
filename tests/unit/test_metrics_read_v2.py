@@ -83,3 +83,53 @@ def test_build_payload_freshness_and_hourly(monkeypatch):
     # 既存の形は維持
     assert payload["kpi"]["queries"]["value"] == 32
     assert "queriesByDay" in payload["series"] and "health" in payload
+
+
+def _admin_event(path, qs):
+    return {
+        "httpMethod": "GET",
+        "path": path,
+        "queryStringParameters": qs,
+        "requestContext": {
+            "authorizer": {"claims": {"cognito:groups": read.ADMIN_GROUP_NAME}}
+        },
+    }
+
+
+def _invoke(path, qs):
+    return read.lambda_handler(_admin_event(path, qs), None)
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("qs", [
+    {"period": "custom", "from": "abc", "to": "2026-01-01"},
+    {"period": "custom", "from": "2026-01-01", "to": "abc"},
+])
+def test_custom_range_with_invalid_date_returns_400(qs):
+    response = _invoke("/admin/metrics", qs)
+    assert response["statusCode"] == 400
+    assert "abc" not in response["body"]
+
+
+@pytest.mark.parametrize("month", ["2026-1", "abc"])
+def test_cost_with_invalid_month_returns_400(month):
+    response = _invoke("/admin/metrics/cost", {"month": month})
+    assert response["statusCode"] == 400
+
+
+def test_cost_with_valid_month_still_works(monkeypatch):
+    monkeypatch.setattr(read, "query_cost_month", lambda month: [])
+    monkeypatch.setattr(read, "query_snapshots", lambda *a, **k: [])
+    response = _invoke("/admin/metrics/cost", {"month": "2026-01"})
+    assert response["statusCode"] == 200
+
+
+def test_custom_range_with_valid_dates_still_works(monkeypatch):
+    monkeypatch.setattr(read, "query_snapshots", lambda *a, **k: [])
+    response = _invoke(
+        "/admin/metrics",
+        {"period": "custom", "from": "2026-01-01", "to": "2026-01-07"},
+    )
+    assert response["statusCode"] == 200
