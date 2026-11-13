@@ -31,6 +31,7 @@ def promote_due(now_iso: Optional[str] = None) -> dict:
     if not now_iso:
         raise ValueError('now_iso could not be normalized')
     promoted = []
+    skipped = []
     kwargs = {
         'IndexName': 'status-publishAt-index',
         'KeyConditionExpression': Key('status').eq('scheduled') & Key('publishAt').lte(now_iso),
@@ -56,32 +57,43 @@ def promote_due(now_iso: Optional[str] = None) -> dict:
                 pub = item.get('publishAt')
             if pub and pub > now_iso:
                 continue
-            # Conditional update: only if still scheduled (avoid races with admin edits)
+            # 取得後の管理者編集も検出し、予約日時が変わっていれば公開しない。
             try:
                 table.update_item(
                     Key={'announcementId': aid},
                     UpdateExpression='SET #s = :pub, updatedAt = :now, publishAt = :pnorm',
-                    ConditionExpression='#s = :sched',
+                    ConditionExpression='#s = :sched AND publishAt = :read_publish_at',
                     ExpressionAttributeNames={'#s': 'status'},
                     ExpressionAttributeValues={
                         ':pub': 'published',
                         ':sched': 'scheduled',
                         ':now': now_iso,
                         ':pnorm': pub or item.get('publishAt'),
+                        ':read_publish_at': item.get('publishAt'),
                     },
                 )
                 promoted.append(aid)
             except ClientError as e:
                 if e.response['Error']['Code'] != 'ConditionalCheckFailedException':
                     raise
+                skipped.append(aid)
 
-    return {'promoted': promoted, 'count': len(promoted), 'serverTime': now_iso}
+    return {
+        'promoted': promoted,
+        'count': len(promoted),
+        'skipped': skipped,
+        'skipped_count': len(skipped),
+        'serverTime': now_iso,
+    }
 
 
 def lambda_handler(event, context):
     try:
         result = promote_due()
-        print(f"[announcements-publisher] promoted={result['count']} ids={result['promoted']}")
+        print(
+            f"[announcements-publisher] promoted={result['count']} ids={result['promoted']} "
+            f"skipped={result['skipped_count']} skipped_ids={result['skipped']}"
+        )
         return result
     except ClientError as e:
         print(f"[announcements-publisher] ClientError: {e}")

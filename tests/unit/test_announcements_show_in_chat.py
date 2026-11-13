@@ -31,10 +31,10 @@ class FakeTable:
     def __init__(self):
         self.items = {}
 
-    def put_item(self, Item):
+    def put_item(self, Item, **kwargs):
         self.items[Item["announcementId"]] = dict(Item)
 
-    def get_item(self, Key):
+    def get_item(self, Key, **kwargs):
         it = self.items.get(Key["announcementId"])
         return {"Item": dict(it)} if it else {}
 
@@ -68,7 +68,8 @@ def test_create_respects_explicit_show_in_chat(table):
 
 def test_update_toggles_show_in_chat_and_keeps_it_when_absent(table):
     table.put_item({"announcementId": "anc_1", "type": "notice", "title": "t", "body": "", "severity": "info",
-                    "status": "published", "publishAt": "2026-01-01T00:00:00.000Z", "showInChat": True})
+                    "status": "published", "publishAt": "2026-01-01T00:00:00.000Z", "showInChat": True,
+                    "createdAt": "2026-01-01T00:00:00.000Z"})
     resp = write.update("anc_1", {"title": "t2"}, actor="u")
     assert resp["statusCode"] == 200 and table.items["anc_1"]["showInChat"] is True
     resp = write.update("anc_1", {"showInChat": False}, actor="u")
@@ -78,7 +79,8 @@ def test_update_toggles_show_in_chat_and_keeps_it_when_absent(table):
 def test_update_end_now_keeps_other_fields(table):
     """表示終了は endAt を今にする更新（削除ではない）。"""
     table.put_item({"announcementId": "anc_9", "type": "notice", "title": "障害中", "body": "", "severity": "critical",
-                    "status": "published", "publishAt": "2026-09-23T23:05:00.000Z", "showInChat": True, "pinned": True})
+                    "status": "published", "publishAt": "2026-09-23T23:05:00.000Z", "showInChat": True, "pinned": True,
+                    "createdAt": "2026-09-23T23:05:00.000Z"})
     resp = write.update("anc_9", {"endAt": "2026-09-24T01:30:00.000Z"}, actor="u")
     assert resp["statusCode"] == 200
     it = table.items["anc_9"]

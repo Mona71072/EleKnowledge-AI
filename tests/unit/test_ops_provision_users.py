@@ -143,6 +143,29 @@ def test_provision_dry_run_reports_without_writing(pu):
     assert "new@x.jp" not in c.users and c.password_calls == [] and not t.items
 
 
+def test_write_results_creates_owner_only_file(pu, tmp_path):
+    out = tmp_path / "pw.csv"
+    previous_umask = os.umask(0o022)
+    try:
+        pu.write_results(str(out), [{
+            "email": "u@x.jp", "status": "created", "password": "Secret1!", "userId": "sub-u",
+        }])
+    finally:
+        os.umask(previous_umask)
+
+    assert out.stat().st_mode & 0o777 == 0o600
+
+
+def test_write_results_refuses_existing_file(pu, tmp_path):
+    out = tmp_path / "pw.csv"
+    out.write_text("existing", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        pu.write_results(str(out), [])
+
+    assert out.read_text(encoding="utf-8") == "existing"
+
+
 def _run_main(pu, monkeypatch, tmp_path, cognito, argv_extra=()):
     import boto3
     csv_in = tmp_path / "in.csv"

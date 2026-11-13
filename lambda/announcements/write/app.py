@@ -208,7 +208,10 @@ def create(body: dict, actor: str) -> dict:
 
 
 def update(announcement_id: str, body: dict, actor: str) -> dict:
-    existing = table.get_item(Key={'announcementId': announcement_id}).get('Item')
+    existing = table.get_item(
+        Key={'announcementId': announcement_id},
+        ConsistentRead=True,
+    ).get('Item')
     if not existing:
         return _response(404, {'error': 'NotFound', 'message': 'Announcement not found'})
 
@@ -270,7 +273,26 @@ def update(announcement_id: str, body: dict, actor: str) -> dict:
     merged['updatedAt'] = now
     merged['updatedBy'] = actor
 
-    table.put_item(Item=merged)
+    condition = 'attribute_exists(announcementId)'
+    values = {}
+    if 'updatedAt' in existing:
+        condition += ' AND updatedAt = :version'
+        values[':version'] = existing['updatedAt']
+    else:
+        condition += ' AND attribute_not_exists(updatedAt)'
+        if 'createdAt' in existing:
+            condition += ' AND createdAt = :version'
+            values[':version'] = existing['createdAt']
+    try:
+        table.put_item(
+            Item=merged,
+            ConditionExpression=condition,
+            **({'ExpressionAttributeValues': values} if values else {}),
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return _response(409, {'error': 'Conflict', 'message': 'Announcement changed; reload and try again'})
+        raise
     return _response(200, {'announcementId': announcement_id, 'status': merged.get('status')})
 
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { getDashboard, DashboardResponse, DashboardEvent, TrendDays, STATUS_META, HealthStatus } from '@/lib/metrics';
 import {
@@ -17,6 +17,7 @@ import { ChartCard, DocRanking, Legend, MsLines, PALETTE, SimpleTable, StackedBa
 import { StatusPill, SeverityBadge, CostBadge } from '@/components/dashboard/status';
 import { Funnel } from '@/components/dashboard/funnel';
 import { Loading } from '@/components/ui/Loading';
+import { createLatestGuard } from '@/lib/latest-request.mjs';
 
 const TRENDS: TrendDays[] = [14, 30, 90];
 
@@ -29,17 +30,27 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestGuard = useRef(createLatestGuard());
 
   const load = useCallback(async (days: TrendDays) => {
+    const token = requestGuard.current.begin();
     setLoading(true);
     setError(null);
     try {
-      setData(await getDashboard(days));
+      const result = await getDashboard(days);
+      if (requestGuard.current.isLatest(token)) setData(result);
     } catch (e) {
-      setError((e as Error).message);
+      if (requestGuard.current.isLatest(token)) {
+        setData(null);
+        setError((e as Error).message);
+      }
     } finally {
-      setLoading(false);
+      if (requestGuard.current.isLatest(token)) setLoading(false);
     }
+  }, []);
+
+  useEffect(() => () => {
+    requestGuard.current.invalidate();
   }, []);
 
   useEffect(() => {

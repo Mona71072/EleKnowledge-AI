@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
 import { documentHref } from '@/lib/documents';
+import { createLatestGuard } from '@/lib/latest-request.mjs';
 
 const API_BASE = process.env.NEXT_PUBLIC_TROUBLESHOOTING_API_URL || '';
 
@@ -72,6 +73,9 @@ function HistoryContent() {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
+  const initRequestGuard = useRef(createLatestGuard());
+  const listRequestGuard = useRef(createLatestGuard());
+  const detailRequestGuard = useRef(createLatestGuard());
 
   const getAuthToken = useCallback(async (): Promise<string | null> => {
     try {
@@ -83,15 +87,17 @@ function HistoryContent() {
   }, []);
 
   const fetchList = useCallback(async () => {
+    const requestToken = listRequestGuard.current.begin();
     const token = await getAuthToken();
     const response = await axios.get<{ sessions: SessionSummary[] }>(
       `${API_BASE}/history`,
       { headers: token ? { Authorization: `Bearer ${token}` } : {} }
     );
-    setSessions(response.data.sessions);
+    if (listRequestGuard.current.isLatest(requestToken)) setSessions(response.data.sessions);
   }, [getAuthToken]);
 
   const fetchDetail = useCallback(async (sessionId: string) => {
+    const requestToken = detailRequestGuard.current.begin();
     setDetailLoading(true);
     setError('');
     try {
@@ -100,43 +106,60 @@ function HistoryContent() {
         `${API_BASE}/history?sessionId=${encodeURIComponent(sessionId)}`,
         { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
-      setDetail(response.data);
+      if (detailRequestGuard.current.isLatest(requestToken)) setDetail(response.data);
     } catch (err: any) {
-      setError(err.response?.data?.error || '詳細の取得に失敗しました');
+      if (detailRequestGuard.current.isLatest(requestToken)) setError(err.response?.data?.error || '詳細の取得に失敗しました');
     } finally {
-      setDetailLoading(false);
+      if (detailRequestGuard.current.isLatest(requestToken)) setDetailLoading(false);
     }
   }, [getAuthToken]);
 
+  const returnToList = useCallback(() => {
+    detailRequestGuard.current.invalidate();
+    setDetail(null);
+    setDetailLoading(false);
+  }, []);
+
   useEffect(() => {
     const init = async () => {
+      const token = initRequestGuard.current.begin();
       const skipAuth = process.env.NEXT_PUBLIC_SKIP_AUTH === 'true';
       const canBypassAuth = skipAuth && process.env.NODE_ENV !== 'production';
       if (!canBypassAuth) {
         try {
           await getCurrentUser();
         } catch {
+          if (!initRequestGuard.current.isLatest(token)) return;
           router.push('/login');
           return;
         }
+        if (!initRequestGuard.current.isLatest(token)) return;
       }
       try {
         await fetchList();
       } catch (err: any) {
         const msg = err.response?.data?.error || err.response?.data?.message || '履歴の取得に失敗しました';
-        setError(msg);
+        if (initRequestGuard.current.isLatest(token)) setError(msg);
       }
-      setPageLoading(false);
+      if (initRequestGuard.current.isLatest(token)) setPageLoading(false);
     };
     init();
   }, [router, fetchList]);
+
+  useEffect(() => () => {
+    initRequestGuard.current.invalidate();
+    listRequestGuard.current.invalidate();
+    detailRequestGuard.current.invalidate();
+  }, []);
 
   useEffect(() => {
     const sessionId = searchParams.get('sessionId');
     if (sessionId && !pageLoading) {
       fetchDetail(sessionId);
+    } else if (!sessionId) {
+      returnToList();
     }
-  }, [searchParams, pageLoading, fetchDetail]);
+  }, [searchParams, pageLoading, fetchDetail, returnToList]);
 
   if (pageLoading) {
     return (
@@ -171,7 +194,7 @@ function HistoryContent() {
                   <h2 className="text-lg font-semibold text-gray-900">分析結果詳細</h2>
                   <p className="text-sm text-gray-500">{formatTimestamp(detail.timestamp)}</p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => setDetail(null)}>
+                <Button variant="outline" size="sm" onClick={returnToList}>
                   一覧に戻る
                 </Button>
               </div>

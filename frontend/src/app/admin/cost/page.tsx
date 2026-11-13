@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCost, CostResponse, HealthStatus } from '@/lib/metrics';
 import { formatCount, formatUsd, jstDateLabel, jstTime } from '@/lib/metrics-format.mjs';
+import { createLatestGuard } from '@/lib/latest-request.mjs';
 import { ChartCard, SimpleTable, TimeBars } from '@/components/dashboard/charts';
 import { CostBadge, CostBadgeKind, StatusPill } from '@/components/dashboard/status';
 import { Loading } from '@/components/ui/Loading';
@@ -27,17 +28,27 @@ export default function CostPage() {
   const [data, setData] = useState<CostResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestGuard = useRef(createLatestGuard());
 
   const load = useCallback(async (m: string) => {
+    const token = requestGuard.current.begin();
     setLoading(true);
     setError(null);
     try {
-      setData(await getCost(m));
+      const result = await getCost(m);
+      if (requestGuard.current.isLatest(token)) setData(result);
     } catch (e) {
-      setError((e as Error).message);
+      if (requestGuard.current.isLatest(token)) {
+        setData(null);
+        setError((e as Error).message);
+      }
     } finally {
-      setLoading(false);
+      if (requestGuard.current.isLatest(token)) setLoading(false);
     }
+  }, []);
+
+  useEffect(() => () => {
+    requestGuard.current.invalidate();
   }, []);
 
   useEffect(() => {

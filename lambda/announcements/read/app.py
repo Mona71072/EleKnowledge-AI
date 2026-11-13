@@ -52,6 +52,11 @@ def _response(status: int, body: dict) -> dict:
     }
 
 
+def _public_announcement(item: dict) -> dict:
+    """公開応答から管理者の識別情報を除いた新しい項目を返す。"""
+    return {key: value for key, value in item.items() if key not in ('createdBy', 'updatedBy')}
+
+
 def _query_by_status(status: str, now_iso: str, fetch_limit: int) -> list:
     """期限切れを除外し、必要件数まで最大ページ数の範囲で取得する。"""
     items = []
@@ -179,8 +184,8 @@ def lambda_handler(event, context):
         active_maintenance = get_active_maintenance(now_iso)
 
         return _response(200, {
-            'announcements': announcements,
-            'activeMaintenance': active_maintenance,
+            'announcements': [_public_announcement(item) for item in announcements],
+            'activeMaintenance': [_public_announcement(item) for item in active_maintenance],
             'serverTime': now_iso,
         })
 

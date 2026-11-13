@@ -322,18 +322,22 @@ def test_list_failure_messages_joins_user_query():
         "pageCandidates": [{"documentName": "C-123.pdf"}],
     }
     table.scan.return_value = {"Items": [assistant], "ScannedCount": 1}
-    table.query.return_value = {
-        "Items": [
-            {
-                "sessionId": "s1",
-                "messageId": "msg_100",
-                "role": "user",
-                "timestamp": "2026-07-29T11:59:00",
-                "content": "火災管制の解除条件は？",
-            },
-            assistant,
-        ]
-    }
+    session_messages = [
+        {
+            "sessionId": "s1",
+            "messageId": "msg_100",
+            "role": "user",
+            "timestamp": "2026-07-29T11:59:00",
+            "content": "火災管制の解除条件は？",
+        },
+        assistant,
+    ]
+
+    def query(**kwargs):
+        items = session_messages if kwargs["ScanIndexForward"] else list(reversed(session_messages))
+        return {"Items": items}
+
+    table.query.side_effect = query
 
     out = mod.list_failure_messages(kind="bad", limit=10)
     assert out["count"] == 1

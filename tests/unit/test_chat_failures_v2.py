@@ -143,12 +143,18 @@ def test_failures_items_include_opened_reformulated_triage_hints_and_trace():
                                           {"rank": 3, "score": 0.34, "excludedBy": "model_scope"}, {"rank": 4, "score": 0.30, "excludedBy": "model_scope"}]},
     }
     table.scan.return_value = {"Items": [assistant], "ScannedCount": 1}
-    table.query.return_value = {"Items": [
+    session_messages = [
         {"sessionId": "s1", "messageId": "u0", "role": "user", "timestamp": "2026-09-23T01:40:00Z", "content": "最初"},
         {"sessionId": "s1", "messageId": "c0", "role": "assistant", "timestamp": "2026-09-23T01:40:10Z", "responseType": "clarify"},
         {"sessionId": "s1", "messageId": "u1", "role": "user", "timestamp": "2026-09-23T01:46:00Z", "content": "かご枠の水平"},
         assistant,
-    ]}
+    ]
+
+    def query(**kwargs):
+        items = session_messages if kwargs["ScanIndexForward"] else list(reversed(session_messages))
+        return {"Items": items}
+
+    table.query.side_effect = query
     out = mod.list_failure_messages(kind="all")
     it = out["failures"][0]
     assert it["userQuery"] == "かご枠の水平"

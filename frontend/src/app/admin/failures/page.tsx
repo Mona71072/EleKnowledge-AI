@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Loading } from '@/components/ui/Loading';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import {
@@ -34,6 +35,7 @@ import {
 import { isThisWeekJst, periodRange } from '@/lib/failures-period.mjs';
 import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
 import { failureTruncationNotices, isReformulatedFailure } from '@/lib/failures-selection.mjs';
+import { createLatestGuard } from '@/lib/latest-request.mjs';
 
 type PeriodKey = '1' | '7' | '30' | 'custom' | 'all';
 type TriageFilter = TriageStatus | 'all';
@@ -110,12 +112,15 @@ function triageOf(item: { triage?: Triage }): Triage {
  * 失敗・改善提案 v2（設計 docs/design-2026-09-10-dashboard-v2.md §9）。
  * 期間で絞り、1 件ずつ振り分けを記録する。週次レビューのゴールは未振り分けを 0 にすること（部分取得時は表示中の範囲）。
  */
-export default function AdminFailuresPage() {
-  const [period, setPeriod] = useState<PeriodKey>('7');
-  const [customSince, setCustomSince] = useState('');
-  const [customUntil, setCustomUntil] = useState('');
+function AdminFailuresContent() {
+  const searchParams = useSearchParams();
+  const initialSince = searchParams.get('since');
+  const initialKind = searchParams.get('kind') as FailureKind | null;
+  const [period, setPeriod] = useState<PeriodKey>(initialSince ? 'custom' : '7');
+  const [customSince, setCustomSince] = useState(initialSince || '');
+  const [customUntil, setCustomUntil] = useState(initialSince ? searchParams.get('until') || initialSince : '');
   const [triageFilter, setTriageFilter] = useState<TriageFilter>('all');
-  const [kind, setKind] = useState<FailureKind>('all');
+  const [kind, setKind] = useState<FailureKind>(initialSince && initialKind && KINDS.some((x) => x.key === initialKind) ? initialKind : 'all');
   const [reasonFilter, setReasonFilter] = useState<ReasonFilterKey>('all');
   const [allItems, setAllItems] = useState<FailureItem[]>([]);
   const [wishes, setWishes] = useState<ProductWish[]>([]);
@@ -130,6 +135,7 @@ export default function AdminFailuresPage() {
   const [showOpsGuide, setShowOpsGuide] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, TriageInput>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  const requestGuard = useRef(createLatestGuard());
 
   const range = useMemo(() => {
     if (period === 'custom') return { since: customSince || null, until: customUntil || null };
@@ -137,6 +143,7 @@ export default function AdminFailuresPage() {
   }, [period, customSince, customUntil]);
 
   const load = useCallback(async () => {
+    const token = requestGuard.current.begin();
     setLoading(true);
     setError(null);
     setWishesError(null);
@@ -145,6 +152,7 @@ export default function AdminFailuresPage() {
         getChatFailures('all', 100, { since: range.since, until: range.until }),
         getChatFailures('reformulated', 100, { since: range.since, until: range.until }),
       ]);
+      if (!requestGuard.current.isLatest(token)) return;
       const seen = new Set<string>();
       const reformulatedFailures = (refRes.failures || []).filter(isReformulatedFailure);
       const merged = [...(failRes.failures || []), ...reformulatedFailures].filter((it) => {
@@ -161,18 +169,22 @@ export default function AdminFailuresPage() {
       setDrafts({});
       try {
         const wishRes = await getAdminSuggestions(30);
-        setWishes(wishRes.wishes || []);
+        if (requestGuard.current.isLatest(token)) setWishes(wishRes.wishes || []);
       } catch (wishErr) {
-        setWishes([]);
-        setWishesError((wishErr as Error).message || '要望一覧の取得に失敗しました');
+        if (requestGuard.current.isLatest(token)) {
+          setWishes([]);
+          setWishesError((wishErr as Error).message || '要望一覧の取得に失敗しました');
+        }
       }
     } catch (e) {
-      setError((e as Error).message);
-      setAllItems([]);
-      setIncomplete(false);
-      setTruncationNotices([]);
+      if (requestGuard.current.isLatest(token)) {
+        setError((e as Error).message);
+        setAllItems([]);
+        setIncomplete(false);
+        setTruncationNotices([]);
+      }
     } finally {
-      setLoading(false);
+      if (requestGuard.current.isLatest(token)) setLoading(false);
     }
   }, [range.since, range.until]);
 
@@ -180,19 +192,14 @@ export default function AdminFailuresPage() {
     load();
   }, [load]);
 
-  // ダッシュボード「到達できず」からの導線: /admin/failures?since=YYYY-MM-DD
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const since = params.get('since');
-    if (since) {
-      setPeriod('custom');
-      setCustomSince(since);
-      setCustomUntil(params.get('until') || since);
-      const k = params.get('kind') as FailureKind | null;
-      if (k && KINDS.some((x) => x.key === k)) setKind(k);
+    if (searchParams.has('since')) {
       window.history.replaceState({}, '', window.location.pathname);
     }
+  }, [searchParams]);
+
+  useEffect(() => () => {
+    requestGuard.current.begin();
   }, []);
 
   const unresolvedItems = useMemo(() => allItems.filter(isUnresolved), [allItems]);
@@ -782,5 +789,13 @@ export default function AdminFailuresPage() {
         )}
       </section>
     </div>
+  );
+}
+
+export default function AdminFailuresPage() {
+  return (
+    <Suspense fallback={<div className="p-12 flex justify-center"><Loading size="lg" text="失敗一覧を読み込み中..." /></div>}>
+      <AdminFailuresContent />
+    </Suspense>
   );
 }

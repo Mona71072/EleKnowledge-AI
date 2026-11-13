@@ -670,7 +670,7 @@ def get_session_messages(session_id: str, limit: int = 100, fetch_all: bool = Fa
                     ':false': False,
                     ':wish': 'product_wish',
                 },
-                'ScanIndexForward': True,
+                'ScanIndexForward': True if fetch_all else False,
                 'Limit': page_limit,
             }
             if exclusive_start:
@@ -685,7 +685,7 @@ def get_session_messages(session_id: str, limit: int = 100, fetch_all: bool = Fa
             if target is not None and len(collected) >= target:
                 break
 
-        messages = collected if fetch_all else collected[:target]
+        messages = collected if fetch_all else list(reversed(collected[:target]))
 
         for msg in messages:
             if 'ttl' in msg:
@@ -795,7 +795,7 @@ def _session_user_query_before(session_id: str, assistant_ts: str, cache: dict) 
     """同一セッションで、assistant の直前 user 文を返す（失敗一覧用）。"""
     if session_id not in cache:
         try:
-            msgs = get_session_messages(session_id, limit=200)
+            msgs = get_session_messages(session_id, fetch_all=True)
         except ClientError:
             msgs = []
         cache[session_id] = msgs
@@ -1004,7 +1004,7 @@ def save_product_wish(user_id: str, text: str, context_session_id: str = None,
     now_utc = datetime.now(timezone.utc)
     now = now_utc.isoformat().replace('+00:00', 'Z')
     ttl = int(time.time()) + (60 * 24 * 60 * 60)
-    message_id = f'wish-{int(time.time() * 1000)}'
+    message_id = f'wish-{int(time.time() * 1000)}-{os.urandom(4).hex()}'
     session_id = f'wish-{user_id}'
 
     item = {
@@ -1023,7 +1023,10 @@ def save_product_wish(user_id: str, text: str, context_session_id: str = None,
         if context_rag_mode in ('normal', 'law'):
             item['contextRagMode'] = context_rag_mode
 
-    chatlogs_table.put_item(Item=item)
+    chatlogs_table.put_item(
+        Item=item,
+        ConditionExpression='attribute_not_exists(messageId)',
+    )
     return {'messageId': message_id, 'timestamp': now}
 
 

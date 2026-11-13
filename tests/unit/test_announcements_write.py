@@ -33,6 +33,7 @@ def _load(name, rel_path):
 
 write = _load("ann_write_ops", "lambda/announcements/write/app.py")
 publisher = _load("ann_publisher_ops", "lambda/announcements/publisher/app.py")
+read = _load("ann_read_ops", "lambda/announcements/read/app.py")
 
 
 class FakeTable:
@@ -41,14 +42,49 @@ class FakeTable:
     def __init__(self, items=None):
         self.items = {it["announcementId"]: dict(it) for it in (items or [])}
         self.updates = []
+        self.puts = []
+        self.gets = []
+        self.after_get_item = None
+        self.fail_conditional_put = False
         self.query_pages = []  # publisher 用: 事前に用意したページ
 
-    def put_item(self, Item):
+    def put_item(self, Item, **kwargs):
+        self.puts.append({"Item": dict(Item), **kwargs})
+        if self.fail_conditional_put:
+            raise ClientError(
+                {"Error": {"Code": "ConditionalCheckFailedException", "Message": "condition failed"}},
+                "PutItem",
+            )
+        condition = kwargs.get("ConditionExpression")
+        if condition:
+            existing = self.items.get(Item["announcementId"])
+            values = kwargs.get("ExpressionAttributeValues", {})
+            for clause in condition.split(" AND "):
+                if clause == "attribute_exists(announcementId)" and existing is None:
+                    self._raise_conditional_put()
+                if clause == "attribute_not_exists(updatedAt)" and existing and "updatedAt" in existing:
+                    self._raise_conditional_put()
+                if clause in ("updatedAt = :version", "createdAt = :version"):
+                    attribute = clause.split(" = ")[0]
+                    if existing is None or existing.get(attribute) != values.get(":version"):
+                        self._raise_conditional_put()
         self.items[Item["announcementId"]] = dict(Item)
 
-    def get_item(self, Key):
+    def _raise_conditional_put(self):
+        raise ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "condition failed"}},
+            "PutItem",
+        )
+
+    def get_item(self, Key, **kwargs):
+        self.gets.append({"Key": dict(Key), **kwargs})
         it = self.items.get(Key["announcementId"])
-        return {"Item": dict(it)} if it else {}
+        response = {"Item": dict(it)} if it else {}
+        if self.after_get_item:
+            hook = self.after_get_item
+            self.after_get_item = None
+            hook(Key["announcementId"])
+        return response
 
     def delete_item(self, Key, ConditionExpression=None):
         aid = Key["announcementId"]
@@ -159,6 +195,106 @@ def test_update_not_found(table):
     assert write.update("missing", {"title": "x"}, actor="u")["statusCode"] == 404
 
 
+def test_update_uses_existing_version_condition_and_succeeds(table):
+    table.put_item(_maintenance())
+
+    resp = write.update("anc_1", {"title": "更新後"}, actor="u")
+
+    assert resp["statusCode"] == 200
+    put = table.puts[-1]
+    assert "attribute_exists(announcementId)" in put["ConditionExpression"]
+    assert "updatedAt = :version" in put["ConditionExpression"]
+    assert put["ExpressionAttributeValues"][":version"] == "2026-01-01T00:00:00.000Z"
+    assert table.items["anc_1"]["title"] == "更新後"
+    assert table.gets[-1]["ConsistentRead"] is True
+
+
+def test_update_falls_back_to_created_at_when_updated_at_is_missing(table):
+    item = _maintenance()
+    item.pop("updatedAt")
+    table.put_item(item)
+
+    resp = write.update("anc_1", {"title": "更新後"}, actor="u")
+
+    assert resp["statusCode"] == 200
+    put = table.puts[-1]
+    assert "createdAt = :version" in put["ConditionExpression"]
+    assert "attribute_not_exists(updatedAt)" in put["ConditionExpression"]
+    assert put["ExpressionAttributeValues"][":version"] == item["createdAt"]
+
+
+def test_update_without_version_attributes_uses_existence_condition(table):
+    item = _maintenance()
+    item.pop("updatedAt")
+    item.pop("createdAt")
+    table.put_item(item)
+
+    resp = write.update("anc_1", {"title": "更新後"}, actor="u")
+
+    assert resp["statusCode"] == 200
+    put = table.puts[-1]
+    assert put["ConditionExpression"] == "attribute_exists(announcementId) AND attribute_not_exists(updatedAt)"
+    assert "ExpressionAttributeValues" not in put
+    assert table.items["anc_1"]["title"] == "更新後"
+
+
+@pytest.mark.parametrize("version_fields", ["updated", "created", "none"])
+def test_update_rejects_second_put_from_same_legacy_version(table, monkeypatch, version_fields):
+    item = _maintenance()
+    if version_fields == "created":
+        item.pop("updatedAt")
+    elif version_fields == "none":
+        item.pop("updatedAt")
+        item.pop("createdAt")
+    table.put_item(item)
+    ticks = iter(("2026-11-13T00:00:01.000Z", "2026-11-13T00:00:02.000Z"))
+    monkeypatch.setattr(write, "_now_iso", lambda: next(ticks))
+
+    def concurrent_put(announcement_id):
+        assert announcement_id == "anc_1"
+        assert write.update(announcement_id, {"title": "先行編集"}, actor="first")["statusCode"] == 200
+
+    table.after_get_item = concurrent_put
+    response = write.update("anc_1", {"title": "後続編集"}, actor="second")
+
+    assert response["statusCode"] == 409
+    assert table.items["anc_1"]["title"] == "先行編集"
+
+
+def test_update_does_not_resurrect_item_deleted_after_read(table):
+    table.put_item(_maintenance())
+    table.after_get_item = lambda announcement_id: table.items.pop(announcement_id)
+
+    response = write.update("anc_1", {"title": "更新後"}, actor="u")
+
+    assert response["statusCode"] == 409
+    assert "anc_1" not in table.items
+
+
+def test_update_allows_two_sequential_edits(table, monkeypatch):
+    table.put_item(_maintenance())
+    ticks = iter(("2026-11-13T00:00:01.000Z", "2026-11-13T00:00:02.000Z"))
+    monkeypatch.setattr(write, "_now_iso", lambda: next(ticks))
+
+    first = write.update("anc_1", {"title": "一回目"}, actor="u")
+    second = write.update("anc_1", {"title": "二回目"}, actor="u")
+
+    assert first["statusCode"] == second["statusCode"] == 200
+    assert table.items["anc_1"]["title"] == "二回目"
+    assert all(read["ConsistentRead"] is True for read in table.gets)
+
+
+def test_update_conditional_conflict_returns_409_and_keeps_not_found_404(table):
+    table.put_item(_maintenance())
+    table.fail_conditional_put = True
+
+    resp = write.update("anc_1", {"title": "競合"}, actor="u")
+
+    assert resp["statusCode"] == 409
+    assert _body(resp)["error"] == "Conflict"
+    assert write.update("missing", {"title": "x"}, actor="u")["statusCode"] == 404
+
+
 # ----------------------------------------------------------------- delete
 def test_delete_missing_returns_404(table):
     assert write.delete("missing")["statusCode"] == 404  # R8
@@ -182,6 +318,86 @@ def test_promote_due_reads_all_pages_before_updating(monkeypatch):
     assert sorted(result["promoted"]) == ["a1", "a2"]  # R1: 2 ページ目も取りこぼさない
     assert len(fake.updates) == 2
     assert fake.query_pages == []  # 更新前に全ページを読み切っている
+
+
+def test_promote_due_conditions_on_read_publish_at_and_skips_conflicts(monkeypatch):
+    class ConflictingTable(FakeTable):
+        def update_item(self, **kwargs):
+            self.updates.append(kwargs)
+            if kwargs["Key"]["announcementId"] == "a1":
+                raise ClientError(
+                    {"Error": {"Code": "ConditionalCheckFailedException", "Message": "condition failed"}},
+                    "UpdateItem",
+                )
+
+    fake = ConflictingTable()
+    fake.query_pages = [[
+        {"announcementId": "a1", "publishAt": "2026-01-01T00:00:00.000Z", "status": "scheduled"},
+        {"announcementId": "a2", "publishAt": "2026-01-01T00:00:00.000Z", "status": "scheduled"},
+    ]]
+    monkeypatch.setattr(publisher, "table", fake)
+
+    result = publisher.promote_due("2026-01-02T00:00:00Z")
+
+    assert len(fake.updates) == 2
+    assert "publishAt = :read_publish_at" in fake.updates[0]["ConditionExpression"]
+    assert fake.updates[0]["ExpressionAttributeValues"][":read_publish_at"] == "2026-01-01T00:00:00.000Z"
+    assert result["promoted"] == ["a2"]
+    assert result["count"] == 1
+    assert result["skipped_count"] == 1
+
+
+def test_public_announcements_hide_actor_fields_but_admin_list_keeps_them(monkeypatch):
+    public_rows = [
+        {
+            "announcementId": "public", "type": "notice", "status": "published",
+            "severity": "info", "title": "告知", "body": "本文",
+            "publishAt": "2026-09-10T02:00:00.000Z",
+            "createdBy": "admin@example.com", "updatedBy": "admin2@example.com",
+        },
+        {
+            "announcementId": "maintenance", "type": "maintenance", "status": "published",
+            "severity": "warning", "title": "保守", "body": "本文",
+            "publishAt": "2026-09-10T02:00:00.000Z",
+            "startAt": "2026-09-10T02:00:00.000Z", "endAt": "2026-09-10T04:00:00.000Z",
+            "createdBy": "admin@example.com", "updatedBy": "admin2@example.com",
+        },
+    ]
+
+    class PublicRowsTable:
+        def query(self, **kwargs):
+            status = _status_of(kwargs["KeyConditionExpression"])
+            rows = [item for item in public_rows if item["status"] == status]
+            if "FilterExpression" in kwargs:
+                expression = kwargs["FilterExpression"]
+                condition = expression
+                while not hasattr(condition, "name"):
+                    condition = condition._values[0]
+                if condition.name == "type":
+                    rows = [item for item in rows if item["type"] == "maintenance"]
+            return {"Items": [dict(item) for item in rows]}
+
+    monkeypatch.setattr(read, "table", PublicRowsTable())
+    monkeypatch.setattr(read, "_now_iso", lambda: "2026-09-10T03:00:00.000Z")
+
+    response = read.lambda_handler({"httpMethod": "GET"}, None)
+    body = _body(response)
+
+    assert response["statusCode"] == 200
+    assert all("createdBy" not in item and "updatedBy" not in item
+               for item in body["announcements"] + body["activeMaintenance"])
+
+    admin_table = GsiTable(public_rows)
+    monkeypatch.setattr(write, "table", admin_table)
+    admin_response = write.list_all({})
+    assert admin_response["statusCode"] == 200
+    assert admin_table.items["public"]["createdBy"] == "admin@example.com"
+    assert admin_table.items["public"]["updatedBy"] == "admin2@example.com"
+    active_response = write.list_active("2026-09-10T03:00:00.000Z")
+    assert active_response["statusCode"] == 200
+    active_item = _body(active_response)["announcements"][0]
+    assert active_item["createdBy"] == "admin@example.com"
+    assert active_item["updatedBy"] == "admin2@example.com"
 
 
 # ----------------------------------------------------------------- admin list (R9)

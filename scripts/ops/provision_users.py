@@ -44,6 +44,7 @@ import time
 USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "ap-northeast-1_DN17ekXik")
 USERS_TABLE = os.environ.get("USERS_TABLE", "users-dev")
 PROVISIONED_BY = "scripts/ops/provision_users.py"
+OUTPUT_FILE_MODE = 0o600
 
 # Cognito のパスワードポリシー（最小 8 文字）を満たす 12 文字: 英大小・数字・記号を各 1 文字以上含める
 _ALPHABET = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -155,7 +156,8 @@ def _repo_root() -> str:
 
 def write_results(out_path: str, results: list[dict]) -> None:
     """結果 CSV を新規作成する。既存ファイルは上書きしない（初期パスワードを失わないため）。"""
-    with open(out_path, "x", encoding="utf-8", newline="") as f:
+    fd = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, OUTPUT_FILE_MODE)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["email", "status", "password", "userId"], extrasaction="ignore")
         w.writeheader(); w.writerows(results)
 

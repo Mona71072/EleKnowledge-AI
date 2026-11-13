@@ -4,11 +4,11 @@
 エラーコードと不具合情報から対処方法を検索
 Citation は取得しない（参考情報のみ）、1-3件のみ返却
 """
-import json
 import logging
 import os
 from typing import Dict, Any, List
 import boto3
+from botocore.exceptions import ClientError
 
 # ロギング設定
 logger = logging.getLogger()
@@ -111,7 +111,7 @@ def search_knowledge_base(query: str, filters: Dict[str, Any]) -> List[Dict[str,
         KBSearchError: 検索失敗
     """
     try:
-        logger.info(f"Searching KB with query: {query}")
+        logger.info("Searching KB: query_length=%d", len(query))
         
         vector_config: Dict[str, Any] = {
             'numberOfResults': 5,
@@ -144,7 +144,8 @@ def search_knowledge_base(query: str, filters: Dict[str, Any]) -> List[Dict[str,
         return results[:3]
         
     except Exception as e:
-        logger.error(f"KB search error: {str(e)}")
+        error_code = e.response.get('Error', {}).get('Code') if isinstance(e, ClientError) else None
+        logger.error("KB search failed: error_type=%s error_code=%s", type(e).__name__, error_code)
         raise KBSearchError(f"Knowledge Base 検索失敗: {str(e)}")
 
 
@@ -197,9 +198,10 @@ def write_citations(session_id: str, results: List[Dict[str, Any]]):
             UpdateExpression='SET citations = list_append(if_not_exists(citations, :empty), :c)',
             ExpressionAttributeValues={':c': citations, ':empty': []},
         )
-        logger.info(f"Citations written: session_id={session_id}, count={len(citations)}")
+        logger.info(f"Citations written: count={len(citations)}")
     except Exception as e:
-        logger.warning(f"Citations write failed: {e}")
+        error_code = e.response.get('Error', {}).get('Code') if isinstance(e, ClientError) else None
+        logger.warning("Citations write failed: error_type=%s error_code=%s", type(e).__name__, error_code)
 
 
 def _extract_params(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -238,11 +240,14 @@ def lambda_handler(event, context):
     Returns:
         レスポンス
     """
-    logger.info(f"KB Search2 Action invoked: {json.dumps(event)}")
+    logger.info("KB Search2 Action invoked: actionGroup=%s function=%s",
+                event.get('actionGroup', ''), event.get('function', ''))
     
     try:
         parameters = _extract_params(event)
-        logger.info(f"Parameters: {parameters}")
+        query = parameters.get('query', '')
+        logger.info("KB Search2 parameters: keys=%s query_length=%d",
+                    sorted(parameters), len(query) if isinstance(query, str) else 0)
         validated_params = validate_parameters(parameters)
         search_query = build_search_query({**parameters, **validated_params})
         filters = build_metadata_filter(validated_params)
@@ -253,8 +258,9 @@ def lambda_handler(event, context):
         logger.info("KB Search2 completed successfully")
         return _make_response(event, 200, formatted_result)
     except KBSearchError as e:
-        logger.error(f"KB Search error: {str(e)}")
+        logger.error("KB Search error: error_type=%s", type(e).__name__)
         return _make_response(event, 400, f"エラー: {str(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        error_code = e.response.get('Error', {}).get('Code') if isinstance(e, ClientError) else None
+        logger.error("Unexpected error: error_type=%s error_code=%s", type(e).__name__, error_code)
         return _make_response(event, 500, f"予期しないエラーが発生しました: {str(e)}")
