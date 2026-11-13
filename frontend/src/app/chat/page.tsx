@@ -16,6 +16,7 @@ import { ProductWishModal } from '@/components/chat/ProductWishModal';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { documentHref, documentHrefWithPage } from '@/lib/documents';
 import { linkCitedNames } from '@/lib/citation-links.mjs';
+import { safeExternalHref } from '@/lib/safe-external-href.mjs';
 import { getAnnouncements, Announcement } from '@/lib/announcements';
 import { NoticeBanner } from '@/components/announcements/NoticeBanner';
 import { resolveInitialChatMode } from '@/lib/chat-session-link.mjs';
@@ -1418,7 +1419,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                       ? getUniqueDocs(message.sourceDocuments).map((doc) => {
                                         const ctx = { sessionId: currentSession, messageId: message.id };
                                         return doc.lawCitation
-                                          ? { names: [doc.documentName, doc.title], href: doc.lawCitation.sourceUrl }
+                                          ? { names: [doc.documentName, doc.title], href: safeExternalHref(doc.lawCitation.sourceUrl) }
                                           : {
                                             names: [doc.documentName, doc.title],
                                             href: documentHref(doc.sourceUri, ctx),
@@ -1479,7 +1480,7 @@ const normalizeTableMarkdown = (text: string): string => {
                               {primaryDocs.map((doc, idx) => (
                                 <a
                                   key={`${doc.sourceUri || doc.documentName}-${idx}`}
-                                  href={doc.lawCitation?.sourceUrl || documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id })}
+                                  href={safeExternalHref(doc.lawCitation?.sourceUrl) || documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id })}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"
@@ -1516,7 +1517,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                       {extraDocs.map((doc, idx) => (
                                         <a
                                           key={`${doc.sourceUri || doc.documentName}-extra-${idx}`}
-                                          href={doc.lawCitation?.sourceUrl || documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id })}
+                                          href={safeExternalHref(doc.lawCitation?.sourceUrl) || documentHref(doc.sourceUri, { sessionId: currentSession, messageId: message.id })}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline transition-all duration-200 p-1.5 rounded-lg hover:bg-blue-50 group"

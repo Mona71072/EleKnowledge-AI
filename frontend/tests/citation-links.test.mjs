@@ -69,3 +69,17 @@ test('keeps the document link when the page is absent, invalid or not supported'
     '[TI-1158.pdf](</doc?uri=s3%3A%2F%2Fb%2FTI-1158.pdf>) p.3',
   );
 });
+
+test('does not link names whose href uses a script or other non-web scheme', () => {
+  const text = 'TI-1158.pdf と LAW-NAME を参照';
+  for (const href of ['javascript:alert(1)', 'JavaScript:alert(1)', 'data:text/html,x', 'vbscript:x']) {
+    assert.equal(linkCitedNames(text, [{ names: ['TI-1158.pdf', 'LAW-NAME'], href }]), text, href);
+  }
+  assert.equal(linkCitedNames('LAW-NAME', [{ names: ['LAW-NAME'], href: 'https://laws.e-gov.go.jp/law/123' }]),
+    '[LAW-NAME](<https://laws.e-gov.go.jp/law/123>)');
+});
+
+test('does not link a page href that uses a script scheme', () => {
+  const out = linkCitedNames('TI-1158.pdf p.3', [{ names: ['TI-1158.pdf'], href: '/doc?a', pageHref: () => 'javascript:alert(1)' }]);
+  assert.equal(out, '[TI-1158.pdf](</doc?a>) p.3');
+});

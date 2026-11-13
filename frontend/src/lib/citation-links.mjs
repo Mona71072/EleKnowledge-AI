@@ -27,8 +27,13 @@ function nameVariants(name) {
   return withoutExtension !== trimmed && withoutExtension.length >= MIN_NAME_LENGTH ? [trimmed, withoutExtension] : [trimmed];
 }
 
+// SECURITY: スキーム付きの URL は http: / https: だけ通す（javascript: / data: などはリンクにしない）。アプリ内パスは通す。
+const SCHEME = /^([A-Za-z][A-Za-z0-9+.-]*):/u;
+
 function safeHref(href) {
-  return typeof href === 'string' && href && !/[<>\s]/u.test(href) ? href : undefined;
+  if (typeof href !== 'string' || !href || /[<>\s]/u.test(href)) return undefined;
+  const scheme = SCHEME.exec(href)?.[1].toLowerCase();
+  return scheme && scheme !== 'http' && scheme !== 'https' ? undefined : href;
 }
 
 /**
