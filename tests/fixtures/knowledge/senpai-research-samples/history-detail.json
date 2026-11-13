@@ -19,7 +19,7 @@
       },
       {
         "clarifyQuestions": [],
-        "content": "## 結論\nまずドアの調整状態を確認してください[T1][T2]。法令上の確認は[L1]の範囲です。\n\n## 根拠と手順\n- 戸の開閉調整の手順が記載されています[T1]。\n- 昇降機の構造は政令で定める基準によります[L1]。\n- 同機種の事例があります（ノウハウ・未承認）[K1]。別機種の事例[K2]は機種が異なる可能性があります（ノウハウ・未承認）。\n\n## 確認が必要な点\n- 階数と製造年が不明です。\n- 異音が出るタイミング。",
+        "content": "取得した根拠の原文を参考として示します。生成した説明は検証を通過していないため掲載していません。\n\n\n### TI-1.pdf [T1]\n\n> 戸の開閉調整の手順\n\n\n### 建築基準法 [L1]\n\n> 合成データの法令本文\n\n\nこの引用だけでは原因や対策を確定できません。現行の正式資料で対象条件と手順を確認してください。",
         "daysUntilDeletion": 60,
         "messageId": "senpai-research-a-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         "modelType": "AXIEZ-LINKs",
@@ -28,7 +28,7 @@
         },
         "ragMode": "senpai_research",
         "researchResult": {
-          "answerMarkdown": "## 結論\nまずドアの調整状態を確認してください[T1][T2]。法令上の確認は[L1]の範囲です。\n\n## 根拠と手順\n- 戸の開閉調整の手順が記載されています[T1]。\n- 昇降機の構造は政令で定める基準によります[L1]。\n- 同機種の事例があります（ノウハウ・未承認）[K1]。別機種の事例[K2]は機種が異なる可能性があります（ノウハウ・未承認）。\n\n## 確認が必要な点\n- 階数と製造年が不明です。\n- 異音が出るタイミング。",
+          "answerMarkdown": "取得した根拠の原文を参考として示します。生成した説明は検証を通過していないため掲載していません。\n\n\n### TI-1.pdf [T1]\n\n> 戸の開閉調整の手順\n\n\n### 建築基準法 [L1]\n\n> 合成データの法令本文\n\n\nこの引用だけでは原因や対策を確定できません。現行の正式資料で対象条件と手順を確認してください。",
           "clarifyQuestions": [],
           "kind": "answer",
           "sources": {
@@ -36,28 +36,21 @@
               "candidates": [
                 {
                   "cardVersion": 2.0,
-                  "knowledgeId": "KH-GEN-003",
-                  "title": "ドア全般の点検メモ"
-                }
-              ],
-              "used": [
-                {
-                  "cardVersion": 2.0,
                   "knowledgeId": "KH-AX-001",
-                  "modelFit": "matched",
-                  "ref": "K1",
-                  "status": "draft",
                   "title": "ドア開閉時の異音"
                 },
                 {
                   "cardVersion": 2.0,
                   "knowledgeId": "KH-NX-014",
-                  "modelFit": "other_product",
-                  "ref": "K2",
-                  "status": "draft",
                   "title": "戸の擦り音（別機種）"
+                },
+                {
+                  "cardVersion": 2.0,
+                  "knowledgeId": "KH-GEN-003",
+                  "title": "ドア全般の点検メモ"
                 }
-              ]
+              ],
+              "used": []
             },
             "law": [
               {
@@ -75,13 +68,6 @@
                 "ref": "T1",
                 "sourceUri": "s3://kb-docs-bucket/docs/TI-1.pdf",
                 "title": "TI-1.pdf"
-              },
-              {
-                "documentName": "TI-2.pdf",
-                "pageNumber": 5.0,
-                "ref": "T2",
-                "sourceUri": "s3://kb-docs-bucket/docs/TI-2.pdf",
-                "title": "TI-2.pdf"
               }
             ]
           },

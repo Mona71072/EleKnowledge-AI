@@ -12,6 +12,10 @@ related-code:
 
 ## Purpose
 
+> 最終検証: 2026-10-22 — 共通知識I1の適用範囲を追記。以下の旧Vault提案全体の再検証ではない。
+
+共通のノウハウ・用語・基礎知識のI1は[共通知識I1契約](common-knowledge-i1-contract.md)を適用し、共通GitのMarkdownを編集正本とする。以下のVault正本案は既存資産の取込・編集クライアントの歴史的提案として扱う。Vaultの移動・削除・全件移行は行わない。
+
 Define a path for organizing curated technical knowledge in EleKnowledge while the local Obsidian Vault remains the canonical source. The design must support exploration of existing knowledge, curation of new observations, human review, controlled publication, and selective return of accepted edits to the Vault.
 
 This is separate from PR #191, whose stated purpose is to consult administrators about read-only OneNote/Lists access. The proposal does not require that access to begin schema and UI design.
@@ -32,6 +36,10 @@ Keep materials with different trust and runtime roles separate:
 Never infer publication eligibility from a file's presence in Git. Curated engineering-business information is in scope alongside technical knowledge. Keep personal/HR/qualification details, customer/site identifiers, raw OneNote exports, recycle-bin content, raw workbooks, credentials, and operational ledgers out unless separately approved. The current snapshot excludes explicit `confidential`/`restricted` content, the unread internal-URL item, the customer-named hold, and the consolidated error-code-table reference; see `knowledge/drafts/IMPORT-SCOPE.md`.
 
 ## Record Model
+
+> 最終検証: 2026-10-22 — legacy recordと共通単元の境界のみ照合。
+
+I1の`candidateId` / `knowledgeId` / 公開版は以下の`record_id`と別IDとし、`originRef`で元ID・版を保持する。新規`term_foundation`は合成試行の分類で、既存カードを一律変換しない。
 
 Use the Vault's stable `record_id` and increment `record_version` when accepted content changes. Preserve source identity, evidence, conditions, exceptions, and uncertainty. Do not make an AI-generated summary a verified fact. The curated Markdown copy is for EleKnowledge-side editing and schema improvement; it does not replace the Vault as canonical source.
 

@@ -1,0 +1,280 @@
+---
+status: development
+last-verified: 2026-10-22
+related-code:
+  - lambda/knowledge/common-knowledge/
+  - infrastructure/sam/common-knowledge-itai-template.yaml
+  - tests/integration/test_common_knowledge_aws_adapters.py
+  - frontend/src/lib/common-knowledge.mjs
+  - frontend/src/components/knowledge/common-knowledge-inbox.tsx
+  - scripts/knowledge/common-knowledge-cli.py
+---
+
+# 共通知識: itai専用AWS基盤の実装契約
+
+> 最終検証: 2026-10-22 — 実装前にAWS読取（認証主体・既存itai/共有devスタック・WAF・Amplify itai）、#195/#200のhead・コメント、設計§17の保存hashを照合。実装・配備の結果は末尾の記録へ追記する。
+
+[I1実装契約](common-knowledge-i1-contract.md)の業務ルールは変えず、保存・配布・正本・API配線をAWSで動く形へ移す。2026-10-22の[S3正本化の決定](common-knowledge-itai-s3-canonical-handoff.md)により、正本はGitではなくS3とする（次節。以降の節のGit記述は次節で置き換える）。方針の正本は設計worktreeのノウハウ設計§17。[引継ぎ](common-knowledge-itai-aws-handoff.md)の許可範囲（itai専用・非破壊・合成データのみ）を超える操作は本契約に含めない。
+
+## S3正本化への改訂（2026-10-22）
+
+> 最終検証: 2026-10-22 — ユーザー決定（引継ぎ§決定事項1〜8）と、共有Cognitoの読取（2アカウントのsub・グループ）に基づく実装前の契約。
+
+| 項目 | 契約 |
+| --- | --- |
+| 作業用バケット（新設 `WorkBucket`） | `drafts/{knowledgeId}.md` が編集の場。バージョニング有効。開発エージェントが直接書けるのはここだけ。台帳は作業版を **VersionId＋sha256** で固定し、以後その特定版だけを確認・承認する（後から作業用を編集しても承認対象は変わらない）。バケットポリシーで全主体の `DeleteObjectVersion` を拒否し、固定した版を消せないようにする |
+| 正本バケット（既存 `DistributionBucket` を流用、置換なし） | `approved/{id}/{rev}/{bundleHash}.md`（承認時に作業用の特定版を不変コピー）と同名 `.json`（承認記録）。`published/{id}.md` と `published/{id}.md.metadata.json`（Bedrock KB用 `metadataAttributes`）は公開中だけ存在する。`manifests/{id}.json` は世代CASと読取ガード用で、公開中の版の束（domain・audience・根拠・hash）を持つ。旧 `artifacts/` は書かない。KBの作成・同期は行わない |
+| 正本への書込境界 | バケットポリシーで `approved/*` はeditorial・recovery、`manifests/*`・`published/*` はpublication・recoveryのLambdaロール以外の Put/Delete を拒否。全主体の `DeleteObjectVersion` を拒否。台帳はService（API・CLI）経由でだけ書く |
+| 公開・停止の順序 | 承認版を `approved/` から読みhashを照合 → manifest CAS（停止は active=null）→ `published/` を **最新manifestに合わせて再投影**（manifestがnullなら削除、そうでなければ `approved/` から複製）。投影後にmanifestが変わっていれば再投影を繰り返す（有限回、尽きたら操作は受付のまま再試行）。manifest先行のため、停止は投影の失敗や古い公開の再試行で覆らない |
+| 読取（RAG・開発エージェント） | manifest → `published/{id}.md` の順に読み、本文hashがmanifestの束と一致し、読む前後でmanifestが同じ場合だけ返す。`drafts/`・`approved/` を直接読んで代用しない。readerロールは `manifests/*`・`published/*` の取得だけ |
+| 作業版の登録（CLI） | `scripts/knowledge/common-knowledge-cli.py register` が同じServiceを呼び、作業用の指定版（既定は最新版）を読み、検証して作業版として登録する。編集者は呼出し元のIAM主体（`iam:` ＋ STS ARN）。CLIで行えるのは登録・確認依頼・状態確認・公開版の読取。承認・公開・停止は正本書込を伴うためAPI（画面）だけ（CLIで受け付けるとバケットポリシーの拒否で操作が受付のまま残り、同じ対象を塞ぐため） |
+| admin条件 | 撤廃。編集・承認・公開・一覧は認可表の業務権限・分野・読者・期限だけで判定する。adminに属するだけでは何もできない（I1の「adminだけでは不可」は維持）。共有Cognitoのグループは変更しない |
+| 画面 | `/admin/knowledge` は、共通知識が有効なビルドでは非adminのログイン利用者も入れる（他のadmin画面は従来どおり）。実データガードは `NEXT_PUBLIC_COMMON_KNOWLEDGE_VALIDATION_SCOPE` に一致する分野・読者に限って解除する。画面に接続先APIと、`GET /knowledge/me` で得た自分の業務権限・共有許可・根拠台帳を表示し、ボタンを権限で出し分ける |
+| 試験主体 | 本アカウント（開発用・admin所属）＝投稿・編集・公開・閲覧・読取。2つ目のアカウント（adminなし）＝承認・閲覧・読取。CLIのIAM主体＝編集・閲覧・読取。分野・読者は `itai-validation`、共有許可と根拠台帳は各1件、期限14日。subはCognitoから読取り、未追跡の作業記録にだけ置く |
+| 廃止 | `GitMode` パラメータ、`remote_git.py`（GitHub互換アダプター候補）、`LocalGit`。ローカル合成はSQLiteの作業用・正本アダプターに置き換える |
+
+IAM（改訂後）: editorialは作業用 `drafts/*` の Get/GetVersion/Put と正本 `approved/*` の Get/Put。publicationは `approved/*` の Get、`manifests/*` の Get/Put、`published/*` の Get/Put/Delete。readerは `manifests/*`・`published/*` の Get。recoveryはeditorialとpublicationの和。404判定のため各バケットの `ListBucket`（キー一覧はコードで使わない）。DynamoDBの権限は従来どおり。
+
+## 配置と既存資源との関係
+
+| 判断 | 内容 | 理由 |
+| --- | --- | --- |
+| 分離スタック | 新規 `EleKnowledge-itai-common-knowledge`。既存 `EleKnowledge-itai-phase2`（T2のRAG/チャット/調査）は更新しない | 既存itaiはT2生成テンプレートで、更新するとRAG側へ差分が波及する。役割（候補台帳・Git承認・公開）が異なる |
+| 共有物 | Cognito User Pool ARNはExport参照、Regional WAFは既存ACLへの関連付けのみ、IP制限はAPI ResourcePolicy。WAF本体・IPSet・Cognito・共有devは変更しない | T2と同じ参照方式。共有devへの書込IAMを持たない |
+| 名前 | 物理名はCloudFormation自動生成。stage `dev`。タグは `gyoumu012Project=ele-knowledge` / `gyoumu012Component=rag` / `gyoumu012Usage=development` / `Purpose=itai-common-knowledge-validation` | 既存区分値を流用し、新しい区分値は台帳の判断として作らない |
+| 機能フラグ | `CommonKnowledgeEnabled=false`（既定・今回の配備値）。`GitMode` は `unconfigured` のみ許可 | 実ロール・保持・会社Gitが未決。Git必須操作は503 `GitNotConfigured` |
+
+APIのフロント接続先（Amplify itai）は切り替えない。itaiブランチは自動配信ONで、API URLはアプリ共通値＝共有devを使っているため、接続切替はブランチ環境変数の追加という別操作になる。
+
+## 保存の移植
+
+Service内の直接SQLを廃し、台帳を「作業単位（unit）」と「一覧Query」のドメイン操作に分ける。SQLiteとDynamoDBの両アダプターが同じ契約を満たす。
+
+- **unit**: `get` / `put` / `delete`、操作の `operation_by_key` / `operation` / `target_pending` / `accept_operation` / `finish_operation`。SQLiteは `BEGIN IMMEDIATE`。DynamoDBは強整合GetItemで読んだ版番号 `v` を記録し、書込を `TransactWriteItems` 1回へまとめる。読んだ項目は版一致、未存在で読んだ項目と新規項目は `attribute_not_exists` を条件にし、書かずに読んだ項目もConditionCheckで再検証する。条件不成立・競合は `Contention` とし、操作を拒否確定にせず503で同じ操作IDの再試行へ戻す。
+- **冪等・ロック**: 操作本体、`actor+key` の一意項目、同一対象の未完了ロック項目を受付時に同じtransactionで作成。完了／拒否でロックを外す。完了後のjournalはI1と同じく要求本文を残さない。
+- **一覧**: 候補は `StateIndex`（状態）と `SubmitterIndex`（本人＋状態）、未完了操作は `PendingIndex`（本人）。GSIは `KEYS_ONLY` で本文を投影しない。1回のQueryで得たキーを基底表から強整合で読み直し、状態・本人・期限・共有範囲を再検証する。無効項目はページから除き、短いページとcursorで続行する。cursorは最後の並び順キーをHMAC付きで返し、offsetは使わない。
+- **期限**: APIが期限切れを返さない。保持年限は未決のため、業務データにTTL物理削除を設定しない。TTL属性は合成受入の名前空間だけが設定する。
+- **配布**: 台帳と別のprivate S3。artifactは `If-None-Match: *` で不変、既存と同一内容なら成功・異なれば拒否。manifestは `If-Match` ETagでCAS。公開・停止の受付票を操作IDごとに保存し、次のCAS実行者は置き換える前に現行manifestの受付票を必ず作る。これにより、manifest成功後に応答や受付票の保存が失われても、停止後に古い公開の再試行が復活しない。412/409は再読込のうえ有限回で判定する。
+- **Git**: `GitMode=unconfigured` では書込・読取・tree照合をすべて503で拒否する。GitHub互換REST（blob/tree/commit/非forceのref更新）のアダプターを実装候補として持つが、配備では選択できない。会社Gitの製品・ホスト・repo・path・資格情報が決まったら、ホスト許可・path許可・操作マーカーcommitの照合・ref競合時の有限再基底を受入してから有効化する。Lambdaの `/tmp` やローカルGitを正本にしない。
+
+## API・Lambda・IAM（責任別）
+
+| Lambda | ルート | 台帳 | 配布S3 | その他 |
+| --- | --- | --- | --- | --- |
+| intake | `POST/GET /knowledge/contributions`、`GET/PATCH .../{id}`、`GET /knowledge/operations`、`GET .../operations/{id}` | 読取・Query・transaction内の書込 | なし | cursor秘密のGetSecretValue |
+| editorial | `GET /cards/{id}`、`PUT .../draft`、`POST .../review-requests`・`/decisions`・`/sample-checks`（2026-11-11 追加・未配備。[I1 契約](common-knowledge-i1-contract.md)の自己承認の例外） | 同上 | なし | Git（未設定のため権限なし） |
+| publication | `POST .../publish`・`/withdraw` | 同上 | artifact/manifest/受付票のGet・Put | Git読取（同上） |
+| reader | `GET /knowledge/published/{id}` | なし | artifact/manifestのGetのみ | なし |
+| recovery | `POST /knowledge/operations/{id}/retry` | 同上 | publicationと同じ | 保存済み要求を元の操作として再認可する。API からの新規操作は受けない。例外: Git のカードの移行（WP3、2026-11-12 追加・未配備）は API に出さず、この関数の直接呼び出しで受ける（[I1 契約](common-knowledge-i1-contract.md)の「Git のカードの移行」） |
+
+全関数は認可表（別DynamoDB表）を `GetItem` だけで読む。認可表が空なら全操作403、共有許可も無いので投函も403。書込は `dynamodb:EnclosingOperation=TransactWriteItems` の条件付きで、単独の Put/Delete を許さない。Scanは許可しない。各Lambdaは自分の責任外のルートを404にする（API Gatewayの配線誤りへの二重防御）。
+
+APIはCognito Authorizer必須、OPTIONSのみ認証なし。CORSは指定したHTTPS originだけ。stageのスロットリングを設定し、アクセスログはphase2と同じ本文・トークンなしの形式。応答は `no-store`。タイムアウト10秒・メモリ256MBはDynamoDB/S3の単発I/Oだけを前提にした暫定値で、Git連携方式を決めた時点で根拠を取り直す。
+
+フロントは `NEXT_PUBLIC_COMMON_KNOWLEDGE_API_URL` にHTTPSのstage付きURL（例 `https://<api>/dev`）を受け付ける。合成モードは従来どおりループバックだけ。実データの投函・保存は引き続き「受入待ち」で止める。
+
+## 受入条件
+
+ローカル: 既存I1の合成テストがSQLite台帳で全て通る。同じシナリオがDynamoDB／S3の挙動を模したアダプターでも通る（3入口の公開・停止、Git成功後の投影失敗の再開、承認時刻の固定、artifactのみ成功、manifest成功後の停止競走、期限、manifest不能、ページング、未完了操作の復旧、同時更新は拒否確定にしない）。Git未設定・設定欠落・責任外ルートは拒否。Lint・型検査・SAM変換/lint・`git diff --check`。
+
+AWS: 新規stackのCREATE changesetが全Addで、共有・既存itaiスタックの変更なし。完了後、暗号化・TLS強制・公開ブロック・バージョニング・PITR、IAMが上表どおり、Lambdaの配備コードが対象コミットと一致、フラグoff・Git未設定であることを確認する。未認証401、フラグoffの403、責任外ルート404を配備版で確認する。台帳とS3アダプターは配備した表・バケットに対し、合成の名前空間（自動失効付き）で上記シナリオを通す。このときGit区間はローカル合成Gitであり、会社Git連携の受入ではない。
+
+未受入として分けて記録するもの: 会社Git連携と知識の一往復、実Cognito主体での画面操作・業務ロール割当、実データ・保持方針、IP外からの拒否の実査、Amplify itaiの接続切替、RAG／開発エージェントの実接続と有料品質検証。
+
+## 費用・停止・rollback（反映前の見積り）
+
+- 固定費: Secrets Manager 1件（約0.40 USD/月）。DynamoDB 2表・S3・Lambda・API Gatewayは従量で、合成受入の量ではほぼ0。PITRとS3バージョンは保存量比例。既存WAFへの関連付けで追加の固定料金はなく、通過リクエスト分のみ。
+- 停止: `CommonKnowledgeEnabled=false` が既定。API stageのスロットリングで上限を固定。
+- rollback: 本スタックは他スタックからExport参照されない。changeset作成で失敗した場合は実行しない。作成後の撤去が必要になった場合は、Retain指定の台帳表・認可表・配布バケットが残ることを確認したうえで、スタック削除とRetain資源の扱いを別途確認する（今回は削除しない）。
+
+## 実施記録（2026-10-22）
+
+> 最終検証: 2026-10-22 — ローカル試験、SAM変換/lint、changeset全ページ、配備後のAWS実査（設定・権限・配備コードhash・API・合成受入）。会社Git・実主体・実データ・ブラウザの受入ではない。
+
+### 実装とローカル検証（コミット `a8c36504`、ローカルitai）
+
+- 台帳をunit／一覧Queryへ分け、Service内の直接SQLを除去。SQLite（I1合成）とDynamoDBの2アダプター、S3配布、Git未設定アダプター、GitHub互換RESTの候補アダプター、設定検証factory、責任別ルートを実装。
+- 当初案の「操作ごとの受付票」は、manifestの世代が単調増加し、manifestに記録した操作IDで現行版の再試行を判定できるため不要と判明して削除した（変異試験で、操作ID判定を外すと試験が落ち、受付票を外しても落ちないことを確認）。
+- Git未設定は操作受付の前に503 `GitNotConfigured` で拒否する。受付後に拒否すると同じ要求の再送が永久に拒否され、対象ロックも残るため。
+- 結果: 共通知識I1 16件・AWSアダプター（模擬）35件・SAM契約5件を含む関連Python 645件成功。フロントは型検査成功、Lintエラー0（既存警告4）、`node --test` 414件のうち成功410・失敗3（残り1件は未実行扱い）。失敗3件は `knowledge-index-check`（索引ビルダー）で、変更前の同一コミットの別worktreeでも同じ3件が失敗するため本変更とは無関係。cfn-lint 1.52.1 終了0、SAM変換後39リソース・全非OPTIONSルートにCognito、`git diff --check` 成功。
+- 端末固有: pytestの既定一時領域が書込不可、長いパスでGitが失敗するため、`--basetemp` を作業用一時領域へ移し `core.longpaths` を環境変数で付与して実行した。リポジトリ設定は変えていない。
+
+### AWSへの作成（itai専用・新規スタックのみ）
+
+- 対象: スタック `EleKnowledge-itai-common-knowledge`（ap-northeast-1、SSOのitai利用者で実行）。`sam build` 後、配備物のファイルhashがコミットのblobと一致することを確認してから `sam package`（既存のSAM配備物バケットの専用prefixへ追加のみ）。
+- changeset `create-a8c36504`（CREATE）: 1ページ・39件すべてAdd、Replacementなし、既存の物理リソースを指す変更なし。パラメータは `CommonKnowledgeEnabled=false`、`GitMode=unconfigured`。IP一覧は既存itaiスタックの現在値（共有devと同一の10件）を明示指定。実行後 `CREATE_COMPLETE`、失敗イベントなし。
+- 作成物: 台帳表・認可表（いずれもRetain、SSE、PITR、台帳は3つのKEYS_ONLY GSIと合成専用TTL属性）、配布バケット（Retain、バージョニング、SSE-S3、所有者強制、TLS以外拒否、`acceptance/` だけ7日失効）、cursor用Secrets Manager 1件、REST API（stage `dev`、Cognito、IP ResourcePolicy、スロットリング 10/5、アクセスログ）、既存Regional WAFへの関連付け1件、Lambda 5・IAM Role 5・LogGroup 6・Lambda Permission 14。認可表は空のまま（実ロール未決のため何も書いていない）。
+- 実行前後で共有dev phase1/phase2、既存itai phase2、itai KB v2の状態・最終更新時刻、WAF ACLのLockTokenとルール数が一致。
+
+### 配備版の確認
+
+| 項目 | 結果 |
+| --- | --- |
+| 配備コード | 5関数とも同一zip（CodeSha256 `VCqY97FFL/hyuPoSA8/SPJyCuJfEz0eTUSskwmwihTU=`）。zip内6ファイルのSHA256がコミット `a8c36504` のblobと一致 |
+| 設定 | python3.13、10秒、256MB。全関数でフラグfalse・Git unconfigured。cursor秘密の参照はintakeだけ |
+| IAM | 各Roleの実ポリシーが契約の表どおり。DynamoDBの書込はTransactWriteItems内に限定、Queryはintakeのindexのみ、readerは台帳権限なし |
+| S3 | Block Public Access 4項目とも有効（SCPで明示設定できないため既定値を実査）、バージョニング、AES256、BucketOwnerEnforced、ポリシー非公開 |
+| DynamoDB | 2表ともSSE・PITR有効。台帳のTTLは `acceptancePurgeAt` のみ、GSI 3つともKEYS_ONLY |
+| API | トークンなし・不正形式・`synthetic-*`・署名なし（alg:none）の偽造JWTはすべて401。未定義ルート403。プリフライトとゲートウェイエラーのCORSはitai originだけ。新stageが既存Regional WAFに関連付け済み |
+| Lambda直接呼出し | 合成イベント（書込なし）で5関数とも403 `FeatureUnavailable`・`no-store`。設定欠落の503ではなく、配備設定から実アダプターを構築できている |
+| 合成受入（配備した表・バケット） | 3入口の公開→両AI読取→停止、Git成功後の投影失敗の再開（二重commitなし）、競合時に拒否確定せず再試行で完了、古い版の上書き拒否、artifactのみ成功／manifest成功後の応答喪失で停止後に復活しない、manifest取得不能503・期限切れ404、短いページ＋cursor、再起動後の未完了操作の復旧: 11件成功（2回実行）。データは合成名前空間のみで、S3は22オブジェクトすべて `acceptance/` 配下 |
+| ログ | 5関数ともプラットフォーム行（INIT_START/START/END/REPORT）だけ。エラー・トークン・パス・本文なし |
+
+接続値（アカウント、ARN、API URL、IP一覧、物理名）とchangeset全ページ・出力値は未追跡の `.private-knowhow/ck-aws/` に保存した。
+
+### 未受入・判断待ち
+
+- 会社Gitの製品・repo・path・資格情報（決定後、GitHub互換アダプターの採否と `GitMode` の許可値追加を別途レビュー）。Git必須操作は配備環境では503で止まる。知識の一往復（Git込み）は未受入。
+- 実Cognito主体での操作、業務ロール・兼務の割当、保持年限、試行単元・読者。認可表は空で、フラグもoff。
+- IP外からの拒否の実査、実ブラウザ、Amplify itaiの接続切替（itaiブランチは自動配信ON、API URLはアプリ共通値＝共有dev）。RAG／開発エージェントの実接続と有料品質検証。いずれも未実施。
+- LambdaランタイムのSDKが条件付きPutの引数を受け付けることは、関数内の実書込では未確認（フラグoffのため）。同じ処理をローカルSDKから配備バケットに対して実行した結果は上表のとおり成功。
+
+### 費用・停止・rollback
+
+- 固定費はSecrets Manager 1件（約0.40 USD/月）。他は従量で、現状はAPIに接続した画面がなく、合成受入の読み書き・ログ・保存量だけ。PITR・S3バージョンは保存量に比例。WAFは既存ACLの通過リクエスト分のみ。単価はAWS料金表を今回照会しておらず、概算として扱う。
+- 停止: フラグoffのまま。必要ならAPI stageのスロットリングを下げる更新で止められる。
+- rollback: 本スタックは他から参照されず、共有物の変更もない。撤去する場合はスタック削除で API・Lambda・Role・ログ・秘密・WAF関連付けが消え、台帳表・認可表・配布バケットはRetainで残る。削除操作は今回行っておらず、実施時は残すRetain資源の扱いを別途確認する。合成データはTTL・ライフサイクルで7日以内に自動失効する。
+
+## S3正本化の反映と受入（2026-10-22）
+
+> 最終検証: 2026-10-22 — ローカル試験、changeset全ページ、配備後のAWS実査（設定・権限・配備コードhash・バケットポリシーの拒否・API）、実AWSでの合成受入、Amplify itaiの配信バンドル実査、2アカウントの実ブラウザ操作と台帳・S3の照合。
+
+### 実装とローカル検証（`6d247a40` ほか、ローカルitai → origin/itai）
+
+- 本書「S3正本化への改訂」節のとおり実装。共通知識の試験はPython 52件・フロント6件（合成UIのe2e含む）成功、型検査・cfn-lint・`git diff --check` 成功、Lintエラー0。収束ループを外すと同時停止の試験が落ちることを変異試験で確認。
+- 全体試験の残る失敗は本変更と無関係: node 3件（既存の索引ビルダー、前回記録と同じ）、Python 2件（未変更のカードがWindows作業ツリーでCRLF）、法令アップロード29件は一時領域のパス長が原因で短いパスでは全件成功。
+
+### AWS（itai専用スタックの更新2回。いずれもchangesetを全ページ確認後にユーザーが実行）
+
+| changeset | 内容 | 結果 |
+| --- | --- | --- |
+| `s3-canonical-6d247a40` | 1ページ17件。Add: 作業用バケット・同ポリシー・`/me` の呼出権限・API Deployment。Modify 12（Replacementなし）。Remove: 旧API Deployment（ルート追加時のSAM標準の付け替え） | UPDATE_COMPLETE、失敗イベントなし |
+| `flag-on-6d247a40` | `CommonKnowledgeEnabled=true` のみ。5関数の環境変数、API本体は関数ARNの動的再評価（再作成なし） | UPDATE_COMPLETE |
+
+- 前後で共有dev phase1/phase2・既存itai phase2・Regional WAF（LockToken・ルール数）が一致。Cognitoは読取のみ。
+- 配備コード: 5関数同一zip、5ファイルのhashがコミットと一致。フラグtrue。
+- 両バケット: バージョニング、公開ブロック4項目、SSE-S3、所有者強制、非公開。
+- 境界の実査: 個人SSO主体から正本の `approved/`・`published/`・`manifests/` への書込と作業用の版削除はすべてAccessDenied。作業用 `drafts/` への書込だけ可。
+- API: トークンなし・偽造JWTは401、未定義ルート403。
+- 実AWSでの合成受入: 13シナリオ成功（3入口の公開→両AI読取→停止、作業版の書込後の投影失敗の再開、競合の再試行、古い版の上書き拒否、manifest後の投影前障害で停止が覆らない、同時停止で `published/` が消える、manifest取得不能・期限、ページング、未完了操作の復旧、固定版が後の編集で変わらない）。データは `acceptance#…`／`acceptance/` だけ。
+- 認可表: 本アカウント（閲覧・編集・公開・読取＋共有許可）、2つ目（閲覧・承認・読取）、CLIのIAM主体（閲覧・編集・読取）、合成の根拠台帳1件。範囲 `itai-validation`、期限2026-11-05。投入はユーザーが実行。
+- CLI: 配備環境で `pending`・`read` が動作。操作者は `iam:assumed-role/…`（アカウントIDなし）。
+
+### Amplify itai
+
+- ブランチ環境変数だけでは、amplify.ymlに直書きのRAG/チャットURLが優先されることを配信バンドルで実査した。そのため amplify.yml に「`AWS_BRANCH=itai` かつ `ITAI_RAG_API_URL`／`ITAI_CHAT_API_URL` が両方HTTPSのときだけ上書き」する分岐を入れた（ユーザー承認、他ブランチの挙動は不変）。
+- ブランチ変数: `ITAI_RAG_API_URL`・`ITAI_CHAT_API_URL`（itai phase2）、`NEXT_PUBLIC_COMMON_KNOWLEDGE_API_URL`、`NEXT_PUBLIC_ENABLE_COMMON_KNOWLEDGE=true`、`NEXT_PUBLIC_COMMON_KNOWLEDGE_VALIDATION_SCOPE=itai-validation`、既存の `NEXT_PUBLIC_LAW_RAG_ENABLED`。
+- 配信バンドルにitai専用のRAG・チャット・共通知識APIだけが入り、共有devのRAG/チャットURLは0件。itai phase2のルートは共有devの全ルートを含む（RAGに先輩調査を追加）。チャット履歴はitai専用表になるため、共有devの過去の会話はitai画面に出ない。先輩調査・総合・現場報告のフラグはoffのまま。
+
+### 実ブラウザ（2アカウント）
+
+- 2つ目のアカウント（adminなし）が共通知識画面に入り、閲覧・承認できた。ホームの入口カードを追加し、URL直打ち不要にした。
+- 一往復: 投函 → 編集引受 → 作業版保存 → 確認依頼 → 差し戻し → 再編集・再依頼 → 承認（2つ目）→ 公開 → 両アカウントで読取 → 停止 → 読取不可。台帳・S3の照合: 作業版4版がそれぞれ作業用バケットの別版に固定、承認は第4版で `approved/` に本文と承認記録、公開でmanifest世代1と `published/`（本文＋KB用metadata）、停止で世代2・active無し・`published/` は削除マーカー。
+- 画面の改善（受入中に反映）: 権限の自動読込（未読込で編集欄が無効になる問題）、押せない理由の表示、操作結果を押したボタンの近くに成功・失敗・処理中で表示。
+- 本アカウントで、itai専用APIでの先輩チャット（#195）の表示とチャット利用を確認。先輩チャットは「開発中・管理者限定」のままで、2つ目のアカウントでは表示されない（今回の決定範囲外）。
+
+### 未受入・費用・停止・rollback
+
+- 未受入: CLIでの作業版登録→確認依頼の実配備での一往復（ローカル試験のみ）、Bedrock KBの作成・同期（形式のみKB向け）、IP外からの拒否の実査、実データ・保持方針、専用編集画面（キーマン向け）。
+- 費用: Secrets Manager 1件（約0.40 USD/月）に加え、作業用バケットの保存量・版数に比例する従量（現状数KB）。他は従来どおり従量で僅少。ブラウザ確認の質問によるBedrock呼出しのみ発生。料金表は今回照会していない概算。
+- 停止: `CommonKnowledgeEnabled=false` の更新、または認可表の削除で全操作403。Amplifyは `ITAI_*` 変数を外せば共有devのRAG/チャットに戻る。
+- rollback: スタックは他から参照されない。作業用バケットはRetain（固定した版を消さないため、版削除はポリシーで拒否）。公開中の知識はない（停止済み）。
+
+## Git のカードの移行（WP3）の配備と実施（2026-11-12）
+
+> 最終検証: 2026-11-12 — changeset の全件確認、配備後の AWS 実査（配備コードの hash・API ポリシー・未認証の応答）、移行 398 枚の結果と `verify`、読み取り用 Lambda の直接呼び出しでの公開版読み取り。
+
+契約: [I1 契約](common-knowledge-i1-contract.md)の「Git のカードの移行」。手順書は `scripts/knowledge/migrate_cards_to_s3.py` の docstring。
+
+### 配備（WP2・WP3 のコードを同時に反映）
+
+| changeset | 内容 | 結果 |
+| --- | --- | --- |
+| `wp2-wp3-41f78de5` | 5 関数のコード、`/sample-checks` のルート（API 本体・Lambda Permission 1・API Deployment の付け替え）。10 件、Replacement なし | **UPDATE_ROLLBACK_COMPLETE**。API のリソースポリシーが上限 8192 バイトを超えた（SAM の `IpRangeWhitelist` がルートごとに IP 10 件入りの許可・拒否の組を書き、15 ルートで超過） |
+| `wp2-wp3-policy-a5bfb447` | 上と同じ 10 件。IP 制限を API 全体の 2 文（`execute-api:/*` の許可と、`AllowedIPList` 以外からの拒否）に変更 | UPDATE_COMPLETE、失敗イベントなし |
+
+- 配備物は `git archive`（`core.autocrlf=false`）から作り、zip 内 6 ファイルの SHA256 がコミット `a5bfb447` の blob と一致。5 関数とも同一コード、フラグ true のまま。
+- API ポリシーは 648 バイト（許可 1・拒否 1、IP 10 件）。許可された IP から、トークンなしの `/knowledge/me`・`/sample-checks` は 401、未定義ルートは 403（変更前と同じ）。
+- 認可表（ユーザーが put-item を実行）: 根拠 `GIT-CARDS-MIGRATION`（version = `a5bfb447`、sha256 = 移行一覧の hash、期限 3 年）を追加。本アカウントに `elevator-knowhow` / `all-users` の閲覧・編集・承認・公開・読取を 2026-11-26 まで付与。他の主体（11-05 で期限切れ）は変更なし。
+
+### 移行の実施
+
+- `plan`（コミット `a5bfb447`）: 398 枚、エラー 0。例外の印 71、置き場違いの修正 14（版を 1 上げた）、移し先が要確認のため変えなかった 2、旧項目を外した 6。
+- `apply`: 1 枚（`KH-ALL-1D2G-PAD-REVERSED-324`）で試行 → `verify` 一致、同じコマンドの再実行で同じ結果・作業用の版は 1 つのまま → 全件を実行。398 枚すべて 200、manifest generation はすべて 1、抜き取り確認待ち 71・なし 327。
+- `verify`: 398 件中 398 件で、公開中・束の本文 hash・`published/` の本文 hash が移行一覧と一致。
+- 読み取り: 読み取り用 Lambda を本アカウントの claims で直接呼び出し、修正したカード（版 2、`product_lines: AXIEZ-LINKs`）と通常のカードが 200、存在しない ID が 404 `NotPublished`。
+
+### 未実施・残り
+
+- 先輩チャットとじっくり調べるの読み取り元は、まだ Git の索引のまま（WP4 で公開版へ切り替える）。公開版から作った索引の照合（設計 §4.11 の手順 4）も WP4 で行う。
+- 抜き取り確認待ち 71 枚は、もう 1 人（mona）の `approve` 権限が要る。mona の権限は期限切れのまま。
+- 2 つ目のアカウント・mona への `elevator-knowhow` / `all-users` の読取付与は未実施。利用者全員に読ませる付与の方式は WP4 で決める。
+- 費用: S3 オブジェクト約 2,400 件（数 MB）、Lambda 呼び出し約 800 回、DynamoDB の書込。いずれも従量で僅少（料金表は今回照会していない概算）。
+- 戻し方: カードごとに `/withdraw` で停止できる（manifest generation 2、`published/` から外れる）。台帳・`approved/` は不変の記録として残る。Git の `knowledge/cards/` はそのまま残しており、凍結は WP4 の切り替え後に行う。
+
+## 先輩の索引を公開版へ切り替え（WP4、2026-11-12）
+
+> 最終検証: 2026-11-12 — 公開版の書き出しと移行一覧の照合、配備中の RAG コード（`9fa0c8fa`）での索引検査と検索、changeset の全件確認、切り替え後の RAG Lambda の環境変数。先輩チャットでの実回答は未確認。
+
+仕様: [先輩チャットからMarkdownを探してKBを確認する](knowledge-markdown-retrieval.md)の「公開版からの索引と、使う直前の照合」。
+
+- **配備元の食い違い:** `EleKnowledge-itai-phase2` は `feature/itai検証T0-T1`（`9fa0c8fa`）のテンプレートから配備されている。`itai` ブランチの phase2 テンプレートには、そのスタックにある `ValidationChatLogsTable`・WAF の関連付け 2・ログのグループ 6 が無く、`itai` から配備すると削除される。そのため `itai` のテンプレート・コードでは配備していない。
+- **実施したこと（パラメータだけ）:** 公開版 398 枚から作った索引（`sha256:3917c4ac…`、移行一覧と件数・本文 hash が一致、停止中の検証カード 1 件は除外）を、従来の索引と同じ検証用バケットの `indexes/` に追加した。changeset `wp4-published-index`（配備中のテンプレートのまま、`KnowhowIndexKey` だけ変更。7 件 Modify・Replacement なし。RAG と調査ワーカーの環境変数、両 Role の GetObject 対象、関数 ARN の再評価）を実行し UPDATE_COMPLETE。
+- **配備中のコードで動くことの確認:** `9fa0c8fa` の `parse_index` が新しい索引（398 枚、すべて `status: approved`）を受け付け、検索も返すことをローカルで確認した。
+- **（同日、下の「照合の配備」で解消）** 使う直前の manifest 照合と `MELCITY`・`MELWIDE` の別名は、`feature/itai検証T0-T1` に取り込んで配備した。画面の注意表示は `itai` ブランチ（`12361a37`）にだけあり、Amplify itai には未配信。
+
+### 照合の配備（`feature/itai検証T0-T1` の `e104a022`、2026-11-12）
+
+- itai の WP4 のうち RAG 側（`confirm_published`・先輩チャットと調査ジョブへの適用・テンプレートのパラメータと IAM・機種の別名）を T0-T1 へ取り込んだ。T0-T1 の配備手順（`scripts/knowledge/prepare-itai-stack.py build` → `validate-itai-stack.py` → SAM build・package → changeset）で、私有の上書き設定に `KnowhowCanonicalBucket`（共通知識の正本バケット）・`KnowhowAudiences=all-users`・T0-T1 で増えた調査ジョブの 2 パラメータ（テンプレートの既定値）を足した。ソースは `git archive`（LF）から作り、配備した RAG の Python 29 ファイルがコミットと一致。
+- itai の判断（2026-11-12）で、T0-T1 の先頭に積んで配備したため、`9fa0c8fa` 以降の未配備の 9 コミット（先輩調査の進捗停止・根拠判定・十分性の改善）も同時に入った。
+- changeset `t23-wp4-guard-e104a022`: 9 件 Modify（API 本体 2、関数 4 のコード・環境変数・Role、Role のポリシー 3、ワーカーのタイムアウト）、Replacement・削除なし。UPDATE_COMPLETE、失敗イベントなし。生成テンプレートのリソースは前回と同じ 28 件（検証用の履歴表・WAF の関連付け・ログのグループを含む）。
+- 配備後: RAG の環境変数は索引 `indexes/3917c4ac…`・読者 `all-users`・正本バケット指定・`RAG_LOGIC_VERSION=e104a022`。IAM シミュレーションで、RAG の Role は正本バケットの `manifests/*` の GetObject だけ許可、`published/` の読み取りと書込みは拒否。両 API の Regional WAF の関連付けは維持。
+- 未確認: 先輩チャット・調査ジョブでの実回答（有料呼び出しのため未実施。ブラウザで 1 問確認する）。
+- 戻し方: 前回の生成物（t8、`9fa0c8fa`）の packaged テンプレートで changeset を作るか、`KnowhowCanonicalBucket` を空にして照合だけを止める。
+- **戻し方:** `KnowhowIndexKey` を旧値 `indexes/acde2268….json`（Git の取込一覧から作った索引）に戻す changeset を、同じ手順（配備中のテンプレートのまま）で実行する。旧索引は消していない。
+
+### 503 と戻し（2026-11-12）
+
+> 最終検証: 2026-11-12 — itai の先輩チャットで「ノウハウMarkdownの検索準備ができていません」（503）を画面で確認、RAG Lambda の環境変数を実査、戻しの changeset 実行後の環境変数を実査。戻し後の画面は未確認。
+
+- **原因:** itai phase2 のノウハウ検索は `KNOWHOW_BACKEND=managed`（専用 Bedrock KB `EleKnowledge-itai-knowhow-kb-v2` の Retrieve）で、`retrieve_cards` が索引の版と `KNOWHOW_RELEASE_ID`（KB に取り込んだ release、`acde2268…`）の一致を検査する。公開版から作った索引（`3917c4ac…`）へ `KnowhowIndexKey` だけを切り替えたため、この検査で `KnowhowIndexError` → 503 になった。上の「実施したこと」で「配備中のコードで動く」と確認したのは `parse_index`・`search_index`（local 方式）であり、managed 方式の検査を見落とした。
+- **戻し:** changeset `restore-git-index`（配備中のテンプレートのまま、`KnowhowIndexKey` を `acde2268…` へ、`KnowhowCanonicalBucket` を空へ。7 件 Modify・Replacement なし）で UPDATE_COMPLETE。索引と release が一致し、照合は無効（Git 由来の索引の本文 hash は変換前で、公開版と一致しないため、照合を有効にすると全カードが除かれる）。RAG のコードは `e104a022` のまま。
+- **公開版へ切り替えるには:** 公開版 398 枚を新しい release（`releases/3917c4ac…/`）として専用 KB に投入・同期し（Bedrock の取込に費用が発生する）、`t3-connection-approved.json` 相当の接続設定の `releaseId` を新しい release にして T0-T1 の手順で再生成・配備する。そのうえで `KnowhowCanonicalBucket` を指定して照合を有効にする。
+
+### 公開版の release を専用 KB に投入し、公開版へ切り替え（2026-11-12）
+
+> 最終検証: 2026-11-12 — 取込ジョブの統計と KB の文書一覧（新 release の 398 件すべて INDEXED、ID が索引と一致）、changeset の全件確認、配備後の RAG・ワーカーの環境変数、配備コードと同じ経路（`retrieve_cards` → `confirm_published`）での検索 1 回（有料の Retrieve 1 回）。先輩チャットの画面での実回答は未確認。
+
+- **release の投入:** 公開版の索引（`sha256:3917c4ac…`）から、T3 と同じ形式の取込物 797 件（索引 1、文書 398、メタデータ 398）を作り、専用バケットの `releases/3917c4ac…/` へ上書きなしで配置して一覧の過不足が無いことを確かめ、取込ジョブ `K2JYW2KEQB` を 1 回実行した（COMPLETE、新規 398・失敗 0、旧 release は変更なし）。手順は `feature/itai検証T0-T1` の `sync-managed-cards.py` の置き先検証・配置・同期の関数を再利用する私有スクリプト（T0-T1 の `.private-knowhow/t24-release-published.py`）で行った。KB の検索は `release_id` で絞るため、旧 release の文書は混ざらない。
+- **配備:** 接続設定の release を新しいものにして生成し直した runtime は、t23 との差が `KNOWHOW_RELEASE_ID`（RAG・ワーカー）と索引キーの既定値の 3 か所だけ。t23 の packaged テンプレートに同じ置き換えを当て（コードの置き場は同じ）、changeset `t24-published-release`（7 件 Modify、コード変更なし・Replacement なし）で UPDATE_COMPLETE。`KnowhowIndexKey=indexes/3917c4ac….json`、`KnowhowCanonicalBucket` は正本バケット（照合を有効化）。
+- **確認:** 「1D2G 調整前に戸開しない。PAD の取付を確認したい」で 3 枚が返り、3 枚とも manifest の照合を通った（すべて `approved`）。
+- **戻し方:** `restore-git-index` と同じ（`KnowhowIndexKey` を `acde2268…`、`KnowhowCanonicalBucket` を空）に加えて、`KNOWHOW_RELEASE_ID` を旧 release に戻す必要があるため、t23 の packaged テンプレート（`deployment-artifacts/e104a022…/template.yaml`）で changeset を作る。旧 release・旧索引は消していない。
+
+### 質問の文言からの機種の絞り込みを配備（2026-11-12）
+
+> 最終検証: 2026-11-12 — 生成テンプレートの差分（t24 との差は `RagLogicVersion` だけ）、専用検査（SAM lint・変換・名前分離・WAF 依存）、changeset の全件確認、配備後の環境変数、配備コード 31 ファイルとコミットの照合。先輩チャットの画面での確認は未実施。
+
+仕様: [先輩チャットからMarkdownを探してKBを確認する](knowledge-markdown-retrieval.md)の「質問の文言から機種を読み取って絞り込む」。
+
+- `itai` の `e6c1b31e` の RAG 側を `feature/itai検証T0-T1` に取り込み（`5c266d57`、origin へ push 済み）、T0-T1 の手順で生成（接続設定は公開版 release の t24 のまま）・検査・build・package した。
+- changeset `t25-question-model-5c266d57`: 7 件 Modify（関数 4 のコード、RAG・ワーカーの `RAG_LOGIC_VERSION`、API 本体 2 と Role 1 は関数 ARN の再評価）、Replacement・削除なし。UPDATE_COMPLETE、失敗イベントなし。
+- 配備後: `RAG_LOGIC_VERSION=5c266d57`、release `3917c4ac…`・読者 `all-users`・照合は維持。配備した RAG の Python 31 ファイル（`question_model.py`・`vocabulary_generated.py` を含む）がコミットと一致。
+- 戻し方: t24 の packaged テンプレート（`deployment-artifacts/e104a022…/template-t24.yaml`）で changeset を作る（release・照合は t24 と同じ）。
+
+### 先輩チャットをノウハウだけで答える（D16）の配備（2026-11-12）
+
+> 最終検証: 2026-11-12 — 生成テンプレートの専用検査、build したコードとコミットの照合（32 ファイル）、changeset の全件確認、配備後の環境変数と配備コードの照合、Amplify itai のブランチ環境変数の読み戻し。画面での確認は Amplify の配信後に行う。
+
+仕様: [先輩チャットからMarkdownを探してKBを確認する](knowledge-markdown-retrieval.md)の「ノウハウだけで答える（D16）」。
+
+- RAG 側: `itai` の `2e62e647` を `feature/itai検証T0-T1` に取り込み（`e8b91a13`、push 済み）、T0-T1 の手順（接続設定は公開版 release の t24 のまま）で changeset `t26-knowhow-only-e8b91a13`（7 件 Modify、Replacement・削除なし）を実行し UPDATE_COMPLETE。`RAG_LOGIC_VERSION=e8b91a13`、release・読者・照合は維持。配備した RAG の Python 32 ファイル（`knowhow_answer.py` を含む）がコミットと一致。
+- 画面: Amplify itai のブランチ環境変数に `NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY=true` を追加（既存 7 件は値を変えずに書き戻し、合計 8 件）。`amplify.yml` に同名の変数は無い。`itai` の push で配信する。
+- 戻し方: 画面は同じ変数を外して再配信（従来の 2 列に戻る）。RAG は t25 の packaged テンプレート（`deployment-artifacts/5c266d57…/template.yaml`）で changeset を作る（`knowhowOnly` を送らない限り従来の経路のため、画面だけ戻しても動く）。
+
+### 回答本文の資料名・カード名の引用リンク（2026-11-12）
+
+> 最終検証: 2026-11-12 — 専用検査・build したコードの照合（32 ファイル）・changeset の全件確認・配備後の環境変数と配備コードの照合。画面での確認は Amplify の配信後に行う。
+
+- RAG 側はノウハウ回答の指示文 1 行（カードの `title` をそのまま書かせる）だけ。`itai` の `5696cff1` を `feature/itai検証T0-T1` に取り込み（`2f92bdf5`、push 済み）、changeset `t27-card-title-2f92bdf5`（7 件 Modify、Replacement・削除なし）で UPDATE_COMPLETE。`RAG_LOGIC_VERSION=2f92bdf5`、release・照合は維持。配備コード 32 ファイルがコミットと一致。
+- 画面（先輩チャット・通常チャットのリンク表示）は `itai` の push で配信する。
+- 戻し方: RAG は t26 の packaged テンプレート（`deployment-artifacts/e8b91a13…/template.yaml`）で changeset を作る。画面は `itai` の該当コミットを戻して再配信。

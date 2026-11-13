@@ -27,8 +27,8 @@ model_scope:
 | --- | ---: |
 | P0 現場の報告で確認が必要（当てはまらなかった／カードと違う機種で報告） | 0 |
 | P1 矛盾の疑い（機種名があるのに適用範囲が広いと読める） | 2 |
-| P2 機種を名指し・未検証（検証すれば機種フィルタで除外対象になる） | 95 |
-| P3 制御方式・略称のみ・未検証 | 194 |
+| P2 機種を名指し・未検証（検証すれば機種フィルタで除外対象になる） | 96 |
+| P3 制御方式・略称のみ・未検証 | 193 |
 | P4 汎用ラベル／空（対応不要の情報） | 107 |
 | 重複の疑い（同じ Lists 番号） | 5 |
 | 検証済み（キュー対象外） | 0 |
@@ -45,7 +45,7 @@ model_scope:
 | [KH-LINKS-WOS-DLDP-345](../../cards/practice-guides/KH-LINKS-WOS-DLDP-345.md) | GAWからWOSへの切替でDL・DPコネクタが無い | — | — | — | エレベーター機種名あり、かつ may_apply_to に「全エレ」 | 適用範囲を確認する。全機種対応なら product_lines / lists_model_label を全エレ機種へ直し、特定機種のみなら may_apply_to / scope_note を直して、検証済みにする |
 | [KH-ROLLER-GUIDE-CAR-VIBRATION-1-2](../../cards/case-summaries/KH-ROLLER-GUIDE-CAR-VIBRATION-1-2.md) | ローラーガイド系 かご内振動（ガイドローラー周波数と PMT 一致） | Nexcube | CM-MA | VFGH | エレベーター機種名あり、かつ may_apply_to に「一般」 | 適用範囲を確認する。全機種対応なら product_lines / lists_model_label を全エレ機種へ直し、特定機種のみなら may_apply_to / scope_note を直して、検証済みにする |
 
-## P2 機種を名指し・未検証（検証すれば機種フィルタで除外対象になる）（95 件）
+## P2 機種を名指し・未検証（検証すれば機種フィルタで除外対象になる）（96 件）
 
 | カード | タイトル | product_lines | lists_model_label | control_methods | 理由 | 推奨対応 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -144,8 +144,9 @@ model_scope:
 | [KH-VFGLF-SD-T21-WOS-97](../../cards/case-summaries/KH-VFGLF-SD-T21-WOS-97.md) | WOS 時 SD-T21 #5 コンタクタ動作不良（M5 交換） | AXIEZ-LINKs | VFGLF | VFGLF | 機種名あり（AXIEZ-LINKs） | product_lines が正しければ検証済みにする（以後、他機種を選んだときに除外される） |
 | [KH-VFGLF-TERMINAL-M8-343](../../cards/practice-guides/KH-VFGLF-TERMINAL-M8-343.md) | VFGLF 制御盤 — 繋ぎ込み端子 M8（X17AT-44） | — | VFGLF、AXIEZ-LINKS | VFGLF | 機種名あり（） | product_lines が正しければ検証済みにする（以後、他機種を選んだときに除外される） |
 | [KH-VFGLF-VIRTUAL-FLOOR-PLATE-401](../../cards/practice-guides/KH-VFGLF-VIRTUAL-FLOOR-PLATE-401.md) | 仮想階用着床プレート — 品目余剰の見方 | AXIEZ-LINKs | VFGLF | VFGLF | 機種名あり（AXIEZ-LINKs） | product_lines が正しければ検証済みにする（以後、他機種を選んだときに除外される） |
+| [KH-VFGR-DIRECT-COMM-B3B7-354](../../cards/case-summaries/KH-VFGR-DIRECT-COMM-B3B7-354.md) | VFGR 直伝通信未確立 — B3/B7 テレコ（ドアSW・点検SW） | MELCITY | VFGR | VFGR | 機種名あり（MELCITY） | product_lines が正しければ検証済みにする（以後、他機種を選んだときに除外される） |
 
-## P3 制御方式・略称のみ・未検証（194 件）
+## P3 制御方式・略称のみ・未検証（193 件）
 
 | カード | タイトル | product_lines | lists_model_label | control_methods | 理由 | 推奨対応 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -341,7 +342,6 @@ model_scope:
 | [KH-VFGLF-TOUCHLESS-INIT-365](../../cards/practice-guides/KH-VFGLF-TOUCHLESS-INIT-365.md) | VFGLF/B/VFGH — タッチレス釦初期設定 | — | VFGLF、VFGLB、VFGH | — | 制御方式・略称のみ | 機種フィルタ対象外。全機種対応なら lists_model_label を全エレ機種へ |
 | [KH-VFGLF-WINCH-CABLE-ROUTE-126](../../cards/practice-guides/KH-VFGLF-WINCH-CABLE-ROUTE-126.md) | 巻上機 — 現地ケーブル交換時の配線ルート | — | VFGLF | VFGLF | 制御方式・略称のみ | 機種フィルタ対象外。全機種対応なら lists_model_label を全エレ機種へ |
 | [KH-VFGR-CAR-TOP-RUN-SW-319](../../cards/case-summaries/KH-VFGR-CAR-TOP-RUN-SW-319.md) | VFGR かご上 RUN SW OFF — 手動運転不能 | — | VFGR | VFGR | 制御方式・略称のみ | 機種フィルタ対象外。全機種対応なら lists_model_label を全エレ機種へ |
-| [KH-VFGR-DIRECT-COMM-B3B7-354](../../cards/case-summaries/KH-VFGR-DIRECT-COMM-B3B7-354.md) | VFGR 直伝通信未確立 — B3/B7 テレコ（ドアSW・点検SW） | MELCITY | VFGR | VFGR | 制御方式・略称のみ | 機種フィルタ対象外。全機種対応なら lists_model_label を全エレ機種へ |
 | [KH-VFGR-FLASH-WRITE-CABLE-284](../../cards/practice-guides/KH-VFGR-FLASH-WRITE-CABLE-284.md) | VFGR — フラッシュ書換時は LAN 外す | — | VFGR | VFGR | 制御方式・略称のみ | 機種フィルタ対象外。全機種対応なら lists_model_label を全エレ機種へ |
 
 ## P4 汎用ラベル／空（対応不要の情報）（107 件）

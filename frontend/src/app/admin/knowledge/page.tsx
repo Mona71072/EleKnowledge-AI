@@ -2,8 +2,12 @@
 
 import Link from 'next/link';
 import { KnowledgeWorkbench } from '@/components/knowledge/KnowledgeWorkbench';
+import { CommonKnowledgeInbox } from '@/components/knowledge/common-knowledge-inbox';
 
 export default function AdminKnowledgePage() {
+  if (process.env.NEXT_PUBLIC_ENABLE_COMMON_KNOWLEDGE === 'true') {
+    return <CommonKnowledgeInbox />;
+  }
   if (process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH !== 'true') {
     return (
       <section className="mx-auto max-w-2xl rounded-xl border border-gray-200 bg-white p-6 text-center">

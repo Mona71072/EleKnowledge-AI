@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cardDigest } from './card-hash.mjs';
 import { parseKnowledgeMarkdown } from '../../frontend/src/lib/knowledge-workbench.mjs';
+import { GENERIC_ELEVATOR_LABEL, GENERIC_ESCALATOR_LABEL, MODEL_ALIASES } from './vocabulary.generated.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const frontendRequire = createRequire(path.resolve(scriptDirectory, '../../frontend/package.json'));
@@ -29,7 +30,7 @@ const NON_CARD_FILES = new Set([
   `${CARD_ROOT}/INDEX.md`, `${CARD_ROOT}/README.md`, `${CARD_ROOT}/TEMPLATE.md`, `${CARD_ROOT}/_SOURCE-LEGEND.md`,
 ]);
 // SYNC: must equal SOURCE_TYPES in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
-const SOURCE_REF_TYPES = new Set(['lists_item', 'onenote_page', 'kb_document', 'law_rag']);
+const SOURCE_REF_TYPES = new Set(['lists_item', 'onenote_page', 'kb_document', 'law_rag', 'knowhow']);
 // SYNC: must equal SOURCE_ID_KEYS in knowhow_retrieval.py and KNOWHOW_SOURCE_IDS in knowledge-research.mjs
 // (tests/unit/test_knowhow_contract_sync.py).
 const SOURCE_ID_KEYS = Object.freeze({
@@ -37,12 +38,16 @@ const SOURCE_ID_KEYS = Object.freeze({
   onenote_page: 'onenote_id',
   kb_document: 'document_number',
   law_rag: 'law_id',
+  knowhow: 'knowhow_id',
 });
+// Route of a person-written or field-report source (design 2026-11-11 §4.7.2). Only knowhow refs carry it.
+// SYNC: must equal KNOWHOW_ORIGINS in knowhow_retrieval.py and knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
+const KNOWHOW_ORIGINS = new Set(['editor', 'field_report']);
 // SYNC: keys must equal SOURCE_REF_KEYS in knowhow_retrieval.py and KNOWHOW_SOURCE_FIELDS in
 // knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 const SOURCE_REF_KEYS = new Set([
   'ref_type', 'list_item_id', 'onenote_id', 'source_id', 'document_number', 'kb_filename',
-  'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator',
+  'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator', 'knowhow_id', 'origin',
 ]);
 // Editor-only annotations on source refs. They are dropped at build and never reach the index.
 const SOURCE_REF_ANNOTATION_KEYS = new Set([
@@ -72,19 +77,10 @@ const SCOPE_STATUSES = new Set(['verified', 'unverified']);
 const SCOPE_DATE = /^\d{4}-\d{2}-\d{2}$/u;
 // A verified scope only filters when one of these fields holds a recognized product or generic label
 // (mirrors MODEL_CLASSIFY_KEYS / MODEL_ALIASES / GENERIC_* in knowhow_retrieval.py). Values are compared
-// after NFKC + lower-casing + trimming, so the alias lists below are already normalized.
+// after NFKC + lower-casing + trimming, so the generated alias lists are already normalized.
+// MODEL_ALIASES / GENERIC_* come from vocabulary.generated.mjs (source: knowledge/registry/applicability-vocabulary.json).
 // SYNC: tests/unit/test_knowhow_contract_sync.py compares all four with the Lambda.
 const MODEL_CLASSIFY_KEYS = new Set(['product_lines', 'model_abbreviations', 'lists_model_label', 'observed_on']);
-const MODEL_ALIASES = Object.freeze({
-  'AXIEZ': ['axiez', 'axiez(ke-wf・ke-hf)', '駅舎エレ'],
-  'AXIEZ-LINKs': ['axiez-links'],
-  'NEXCUBE': ['nexcube', 'nexcube limited', '特注機械室レスエレベーター'],
-  'メルシティ': ['メルシティ'],
-  'メルワイド': ['メルワイド'],
-  'エスカレーター': ['エスカレーター', 'escalator'],
-});
-const GENERIC_ELEVATOR_LABEL = '全エレ機種';
-const GENERIC_ESCALATOR_LABEL = '全エス機種';
 const RECOGNIZED_MODEL_LABELS = new Set([
   ...Object.values(MODEL_ALIASES).flat(), GENERIC_ELEVATOR_LABEL.normalize('NFKC').toLowerCase(), GENERIC_ESCALATOR_LABEL.normalize('NFKC').toLowerCase(),
 ]);
@@ -254,8 +250,10 @@ function sourceRefs(metadata) {
     const identityField = SOURCE_ID_KEYS[ref.ref_type];
     const id = ref[identityField];
     if (id === undefined || id === null) fail('A source reference is missing its stable identity.');
+    if ((ref.ref_type === 'knowhow') !== (ref.origin !== undefined)
+      || (ref.origin !== undefined && !KNOWHOW_ORIGINS.has(ref.origin))) fail('A knowhow source reference needs origin editor or field_report.');
     const result = { ref_type: ref.ref_type };
-    for (const key of ['list_item_id', 'onenote_id', 'source_id', 'document_number', 'kb_filename', 'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator']) {
+    for (const key of ['list_item_id', 'onenote_id', 'source_id', 'document_number', 'kb_filename', 'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator', 'knowhow_id', 'origin']) {
       const value = ref[key];
       if (value === undefined || value === null || value === '') continue;
       result[key] = safeScalar(value, 'Source reference field', { allowSlash: SOURCE_REF_FREE_TEXT_KEYS.has(key) });
@@ -411,6 +409,47 @@ export async function buildKnowhowIndex({ root, manifest, generatedAt = new Date
       fail('A selected card does not match its approved ID, version, and hash.');
     }
     selected.push(indexCard({ parsed, metadata, sha256 }, today));
+  }
+  return assembleIndex(selected, generatedAt);
+}
+
+const PUBLISHED_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
+
+/**
+ * WP4 (design 2026-11-11 §4.11–4.12): build the Senpai index from a local snapshot of the
+ * common-knowledge published versions (snapshot_published_cards.py), not from Git.
+ * Every entry's body must match the manifest's rawSha256 and declare `status: approved`;
+ * the same card validation as the Git build applies. `sha256` in the index is the published
+ * rawSha256, which the RAG Lambda re-checks against the manifest before using a card.
+ */
+export async function buildPublishedIndex({ snapshotDir, generatedAt = new Date().toISOString(), today = utcToday() }) {
+  if (!validIsoDate(generatedAt)) fail('generatedAt must be an ISO timestamp.');
+  const { resolved } = await rootInfo(snapshotDir);
+  const listing = JSON.parse(await readFile(path.join(resolved, 'published.json'), 'utf8'));
+  exactKeys(listing, new Set(['schemaVersion', 'purpose', 'audiences', 'snapshotAt', 'entries']), 'Published listing');
+  if (listing.schemaVersion !== 1 || listing.purpose !== 'common-knowledge-published') fail('Published listing purpose or schema is invalid.');
+  if (!Array.isArray(listing.entries) || listing.entries.length === 0 || listing.entries.length > MAX_CARDS) {
+    fail('Published listing entries are empty or exceed the limit.');
+  }
+  const seen = new Set();
+  const selected = [];
+  for (const entry of listing.entries) {
+    exactKeys(entry, new Set(['knowledgeId', 'generation', 'rawSha256', 'bundleHash', 'audience', 'expiresAt']), 'Published entry');
+    if (typeof entry.knowledgeId !== 'string' || !PUBLISHED_ID.test(entry.knowledgeId)) fail('Published knowledge ID is invalid.');
+    if (seen.has(entry.knowledgeId)) fail('Published listing contains a duplicate knowledge ID.');
+    seen.add(entry.knowledgeId);
+    if (typeof entry.rawSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(entry.rawSha256)) fail('Published hash is invalid.');
+    const relativePath = `cards/${entry.knowledgeId}.md`;
+    const absolutePath = await checkNoSymlinkPath(resolved, relativePath);
+    if ((await lstat(absolutePath)).size > MAX_SOURCE_BYTES) fail('A published card exceeds the 256 KiB limit.');
+    const markdown = await readFile(absolutePath, 'utf8');
+    const sha256 = digest(markdown);
+    if (sha256 !== entry.rawSha256) fail(`Published card ${entry.knowledgeId} does not match its manifest hash.`);
+    const parsed = parseKnowledgeMarkdown(markdown);
+    if (parsed.id !== entry.knowledgeId) fail(`Published card ${entry.knowledgeId} declares another knowledge_id.`);
+    if (parsed.metadata.status !== 'approved') fail(`Published card ${entry.knowledgeId} is not status: approved.`);
+    if (parsed.body.length > MAX_CARD_BODY_CHARS) fail('A Markdown card body exceeds the 16,000 character limit.');
+    selected.push(indexCard({ parsed, metadata: parsed.metadata, sha256 }, today));
   }
   return assembleIndex(selected, generatedAt);
 }
@@ -697,7 +736,13 @@ async function main(args) {
     process.stdout.write(`Index built: ${index.cards.length} explicitly selected cards; index ${index.indexVersion}. No upload was performed.\n`);
     return;
   }
-  fail('Usage: build-senpai-index.mjs inventory <root> | build <root> <manifest.json> | ledger <root> | check <root> [--eval-index <path>] [--json] [--no-ledger]');
+  if (command === 'build-published' && manifestPath) {
+    const index = await buildPublishedIndex({ snapshotDir: manifestPath });
+    await writePrivateOutput(root, 'index-published.json', index);
+    process.stdout.write(`Index built from published versions: ${index.cards.length} cards; index ${index.indexVersion}. No upload was performed.\n`);
+    return;
+  }
+  fail('Usage: build-senpai-index.mjs inventory <root> | build <root> <manifest.json> | build-published <root> <snapshotDir> | ledger <root> | check <root> [--eval-index <path>] [--json] [--no-ledger]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

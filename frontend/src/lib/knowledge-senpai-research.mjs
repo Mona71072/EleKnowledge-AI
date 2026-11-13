@@ -20,7 +20,7 @@ const JOB_STATUSES = new Set(['queued', 'running', 'completed', 'failed']);
 const STEP_NAMES = new Set(['understand', 'knowhow', 'tech_search', 'law_search', 'sufficiency', 'retry_search', 'doc_page', 'clarify', 'synthesize', 'verify']);
 const STEP_STATUSES = new Set(['running', 'done', 'skipped', 'failed']);
 const RESULT_KINDS = new Set(['answer', 'clarify', 'not_found']);
-const STOP_REASONS = new Set(['sufficient', 'budget', 'no_new_results', 'clarify']);
+const STOP_REASONS = new Set(['sufficient', 'budget', 'no_new_results', 'clarify', 'insufficient', 'judgment_failed', 'partial']);
 const INTENTS = new Set(['procedure', 'cause', 'spec_value', 'legal', 'other']);
 const KNOWHOW_STATUSES = new Set(['draft', 'approved']);
 // SYNC: must equal KNOWHOW_MODEL_FITS in knowledge-research.mjs.
@@ -250,12 +250,48 @@ function normalizeTool(raw) {
 function normalizeBudget(raw) {
   if (!isObject(raw)) invalid();
   const budget = {};
-  for (const key of ['searchesUsed', 'searchesMax', 'modelCallsUsed', 'modelCallsMax', 'elapsedMs', 'elapsedMaxMs']) {
+  for (const key of ['searchesUsed', 'searchesMax', 'modelCallsUsed', 'modelCallsMax', 'elapsedMs', 'elapsedMaxMs', 'inputBytesMax']) {
     if (raw[key] === undefined) continue;
     if (!isCount(raw[key])) invalid();
     budget[key] = raw[key];
   }
   return budget;
+}
+
+function normalizeMeasurement(raw) {
+  if (!isObject(raw)) invalid();
+  const entry = {};
+  for (const key of ['seq', 'round', 'ms', 'modelCalls', 'searches', 'searchesCharged', 'selected', 'newCandidateItems', 'newExposedEvidence']) {
+    if (raw[key] === undefined) continue;
+    if (!isCount(raw[key])) invalid();
+    entry[key] = raw[key];
+  }
+  const enums = {
+    stage: ['understand', 'knowhow', 'sufficiency', 'synthesize', 'grounding', 'tech_search', 'law_search'],
+    action: ['retry_search', 'doc_page'],
+    outcome: ['progress', 'duplicate', 'no_new', 'no_budget'],
+    evidenceValidity: ['unassessed'],
+  };
+  for (const [key, allowed] of Object.entries(enums)) {
+    if (raw[key] === undefined) continue;
+    if (!allowed.includes(raw[key])) invalid();
+    entry[key] = raw[key];
+  }
+  for (const key of ['usageMissing', 'completed']) {
+    if (raw[key] === undefined) continue;
+    if (typeof raw[key] !== 'boolean') invalid();
+    entry[key] = raw[key];
+  }
+  if (raw.usage !== undefined) {
+    if (!isObject(raw.usage)) invalid();
+    entry.usage = {};
+    for (const key of ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens']) {
+      if (raw.usage[key] === undefined) continue;
+      if (!isCount(raw.usage[key])) invalid();
+      entry.usage[key] = raw.usage[key];
+    }
+  }
+  return entry;
 }
 
 function normalizeDebugStrict(raw) {
@@ -274,6 +310,30 @@ function normalizeDebugStrict(raw) {
   }
   if (raw.tools !== undefined) debug.tools = list(raw.tools, normalizeTool);
   if (raw.budget !== undefined) debug.budget = normalizeBudget(raw.budget);
+  if (raw.stages !== undefined) debug.stages = list(raw.stages, normalizeMeasurement);
+  if (raw.progress !== undefined) debug.progress = list(raw.progress, normalizeMeasurement);
+  if (raw.stopDetail != null) {
+    if (!['repeated_query', 'repeated_results', 'no_exposed_progress', 'search_limit', 'model_limit', 'time_limit', 'input_limit'].includes(raw.stopDetail)) invalid();
+    debug.stopDetail = raw.stopDetail;
+  }
+  if (raw.lastJudgment !== undefined) {
+    if (!['sufficient', 'insufficient', 'unjudged'].includes(raw.lastJudgment)) invalid();
+    debug.lastJudgment = raw.lastJudgment;
+  }
+  if (raw.grounding !== undefined) {
+    if (!isObject(raw.grounding) || !['not_run', 'model_verified', 'extractive_fallback', 'rejected'].includes(raw.grounding.mode)) invalid();
+    debug.grounding = { mode: raw.grounding.mode,
+      ...(raw.grounding.articleMismatches ? { articleMismatches: stringList(raw.grounding.articleMismatches) } : {}),
+      ...(Array.isArray(raw.grounding.guardReasons) ? { guardReasons: raw.grounding.guardReasons.filter(v => v === 'policy_explanation') } : {}) };
+  }
+  if (raw.coverage != null) {
+    if (!isObject(raw.coverage)) invalid();
+    debug.coverage = { missing: stringList(raw.coverage.missing), supported: list(raw.coverage.supported, (item) => {
+      if (!isObject(item) || !/^A[1-4]$/u.test(item.id) || !['technical', 'legal'].includes(item.kind)
+        || !['direct', 'reference'].includes(item.status) || !/^[TLK][0-9]{1,3}$/u.test(item.ref)) invalid();
+      return { id: item.id, kind: item.kind, status: item.status, ref: item.ref };
+    }) };
+  }
   return debug;
 }
 

@@ -9,14 +9,17 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 import { Chip } from '@/components/ui';
+import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Toast } from '@/components/ui/Toast';
 import { ChatMessageFeedback } from '@/components/chat/ChatMessageFeedback';
 import { ProductWishModal } from '@/components/chat/ProductWishModal';
 import { ALL_MODEL_TYPES } from '@/data/kbModelTypes';
 import { documentHref, documentHrefWithPage } from '@/lib/documents';
+import { linkCitedNames } from '@/lib/citation-links.mjs';
 import { getAnnouncements, Announcement } from '@/lib/announcements';
 import { NoticeBanner } from '@/components/announcements/NoticeBanner';
 import { resolveInitialChatMode } from '@/lib/chat-session-link.mjs';
+import { createJobPoller, type JobPoller, type ResearchJobStatus } from '@/lib/research-polling.mjs';
 import {
   BadFeedbackReasonId,
   FEEDBACK_COMMENT_MAX,
@@ -30,7 +33,7 @@ interface Message {
   content: string;
   timestamp: string;
   citations?: string[];
-  responseType?: 'clarify' | 'pages' | 'not_found';
+  responseType?: 'clarify' | 'pages' | 'not_found' | 'research';
   clarifyQuestions?: string[];
   pageCandidates?: Array<{
     documentName: string;
@@ -83,6 +86,20 @@ interface Session {
 }
 
 type ChatMode = 'normal' | 'law';
+type AnswerMode = 'normal' | 'research';
+
+interface ResearchQuota {
+  limit: number;
+  used: number;
+  remaining: number;
+  resetsAt: string;
+}
+
+const RESEARCH_MODE_SETTING = ['off', 'beta', 'on'].includes(
+  process.env.NEXT_PUBLIC_RESEARCH_MODE || 'off',
+)
+  ? process.env.NEXT_PUBLIC_RESEARCH_MODE || 'off'
+  : 'off';
 
 export default function ChatPage() {
   const router = useRouter();
@@ -91,6 +108,18 @@ export default function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [ragMode, setRagMode] = useState<ChatMode>('normal');
+  const [answerMode, setAnswerMode] = useState<AnswerMode>('normal');
+  const [researchQuota, setResearchQuota] = useState<ResearchQuota | null>(null);
+  const [researchJob, setResearchJob] = useState<ResearchJobStatus | null>(null);
+  const [researchRateLimited, setResearchRateLimited] = useState(false);
+  const researchPollerRef = useRef<JobPoller | null>(null);
+  const loginRedirectedRef = useRef(false);
+  const pendingResearchRequestRef = useRef<{
+    query: string;
+    sessionId: string | null;
+    clientRequestId: string;
+    userMessageId: string;
+  } | null>(null);
   const [currentSession, setCurrentSession] = useState<string | null>(null);
   // admin が失敗一覧から他ユーザーのセッションを開いたとき true（閲覧のみ・送信不可）
   const [readOnlySession, setReadOnlySession] = useState(false);
@@ -122,6 +151,8 @@ export default function ChatPage() {
   const [wishSent, setWishSent] = useState(false);
   const [wishError, setWishError] = useState<string | null>(null);
   const isLawMode = ragMode === 'law';
+  const researchModeAvailable = !isLawMode && RESEARCH_MODE_SETTING !== 'off';
+  const researchIsRunning = researchJob?.status === 'queued' || researchJob?.status === 'running';
   // 表示中の告知（障害中・復旧・メンテナンスなど、チャット画面の帯に出すもの）
   const [notices, setNotices] = useState<Announcement[]>([]);
 
@@ -160,6 +191,7 @@ export default function ChatPage() {
   const selectedModelLabel = selectedModelOption?.label || selectedModel;
 
   const API_URL = process.env.NEXT_PUBLIC_RAG_API_URL || '';
+  const RESEARCH_API_URL = process.env.NEXT_PUBLIC_RESEARCH_API_URL || API_URL;
   const CHAT_API_URL = process.env.NEXT_PUBLIC_CHAT_API_URL || '';
 
   // 空状態のクリック可能な質問サジェスト（ホーム画面のチップと同一）
@@ -286,13 +318,148 @@ const normalizeTableMarkdown = (text: string): string => {
 };
 
   // 認可トークン取得関数
-  const getAuthToken = async (): Promise<string | null> => {
+  const handleAuthenticationError = (err: unknown): boolean => {
+    const status = axios.isAxiosError(err)
+      ? err.response?.status
+      : err instanceof Error && 'status' in err ? err.status : undefined;
+    if (status !== 401) return false;
+    researchPollerRef.current?.stopAll();
+    setLoading(false);
+    setIsLoadingSessions(false);
+    setError('ログインの有効期限が切れました。もう一度ログインしてください。');
+    if (!loginRedirectedRef.current) {
+      loginRedirectedRef.current = true;
+      router.replace('/login?next=%2Fchat');
+    }
+    return true;
+  };
+
+  const getAuthToken = async (): Promise<string> => {
     try {
       const session = await fetchAuthSession();
-      return session.tokens?.idToken?.toString() || null;
+      const token = session.tokens?.idToken?.toString();
+      if (!token) throw Object.assign(new Error('Authentication required'), { status: 401 });
+      return token;
     } catch (err) {
-      console.error('Error fetching auth token:', err);
-      return null;
+      if (err instanceof Error && ['NotAuthorizedException', 'UserUnAuthenticatedException'].includes(err.name)) {
+        throw Object.assign(new Error('Authentication required'), { status: 401 });
+      }
+      throw err;
+    }
+  };
+
+  useEffect(() => {
+    const refreshQuota = async () => {
+      try {
+        const token = await getAuthToken();
+        const response = await axios.get<ResearchQuota>(`${RESEARCH_API_URL}/rag/research/quota`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setResearchQuota(response.data);
+      } catch (err) {
+        if (handleAuthenticationError(err)) return;
+        setResearchQuota(null);
+      }
+    };
+    if (userId && researchModeAvailable) void refreshQuota();
+  }, [userId, researchModeAvailable]);
+
+  useEffect(() => {
+    const poller = createJobPoller({
+      fetchJob: async (jobId) => {
+        try {
+          const token = await getAuthToken();
+          const response = await axios.get<ResearchJobStatus>(
+            `${RESEARCH_API_URL}/rag/research/${encodeURIComponent(jobId)}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          return response.data;
+        } catch (error: unknown) {
+          if (handleAuthenticationError(error)) {
+            throw Object.assign(new Error('Authentication required'), { status: 401 });
+          }
+          const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+          throw Object.assign(new Error('Research status request failed'), { status });
+        }
+      },
+      onUpdate: (_jobId, result) => {
+        setResearchJob(result);
+        setResearchRateLimited(false);
+        if (result.status === 'completed' && result.message) {
+          const saved = result.message;
+          const messageId = String(saved.messageId || `research-${result.jobId}`);
+          const assistantMessage: Message = {
+            id: messageId,
+            role: 'assistant',
+            content: String(saved.content || ''),
+            timestamp: String(saved.timestamp || new Date().toISOString()),
+            citations: saved.citations as string[] | undefined,
+            responseType: 'research',
+            sourceDocuments: saved.sourceDocuments as Message['sourceDocuments'],
+          };
+          setCurrentSession(result.sessionId || null);
+          setMessages((previous) => previous.some((item) => item.id === messageId)
+            ? previous
+            : [...previous, assistantMessage]);
+          setStreamingMessages((previous) => ({ ...previous, [messageId]: assistantMessage.content }));
+          setStreamingMessageId(null);
+          setLoading(false);
+        }
+        if (result.status === 'completed' || result.status === 'failed') {
+          setLoading(false);
+          void (async () => {
+            try {
+              const token = await getAuthToken();
+              const response = await axios.get<ResearchQuota>(`${RESEARCH_API_URL}/rag/research/quota`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              setResearchQuota(response.data);
+            } catch (err) {
+              if (handleAuthenticationError(err)) return;
+              setResearchQuota(null);
+            }
+          })();
+        }
+      },
+      onGiveUp: (jobId) => {
+        setResearchJob((current) => current?.jobId === jobId
+          ? { ...current, status: 'unavailable' }
+          : current);
+        setLoading(false);
+      },
+      onRateLimited: () => setResearchRateLimited(true),
+    });
+    researchPollerRef.current = poller;
+    const onVisibilityChange = () => poller.setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      poller.stopAll();
+      researchPollerRef.current = null;
+    };
+  }, []);
+
+  const resumeResearchJob = async (sessionId: string) => {
+    if (RESEARCH_MODE_SETTING === 'off') return;
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      const response = await axios.get<{ job: ResearchJobStatus | null }>(`${RESEARCH_API_URL}/rag/research`, {
+        params: { sessionId },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const job = response.data.job;
+      if (job?.jobId && (job.status === 'queued' || job.status === 'running')) {
+        setResearchJob(job);
+        setAnswerMode('research');
+        researchPollerRef.current?.start(job.jobId, {
+          visible: document.visibilityState === 'visible',
+          pollAfterMs: job.pollAfterMs,
+        });
+      }
+    } catch (err) {
+      if (handleAuthenticationError(err)) return;
+      // Old sessions and API deployments without the feature have nothing to resume.
     }
   };
 
@@ -349,6 +516,11 @@ const normalizeTableMarkdown = (text: string): string => {
       setInput(q);
       dirty = true;
       setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+    // 先輩チャットの「じっくり調べるで確かめる」(?research=1&q=...)。選んだ状態で開くだけで、送信は利用者が行う。
+    if (params.get('research') === '1' && initialMode !== 'law' && RESEARCH_MODE_SETTING !== 'off') {
+      setAnswerMode('research');
+      dirty = true;
     }
     if (sessionId) {
       dirty = true;
@@ -453,6 +625,7 @@ const normalizeTableMarkdown = (text: string): string => {
       });
       setSessions(response.data.sessions || []);
     } catch (err: any) {
+      if (handleAuthenticationError(err)) return;
       // err.config は headers.Authorization（ID トークン）を含むためログに出さない
       console.error('Error fetching sessions:', {
         message: err.message,
@@ -468,6 +641,10 @@ const normalizeTableMarkdown = (text: string): string => {
 
   const fetchSessionMessages = async (sessionId: string, mode: ChatMode = ragMode) => {
     try {
+      researchPollerRef.current?.stopAll();
+      pendingResearchRequestRef.current = null;
+      setResearchJob(null);
+      setResearchRateLimited(false);
       const token = await getAuthToken();
       const response = await axios.get(`${CHAT_API_URL}/chat/sessions/${sessionId}/messages`, {
         params: { mode },
@@ -495,24 +672,44 @@ const normalizeTableMarkdown = (text: string): string => {
 
       setCurrentSession(sessionId);
       setReadOnlySession(Boolean(response.data.readOnly));
+      if (!response.data.readOnly && mode === 'normal') void resumeResearchJob(sessionId);
     } catch (err) {
-      console.error('Error fetching messages:', err);
+      if (handleAuthenticationError(err)) return;
+      console.error('Error fetching messages');
       setError('メッセージ取得に失敗しました');
     }
   };
 
   const handleSendMessage = async () => {
-    if (!input.trim() || loading || !userId || readOnlySession) return;
+    if (!input.trim() || loading || researchIsRunning || !userId || readOnlySession) return;
+
+    const trimmedQuery = input.trim();
+    if (answerMode === 'research' && researchModeAvailable) {
+      const pending = pendingResearchRequestRef.current;
+      if (!pending || pending.query !== trimmedQuery || pending.sessionId !== currentSession) {
+        pendingResearchRequestRef.current = {
+          query: trimmedQuery,
+          sessionId: currentSession,
+          clientRequestId: crypto.randomUUID(),
+          userMessageId: `research-user-${crypto.randomUUID()}`,
+        };
+      }
+    }
+    const pendingResearchRequest = pendingResearchRequestRef.current;
 
     const userMessage: Message = {
-      id: `msg_${Date.now()}`,
+      id: answerMode === 'research' && researchModeAvailable
+        ? pendingResearchRequest?.userMessageId || `msg_${Date.now()}`
+        : `msg_${Date.now()}`,
       role: 'user',
       content: input,
       timestamp: new Date().toISOString()
     };
 
     // ローカル UI 更新
-    setMessages([...messages, userMessage]);
+    setMessages((previous) => previous.some((message) => message.id === userMessage.id)
+      ? previous
+      : [...previous, userMessage]);
     setInput('');
     // textareaの高さをリセット
     if (textareaRef.current) {
@@ -528,6 +725,58 @@ const normalizeTableMarkdown = (text: string): string => {
         category: selectedCategories.length > 0 ? selectedCategories : undefined,
         modelType: selectedModel || undefined,
       };
+
+      if (answerMode === 'research' && researchModeAvailable) {
+        const response = await axios.post(`${RESEARCH_API_URL}/rag/research`, {
+          sessionId: currentSession,
+          query: input,
+          clientRequestId: pendingResearchRequest?.clientRequestId,
+          filters: effectiveFilters,
+        }, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        const data = response.data;
+        if (data.userMessageId) {
+          setMessages((previous) => previous.map((message) => message.id === userMessage.id
+            ? { ...message, id: data.userMessageId }
+            : message));
+        }
+        pendingResearchRequestRef.current = null;
+        if (data.sessionId) setCurrentSession(data.sessionId);
+        if (data.quota) setResearchQuota(data.quota);
+        if (data.responseType === 'clarify') {
+          const clarifyMessage: Message = {
+            id: data.aiMessageId || `clarify-${Date.now()}`,
+            role: 'assistant',
+            content: data.content,
+            timestamp: new Date().toISOString(),
+            responseType: 'clarify',
+            clarifyQuestions: data.clarifyQuestions,
+          };
+          setMessages((previous) => [...previous, clarifyMessage]);
+          setStreamingMessageId(null);
+          if (!currentSession && data.sessionId) await fetchSessions('normal');
+          return;
+        }
+        const job: ResearchJobStatus = {
+          jobId: data.jobId,
+          sessionId: data.sessionId,
+          status: data.status || 'queued',
+          stage: 'queued',
+          progress: { step: 0, totalSteps: 6, searchesDone: 0, searchesTotal: 0 },
+        };
+        setResearchJob(job);
+        setResearchRateLimited(false);
+        researchPollerRef.current?.start(job.jobId, {
+          visible: document.visibilityState === 'visible',
+          pollAfterMs: data.pollAfterMs,
+        });
+        if (!currentSession && data.sessionId) await fetchSessions('normal');
+        return;
+      }
 
       const payload = {
         sessionId: currentSession,
@@ -577,6 +826,7 @@ const normalizeTableMarkdown = (text: string): string => {
         await fetchSessionMessages(response.data.sessionId, ragMode);
       }
     } catch (err: any) {
+      if (handleAuthenticationError(err)) return;
       // err.config は headers.Authorization（ID トークン）を含むためログに出さない
       console.error('Error sending RAG query:', {
         message: err.message,
@@ -585,7 +835,18 @@ const normalizeTableMarkdown = (text: string): string => {
         data: err.response?.data,
         url: err.config?.url
       });
-      setError(`エラーが発生しました: ${err.response?.data?.message || err.message || 'Unknown error'}`);
+      const researchError = err.response?.data?.error;
+      if (answerMode === 'research' && researchError === 'DailyLimitExceeded') {
+        if (err.response?.data?.quota) setResearchQuota(err.response.data.quota);
+        setError('じっくり調査の本日の回数上限に達しました');
+      } else if (answerMode === 'research' && researchError === 'ResearchAlreadyRunning') {
+        setError('このアカウントでは別のじっくり調査が実行中です');
+        if (currentSession) void resumeResearchJob(currentSession);
+      } else if (answerMode === 'research' && researchError === 'ResearchUnavailable') {
+        setError('じっくり調査の受付に失敗しました。少し待ってから同じ質問を再送してください');
+      } else {
+        setError(`エラーが発生しました: ${err.response?.data?.message || err.message || 'Unknown error'}`);
+      }
       // ユーザーメッセージは残す
     } finally {
       setLoading(false);
@@ -593,6 +854,9 @@ const normalizeTableMarkdown = (text: string): string => {
   };
 
   const handleNewSession = () => {
+    researchPollerRef.current?.stopAll();
+    setResearchJob(null);
+    setResearchRateLimited(false);
     setCurrentSession(null);
     setReadOnlySession(false);
     setMessages([]);
@@ -1021,7 +1285,9 @@ const normalizeTableMarkdown = (text: string): string => {
                       className={`break-words min-w-0 ${
                         message.role === 'user'
                           ? 'px-4 py-2.5 rounded-2xl rounded-br-md bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-sm max-w-[85%] sm:max-w-[70%]'
-                          : 'px-4 py-3 rounded-2xl rounded-tl-md bg-white border border-gray-200 text-gray-900 shadow-sm max-w-full sm:max-w-[92%]'
+                          : message.responseType === 'research'
+                            ? 'px-4 py-3 rounded-2xl rounded-tl-md bg-violet-50 border border-violet-200 text-gray-900 shadow-sm max-w-full sm:max-w-[92%]'
+                            : 'px-4 py-3 rounded-2xl rounded-tl-md bg-white border border-gray-200 text-gray-900 shadow-sm max-w-full sm:max-w-[92%]'
                       }`}
                     >
                       {/* Role Indicator (assistant only) */}
@@ -1033,6 +1299,19 @@ const normalizeTableMarkdown = (text: string): string => {
                             </svg>
                           </div>
                           <span className="text-xs font-semibold text-gray-500">EleKnowledge AI</span>
+                        </div>
+                      )}
+
+                      {message.responseType === 'research' && (
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-semibold text-violet-900">
+                            {RESEARCH_MODE_SETTING === 'beta' ? 'じっくり調査（開発中）' : 'じっくり調査'}
+                          </span>
+                          {RESEARCH_MODE_SETTING === 'beta' && (
+                            <span className="rounded border border-violet-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-violet-800">
+                              開発中
+                            </span>
+                          )}
                         </div>
                       )}
 
@@ -1130,10 +1409,31 @@ const normalizeTableMarkdown = (text: string): string => {
                                 </>
                               ) : (
                                 <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-                                  {normalizeTableMarkdown(streamingMessages[message.id] || message.content)}
+                                  {/* 本文の資料名を、この回答の参考資料へのリンクにする（返した資料の名前だけ）。
+                                      「資料名 p.N」は該当ページを開く。法令は法令チャットと同じ e-Gov の URL（lawCitation.sourceUrl）で、ページは付けない。 */}
+                                  {linkCitedNames(
+                                    normalizeTableMarkdown(streamingMessages[message.id] || message.content),
+                                    message.role === 'assistant'
+                                      ? getUniqueDocs(message.sourceDocuments).map((doc) => {
+                                        const ctx = { sessionId: currentSession, messageId: message.id };
+                                        return doc.lawCitation
+                                          ? { names: [doc.documentName, doc.title], href: doc.lawCitation.sourceUrl }
+                                          : {
+                                            names: [doc.documentName, doc.title],
+                                            href: documentHref(doc.sourceUri, ctx),
+                                            pageHref: (page: number) => documentHrefWithPage(doc.sourceUri, page, ctx),
+                                          };
+                                      })
+                                      : [],
+                                  )}
                                 </ReactMarkdown>
                               )}
                             </div>
+                            {message.responseType === 'research' && (
+                              <p className="border-t border-violet-200 pt-2 text-xs text-gray-600">
+                                気づいた点を 👍👎 で教えてください
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <p className={`whitespace-pre-wrap break-words text-[13px] leading-relaxed font-normal text-white`}>
@@ -1277,6 +1577,75 @@ const normalizeTableMarkdown = (text: string): string => {
                     </div>
                   </div>
                 ))}
+                {researchJob && ['queued', 'running', 'failed', 'unavailable'].includes(researchJob.status) && (
+                  <div className="flex justify-start">
+                    <section
+                      aria-live="polite"
+                      className={`w-full max-w-3xl rounded-lg border px-4 py-3 ${
+                        researchJob.status === 'failed' || researchJob.status === 'unavailable'
+                          ? 'border-amber-300 bg-amber-50'
+                          : 'border-violet-200 bg-violet-50'
+                      }`}
+                    >
+                      <h2 className="text-sm font-semibold text-violet-950">
+                        {RESEARCH_MODE_SETTING === 'beta' ? 'じっくり調査（開発中）' : 'じっくり調査'}
+                      </h2>
+                      {researchJob.status === 'queued' ? (
+                        <p className="mt-1 text-sm text-gray-700">
+                          受付済みです。混み合っているときは、順番が来るまで最大2分お待ちください。
+                        </p>
+                      ) : researchJob.status === 'running' ? (
+                        <p className="mt-1 text-sm text-gray-700">
+                          {researchJob.stage === 'planning' ? '観点を整理中' :
+                            researchJob.stage === 'searching'
+                              ? `検索中 ${researchJob.progress?.searchesDone || 0}/${researchJob.progress?.searchesTotal || 0}` :
+                              researchJob.stage === 'selecting' ? '根拠を選定中' :
+                                researchJob.stage === 'synthesizing' ? 'まとめ中' :
+                                  researchJob.stage === 'checking' ? '照合中' : '結果を保存中'}
+                        </p>
+                      ) : researchJob.status === 'failed' && researchJob.error?.code === 'DispatchTimeout' ? (
+                        <p className="mt-1 text-sm text-gray-700">
+                          混み合っていて開始できませんでした。回数は消費していません。
+                        </p>
+                      ) : researchJob.status === 'unavailable' ? (
+                        <p className="mt-1 text-sm text-gray-700">
+                          結果を確認できませんでした。チャット履歴に回答が保存されている場合があります。
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-sm text-gray-700">
+                          調査を完了できませんでした。通常モードで質問を続けられます。
+                        </p>
+                      )}
+                      {researchRateLimited && researchIsRunning && (
+                        <p className="mt-1 text-xs text-amber-800">アクセスが多いため、しばらくお待ちください</p>
+                      )}
+                      {(researchJob.status === 'failed' || researchJob.status === 'unavailable') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const lastQuestion = [...messages].reverse().find((item) => item.role === 'user')?.content;
+                            setAnswerMode('normal');
+                            if (lastQuestion) setInput(lastQuestion);
+                            setResearchJob(null);
+                          }}
+                          className="mt-2 text-sm font-medium text-violet-800 underline underline-offset-2"
+                        >
+                          通常モードで質問する
+                        </button>
+                      )}
+                    </section>
+                  </div>
+                )}
+                {researchModeAvailable && answerMode === 'research' && !researchIsRunning && (
+                  <div className="mx-auto w-full max-w-3xl rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-xs leading-relaxed text-violet-950">
+                    {RESEARCH_MODE_SETTING === 'beta'
+                      ? '開発中の機能です。回答の正確さを検証しています。重要な判断は根拠資料で確認してください'
+                      : '複数の観点で検索し、資料間の違いを照合します。回答まで1〜3分かかります。'}
+                    {researchQuota && (
+                      <span className="ml-1">本日残り {researchQuota.remaining} 回</span>
+                    )}
+                  </div>
+                )}
                 {/* Typing Indicator */}
                 {loading && (
                   <div className="flex justify-start animate-fade-in">
@@ -1342,6 +1711,31 @@ const normalizeTableMarkdown = (text: string): string => {
           {/* Input Area - Fixed at bottom */}
           <div className="border-t border-gray-200 bg-white/95 backdrop-blur-sm sticky bottom-0 z-10 flex-shrink-0 shadow-lg">
             <div className="p-3 sm:p-4">
+              {researchModeAvailable && (
+                <div className="mb-2.5 flex flex-wrap items-center gap-2">
+                  <SegmentedControl<AnswerMode>
+                    aria-label="回答モード"
+                    value={answerMode}
+                    disabled={loading || researchIsRunning || readOnlySession}
+                    onChange={setAnswerMode}
+                    options={[
+                      { value: 'normal', label: '通常' },
+                      {
+                        value: 'research',
+                        label: (
+                          <span className="inline-flex items-center gap-1.5">
+                            じっくり調べる
+                            {RESEARCH_MODE_SETTING === 'beta' && (
+                              <span className="rounded border border-violet-200 px-1 text-[10px] text-violet-800">開発中</span>
+                            )}
+                            {researchQuota && <span className="text-[10px]">残り {researchQuota.remaining} 回</span>}
+                          </span>
+                        ),
+                      },
+                    ]}
+                  />
+                </div>
+              )}
               {/* Filter bar: collapsible, active filters summarized when closed */}
               {!isLawMode && (
               <div className="mb-2.5">
@@ -1517,7 +1911,7 @@ const normalizeTableMarkdown = (text: string): string => {
                       : isLawMode
                         ? '調べたい法令・条文・工事条件を入力してください'
                         : '質問を入力してください... (Shift+Enterで改行、Enterで送信)'}
-                    disabled={loading || readOnlySession}
+                    disabled={loading || researchIsRunning || readOnlySession}
                     rows={1}
                     className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 text-sm transition-all placeholder:text-gray-500 placeholder:opacity-100 shadow-sm hover:border-gray-400 bg-white text-gray-900 resize-none min-h-[42px] max-h-[200px] overflow-y-auto"
                     style={{
@@ -1539,7 +1933,7 @@ const normalizeTableMarkdown = (text: string): string => {
                 </div>
                 <button
                   onClick={handleSendMessage}
-                  disabled={loading || readOnlySession || !input.trim()}
+                  disabled={loading || researchIsRunning || readOnlySession || !input.trim()}
                   className="px-3 sm:px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg font-medium text-sm flex items-center gap-2 flex-shrink-0 transform hover:scale-105 active:scale-95 disabled:transform-none"
                 >
                   {loading ? (

@@ -171,6 +171,14 @@ def test_start_job_only_from_queued(env):
     assert store.get_job(JOB_A)["status"] == "running"
 
 
+def test_delayed_worker_cannot_start_an_expired_job(env):
+    store_mod, store, _table, clock = env
+    store.create_job(_item(store_mod, clock=clock))
+    clock.advance(151)
+    assert store.start_job(JOB_A) is False
+    assert store.get_job(JOB_A)['status'] == 'queued'
+
+
 def test_append_step_is_append_only_and_sequence_checked(env):
     store_mod, store, _table, clock = env
     store.create_job(_item(store_mod, clock=clock))

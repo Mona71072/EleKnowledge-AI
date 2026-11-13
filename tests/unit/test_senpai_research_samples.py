@@ -139,7 +139,7 @@ class Lab:
 
 def _answer_deps():
     return FakeDeps(
-        understand=_understanding(lawRelevant=True, queries={
+        understand=_understanding(aspects=[{"kind": "technical", "question": "ドアの異音の確認"}, {"kind": "legal", "question": "構造基準の確認"}], lawRelevant=True, queries={
             "tech": "AXIEZ-LINKs ドア 開閉 異音", "law": "昇降機 構造 基準", "knowhow": "ドア 異音"}),
         tech=lambda q, m: _retrieval(_tech("TI-1.pdf", 3, "戸の開閉調整の手順", 0.82),
                                      _tech("TI-2.pdf", 5, "戸まわりの点検項目", 0.64)),
@@ -164,7 +164,7 @@ def _mid_run_samples(lab):
             else _retrieval(_tech("TI-1.pdf", 3, "戸の開閉調整の手順", 0.82))
 
     deps = MidRunDeps(
-        capture, understand=_understanding(), tech=tech,
+        capture, understand=_understanding(aspects=[{"kind": "technical", "question": "ドアの異音の確認"}]), tech=tech,
         sufficiency=[_directive(sufficient=False, action="retry_search", query="ドア 調整 異音", target="tech"),
                      SUFFICIENT],
         synth=GOOD_ANSWER)
@@ -267,7 +267,9 @@ def generate_samples() -> dict:
         out["status-not-found.json"] = lab.run(FakeDeps(tech=lambda q, m: _retrieval(), cards=[]))[1]
 
     def failed(lab, _mp):
-        out["status-failed-timeout.json"] = lab.run(FakeDeps(synth=ReadTimeoutError("read timeout")))[1]
+        out["status-failed-timeout.json"] = lab.run(FakeDeps(
+            understand=_understanding(aspects=[{'kind': 'technical', 'question': 'ドアの異音'}]),
+            synth=ReadTimeoutError("read timeout")))[1]
 
     scenario(answer)
     scenario(lambda lab, mp: out.update(_mid_run_samples(lab)))
@@ -310,8 +312,11 @@ def test_samples_cover_the_contract_shapes():
     answer = samples["status-answer.json"]["body"]
     assert answer["status"] == "completed" and answer["pollAfterMs"] == 0 and "debug" in answer
     knowhow = answer["result"]["sources"]["knowhow"]
-    assert {c["modelFit"] for c in knowhow["used"]} >= {"matched", "other_product"}
-    assert knowhow["candidates"] and answer["result"]["unverifiedRefs"] == ["T9"]
+    # A hallucinated T9 forces the T17 extractive fallback. Candidate discovery is
+    # preserved; it must not be reported as actual citation of K1/K2.
+    assert knowhow['used'] == []
+    assert {c['knowledgeId'] for c in knowhow['candidates']} >= {'KH-AX-001', 'KH-NX-014'}
+    assert answer['result']['unverifiedRefs'] == ['T9']
     assert samples["status-clarify.json"]["body"]["result"]["kind"] == "clarify"
     assert samples["status-not-found.json"]["body"]["result"]["kind"] == "not_found"
     assert samples["status-failed-timeout.json"]["body"]["error"]["code"] == "Timeout"

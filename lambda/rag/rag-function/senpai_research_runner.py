@@ -11,11 +11,11 @@ import senpai_research_sufficiency as sufficiency
 import senpai_research_synthesize as synthesize
 import senpai_research_text as text_util
 import senpai_research_understand as understand
+import senpai_research_grounding as grounding
 from senpai_research_context import RunContext
 from senpai_research_errors import KnowhowUnavailable, ResearchFailure, TimeBudgetExceeded  # noqa: F401 (re-export)
 
-MAX_EXTRA_SEARCHES = 2
-MODEL_MAX_TOKENS = {'understand': 700, 'sufficiency': 500, 'synthesize': 3000}
+MODEL_MAX_TOKENS = {'understand': 900, 'sufficiency': 1200, 'synthesize': 1800, 'grounding': 600}
 TIMEOUT_ERROR_CODES = frozenset({'ModelTimeoutException', 'RequestTimeout', 'RequestTimeoutException'})
 RAG_QUERY_MAX_LENGTH = 2000
 MIN_SYNTH_MS = 8000  # これより残りが少ないときは、まとめを呼ばずに資料の一覧で返す
@@ -25,7 +25,8 @@ INTERNAL_MESSAGE = '回答を作成できませんでした。時間をおいて
 BUDGET_MESSAGE = '調査の上限に達したため、回答をまとめられませんでした。'
 SEARCH_FAILED_MESSAGE = '資料の検索に失敗しました。時間をおいて再度お試しください。'
 
-BUDGET_NOTE = '時間または回数の上限に達したため、確認できた範囲での回答です。追加の検索はしていません。'
+BUDGET_NOTE = '調査の上限に達したため、確認できた範囲での回答です。これ以上の検索は行っていません。'
+JUDGMENT_NOTE = '根拠の十分性の判定が完了しなかったため、以下は取得候補に基づく暫定回答です。'
 
 
 def _is_timeout(error: Exception) -> bool:
@@ -57,7 +58,7 @@ def _call_understand(ctx: RunContext):
     if not ctx.budget.try_model_call(reserve=1):
         return None
     try:
-        raw = ctx.deps.call_model('understand', understand.SYSTEM_PROMPT,
+        raw = ctx.call_model('understand', understand.SYSTEM_PROMPT,
                                   understand.build_user_text(ctx.question),
                                   MODEL_MAX_TOKENS['understand'])
         return understand.parse_understanding(raw, ctx.question)
@@ -71,7 +72,9 @@ def _step_understand(ctx: RunContext) -> None:
     parsed = _call_understand(ctx)
     ctx.fallback = parsed is None
     ctx.understanding = parsed or understand.fallback_understanding()
-    ctx.model_type = understand.effective_model_type(ctx.ui_model, ctx.understanding)
+    if not ctx.understanding.get('aspects'):
+        ctx.understanding['aspects'] = understand._aspects(None, ctx.question, ctx.understanding.get('intent'))
+    ctx.model_type = understand.effective_model_type(ctx.ui_model, ctx.understanding, ctx.question)
     ctx.recorder.end(handle, 'done', detail=_understand_detail(ctx))
 
 
@@ -84,14 +87,26 @@ def _step_knowhow(ctx: RunContext) -> None:
     queries = _distinct([ctx.question, ctx.understanding['queries']['knowhow']])
     ctx.queries['knowhow'] = queries[-1]
     handle = ctx.recorder.begin('knowhow')
+    started = ctx.budget.snapshot()
+    completed = False
     try:
-        found = ctx.deps.search_knowhow(queries, ctx.model_type)
+        if getattr(ctx.deps, 'knowhow_uses_remote', False):
+            found = ctx.deps.search_knowhow(queries, ctx.model_type, claim_search=ctx.budget.try_search)
+        else:
+            found = ctx.deps.search_knowhow(queries, ctx.model_type)
+        ctx.cards, ctx.hints = list(found['cards']), list(found['hints'])
+        completed = True
     except Exception as error:  # noqa: BLE001 - ノウハウなしで調査を続ける
         run_log.log('knowhow', 'error', error)
         ctx.notes.append('ノウハウの索引を読み込めなかったため、事例は参照していません。')
         ctx.recorder.end(handle, 'failed', detail='ノウハウを読み込めませんでした')
         return
-    ctx.cards, ctx.hints = list(found['cards']), list(found['hints'])
+    finally:
+        ended = ctx.budget.snapshot()
+        ctx.stages.append({'stage': 'knowhow', 'ms': ended['elapsedMs'] - started['elapsedMs'],
+                           'searches': ended['searchesUsed'] - started['searchesUsed'],
+                           'selected': len(ctx.cards), 'completed': completed,
+                           'evidenceValidity': 'unassessed'})
     count = len(ctx.cards)
     ctx.recorder.end(handle, 'done', detail=f'{count}件の事例メモ',
                      counts={'hits': count, 'selected': count, 'documents': count})
@@ -174,16 +189,24 @@ def _directive_detail(directive) -> str:
     }[directive['action']]
 
 
-def _ask_sufficiency(ctx: RunContext):
+def _ask_sufficiency(ctx: RunContext, retries_left: int):
     handle = ctx.recorder.begin('sufficiency')
     directive = None
     try:
         user_text = sufficiency.build_user_text(
-            question=ctx.question, understanding=ctx.understanding, sources=ctx.sources(),
-            tried_queries=ctx.tried_queries(), retries_left=MAX_EXTRA_SEARCHES)
-        raw = ctx.deps.call_model('sufficiency', sufficiency.SYSTEM_PROMPT, user_text,
+            question=ctx.question, understanding={
+                **ctx.understanding, 'modelType': ctx.model_type,
+                'extractedModelType': ctx.understanding.get('modelType')}, sources=ctx.sources(),
+            tried_queries=ctx.tried_queries(), retries_left=retries_left)
+        raw = ctx.call_model('sufficiency', sufficiency.SYSTEM_PROMPT, user_text,
                                   MODEL_MAX_TOKENS['sufficiency'])
         directive = sufficiency.parse_directive(raw)
+        if directive is not None:
+            ctx.coverage = sufficiency.assess_coverage(directive, ctx.understanding['aspects'], ctx.sources())
+            directive['sufficient'] = directive['sufficient'] and ctx.coverage['complete']
+    except ResearchFailure:
+        ctx.recorder.end(handle, 'failed', detail='モデル入力の上限に達しました')
+        raise
     except Exception as error:  # noqa: BLE001 - 判断できなければ現状の結果でまとめる
         run_log.log('sufficiency', 'error', error)
     if directive is None:
@@ -195,7 +218,8 @@ def _ask_sufficiency(ctx: RunContext):
 def _retry_targets(ctx: RunContext, directive: dict) -> list:
     wanted = {'tech': ['tech'], 'law': ['law'], 'both': ['tech', 'law']}[directive['target']]
     wanted = [tool for tool in wanted if tool == 'tech' or ctx.deps.law_available]
-    return [tool for tool in wanted if not ctx.is_tried(tool, directive['query'])]
+    scope = '' if directive['dropModelFilter'] and not ctx.model_from_ui else None
+    return [tool for tool in wanted if not ctx.is_tried(tool, directive['query'], scope if tool == 'tech' else None)]
 
 
 def _extra_retry_search(ctx: RunContext, directive: dict) -> str:
@@ -203,11 +227,12 @@ def _extra_retry_search(ctx: RunContext, directive: dict) -> str:
     if not targets:
         return 'duplicate'
     query = directive['query']
+    scope = '' if directive['dropModelFilter'] and not ctx.model_from_ui else None
     claimed = []
     for tool in targets:
         if not ctx.budget.try_search():
             break
-        ctx.mark_tried(tool, query)
+        ctx.mark_tried(tool, query, scope if tool == 'tech' else None)
         ctx.add_query(tool, query)
         claimed.append(tool)
     if not claimed:
@@ -221,22 +246,33 @@ def _extra_retry_search(ctx: RunContext, directive: dict) -> str:
         for tool in claimed
     ]
     results = search.run_parallel(tasks)
-    return 'progress' if sum(result['new_docs'] for result in results) > 0 else 'no_new'
+    if all(result['failed'] for result in results):
+        raise ResearchFailure('Internal', SEARCH_FAILED_MESSAGE)
+    ctx.last_extra_items = sum(result['new_items'] for result in results)
+    if any(result.get('timeSkipped') for result in results):
+        return 'no_budget'
+    return 'progress' if ctx.last_extra_items > 0 else 'no_new'
 
 
 def _extra_doc_page(ctx: RunContext, directive: dict) -> str:
     name, page = directive['documentName'], directive['pageNumber']
     query = f'{name} {directive.get("query") or ""}'.strip()
-    if ctx.is_tried('tech', query):
+    scope = (ctx.model_type, name, page)
+    if ctx.is_tried('tech', query, scope):
         return 'duplicate'
     if not ctx.budget.try_search():
         return 'no_budget'
-    ctx.mark_tried('tech', query)
+    ctx.mark_tried('tech', query, scope)
     ctx.add_query('tech', query)
     page_text = f' p.{page}' if page else ''
     result = search.run_search_step(
         ctx, 'doc_page', 'tech', [query], detail=f'『{name[:40]}』{page_text}を確認',
         model_type=ctx.model_type, evidence_filter=search.keep_document(name, page))
+    ctx.last_extra_items = result['new_items']
+    if result['failed']:
+        raise ResearchFailure('Internal', SEARCH_FAILED_MESSAGE)
+    if result.get('timeSkipped'):
+        return 'no_budget'
     return 'progress' if result['new_items'] > 0 else 'no_new'
 
 
@@ -244,25 +280,51 @@ STOP_AFTER_EXTRA = {'duplicate': 'no_new_results', 'no_new': 'no_new_results', '
 
 
 def _sufficiency_loop(ctx: RunContext) -> tuple:
-    """(停止理由, 聞き返しの質問 or None)。追加の検索は最大2回。"""
-    retries = 0
+    """進捗停止を優先し、回数・時間は有限の非常停止枠として残す。"""
+    stagnant = 0
     while True:
-        if retries >= MAX_EXTRA_SEARCHES:
+        if not ctx.budget.time_allows_more():
+            ctx.stop_detail = 'time_limit'
             return 'budget', None
-        if not ctx.budget.time_allows_more() or not ctx.budget.try_model_call(reserve=1):
+        if not ctx.budget.try_model_call(reserve=1):
+            ctx.stop_detail = ctx.budget.blocked_by
             return 'budget', None
-        directive = _ask_sufficiency(ctx)
-        if directive is None or directive['sufficient']:
+        try:
+            directive = _ask_sufficiency(ctx, ctx.budget.searches_left())
+        except ResearchFailure:
+            ctx.stop_detail = ctx.budget.blocked_by
+            return 'budget', None
+        if directive is None:
+            ctx.last_judgment = 'unjudged'
+            return 'judgment_failed', None
+        ctx.last_judgment = 'sufficient' if directive['sufficient'] else 'insufficient'
+        if directive['sufficient']:
             return 'sufficient', None
         if directive['action'] == 'clarify':
             return 'clarify', directive['clarifyQuestions']
         if directive['action'] == 'none':
-            return 'no_new_results', None
+            return 'partial' if ctx.coverage and ctx.coverage['partial'] else 'insufficient', None
         extra = _extra_retry_search if directive['action'] == 'retry_search' else _extra_doc_page
+        before = ctx.exposed_fingerprints()
+        started = ctx.budget.snapshot()
+        ctx.last_extra_items = 0
         outcome = extra(ctx, directive)
+        after = ctx.exposed_fingerprints()
+        ended = ctx.budget.snapshot()
+        gained = len(after - before)
+        stagnant = stagnant + 1 if gained == 0 else 0
+        ctx.progress.append({'round': len(ctx.progress) + 1, 'action': directive['action'],
+                             'ms': ended['elapsedMs'] - started['elapsedMs'],
+                             'searches': ended['searchesUsed'] - started['searchesUsed'],
+                             'newCandidateItems': ctx.last_extra_items, 'newExposedEvidence': gained,
+                             'evidenceValidity': 'unassessed', 'outcome': outcome})
         if outcome != 'progress':
+            ctx.stop_detail = {'duplicate': 'repeated_query', 'no_new': 'repeated_results',
+                               'no_budget': ctx.budget.blocked_by}[outcome]
             return STOP_AFTER_EXTRA[outcome], None
-        retries += 1
+        if stagnant >= ctx.budget.no_progress_limit:
+            ctx.stop_detail = 'no_exposed_progress'
+            return 'no_new_results', None
 
 
 # ---------------------------------------------------------------- 結果の組み立て
@@ -301,7 +363,8 @@ def _not_found_outcome(ctx: RunContext, stop_reason: str) -> dict:
     ctx.recorder.skip('synthesize', '根拠が見つからないため省略')
     ctx.recorder.skip('verify', '根拠が見つからないため省略')
     result = _result(
-        ctx, kind='not_found', markdown=synthesize.not_found_markdown(),
+        ctx, kind='not_found', markdown=((BUDGET_NOTE + '\n\n') if stop_reason == 'budget' else '') +
+        synthesize.not_found_markdown(),
         public_sources=citations.public_sources(ctx.sources(), cited=set()),
         stop_reason=stop_reason)
     return _outcome(ctx, result)
@@ -334,12 +397,16 @@ def _synthesis_understanding(ctx: RunContext) -> dict:
 def _generate_answer(ctx: RunContext, sources: dict, stop_reason: str):
     """まとめの本文。残り時間が足りずモデルを呼べないときは None（資料の一覧で返す）。"""
     notes = list(ctx.notes) + ([BUDGET_NOTE] if stop_reason == 'budget' else [])
+    if ctx.coverage and ctx.coverage['missing']:
+        notes.append('次の論点は未確認。解決したと書かず、根拠を推論で補わない: ' +
+                     ' / '.join(i['question'] for i in ctx.coverage['missing']))
     handle = ctx.recorder.begin('synthesize')
     if not ctx.budget.try_model_call():
+        ctx.stop_detail = ctx.budget.blocked_by
         ctx.recorder.end(handle, 'failed', detail='モデル呼び出しの上限に達しました')
-        raise ResearchFailure('BudgetExceeded', BUDGET_MESSAGE)
+        return None
     try:
-        text = ctx.deps.call_model(
+        text = ctx.call_model(
             'synthesize', synthesize.SYSTEM_PROMPT,
             synthesize.build_user_text(ctx.question, _synthesis_understanding(ctx), sources, notes),
             MODEL_MAX_TOKENS['synthesize'])
@@ -347,6 +414,10 @@ def _generate_answer(ctx: RunContext, sources: dict, stop_reason: str):
         run_log.log('synthesize', 'no_time')
         ctx.recorder.end(handle, 'failed', detail='時間が足りず、まとめを作れませんでした')
         return None
+    except ResearchFailure:
+        ctx.stop_detail = ctx.budget.blocked_by
+        ctx.recorder.end(handle, 'failed', detail='モデル入力の上限に達しました')
+        raise
     except Exception as error:  # noqa: BLE001 - 利用者には一般化した失敗として返す
         run_log.log('synthesize', 'error', error)
         ctx.recorder.end(handle, 'failed', detail='回答をまとめられませんでした')
@@ -362,6 +433,43 @@ def _generate_answer(ctx: RunContext, sources: dict, stop_reason: str):
 def _verify_answer(ctx: RunContext, text: str, sources: dict) -> dict:
     handle = ctx.recorder.begin('verify')
     verified = citations.verify_refs(text, sources)
+    if not verified['cited']:
+        ctx.grounding = {'mode': 'rejected', 'articleMismatches': []}
+        ctx.recorder.end(handle, 'done', detail='根拠の参照を確認できませんでした')
+        return verified
+    mismatch = grounding.article_mismatches(verified['text'], sources)
+    guard_reasons = grounding.guard_reasons(verified['text'])
+    valid, mode = False, 'extractive_fallback'
+    if ctx.coverage is None and not mismatch and not guard_reasons and not ctx.budget.time_allows_more():
+        fallback = citations.verify_refs(synthesize.source_list_markdown(sources), sources)
+        ctx.grounding = {'mode': 'source_list_only', 'articleMismatches': []}
+        ctx.recorder.end(handle, 'done', detail='時間上限のため資料一覧のみ')
+        return fallback
+    if not mismatch and not guard_reasons and not verified['unverifiedRefs'] and ctx.budget.try_model_call():
+        try:
+            raw = ctx.call_model('grounding', grounding.SYSTEM_PROMPT,
+                                 grounding.build_user_text(ctx.question, verified['text'], sources, ctx.coverage or {}),
+                                 MODEL_MAX_TOKENS['grounding'])
+            verdict = grounding.parse_verdict(raw)
+            valid = verdict is not None and verdict['valid']
+        except Exception as error:  # noqa: BLE001 - 未検証の生成文は返さない
+            run_log.log('grounding', 'error', error)
+    if valid:
+        mode = 'model_verified'
+    else:
+        if ctx.coverage is None and not mismatch and not guard_reasons:
+            fallback = citations.verify_refs(synthesize.source_list_markdown(sources), sources)
+            ctx.grounding = {'mode': 'source_list_only', 'articleMismatches': []}
+            ctx.recorder.end(handle, 'done', detail='根拠対応を検証できないため資料一覧のみ')
+            return fallback
+        if all(a['kind'] == 'legal' for a in ctx.understanding['aspects']):
+            ctx.coverage = {'supported': [], 'missing': ctx.understanding['aspects'], 'complete': False, 'partial': False}
+            mode = 'rejected'
+        fallback = grounding.extractive_answer(ctx.coverage or {}, sources)
+        fallback_verified = citations.verify_refs(fallback, sources)
+        verified.update(text=fallback_verified['text'], cited=fallback_verified['cited'])
+    ctx.grounding = {'mode': mode, 'articleMismatches': mismatch,
+                     **({'guardReasons': guard_reasons} if guard_reasons else {})}
     removed = len(verified['unverifiedRefs'])
     if removed:
         detail = f'実在しない参照 {removed} 件を除去'
@@ -384,20 +492,47 @@ def _no_citation_outcome(ctx: RunContext, sources: dict, stop_reason: str, unver
 
 def _answer_outcome(ctx: RunContext, stop_reason: str) -> dict:
     sources = ctx.sources()
-    if not (sources['tech'] or sources['law'] or sources['knowhow']):
+    if ctx.coverage is None and all(a['kind'] == 'legal' for a in ctx.understanding['aspects']):
+        return _not_found_outcome(ctx, stop_reason)
+    if ctx.coverage is not None:
+        if not ctx.coverage['supported']:
+            return _not_found_outcome(ctx, stop_reason)
+        if ctx.coverage['partial']:
+            stop_reason = 'partial'
+            if any(item['kind'] == 'legal' for item in ctx.coverage['missing']):
+                sources = {**sources, 'law': []}
+    if stop_reason in ('insufficient', 'no_new_results') or not (
+            sources['tech'] or sources['law'] or sources['knowhow']):
         return _not_found_outcome(ctx, stop_reason)
     text = None
     if ctx.budget.remaining_ms() >= MIN_SYNTH_MS:
         text = _generate_answer(ctx, sources, stop_reason)
     else:
         ctx.recorder.skip('synthesize', '時間が足りないため省略')
-    if text is None:
+    source_list_only = text is None
+    if source_list_only:
         # 時間切れ: 見つかった資料の一覧（参照つき）を返す。推測は書かない。
         text, stop_reason = synthesize.source_list_markdown(sources), 'budget'
+    if stop_reason == 'judgment_failed':
+        text = f'{JUDGMENT_NOTE}\n\n{text}'
+    if stop_reason == 'budget':
+        text = f'{BUDGET_NOTE}\n\n{text}'
     text = citations.strip_links(text)
-    verified = _verify_answer(ctx, text, sources)
+    if source_list_only:
+        verified = citations.verify_refs(text, sources)
+        ctx.grounding = {'mode': 'source_list_only', 'articleMismatches': []}
+        ctx.recorder.skip('verify', '資料の一覧のみ。技術的な回答は生成していません')
+    else:
+        verified = _verify_answer(ctx, text, sources)
     if not verified['cited']:
         return _no_citation_outcome(ctx, sources, stop_reason, verified['unverifiedRefs'])
+    if ctx.coverage is not None and not ctx.coverage['supported']:
+        result = _result(ctx, kind='not_found', markdown=synthesize.not_found_markdown(),
+                         public_sources=citations.public_sources(ctx.sources(), cited=set()), stop_reason='insufficient')
+        ctx.last_judgment = 'insufficient'
+        return _outcome(ctx, result)
+    if stop_reason == 'partial':
+        verified['text'] = '一部の論点についての参考回答です。未確認の論点は解決していません。\n\n' + verified['text']
     result = _result(
         ctx, kind='answer', markdown=verified['text'].strip(),
         public_sources=citations.public_sources(sources, cited=verified['cited']),

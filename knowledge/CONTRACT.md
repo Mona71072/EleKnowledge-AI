@@ -11,7 +11,7 @@ status: draft | approved | retired
 card_version: 1
 title: "人が読むテーマ名（IDを含めない）"
 symptoms: []                   # 検索用
-model_scope:
+model_scope:                   # 製品系列〜ドア型式の値は registry/applicability-vocabulary.json にあるものを使う（tests/unit/test_applicability_vocabulary.py が検査）
   lists_model_label: []        # Lists スナップショット § の Model 行をそのまま（略称≠制御のとき必須）
   product_lines: []            # AXIEZ, Nexcube, AXIEZ-LINKs, MELCITY …
   machine_room: []             # 機械室大分け: MRL | MR のみ（Lists MRL機種/MR機種）。catalog 画像の CMR 表記は MR に読み替え。不明は空
@@ -29,7 +29,7 @@ model_scope:
   scope_verified_by: ""        # verified のとき必須: 適用範囲を確認した人の名前
   scope_verified_at: ""        # verified のとき必須: 確認日 YYYY-MM-DD
 source_refs:
-  # 参照元（利用者・AIが辿る原情報）は次の4種類を「出典」と呼ぶ（draft_record は写し索引）
+  # 参照元（利用者・AIが辿る原情報）は次の5種類を「出典」と呼ぶ（draft_record は写し索引）
   - ref_type: lists_item      # Microsoft Lists の list_item_id（スナップショット上の項目番号）
     list_item_id: "417"
     source_id: ""             # evidence_sources.source_id（任意・監査用）
@@ -47,6 +47,9 @@ source_refs:
     law_id: ""                      # 同表のフォルダ名（S3 / メタデータ）
     retrieval: "mode=law"           # dev の法令チャット。本番は設計書どおり未有効可
     law_rag_status: current         # 一覧外（告示・条例等）は付けない
+  - ref_type: knowhow               # 人が書いたもの・現場報告（2026-11-11 追加）
+    knowhow_id: ""                  # 共通知識の候補 ID など、記録を辿れる ID
+    origin: editor                  # editor（担当者の記述）| field_report（現場報告）。knowhow だけが持ち、必須
   # 下記は原情報ではなく、Vault 写しの棚位置（照合・編集用。出典の代わりに使わない）
   - ref_type: draft_record
     record_id: ""
@@ -55,6 +58,8 @@ review_status: in_review
 publication_status: not_published
 cloud_approval: not_reviewed
 ```
+
+機種キー・機種の別名・汎用ラベル（`全エレ機種` / `全エス機種`）は [registry/applicability-vocabulary.json](registry/applicability-vocabulary.json) から生成したコード（Lambda・索引作成・画面）が使う。語彙ファイルを変えたら `python scripts/knowledge/generate_vocabulary.py` を実行し、生成物も一緒にコミットする（古いままだと `tests/unit/test_applicability_vocabulary.py` が失敗する）。
 
 ### 適用範囲の検証（`scope_status`）
 
@@ -65,7 +70,7 @@ Lists の機種欄は信頼できない（例: VFGH と書かれたカードが�
 - `scope_status: verified` のカードだけが、`product_lines` / `model_abbreviations` / `lists_model_label` / `observed_on` の認識済み機種がすべて「選んだ機種以外」のとき除外される。
 - `unverified`（省略を含む）のカードは、機種欄が何であっても除外されない。
 - `verified` には `scope_verified_by`（名前）と `scope_verified_at`（YYYY-MM-DD）が**両方必須**。欠ける、または形式が不正なカードはインデックスのビルドと検証で失敗する。
-- `verified` のカードは、上の4キーのどれかに**認識できる機種名か `全エレ機種` / `全エス機種`** が1つ以上必要。誤字（例: `AXEIZ`）だけだと機種フィルタが何も判定できず、確認が無効になるため、`check` / ビルドが失敗し、認識される値の一覧を表示する。認識される機種名は UI の機種キーと同じ **AXIEZ / AXIEZ-LINKs / NEXCUBE / メルシティ / メルワイド / エスカレーター**（別名: `AXIEZ(KE-WF・KE-HF)`、駅舎エレ、`Nexcube Limited`、特注機械室レスエレベーター、escalator）。**AXIEZ と AXIEZ-LINKs は別の機種**として扱われる（AXIEZ を選んでも AXIEZ-LINKs だけのカードは除外される）。
+- `verified` のカードは、上の4キーのどれかに**認識できる機種名か `全エレ機種` / `全エス機種`** が1つ以上必要。誤字（例: `AXEIZ`）だけだと機種フィルタが何も判定できず、確認が無効になるため、`check` / ビルドが失敗し、認識される値の一覧を表示する。認識される機種名は UI の機種キーと同じ **AXIEZ / AXIEZ-LINKs / NEXCUBE / メルシティ / メルワイド / エスカレーター**（別名: `AXIEZ(KE-WF・KE-HF)`、駅舎エレ、`Nexcube Limited`、特注機械室レスエレベーター、`MELCITY`、`MELWIDE`、アクシーズ、`LINKs`・アクシーズリンクス・リンクス、ネクスキューブ、escalator。`MELCITY`・`MELWIDE` とカタカナ・`LINKs` は 2026-11-12 に追加）。**AXIEZ と AXIEZ-LINKs は別の機種**として扱われる（AXIEZ を選んでも AXIEZ-LINKs だけのカードは除外される）。
 - `scope_verified_at` は実在する日付で、**本日（UTC）より後は不可**。
 - 3 つのキーは検索スコアにも検索語にも使われない。
 - 確認手順: 原情報（Lists / OneNote / KB）で適用範囲を確かめ、`model_scope` を直してから 3 キーを記入する。直し方は [APPLICABILITY-TAXONOMY.md](registry/APPLICABILITY-TAXONOMY.md) の「適用範囲の訂正」、確認待ちの一覧は [queues/scope-review/QUEUE.md](queues/scope-review/QUEUE.md)。

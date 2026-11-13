@@ -18,6 +18,12 @@ def _by_score(evidence: list) -> list:
     return sorted(evidence, key=lambda item: item.get('score') or 0.0, reverse=True)
 
 
+def evidence_key(item: dict) -> tuple:
+    """同文でも条文・施行日が違う法令根拠は残す。"""
+    return (item['docKey'], item.get('pageNumber'), item.get('provision'),
+            item.get('effectiveDate'), item.get('text'))
+
+
 def _group(evidence: list, key_fn, limit: int) -> list:
     """スコア順に、同じ出典（キー）の断片を1つにまとめる。先頭 limit 件まで。"""
     groups = {}
@@ -69,7 +75,10 @@ def _knowhow_source(index: int, card: dict) -> dict:
 def build_sources(tech_evidence: list, law_evidence: list, cards: list) -> dict:
     """検索結果に番号を振る。同じ資料・同じページの断片は1つの参照にまとめる。"""
     tech_groups = _group(tech_evidence, lambda e: (e['docKey'], e.get('pageNumber')), MAX_TECH_REFS)
-    law_groups = _group(law_evidence, lambda e: e['docKey'], MAX_LAW_REFS)
+    law_groups = _group(
+        law_evidence, lambda e: (e['docKey'], e.get('provision'), e.get('effectiveDate')),
+        MAX_LAW_REFS,
+    )
     return {
         'tech': [_tech_source(i, items) for i, items in enumerate(tech_groups, start=1)],
         'law': [_law_source(i, items) for i, items in enumerate(law_groups, start=1)],

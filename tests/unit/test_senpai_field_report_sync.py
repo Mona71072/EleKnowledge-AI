@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VOCAB = ROOT / "lambda/rag/senpai-field-report/field_report_vocab.py"
 FRONTEND_REPORT = ROOT / "frontend/src/lib/knowledge-senpai-field-report.mjs"
 FRONTEND_CHAT = ROOT / "frontend/src/lib/knowledge-senpai-chat.mjs"
-FRONTEND_MODELS = ROOT / "frontend/src/data/kbModelTypes.ts"
+FRONTEND_MODELS = ROOT / "frontend/src/data/kb-model-types.generated.mjs"
 QUEUE_SCRIPT = ROOT / "scripts/knowledge/build_scope_review_queue.py"
 RETRIEVAL = ROOT / "lambda/rag/rag-function/knowhow_retrieval.py"
 
@@ -49,10 +49,15 @@ def test_review_states_match_everywhere_and_start_unconfirmed():
 def test_model_types_match_ui_filters_and_retrieval_aliases():
     vocab = _load(VOCAB, "field_report_vocab_sync_models")
     retrieval = _load(RETRIEVAL, "knowhow_retrieval_field_report_sync")
-    ui_values = re.findall(r"value: '([^']+)'", FRONTEND_MODELS.read_text(encoding="utf-8"))
+    # 画面の機種一覧と SENPAI_MODEL_TYPES は、語彙ファイルから生成した kb-model-types.generated.mjs を使う。
+    generated = FRONTEND_MODELS.read_text(encoding="utf-8")
+    ui_values = re.findall(r"value: '([^']+)'", generated)
+    keys = re.search(r"export const KB_MODEL_KEYS = Object\.freeze\(\[(.*?)\]\);", generated)
+    assert keys, "KB_MODEL_KEYS not found"
     assert set(vocab.MODEL_TYPES) == set(retrieval.MODEL_ALIASES)
     assert set(vocab.MODEL_TYPES) == set(ui_values)
-    assert set(vocab.MODEL_TYPES) == set(_js_set(FRONTEND_CHAT, "SENPAI_MODEL_TYPES"))
+    assert set(vocab.MODEL_TYPES) == set(re.findall(r"'([^']+)'", keys.group(1)))
+    assert "export const SENPAI_MODEL_TYPES = new Set(KB_MODEL_KEYS);" in FRONTEND_CHAT.read_text(encoding="utf-8")
 
 
 def test_text_limits_match_between_lambda_and_frontend():

@@ -186,13 +186,13 @@ def test_search_law_raises_when_disabled(ctx):
 
 # ---------------------------------------------------------------- モデル呼び出し
 
-def test_call_model_uses_understand_model_for_the_small_steps(ctx, monkeypatch):
+def test_call_model_uses_understand_model_for_the_small_steps(ctx, monkeypatch, capsys):
     module, app, agent = ctx
     calls = []
 
     def fake_invoke(client, model_id, system_prompt, messages, **kwargs):
         calls.append((model_id, system_prompt, messages, kwargs))
-        return "出力", {}, "end_turn"
+        return "出力", {'inputTokens': 123, 'outputTokens': 45, 'prompt': 'secret text'}, "end_turn"
 
     monkeypatch.setattr(app, "invoke_generation", fake_invoke)
     monkeypatch.setattr(app, "BEDROCK_MODEL_ID", "jp.anthropic.claude-sonnet-5-5-20260601-v1:0")
@@ -206,6 +206,9 @@ def test_call_model_uses_understand_model_for_the_small_steps(ctx, monkeypatch):
         "jp.anthropic.claude-sonnet-5-5-20260601-v1:0"]
     assert calls[0][2] == [{"role": "user", "content": "user"}]
     assert calls[0][3]["max_tokens"] == 700 and calls[0][3]["ensure_ascii"] is False
+    logs = capsys.readouterr().out
+    assert '"inputTokens":123' in logs and '"outputTokens":45' in logs
+    assert 'secret text' not in logs and '出力' not in logs
 
 
 def test_understand_model_falls_back_to_main_model_when_unset(ctx, monkeypatch):
@@ -217,6 +220,22 @@ def test_understand_model_falls_back_to_main_model_when_unset(ctx, monkeypatch):
     monkeypatch.setenv("SENPAI_UNDERSTAND_MODEL_ID", "")
     module.RagDeps().call_model("understand", "s", "u", 100)
     assert seen == ["jp.anthropic.claude-haiku-4-5-20251001-v1:0"]
+
+
+def test_worker_clients_have_a_single_attempt_and_finite_wait(ctx, monkeypatch):
+    import boto3
+    module, app, _agent = ctx
+    calls = []
+    def client(service, **kwargs):
+        calls.append((service, kwargs['config']))
+        return object()
+    monkeypatch.setattr(boto3, 'client', client)
+    monkeypatch.setattr(app, 'bedrock_agent', app.bedrock_agent)
+    monkeypatch.setattr(app, 'bedrock_runtime', app.bedrock_runtime)
+    module.RagDeps().configure_worker_clients()
+    assert {s for s, c in calls} == {'bedrock-runtime', 'bedrock-agent-runtime'}
+    assert all(c.retries == {'total_max_attempts': 1} and c.read_timeout == 40 and c.connect_timeout == 5
+               for s, c in calls)
 
 
 # ---------------------------------------------------------------- ノウハウ
@@ -274,6 +293,68 @@ def test_search_knowhow_merges_multiple_queries_without_duplicates(knowhow_on, m
     found = module.RagDeps().search_knowhow(["かごが走行中に振動", "かご 振動 走行中"], None)
     ids = [c["knowledgeId"] for c in found["cards"]]
     assert len(ids) == len(set(ids)) and 1 <= len(ids) <= 3
+
+
+def test_managed_adapter_forwards_budget_and_keeps_kb_hints(knowhow_on, monkeypatch):
+    module, app, _agent = knowhow_on
+    monkeypatch.setenv("KNOWHOW_BACKEND", "managed")
+    monkeypatch.setattr(app, "load_index", lambda **_kw: _index(_kcard()))
+    claims = []
+
+    def retrieve(index, query, model_type=None, claim_search=None, max_matches=3):
+        assert claim_search()
+        return {"matches": index["cards"]}
+
+    monkeypatch.setattr(app, "retrieve_cards", retrieve)
+    deps = module.RagDeps()
+    assert deps.knowhow_uses_remote
+    found = deps.search_knowhow(["振動"], "AXIEZ", claim_search=lambda: claims.append(1) or True)
+    assert claims == [1] and found["hints"] == ["TI-2024-017"]
+    with pytest.raises(module.KnowhowUnavailable):
+        deps.search_knowhow(["振動"], "AXIEZ")
+
+
+@pytest.mark.parametrize("backend", ["local", "managed"])
+def test_knowhow_selection_preserves_a_later_query_top_candidate(knowhow_on, monkeypatch, backend):
+    module, app, _agent = knowhow_on
+    monkeypatch.setenv("KNOWHOW_BACKEND", backend)
+    cards = [_kcard(f"KH-SYNTHETIC-{number}", doc=f"DOC-{number}") for number in range(4)]
+    monkeypatch.setattr(app, "load_index", lambda **_kwargs: _index(*cards))
+    calls = []
+
+    def retrieve(index, query, model_type=None, claim_search=None, max_matches=3):
+        calls.append(query)
+        if backend == "managed":
+            assert claim_search()
+        return {"matches": cards[:3] if query == "first" else [cards[3], cards[1]]}
+
+    monkeypatch.setattr(app, "search_index" if backend == "local" else "retrieve_cards", retrieve)
+    claims = []
+    found = module.RagDeps().search_knowhow(
+        ["first", "second"], None, claim_search=lambda: claims.append(1) or True)
+    assert [card["knowledgeId"] for card in found["cards"]] == [
+        "KH-SYNTHETIC-0", "KH-SYNTHETIC-3", "KH-SYNTHETIC-1", "KH-SYNTHETIC-2"]
+    assert found["candidateIdsByQuery"] == [
+        ["KH-SYNTHETIC-0", "KH-SYNTHETIC-1", "KH-SYNTHETIC-2"],
+        ["KH-SYNTHETIC-3", "KH-SYNTHETIC-1"]]
+    assert found["hints"] == ["DOC-0", "DOC-3", "DOC-1", "DOC-2"]
+    assert calls == ["first", "second"]
+    assert len(claims) == (2 if backend == "managed" else 0)
+
+
+def test_knowhow_merged_cards_keep_the_combined_body_budget(knowhow_on, monkeypatch):
+    module, app, _agent = knowhow_on
+    monkeypatch.setenv("KNOWHOW_BACKEND", "local")
+    cards = [_kcard(f"KH-SYNTHETIC-{number}") for number in range(4)]
+    for card, size in zip(cards, [9000, 1000, 1000, 9000]):
+        card["body"] = "x" * size
+    monkeypatch.setattr(app, "load_index", lambda **_kwargs: _index(*cards))
+    monkeypatch.setattr(app, "search_index", lambda index, query, model_type=None, **kw: {
+        "matches": cards[:3] if query == "first" else [cards[3]]})
+    found = module.RagDeps().search_knowhow(["first", "second"], None)
+    assert sum(len(card["body"]) for card in found["cards"]) <= 16000
+    assert [card["knowledgeId"] for card in found["cards"]] == [
+        "KH-SYNTHETIC-0", "KH-SYNTHETIC-1", "KH-SYNTHETIC-2"]
 
 
 def test_search_knowhow_raises_unavailable_when_the_index_cannot_be_read(knowhow_on, monkeypatch):

@@ -34,6 +34,16 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 
 ## 3. 全体構成
 
+### itai検証環境の認証期限切れ対応（2026-11-05）
+
+> 最終検証: 2026-11-05 — 障害引継ぎと既存コードの照合、ユーザー指定の変更範囲・受入条件。配備後の動作確認は未実施。
+
+- 独立スタック `EleKnowledge-itai-research` のAPIに `DEFAULT_4XX` / `DEFAULT_5XX` のCORSヘッダーを追加し、Authorizerの401もブラウザから判別できるようにする。許可origin・headersは既存のプリフライトと同じ。
+- チャットの送信・履歴一覧/メッセージ取得・調査の進捗/再開/残り回数取得で401になったら、確認タイマーを停止しログイン画面へ移す。トークン取得不能も再ログイン対象とし、`Bearer null` は送らない。
+- 403・429・通信障害は認証期限切れと混同しない。再ログイン後は既存の履歴と実行中ジョブの再開経路を使い、調査を自動再送しない。
+- 共有Cognitoの24時間のリフレッシュトークン設定、WAF/IP制限、`EleKnowledge-itai-phase2` は変更しない。フロント配信はAmplifyのitaiブランチだけ。
+- 受入: SAM契約テスト、チャットの401/トークン欠落/非401の回帰試験、型検査・Lint、独立APIの実401とCORS、画面の再ログイン動線、phase2の更新時刻不変を確認する。
+
 ```text
 画面（chat/page.tsx）
  ├─ 通常    → POST /rag/query（既存。rag-{env}、同期）

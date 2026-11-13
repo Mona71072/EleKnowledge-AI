@@ -140,6 +140,14 @@ const statusOptions = (fetchImpl, overrides = {}) => ({
   baseUrl: BASE, getToken: async () => TOKEN, fetchImpl, jobId, afterSeq: 0, ...overrides,
 });
 
+test('results preserve explicit insufficiency and failed judgment stop reasons', () => {
+  for (const stopReason of ['insufficient', 'judgment_failed', 'partial']) {
+    const normalized = normalizeSenpaiResearchResult(result({ stopReason }));
+    assert.equal(normalized.stopReason, stopReason);
+  }
+  assert.throws(() => normalizeSenpaiResearchResult(result({ stopReason: 'unknown' })));
+});
+
 test('status requests the job with afterSeq and returns validated steps', async () => {
   let request;
   const out = await getSenpaiResearchStatus(statusOptions(async (url, init) => {
@@ -240,6 +248,32 @@ test('status maps HTTP failures; 404 is not retryable and 429 keeps its status',
   await assert.rejects(run(502), (error) => error.code === 'server');
   await assert.rejects(run(504), (error) => error.code === 'timeout');
   await assert.rejects(run(418), (error) => error.code === 'unavailable');
+});
+
+test('stage usage and marginal evidence survive normalization without private text', async () => {
+  const measurement = { stage: 'sufficiency', modelCalls: 1, ms: 45,
+    usage: { inputTokens: 50, outputTokens: 10 }, usageMissing: true, completed: true,
+    body: 'private body', query: 'private query' };
+  const debug = { stages: [measurement], progress: [{ round: 1, action: 'retry_search',
+    searches: 1, newCandidateItems: 2, newExposedEvidence: 0, evidenceValidity: 'unassessed', outcome: 'progress' }],
+  stopDetail: 'no_exposed_progress', lastJudgment: 'insufficient', budget: { inputBytesMax: 120000 } };
+  const normalized = await getSenpaiResearchStatus(statusOptions(async () => response({
+    jobId, status: 'completed', steps: [], result: result(), debug,
+  })));
+  assert.equal(normalized.debug.stages[0].usage.inputTokens, 50);
+  assert.equal(normalized.debug.stages[0].usageMissing, true);
+  assert.equal(normalized.debug.progress[0].newExposedEvidence, 0);
+  assert.equal(normalized.debug.stopDetail, 'no_exposed_progress');
+  assert.equal(normalized.debug.lastJudgment, 'insufficient');
+  assert.equal(normalized.debug.budget.inputBytesMax, 120000);
+  assert.doesNotMatch(JSON.stringify(normalized.debug), /private/u);
+  for (const broken of [{ ...debug, stages: [{ ms: -1 }] }, { ...debug, stopDetail: 'arbitrary text' }]) {
+    const out = await getSenpaiResearchStatus(statusOptions(async () => response({
+      jobId, status: 'completed', steps: [], result: result(), debug: broken,
+    })));
+    assert.equal(out.result.kind, 'answer');
+    assert.equal(out.debug, undefined);
+  }
 });
 
 test('normalizeSenpaiResearchResult checks every source group strictly', () => {

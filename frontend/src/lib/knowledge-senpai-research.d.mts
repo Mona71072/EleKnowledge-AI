@@ -4,7 +4,7 @@ export type SenpaiResearchStepName =
   | 'retry_search' | 'doc_page' | 'clarify' | 'synthesize' | 'verify';
 export type SenpaiResearchStepStatus = 'running' | 'done' | 'skipped' | 'failed';
 export type SenpaiResearchKind = 'answer' | 'clarify' | 'not_found';
-export type SenpaiResearchStopReason = 'sufficient' | 'budget' | 'no_new_results' | 'clarify';
+export type SenpaiResearchStopReason = 'sufficient' | 'budget' | 'no_new_results' | 'clarify' | 'insufficient' | 'judgment_failed' | 'partial';
 export type SenpaiResearchErrorCode = 'Timeout' | 'BudgetExceeded' | 'Internal' | 'QuestionUnavailable';
 export type SenpaiResearchModelFit = 'matched' | 'general' | 'other_product' | 'unknown';
 
@@ -78,8 +78,22 @@ export type SenpaiResearchDebug = {
   }>;
   budget?: {
     searchesUsed?: number; searchesMax?: number; modelCallsUsed?: number; modelCallsMax?: number;
-    elapsedMs?: number; elapsedMaxMs?: number;
+    elapsedMs?: number; elapsedMaxMs?: number; inputBytesMax?: number;
   };
+  stages?: SenpaiResearchMeasurement[];
+  progress?: SenpaiResearchMeasurement[];
+  stopDetail?: 'repeated_query' | 'repeated_results' | 'no_exposed_progress' | 'search_limit' | 'model_limit' | 'time_limit' | 'input_limit';
+  lastJudgment?: 'sufficient' | 'insufficient' | 'unjudged';
+  grounding?: { mode: 'not_run' | 'model_verified' | 'extractive_fallback' | 'rejected'; articleMismatches?: string[]; guardReasons?: 'policy_explanation'[] };
+  coverage?: { missing: string[]; supported: Array<{ id: string; kind: string; status: string; ref: string }> };
+};
+
+export type SenpaiResearchMeasurement = {
+  stage?: string; action?: string; outcome?: string;
+  seq?: number; round?: number; ms?: number; modelCalls?: number; searches?: number;
+  searchesCharged?: number; selected?: number; newCandidateItems?: number; newExposedEvidence?: number;
+  evidenceValidity?: 'unassessed'; completed?: boolean; usageMissing?: boolean;
+  usage?: { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheWriteInputTokens?: number };
 };
 
 export type SenpaiResearchError = { code: SenpaiResearchErrorCode; message: string };

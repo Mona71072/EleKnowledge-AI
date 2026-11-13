@@ -29,10 +29,15 @@ class Budget:
         self._lock = threading.Lock()
         self._searches = 0
         self._model_calls = 0
+        self.blocked_by = None
 
     def try_search(self) -> bool:
         with self._lock:
+            if not self.time_allows_more():
+                self.blocked_by = 'time_limit'
+                return False
             if self._searches >= self._limits.max_searches:
+                self.blocked_by = 'search_limit'
                 return False
             self._searches += 1
             return True
@@ -40,7 +45,11 @@ class Budget:
     def try_model_call(self, reserve: int = 0) -> bool:
         """reserve 回分（まとめ用など）を残せるときだけ消費する。"""
         with self._lock:
+            if self.elapsed_ms() >= self._limits.job_ms:
+                self.blocked_by = 'time_limit'
+                return False
             if self._model_calls + reserve >= self._limits.max_model_calls:
+                self.blocked_by = 'model_limit'
                 return False
             self._model_calls += 1
             return True
@@ -74,6 +83,17 @@ class Budget:
         """まとめ用の時間を残して、まだ追加の作業をしてよいか。"""
         return self.elapsed_ms() + self._limits.synth_reserve_ms < self._limits.job_ms
 
+    def input_allows(self, system: str, user: str) -> bool:
+        """有限の課金露出枠。UTF-8 bytesはtoken数や金額そのものではない。"""
+        if len(system.encode('utf-8')) + len(user.encode('utf-8')) > self._limits.max_input_bytes:
+            self.blocked_by = 'input_limit'
+            return False
+        return True
+
+    @property
+    def no_progress_limit(self) -> int:
+        return self._limits.no_progress_limit
+
     def snapshot(self) -> dict:
         with self._lock:
             return {
@@ -83,4 +103,5 @@ class Budget:
                 'modelCallsMax': self._limits.max_model_calls,
                 'elapsedMs': self.elapsed_ms(),
                 'elapsedMaxMs': self._limits.job_ms,
+                'inputBytesMax': self._limits.max_input_bytes,
             }

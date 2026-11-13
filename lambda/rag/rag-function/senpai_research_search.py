@@ -1,6 +1,7 @@
 """検索の実行と段階イベント（tech_search / law_search / retry_search / doc_page）の記録。"""
 from concurrent.futures import ThreadPoolExecutor
 
+import senpai_research_citations as citations
 import senpai_research_log as run_log
 import senpai_research_text as text_util
 
@@ -34,29 +35,45 @@ def keep_document(document_name: str, page_number):
     return apply
 
 
-def _call_tool(ctx, tool: str, query: str, model_type):
+def _call_tool(ctx, tool: str, query: str, model_type, claim_search):
     if tool == 'tech':
-        return ctx.deps.search_tech(query, model_type, claim_search=ctx.budget.try_search)
-    return ctx.deps.search_law(query, claim_search=ctx.budget.try_search)
+        return ctx.deps.search_tech(query, model_type, claim_search=claim_search)
+    return ctx.deps.search_law(query, claim_search=claim_search)
 
 
 def _search_one(ctx, step_seq, tool: str, query: str, model_type, evidence_filter) -> dict:
     """1 回の検索。失敗しても例外は外へ出さず、結果に failed として載せる。"""
     started = ctx.budget.elapsed_ms()
+    # 初期計画で枠を予約した後も、各SDK呼出し直前に時間を再確認する。
+    if not ctx.budget.time_allows_more():
+        ctx.budget.blocked_by = 'time_limit'
+        return {'failed': False, 'hits': 0, 'evidence': [], 'new_docs': 0, 'new_items': 0,
+                'timeSkipped': True}
+    charged = 1
+
+    def claim_extra():
+        nonlocal charged
+        if ctx.budget.try_search():
+            charged += 1
+            return True
+        return False
     failed, retrieval = False, {'hits': 0, 'evidence': [], 'topScores': []}
     try:
-        retrieval = _call_tool(ctx, tool, query, model_type)
+        retrieval = _call_tool(ctx, tool, query, model_type, claim_extra)
     except Exception as error:  # noqa: BLE001 - 検索 1 本の失敗で調査全体を止めない
         failed = True
         run_log.log('search', 'error', error, tool=tool)
     evidence = retrieval['evidence']
     if evidence_filter is not None:
         evidence = evidence_filter(evidence)
-    new_docs, new_items = ctx.add_evidence(tool, evidence)
+    new_docs, new_items, exposed = ctx.add_measured_evidence(tool, evidence)
     ctx.record_tool({
         'seq': step_seq, 'tool': f'{tool}_search', 'query': query,
         'filters': {'modelType': model_type} if (tool == 'tech' and model_type) else {},
         'hits': retrieval['hits'], 'selected': len(evidence),
+        'searchesCharged': charged, 'newCandidateItems': new_items,
+        'newExposedEvidence': exposed,
+        'evidenceValidity': 'unassessed',
         'topScores': list(retrieval['topScores'][:3]),
         'ms': ctx.budget.elapsed_ms() - started,
         **({'error': True} if failed else {}),
@@ -73,13 +90,14 @@ def run_search_step(ctx, step: str, tool: str, queries: list, *, detail: str,
         _search_one(ctx, handle['seq'], tool, query, model_type, evidence_filter)
         for query in queries
     ]
-    unique = {(item['docKey'], item.get('pageNumber'), item.get('text'))
+    unique = {citations.evidence_key(item)
               for result in results for item in result['evidence']}
     documents = {key[0] for key in unique}
     summary = {
         'failed': all(result['failed'] for result in results),
         'new_docs': sum(result['new_docs'] for result in results),
         'new_items': sum(result['new_items'] for result in results),
+        'timeSkipped': any(result.get('timeSkipped') for result in results),
     }
     counts = {'hits': sum(result['hits'] for result in results),
               'selected': len(unique),

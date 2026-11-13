@@ -1,3 +1,5 @@
+import { KB_MODEL_KEYS } from '../data/kb-model-types.generated.mjs';
+
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_QUERY_LENGTH = 2_000;
@@ -8,11 +10,15 @@ const KNOWHOW_SOURCE_IDS = Object.freeze({
   onenote_page: 'onenote_id',
   kb_document: 'document_number',
   law_rag: 'law_id',
+  knowhow: 'knowhow_id',
 });
+// SYNC: must equal KNOWHOW_ORIGINS in knowhow_retrieval.py and build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
+const KNOWHOW_ORIGINS = new Set(['editor', 'field_report']);
 // SYNC: must equal SOURCE_REF_KEYS in knowhow_retrieval.py and build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
 const KNOWHOW_SOURCE_FIELDS = new Set([
   'ref_type', 'source_id', 'list_item_id', 'onenote_id', 'document_number',
   'kb_filename', 'kb_verify_status', 'page_role', 'law_id', 'law_title', 'locator',
+  'knowhow_id', 'origin',
 ]);
 // SYNC: must equal MODEL_SCOPE_KEYS in knowhow_retrieval.py and build-senpai-index.mjs (tests/unit/test_knowhow_contract_sync.py).
 const KNOWHOW_SCOPE_FIELDS = new Set([
@@ -23,8 +29,8 @@ const KNOWHOW_SCOPE_FIELDS = new Set([
 ]);
 // SYNC: must equal MODEL_FIT_VALUES in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
 const KNOWHOW_MODEL_FITS = new Set(['matched', 'general', 'other_product', 'unknown']);
-// SYNC: must equal the MODEL_ALIASES keys in knowhow_retrieval.py (tests/unit/test_knowhow_contract_sync.py).
-const KNOWHOW_MODEL_PRODUCTS = new Set(['AXIEZ', 'AXIEZ-LINKs', 'NEXCUBE', 'メルシティ', 'メルワイド', 'エスカレーター']);
+// Generated from knowledge/registry/applicability-vocabulary.json; equals the MODEL_ALIASES keys in knowhow_retrieval.py.
+const KNOWHOW_MODEL_PRODUCTS = new Set(KB_MODEL_KEYS);
 const RESPONSE_FIELDS = [
   'documentName',
   'title',
@@ -220,6 +226,8 @@ function cleanKnowhowSourceRef(value) {
   if (!identityKey || typeof value[identityKey] !== 'string' || !value[identityKey].trim()) return null;
   const otherIdentityKeys = Object.values(KNOWHOW_SOURCE_IDS).filter((key) => key !== identityKey);
   if (otherIdentityKeys.some((key) => Object.hasOwn(value, key))) return null;
+  if ((value.ref_type === 'knowhow') !== Object.hasOwn(value, 'origin')
+    || (Object.hasOwn(value, 'origin') && !KNOWHOW_ORIGINS.has(value.origin))) return null;
   const clean = {};
   for (const [key, item] of Object.entries(value)) {
     if (typeof item !== 'string' || item.length > 500 || !item.trim()
@@ -397,7 +405,7 @@ function validateModelType(modelType) {
  * @param {{baseUrl:string, getToken:()=>Promise<string|null|undefined>, fetchImpl?:typeof fetch, mode:'normal'|'law', query:string, sessionId?:string, signal?:AbortSignal, timeoutMs?:number, includeKnowhow?:boolean, modelType?:string}} options
  * `modelType` is a UI model key sent as a filter for normal mode only; law mode ignores it.
  */
-export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS, includeKnowhow, modelType, senpaiConversationId, senpaiTurnId }) {
+export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetch, mode, query, sessionId, signal, timeoutMs = DEFAULT_TIMEOUT_MS, includeKnowhow, knowhowOnly, modelType, senpaiConversationId, senpaiTurnId }) {
   const endpoint = safeEndpoint(baseUrl);
   const normalizedQuery = validateQuery(query, mode);
   if (includeKnowhow !== undefined && typeof includeKnowhow !== 'boolean') {
@@ -405,6 +413,10 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
   }
   if (includeKnowhow === true && mode !== 'normal') {
     fail('validation', 'ノウハウMarkdown検索は技術KBでのみ利用できます');
+  }
+  // D16: ノウハウだけで答える（技術KB・法令KBを検索しない）。ノウハウ検索の指定と一緒にだけ使える。
+  if (knowhowOnly !== undefined && (typeof knowhowOnly !== 'boolean' || (knowhowOnly && includeKnowhow !== true))) {
+    fail('validation', 'ノウハウだけの回答の指定を確認してください');
   }
   const normalizedModelType = validateModelType(modelType);
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -462,7 +474,7 @@ export async function queryKnowledgeSource({ baseUrl, getToken, fetchImpl = fetc
         response = await fetchImpl(`${endpoint}/rag/query`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: normalizedQuery, mode, filters: mode === 'normal' && normalizedModelType ? { modelType: normalizedModelType } : {}, ...(sessionId !== undefined ? { sessionId } : {}), ...(includeKnowhow === true ? { includeKnowhow: true } : {}), ...(senpaiConversationId !== undefined ? { senpaiConversationId, senpaiTurnId } : {}) }),
+          body: JSON.stringify({ query: normalizedQuery, mode, filters: mode === 'normal' && normalizedModelType ? { modelType: normalizedModelType } : {}, ...(sessionId !== undefined ? { sessionId } : {}), ...(includeKnowhow === true ? { includeKnowhow: true } : {}), ...(knowhowOnly === true ? { knowhowOnly: true } : {}), ...(senpaiConversationId !== undefined ? { senpaiConversationId, senpaiTurnId } : {}) }),
           signal: controller.signal,
         });
       } catch {

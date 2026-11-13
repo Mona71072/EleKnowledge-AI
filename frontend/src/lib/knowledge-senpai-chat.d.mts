@@ -118,6 +118,8 @@ export function createSenpaiChat(options: {
   querySource?: SenpaiChatQuerySource;
   /** When given, `send` starts a research job instead of the two lanes. */
   researchSource?: SenpaiChatResearchSource;
+  /** Query targets for the two-lane flow (default both). D16 uses ['normal'] (knowhow only). */
+  modes?: readonly ('normal' | 'law')[];
   /** Injectable clock (epoch milliseconds) for deterministic tests. */
   now?: () => number;
   /** Required for `synthesize`; omit to disable the summary. */

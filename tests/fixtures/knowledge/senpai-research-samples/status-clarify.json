@@ -2,13 +2,25 @@
   "body": {
     "debug": {
       "budget": {
-        "elapsedMaxMs": 60000,
-        "elapsedMs": 300,
-        "modelCallsMax": 4,
+        "elapsedMaxMs": 90000,
+        "elapsedMs": 900,
+        "inputBytesMax": 120000,
+        "modelCallsMax": 10,
         "modelCallsUsed": 2,
-        "searchesMax": 6,
+        "searchesMax": 18,
         "searchesUsed": 2
       },
+      "coverage": {
+        "missing": [
+          "A1"
+        ],
+        "supported": []
+      },
+      "grounding": {
+        "mode": "not_run"
+      },
+      "lastJudgment": "insufficient",
+      "progress": [],
       "queries": {
         "knowhow": "ドア 異音",
         "law": [],
@@ -17,14 +29,65 @@
           "AXIEZ-LINKs ドア 開閉 異音"
         ]
       },
+      "stages": [
+        {
+          "completed": true,
+          "modelCalls": 1,
+          "ms": 50,
+          "stage": "understand",
+          "usage": {},
+          "usageMissing": true
+        },
+        {
+          "completed": true,
+          "evidenceValidity": "unassessed",
+          "ms": 50,
+          "searches": 0,
+          "selected": 1,
+          "stage": "knowhow"
+        },
+        {
+          "completed": true,
+          "modelCalls": 1,
+          "ms": 50,
+          "stage": "sufficiency",
+          "usage": {},
+          "usageMissing": true
+        },
+        {
+          "evidenceValidity": "unassessed",
+          "ms": 100,
+          "newCandidateItems": 1,
+          "newExposedEvidence": 1,
+          "searchesCharged": 1,
+          "selected": 1,
+          "seq": 6,
+          "stage": "tech_search"
+        },
+        {
+          "evidenceValidity": "unassessed",
+          "ms": 101,
+          "newCandidateItems": 0,
+          "newExposedEvidence": 0,
+          "searchesCharged": 1,
+          "selected": 1,
+          "seq": 6,
+          "stage": "tech_search"
+        }
+      ],
+      "stopDetail": null,
       "tools": [
         {
+          "evidenceValidity": "unassessed",
           "filters": {
             "modelType": "AXIEZ-LINKs"
           },
           "hits": 1,
-          "ms": 50,
+          "ms": 100,
+          "newCandidateItems": 1,
+          "newExposedEvidence": 1,
           "query": "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか",
+          "searchesCharged": 1,
           "selected": 1,
           "seq": 6,
           "tool": "tech_search",
@@ -33,12 +96,16 @@
           ]
         },
         {
+          "evidenceValidity": "unassessed",
           "filters": {
             "modelType": "AXIEZ-LINKs"
           },
           "hits": 1,
-          "ms": 50,
+          "ms": 101,
+          "newCandidateItems": 0,
+          "newExposedEvidence": 0,
           "query": "AXIEZ-LINKs ドア 開閉 異音",
+          "searchesCharged": 1,
           "selected": 1,
           "seq": 6,
           "tool": "tech_search",
@@ -48,6 +115,13 @@
         }
       ],
       "understandingRaw": {
+        "aspects": [
+          {
+            "id": "A1",
+            "kind": "legal",
+            "question": "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか"
+          }
+        ],
         "controlMethod": null,
         "fallback": false,
         "intent": "cause",

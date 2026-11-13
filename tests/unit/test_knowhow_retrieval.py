@@ -547,3 +547,19 @@ def test_never_validated_invalid_index_is_still_rejected_by_search_and_rank():
         module.search_index(bad, "かごが走行中に振動")
     with pytest.raises(module.KnowhowIndexError):
         module.rank_cards(bad, "かごが走行中に振動")
+
+
+def test_knowhow_source_refs_need_an_editor_or_field_report_origin():
+    """設計 2026-11-11 §4.7.2: 人が書いたもの・現場報告の出典は ref_type: knowhow と origin で表す。"""
+    module = _module()
+    for origin in ("editor", "field_report"):
+        refs = [{"ref_type": "knowhow", "knowhow_id": "CAND-001", "origin": origin}]
+        assert module.validate_index(_index(_card(sourceRefs=refs)))["cards"][0]["sourceRefs"] == refs
+    for refs in (
+        [{"ref_type": "knowhow", "knowhow_id": "CAND-001"}],
+        [{"ref_type": "knowhow", "knowhow_id": "CAND-001", "origin": "ai"}],
+        [{"ref_type": "lists_item", "list_item_id": "1", "origin": "editor"}],
+        [{"ref_type": "knowhow", "list_item_id": "1", "origin": "editor"}],
+    ):
+        with pytest.raises(module.KnowhowIndexError):
+            module.validate_index(_index(_card(sourceRefs=refs)))
