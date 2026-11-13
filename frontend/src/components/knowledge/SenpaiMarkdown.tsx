@@ -64,13 +64,20 @@ function mutePhrases(nodes: ReactNode[]): ReactNode[] {
   )).filter((part) => part !== '')));
 }
 
-export type SenpaiMarkdownVariant = 'default' | 'plain' | 'lead';
+export type SenpaiMarkdownVariant = 'default' | 'plain' | 'lead' | 'card';
 
 /** 本文の資料名・カード名を、この回答で返した資料・カードへのリンクにする一覧（呼び出し側が作る）。 */
 export type SenpaiLinkTarget = { names: ReadonlyArray<string | undefined | null>; href: string | undefined | null };
 
+// ノウハウカード本文用の見出し。`##` を節の見出しとしてはっきり、`###` を小見出しにする（他の variant は変えない）。
+const CARD_HEADINGS: Partial<Components> = {
+  h1: ({ children }) => <h5 className="mt-5 border-b border-gray-200 pb-1 text-sm font-bold text-gray-900 first:mt-0">{children}</h5>,
+  h2: ({ children }) => <h5 className="mt-5 border-b border-gray-200 pb-1 text-sm font-bold text-gray-900 first:mt-0">{children}</h5>,
+  h3: ({ children }) => <h6 className="mt-3 text-[13px] font-semibold text-gray-700 first:mt-0">{children}</h6>,
+};
+
 function makeComponents(refTitles: Readonly<Record<string, string>>, knownRefs: ReadonlySet<string>, anchorPrefix: string,
-  allowedHrefs: ReadonlySet<string>): Components {
+  allowedHrefs: ReadonlySet<string>, variant: SenpaiMarkdownVariant): Components {
   return {
     a: ({ href, children }) => {
       // SECURITY: 呼び出し側が作った一覧（返した資料の安全なリンクと、この画面内のカード）にある href だけをリンクにする。
@@ -105,6 +112,7 @@ function makeComponents(refTitles: Readonly<Record<string, string>>, knownRefs: 
     table: ({ children }) => <div className="mt-2 overflow-x-auto"><table className="min-w-full border-collapse text-xs">{children}</table></div>,
     th: ({ children }) => <th className="border border-gray-200 bg-gray-50 px-2 py-1 text-left font-medium">{children}</th>,
     td: ({ children }) => <td className="border border-gray-200 px-2 py-1 align-top">{keepRefRunsTogether(children)}</td>,
+    ...(variant === 'card' ? CARD_HEADINGS : {}),
   };
 }
 
@@ -116,14 +124,14 @@ export function SenpaiMarkdown({ markdown, knownRefs, anchorPrefix, refTitles = 
   knownRefs: ReadonlySet<string>;
   anchorPrefix: string;
   refTitles?: Readonly<Record<string, string>>;
-  /** `plain` は小さめの文字で、補足ブロック（確認が必要な点）用。`lead` は結論（先頭の文）用で、少し大きく中くらいの太さ。 */
+  /** `plain` は小さめの文字で、補足ブロック（確認が必要な点）用。`lead` は結論（先頭の文）用で、少し大きく中くらいの太さ。`card` はノウハウカード本文用（節の見出しを際立たせる）。 */
   variant?: SenpaiMarkdownVariant;
   className?: string;
 }) {
   return (
-    <div className={`min-w-0 break-words [overflow-wrap:anywhere] ${variant === 'plain' ? 'text-sm leading-6 text-gray-700' : variant === 'lead' ? 'text-[17px] font-medium leading-8 text-gray-900' : 'text-[15px] leading-7 text-gray-900'} ${className}`}>
+    <div className={`min-w-0 break-words [overflow-wrap:anywhere] ${variant === 'plain' ? 'text-sm leading-6 text-gray-700' : variant === 'lead' ? 'text-[17px] font-medium leading-8 text-gray-900' : variant === 'card' ? 'text-[13px] leading-6 text-gray-800' : 'text-[15px] leading-7 text-gray-900'} ${className}`}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(refTitles, knownRefs, anchorPrefix,
-        new Set(linkTargets.map((target) => target.href).filter((href): href is string => typeof href === 'string' && href.length > 0)))}>
+        new Set(linkTargets.map((target) => target.href).filter((href): href is string => typeof href === 'string' && href.length > 0)), variant)}>
         {linkResearchRefs(linkCitedNames(markdown, linkTargets), knownRefs, anchorPrefix)}
       </ReactMarkdown>
     </div>

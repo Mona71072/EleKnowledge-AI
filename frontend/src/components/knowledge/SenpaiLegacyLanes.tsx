@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import type { SenpaiChatLane, SenpaiChatTurn } from '@/lib/knowledge-senpai-chat.mjs';
-import { KNOWHOW_NOT_OFFICIAL_NOTICE, knowhowStatusLabel, modelFitNotice, scopeUnverifiedNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
 import { SenpaiMarkdown, type SenpaiLinkTarget } from './SenpaiMarkdown';
+import { KnowhowReferences } from './SenpaiKnowhowReferences';
+import { breakBeforeNoticeMarks } from '@/lib/knowhow-card-view.mjs';
 import { knowhowCardAnchor } from '@/lib/citation-links.mjs';
 import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
 import {
@@ -22,81 +23,9 @@ function sourceTitle(source: ResearchCitationSource, mode: KnowledgeResearchMode
     : source.title || source.documentName || '技術資料';
 }
 
-const scopeLabels: Record<string, string> = {
-  conditions: '対象条件', control_methods: '制御方式', door_families: 'ドアの種類', door_types: 'ドア型式',
-  excludes: '適用除外', guide_systems: 'ガイド方式', lists_model_label: '元記録の機種', machine_room: '機械室',
-  may_apply_to: '適用可能性（未確認）', model_abbreviations: '機種略称', observed_on: '確認された対象',
-  product_lines: '製品系列', scope_note: '対象範囲の補足',
-  scope_status: '適用範囲の確認', scope_verified_by: '確認者', scope_verified_at: '確認日',
-};
-const refLabels: Record<string, string> = {
-  list_item_id: 'Lists項目', onenote_id: 'OneNoteページ', source_id: '出典ID', document_number: '資料番号',
-  kb_filename: 'KB資料名', kb_verify_status: 'KB確認状況', page_role: 'ページの役割', law_id: '法令ID',
-  law_title: '法令名', locator: '参照箇所', knowhow_id: 'ノウハウの記録', origin: '経路',
-};
-
-// Unknown keys fall back to the raw key so a label never renders as "undefined".
-function scopeLabel(key: string) {
-  return scopeLabels[key] ?? key;
-}
-
-function refLabel(key: string) {
-  return refLabels[key] ?? key;
-}
-
-function scopeValue(key: string, value: string | string[]) {
-  if (key === 'scope_status') return value === 'verified' ? '担当者確認済み' : '未確認';
-  return (Array.isArray(value) ? value.join('、') : value) || '未記載';
-}
-
 /** 回答ごとの、カードへのアンカーの接頭辞（同じ画面に複数の相談が並ぶため、回答の識別子を入れる）。 */
 function cardPrefix(answer: import('@/lib/knowledge-research.mjs').ResearchAnswer, mode: KnowledgeResearchMode) {
   return `lane-${mode}-${String(answer.messageId || 'answer').replace(/[^A-Za-z0-9-]/gu, '-')}`;
-}
-
-function KnowhowReferences({ answer, selectedModel }: { answer: import('@/lib/knowledge-research.mjs').ResearchAnswer; selectedModel?: string }) {
-  const knowhow = answer.knowhow;
-  if (!knowhow) return null;
-  if (knowhow.status === 'not_found') {
-    return <p className="text-xs leading-5 text-gray-500">参照できるノウハウMarkdownは見つかりませんでした。この回答は技術KBの検索結果を確認してください。</p>;
-  }
-  return (
-    <section aria-label="参照したノウハウMarkdown" className="rounded-xl bg-gray-50 p-3">
-      <h5 className="text-xs font-medium text-gray-700">参照したノウハウMarkdown</h5>
-      <p className="mt-1 text-xs leading-5 text-gray-500">参考候補です。{KNOWHOW_NOT_OFFICIAL_NOTICE}</p>
-      <ul className="mt-2 space-y-3">
-        {knowhow.matches.map((match) => (
-          <li key={`${match.knowledgeId}-${match.cardVersion}`} className="rounded-lg bg-white p-3 text-xs text-gray-800">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold">{match.title}</span>
-              <span>v{match.cardVersion}</span>
-              <span className="text-amber-700">{knowhowStatusLabel(match)}</span>
-              <span className="text-gray-500">参照用のみ</span>
-            </div>
-            {modelFitNotice(match, selectedModel) && <p role="note" className="mt-2 text-amber-700">{modelFitNotice(match, selectedModel)}</p>}
-            {scopeUnverifiedNotice(match) && <p role="note" className="mt-1 text-gray-600">{scopeUnverifiedNotice(match)}</p>}
-            <details className="mt-2">
-              <summary id={knowhowCardAnchor(cardPrefix(answer, 'normal'), match.knowledgeId)} className="cursor-pointer font-medium text-gray-600">適用条件・出典と本文を確認</summary>
-              <dl className="mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 break-words text-gray-700">
-                <dt className="text-gray-500">ノウハウID</dt><dd>{match.knowledgeId}</dd>
-                <dt className="text-gray-500">本文の識別値</dt><dd className="break-all font-mono">{match.sha256}</dd>
-                {Object.entries(match.modelScope).map(([key, value]) => (
-                  <div key={key} className="contents"><dt className="text-gray-500">{scopeLabel(key)}</dt><dd>{scopeValue(key, value)}</dd></div>
-                ))}
-              </dl>
-              <ul className="mt-2 space-y-2 border-t border-gray-200 pt-2">
-                {match.sourceRefs.map((ref, index) => <li key={index} className="break-words">
-                  {Object.entries(ref).filter(([key]) => key !== 'ref_type').map(([key, value]) => <p key={key}>{refLabel(key)}: {value}</p>)}
-                </li>)}
-              </ul>
-              <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-gray-800">{match.body}</pre>
-            </details>
-          </li>
-        ))}
-      </ul>
-      {knowhow.searchTerms.length > 0 && <p className="mt-2 text-xs text-gray-700">技術KB検索へ加えた手掛かり: {knowhow.searchTerms.join('、')}</p>}
-    </section>
-  );
 }
 
 /** `label` を渡すと、その名前で表示し、該当なしでもサーバーの本文（注意・定型文）を出す（先輩チャットのノウハウだけの回答）。 */
@@ -133,10 +62,10 @@ export function LaneReply({ lane, mode, selectedModel, label }: { lane: SenpaiCh
         </div>
       ) : (
         answer.content
-          ? <SenpaiMarkdown markdown={answer.content} knownRefs={NO_REFS} anchorPrefix={`lane-${mode}`} variant="plain" linkTargets={laneLinkTargets(answer, mode)} />
+          ? <SenpaiMarkdown markdown={breakBeforeNoticeMarks(answer.content)} knownRefs={NO_REFS} anchorPrefix={`lane-${mode}`} variant="plain" linkTargets={laneLinkTargets(answer, mode)} />
           : <p className="text-sm leading-6 text-gray-800">回答本文がありません。</p>
       )}
-      {mode === 'normal' && <KnowhowReferences answer={answer} selectedModel={selectedModel} />}
+      {mode === 'normal' && <KnowhowReferences answer={answer} selectedModel={selectedModel} anchorPrefix={cardPrefix(answer, 'normal')} />}
       {sources.length > 0 && (
         <div className="border-t border-gray-200 pt-2">
           <h5 className="mb-1 text-xs font-medium text-gray-500">{mode === 'law' ? '法令の出典' : '技術資料の出典'}</h5>
@@ -213,7 +142,7 @@ export function SynthesisSection({ turn, running, onSynthesize, synthesisEnabled
     <section aria-label="工技先輩のまとめ" className="mb-3 rounded-2xl bg-gray-50 p-4">
       <h4 className="text-sm font-semibold text-gray-900">工技先輩のまとめ（試作・開発中）</h4>
       <p className="mt-1 text-xs leading-5 text-gray-500">下の2つの回答を組み合わせただけの文章です。内容は必ず各回答の出典で確認してください。ノウハウは未承認の参考情報で、根拠にはなりません。</p>
-      <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-gray-900">{synthesis.content}</p>
+      <SenpaiMarkdown markdown={synthesis.content ?? ''} knownRefs={NO_REFS} anchorPrefix="synthesis" variant="plain" className="mt-3" />
       {inputs && (
         <p className="mt-3 text-xs text-gray-500">
           {!inputs.normal && '技術KBの回答は使っていません。'}{!inputs.law && '法令KBの回答は使っていません。'}

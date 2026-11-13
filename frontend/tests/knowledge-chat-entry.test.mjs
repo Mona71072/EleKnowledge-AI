@@ -283,39 +283,124 @@ test('Senpai chat opts normal searches into the server Markdown index and leaves
   assert.equal(law.includeKnowhow, undefined);
 });
 
-test('renders returned Markdown as escaped collapsed text with status, identity, scope, and source references', () => {
-  const answer = {
-    mode: 'normal', query: '設置条件', content: '技術KB回答', responseType: 'pages', sessionId: 'session-tech',
+const CARD_BODY = [
+  '# 仮設材の固定', '', '## 使う場面・対象条件', '', '**仮設材** を固定するとき。[元の手順](../x.md) と [危険](javascript:alert(1))。', '',
+  '## 症状・現象', '', '- ぐらつく', '- <img src=x onerror=alert(1)>', '', '<script>alert(1)</script>', '',
+  '## ソース要約', '', '### Lists（1001）', '', '- 内部メモの要約', '',
+  '## KB確認に基づく追記', '', '（該当なし）', '',
+  '## 関連事例と条件の違い', '', '| list | 内容 |', '| --- | --- |', '| **1001** | 固定 |', '',
+  '## 未確認事項', '', '- なし。', '',
+].join('\n');
+
+function knowhowAnswer(extra = {}) {
+  return {
+    mode: 'normal', query: '設置条件', content: '※注意その1\n※注意その2\n\n技術KB回答', responseType: 'pages', sessionId: 'session-tech',
     messageId: 'm1', receivedAt: '2026-10-20T00:00:00Z', sourceDocuments: [], pageCandidates: [], clarifyQuestions: [],
     knowhow: {
       status: 'matched', indexVersion: `sha256:${'a'.repeat(64)}`, searchTerms: ['設置条件'],
       matches: [{
         knowledgeId: 'KH-1001', cardVersion: 3, sha256: 'b'.repeat(64), title: '仮設材の固定',
-        status: 'draft', usage: 'navigation_only', body: '<img src=x onerror=alert(1)>本文',
+        status: 'draft', usage: 'navigation_only', body: CARD_BODY,
         searchTerms: ['仮設材'], sourceRefs: [{ ref_type: 'lists_item', list_item_id: 'L-1', source_id: 'SRC-1' }],
-        modelScope: { model_abbreviations: ['M1'], excludes: ['M1R'] },
+        modelScope: { model_abbreviations: ['M1'], excludes: ['M1R'], some_internal_key: ['x'] },
+        ...extra,
       }],
     },
   };
+}
+
+// カード部分だけ（画面のメニューの details を除く）を、外側の開閉と入れ子の開閉に分けて返す。
+function splitCardHtml(html) {
+  const section = html.slice(html.indexOf('aria-label="参照した先輩ノウハウ"'));
+  const outerStart = section.indexOf('<details');
+  const nestedStart = section.indexOf('<details', outerStart + 1);
+  return { section, outerStart, nestedStart, reader: section.slice(outerStart, nestedStart), editor: section.slice(nestedStart) };
+}
+
+function renderAnswer(answer) {
   const initialSnapshot = { running: false, turns: [{ id: 1, query: '設置条件', normal: lane('success', { answer }), law: lane('paused') }] };
   const render = loadInteractiveChat({
     initialSnapshot,
     createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
   });
   render();
-  const html = renderToStaticMarkup(render());
+  return renderToStaticMarkup(render());
+}
 
-  assert.match(html, /参照したノウハウMarkdown/);
-  assert.match(html, /KH-1001/);
+test('renders the knowhow card as readable Markdown, reader sections outside and editor sections in a nested closed details', () => {
+  const html = renderAnswer(knowhowAnswer());
+
+  assert.match(html, /参照した先輩ノウハウ/);
+  assert.doesNotMatch(html, /参照したノウハウMarkdown/);
   assert.match(html, /仮設材の固定/);
   assert.match(html, /未承認/);
   assert.match(html, /参照用のみ/);
   assert.match(html, /除外/);
-  assert.match(html, /SRC-1/);
-  assert.match(html, /<details/);
-  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;本文/);
-  assert.doesNotMatch(html, /<img\b|href="javascript:/);
   assert.match(html, /ノウハウは正規文書ではありません/);
+  assert.doesNotMatch(html, /<pre\b[^>]*whitespace-pre-wrap/);
+  assert.match(html, /<strong>仮設材<\/strong>/);
+  assert.doesNotMatch(html, /\*\*仮設材\*\*/);
+
+  const { outerStart, nestedStart, reader, editor } = splitCardHtml(html);
+  assert.ok(outerStart >= 0 && nestedStart > outerStart, '入れ子の details がある');
+  assert.match(reader, /使う場面・対象条件/);
+  assert.match(reader, /症状・現象/);
+  assert.doesNotMatch(reader, /ソース要約|関連事例と条件の違い|内部メモ/);
+  assert.match(editor, /出典・元情報（編集者向け）/);
+  assert.match(editor, /ソース要約/);
+  assert.match(editor, /内部メモの要約/);
+  assert.match(editor, /<table/);
+  assert.match(editor, /KH-1001/);
+  assert.match(editor, /SRC-1/);
+  assert.match(editor, /v3/);
+  assert.match(editor, /some_internal_key/);
+  assert.doesNotMatch(editor.slice(0, 40), /<details[^>]* open/);
+  // 中身の無い節（該当なし / なし）は出ない。
+  assert.doesNotMatch(html, /KB確認に基づく追記|未確認事項/);
+  // 内部の識別値と英字キーは利用者向け部分に出さない。
+  assert.doesNotMatch(reader, /b{64}|some_internal_key|ノウハウID/);
+});
+
+test('keeps the knowhow card safe: no raw HTML, no javascript links, relative card links stay plain text', () => {
+  const html = renderAnswer(knowhowAnswer());
+  assert.doesNotMatch(html, /<img\b/);
+  assert.doesNotMatch(html, /<script\b/);
+  // 属性としては現れない（本文の文字としてエスケープされた `&lt;img … onerror=…&gt;` は表示されるだけ）。
+  assert.doesNotMatch(html, /<[a-z][^>]*\sonerror=/iu);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(html, /href="javascript:/);
+  assert.doesNotMatch(html, /href="\.\.\/x\.md"/);
+  assert.match(html, /元の手順/);
+});
+
+test('renders a table in the card body as a real table and shows the sha256 only inside the editor details', () => {
+  const body = '# T\n\n## 手順\n\n| 項目 | 値 |\n| --- | --- |\n| **A** | 1 |\n';
+  const html = renderAnswer(knowhowAnswer({ body }));
+  const { reader, editor } = splitCardHtml(html);
+  assert.match(reader, /<table/);
+  assert.match(reader, /<strong>A<\/strong>/);
+  assert.equal(reader.includes('b'.repeat(64)), false);
+  assert.equal(editor.includes('b'.repeat(64)), true);
+});
+
+test('shows only meaningful scope labels outside the editor details and splits the 注意 lines into separate paragraphs', () => {
+  const html = renderAnswer(knowhowAnswer());
+  assert.match(splitCardHtml(html).reader, /機種略称/);
+  assert.match(html, /<p[^>]*>※注意その1<\/p>/);
+  assert.match(html, /<p[^>]*>※注意その2<\/p>/);
+});
+
+test('renders the synthesis body as Markdown', () => {
+  const synthesis = { status: 'success', content: '**結論**\n\n- 一つ目', inputs: { normal: true, law: true, knowhowCount: 0 } };
+  const initialSnapshot = { running: false, turns: [{ id: 1, query: 'q', senpaiTurnId: 's', normal: lane('success', { answer: knowhowAnswer() }), law: lane('paused'), synthesis }] };
+  const render = loadInteractiveChat({
+    initialSnapshot,
+    createController: (snapshot) => ({ getSnapshot: () => snapshot, send: async () => {}, cancel() {}, reset() {}, dispose() {} }),
+  });
+  render();
+  const html = renderToStaticMarkup(render());
+  assert.match(html, /<strong>結論<\/strong>/);
+  assert.match(html, /<li>一つ目<\/li>/);
 });
 
 test('explains that Markdown retrieval is server-authorized and does not upload a local vault or edit files', () => {
