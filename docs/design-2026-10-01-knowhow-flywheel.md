@@ -24,6 +24,8 @@ related-code:
 > 過去の[調査](./survey-2026-10-01-knowhow-flywheel.md)は背景資料。[PR #191](https://github.com/yukiworkspace/EleKnowledge-AI/pull/191)の構想を具体化する共同確認用の設計案であり、合意済み仕様ではない。
 > 2026-10-19の目的・全体像・改善提案・段階導入の総括は[工技先輩と知識循環の構想](./concept-2026-10-19-kougi-senpai-knowledge-cycle.md)を参照。本書は技術契約の詳細を扱う。
 
+> 2026-10-23追補: 正本・権限・公開経路は末尾の§17の最新回答を優先する。開発中はmonaブランチのknowledge/cards/を正本とし、運用開始時にS3へ切り替える。キーマンの内容承認と管理者の最終追加・公開を分ける。旧節の恒久的なGit正本案や、itai検証の非管理者によるapproved保存を共有環境へそのまま適用しない。
+
 ## 0. 推奨する構成
 
 **Listsの不具合・原因・対策、OneNoteの業務上の注意点、既存ナレッジベース内の関連資料を生成AIで関連付け、Obsidianで扱うMarkdownをチームのknow-how本文にする。担当者はWeb画面で資料の検索・選択、根拠確認・AI編集・差分確認・承認を行えるようにする。**
@@ -747,3 +749,20 @@ Web編集、AI提案、Obsidianでのローカル編集のいずれも、同じ�
 - [MDN: File System API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API): 端末上のファイルへのアクセスは利用者の明示的な許可とブラウザーの対応に依存する。共有Webアプリが任意のローカルVaultを自動で上書きできる前提にしない。
 
 ローカルの実装接点は§10、未検証の受入条件は§11に分けた。提案を採用しても、実データの整合性、所管の判断、共有範囲、AWSの受入確認が済んだことにはならない。
+
+## 17. 2026-10-22以降の改訂: S3正本と業務権限
+
+> 最終検証: 2026-11-13 — #200のmonaによる10/22回答（二段階承認）・11/5決定と構想書の決定記録、itai実装契約への参照関係を照合。AWS・実データ・共有環境は未実査。
+
+ノウハウ・用語と基礎知識の共通方針を、itai側で実装・検証された方式へ改訂する。Markdownの形式、人の特定版承認、承認と公開の分離、正式資料優先は維持する。本節は旧案のGit正本・admin所属を前提とする記述に優先する。frontmatterは未再検証の旧節の日付を維持する。2026-11-05の業務判断の詳細は[構想書の決定記録](concept-2026-10-21-product-domain-knowledge.md#2026-11-05-開発試行の業務判断)を正本とする。
+
+- 正本はS3。作業用draftsのVersionId＋sha256を固定して確認し、承認した特定版を正本approvedへ不変保存する。公開中の本文・KB用metadataはpublished、世代・有効版はmanifestで管理する。具体的なパス・失敗復旧・IAM・APIの正本は[itaiの実装契約](https://github.com/yukiworkspace/EleKnowledge-AI/blob/b9076cbd/docs/features/development/common-knowledge-itai-aws-contract.md)。
+- **二段階承認:** monaの[10/22回答](https://github.com/yukiworkspace/EleKnowledge-AI/pull/200#issuecomment-6337510165)と[補足](https://github.com/yukiworkspace/EleKnowledge-AI/pull/200#issuecomment-6337807427)に従い、内容承認と、内容承認済みの同一版をapprovedへ最終追加する操作を分け、後者は管理者だけに許可する。内容承認だけではapprovedへ書かない。内容変更後は再確認する。試行中の内容承認はmona・itaiが行う（キーマンは置かない、11/5決定）。[itaiの実装契約](https://github.com/yukiworkspace/EleKnowledge-AI/blob/b9076cbd/docs/features/development/common-knowledge-itai-aws-contract.md)では非adminの確認者がapproved保存まで行えるため、二段階方式へ改修してから共有環境への採用を判断する。過去の合成受入を改訂後の受入済みと扱わない。
+- 現行itai専用契約では、Cognito＋JWTによる本人確認後、認可表の業務権限・分野・読者・期限で操作を許可し、admin所属を必要条件にしない。個人チャット・原資料権限と他管理画面のadmin制限は維持する。共有環境ではCognito `admin`＋認可表の分野制約で管理者を識別し、admin全員に停止を許可する案が暫定であり、現行契約を変更する決定ではない。
+- 開発エージェントの直接書込先は作業用だけ。承認・公開・停止は責任別API/Lambdaを通す。一般の知識利用は公開manifest・hash検証経由とし、草案・承認済み非公開版を直接回答へ混ぜない。
+- S3正本の全領域をKBへ入れない。KBデータソースはpublishedだけを候補とし、現時点ではKB作成・同期をしていない。公開停止・期限・権限の確認は検索後の応答でも必要。
+- 業務試行は2026-11-05から開始し、対象はブレーキ（BK）系1単元、開発中の内容確認・承認者と読者はmona・itaiのみ。キーマンは置かない。公開版は版ごと無期限、草案は60日保持を暫定案とする。GitからS3への全カード移行はitaiが担当し、1単元の試行後・運用開始直前に行う。運用開始日は未定。Gitに承認記録がないため移行せず、試行単元を新規に二段階承認する。
+- BK単元の具体的なID・範囲・根拠資料・選定理由は未提示であり、実データ登録前にmona・itaiが確認する。admin識別案の確認責任者はmona、期限は共有環境への採用前。未確認なら共有環境に適用せず、停止経路の受入も保留する。itai専用の合成検証と、会社全体の実データ受入・未知用語の収集／草案生成・KB同期は別である。
+- 共通知識（二段階承認等）は#195へ含めず別PRで扱う。#195への取込範囲は未決事項ではなく、monaの2026-11-05決定として固定する。
+
+変更理由は、Git接続を前提にせず、ブラウザ中心の編集・技術承認・公開と版固定を同じ基盤で扱うため。2026-10-22のitai判断で技術案を整合し、2026-11-05にmonaが試行の業務範囲を決定した。決定と未確認事項の記録は[PR #200](https://github.com/yukiworkspace/EleKnowledge-AI/pull/200)の構想書に置く。今回の改訂はAWS実行・KB同期・実データ登録・共有環境への適用を許可するものではない。
