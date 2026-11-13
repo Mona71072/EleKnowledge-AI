@@ -20,6 +20,7 @@ function loadTsx(path) {
   const localRequire = (name) => {
     if (name === 'next/link') return Link;
     if (/^\.\/Senpai[A-Za-z]+$/u.test(name)) return loadTsx(`../src/components/knowledge/${name.slice(2)}.tsx`);
+    if (name === './kb-model-types.generated.mjs') return require('../src/data/kb-model-types.generated.mjs');
     if (name === '@/data/kbModelTypes') return loadTsx('../src/data/kbModelTypes.ts');
     if (name === '@/lib/auth-helpers') return { getIdToken: async () => 'test-token' };
     if (name.startsWith('@/lib/') && name.endsWith('.mjs')) return require(`../src/lib/${name.slice(6)}`);

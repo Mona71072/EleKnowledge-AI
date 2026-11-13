@@ -39,13 +39,14 @@ def flow(research_env, rag_app, monkeypatch):
         store = api.store.JobStore(jobs, clock=clock)
         runtime = SimpleNamespace(store=store, chatlogs_table=chatlogs, limits=worker.config.load_limits())
         agent = FakeAgent()
-        agent.default = [_chunk(), _chunk("TI-2.pdf", 5, "別の資料の本文", 0.5)]
+        agent.default = [_chunk(text="合成資料のドア調整の本文"), _chunk("TI-2.pdf", 5, "別の資料の本文", 0.5)]
         calls = []
 
         def fake_invoke(client, model_id, system_prompt, messages, **kwargs):
             calls.append((kwargs.get("call_name"), model_id))
             text = {"understand": UNDERSTANDING,
-                    "sufficiency": json.dumps({"sufficient": True, "action": "none"}),
+                    "sufficiency": json.dumps({"sufficient": True, "action": "none", "coverage": [
+                        {"aspect": "A1", "status": "direct", "ref": "T1", "quoteIndex": 0}]}),
                     "synthesize": ANSWER}[kwargs["call_name"]]
             return text, {}, "end_turn"
 

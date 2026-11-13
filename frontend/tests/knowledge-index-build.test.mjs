@@ -94,7 +94,13 @@ test('CLI output replaces a preexisting symlink without following it or printing
   await mkdir(privateDirectory);
   const outsideTarget = path.join(root, 'outside-target.txt');
   await writeFile(outsideTarget, 'untouched synthetic target');
-  await symlink(outsideTarget, path.join(privateDirectory, 'inventory.json'));
+  try {
+    await symlink(outsideTarget, path.join(privateDirectory, 'inventory.json'));
+  } catch (error) {
+    if (process.platform !== 'win32' || error.code !== 'EPERM') throw error;
+    t.skip('Windows file symlinks require Developer Mode or the symlink privilege.');
+    return;
+  }
   const script = fileURLToPath(new URL('../../scripts/knowledge/build-senpai-index.mjs', import.meta.url));
   const { stdout } = await execFileAsync(process.execPath, [script, 'inventory', root]);
   assert.match(stdout, /1 valid metadata records/);
@@ -135,7 +141,11 @@ test('duplicate IDs, duplicate paths, YAML duplicate keys, status drift, and sym
   const retiredEntry = await selectedEntry(root, 'knowledge/cards/practice-guides/one.md', retired);
   await assert.rejects(buildKnowhowIndex({ root, manifest: manifest([retiredEntry]) }));
   await rm(path.join(allowed, 'one.md'));
-  await symlink(path.join(root, 'outside.md'), path.join(allowed, 'link.md'));
+  // Directory junctions exercise the same traversal guard without requiring
+  // Windows file-symlink privileges.
+  const outsideDirectory = path.join(root, 'outside');
+  await mkdir(outsideDirectory);
+  await symlink(outsideDirectory, path.join(allowed, 'link'), process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(inventoryKnowhowCards(root));
 });
 

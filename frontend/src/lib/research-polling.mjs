@@ -116,13 +116,13 @@ export function createJobPoller({
   }
 
   /** 同じ jobId が確認中なら何もせず false を返す。 */
-  function start(jobId, { visible = true } = {}) {
+  function start(jobId, { visible = true, pollAfterMs } = {}) {
     if (jobs.has(jobId)) return false;
     const startedAt = now();
     const job = {
       startedAt,
       failures: 0,
-      pollAfterMs: undefined,
+      pollAfterMs: Number.isFinite(pollAfterMs) ? pollAfterMs : undefined,
       timer: null,
       expirationTimer: null,
       inFlight: false,

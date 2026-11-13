@@ -20,7 +20,7 @@ def runner():
 
 # ---------------------------------------------------------------- 偽物
 
-def _tech(doc, page, text="技術本文", score=0.7):
+def _tech(doc, page, text="合成データの技術本文", score=0.7):
     return {"kind": "tech", "docKey": f"s3://kb-docs-bucket/docs/{doc}", "documentName": doc, "title": doc,
             "pageNumber": page, "sourceUri": f"s3://kb-docs-bucket/docs/{doc}", "text": text, "score": score}
 
@@ -28,7 +28,7 @@ def _tech(doc, page, text="技術本文", score=0.7):
 def _law(provision="第三十五条", score=0.6):
     return {"kind": "law", "docKey": f"https://laws.e-gov.go.jp/{provision}", "lawTitle": "建築基準法",
             "lawNumber": "法律第二百一号", "provision": provision, "effectiveDate": "2025-04-01",
-            "sourceUrl": f"https://laws.e-gov.go.jp/{provision}", "text": "法令本文", "score": score}
+            "sourceUrl": f"https://laws.e-gov.go.jp/{provision}", "text": "合成データの法令本文", "score": score}
 
 
 def _retrieval(*evidence, hits=None):
@@ -62,11 +62,12 @@ GOOD_ANSWER = "## 結論\nドアの調整を確認します[T1]。\n## 根拠と
 class FakeDeps:
     def __init__(self, *, understand=None, sufficiency=None, synth=GOOD_ANSWER,
                  tech=None, law=None, cards=None, hints=(), law_available=True,
-                 knowhow_available=True, knowhow_error=None):
+                 knowhow_available=True, knowhow_error=None, grounding='{"valid":true}'):
         self.responses = {
             "understand": list(understand) if isinstance(understand, list) else [understand or _understanding()],
             "sufficiency": list(sufficiency) if isinstance(sufficiency, list) else [sufficiency or SUFFICIENT],
             "synthesize": [synth],
+            "grounding": [grounding],
         }
         self.tech = tech if tech is not None else (lambda q, m: _retrieval(_tech("TI-1.pdf", 3)))
         self.law = law if law is not None else (lambda q: _retrieval(_law()))
@@ -88,6 +89,19 @@ class FakeDeps:
             item = queue.pop(0) if len(queue) > 1 else queue[0]
         if isinstance(item, Exception):
             raise item
+        if purpose == 'sufficiency':
+            parsed = json.loads(item) if item.startswith('{') and item.endswith('}') else None
+            if parsed is not None and 'coverage' not in parsed:
+                summary = json.loads(user.split('<results>\n', 1)[1].split('\n</results>', 1)[0])
+                parsed['coverage'] = []
+                for aspect in summary['aspects']:
+                    candidates = summary['law'] if aspect['kind'] == 'legal' else summary['tech'] + summary['knowhow']
+                    source = next((s for s in candidates if len(s['snippet']) >= 8), None)
+                    parsed['coverage'].append({'aspect': aspect['id'],
+                        'status': ('reference' if source and source['ref'].startswith('K') else 'direct')
+                                  if source and parsed['sufficient'] else 'missing',
+                        'ref': source['ref'] if source else '', 'quote': source['snippet'][:200] if source else ''})
+                item = json.dumps(parsed, ensure_ascii=False)
         return item
 
     def search_knowhow(self, queries, model_type):
@@ -134,7 +148,7 @@ def _setup(runner, deps, *, limits=None, model_type=None, question=QUESTION):
     config = support.load_module("senpai_research_config.py")
     budget_mod = support.load_module("senpai_research_budget.py")
     recorder_mod = support.load_module("senpai_research_recorder.py")
-    limits = limits or config.BudgetLimits(max_searches=6, max_model_calls=4, job_ms=60000,
+    limits = limits or config.BudgetLimits(max_searches=6, max_model_calls=6, job_ms=60000,
                                            synth_reserve_ms=20000)
     clock = Ticker()
     budget = budget_mod.Budget(limits, clock=clock)
@@ -148,6 +162,25 @@ def _run(runner, deps, **kw):
     job, budget, recorder, events, clock = _setup(runner, deps, **kw)
     outcome = runner.run_research(job, deps, recorder, budget)
     return outcome, events, budget, clock
+
+
+def test_managed_card_search_consumes_the_existing_remote_search_budget(runner):
+    deps = FakeDeps()
+    deps.knowhow_uses_remote = True
+    claimed = []
+
+    def search_cards(queries, model_type, claim_search=None):
+        assert claim_search is not None
+        for _query in queries:
+            assert claim_search()
+            claimed.append(1)
+        return {"cards": deps.cards, "hints": []}
+
+    deps.search_knowhow = search_cards
+    _outcome, _events, budget, _clock = _run(runner, deps)
+    assert len(claimed) == 2
+    assert budget.snapshot()["searchesUsed"] >= len(claimed) + 1
+    assert budget.snapshot()["searchesUsed"] <= 6
 
 
 def _flow(events, exclude=("tech_search", "law_search")):
@@ -174,7 +207,7 @@ def test_happy_path_emits_ordered_events_with_monotonic_seq(runner):
     assert index[("law_search", "running")] > index[("knowhow", "done")]
     assert index[("tech_search", "done")] < index[("sufficiency", "running")]
     assert index[("law_search", "done")] < index[("sufficiency", "running")]
-    assert deps.purposes() == ["understand", "sufficiency", "synthesize"]
+    assert deps.purposes() == ["understand", "sufficiency", "synthesize", "grounding"]
 
     result = outcome["result"]
     assert result["kind"] == "answer" and result["stopReason"] == "sufficient"
@@ -212,8 +245,8 @@ def test_debug_payload_has_queries_tools_and_budget(runner):
     first = debug["tools"][0]
     assert {"seq", "tool", "query", "filters", "hits", "selected", "topScores", "ms"} <= set(first)
     assert first["filters"] == {"modelType": "AXIEZ-LINKs"}
-    assert debug["budget"]["searchesMax"] == 6 and debug["budget"]["modelCallsMax"] == 4
-    assert debug["budget"]["modelCallsUsed"] == 3 and debug["budget"]["searchesUsed"] >= 2
+    assert debug["budget"]["searchesMax"] == 6 and debug["budget"]["modelCallsMax"] == 6
+    assert debug["budget"]["modelCallsUsed"] == 4 and debug["budget"]["searchesUsed"] >= 2
 
 
 # ---------------------------------------------------------------- 質問の整理
@@ -240,7 +273,8 @@ def test_unparseable_understanding_falls_back_to_original_question(runner):
     assert done["detailJa"] == "整理できなかったため元の質問で検索"
     assert [q for q, _ in deps.tech_calls] == [QUESTION]
     assert deps.law_calls == [QUESTION]  # 整理できないときは法令を省略しない
-    assert outcome["result"]["understanding"]["modelType"] is None
+    # 質問に「LINKs」だけがあるので、AI が読めなくても AXIEZ-LINKs にする（2026-11-12 itai 決定）
+    assert outcome["result"]["understanding"]["modelType"] == "AXIEZ-LINKs"
     assert outcome["debug"]["understandingRaw"]["fallback"] is True
 
 
@@ -262,8 +296,9 @@ def test_model_type_without_evidence_is_not_invented(runner):
     invented = _understanding(modelType="NEXCUBE", modelEvidence="ネクスキューブ")
     deps = FakeDeps(understand=invented)
     outcome, *_ = _run(runner, deps)
-    assert {m for _, m in deps.tech_calls} == {None}
-    assert outcome["result"]["understanding"]["modelType"] is None
+    # 根拠の無い NEXCUBE は採らず、質問にある「LINKs」から AXIEZ-LINKs にする（2026-11-12 itai 決定）
+    assert {m for _, m in deps.tech_calls} == {"AXIEZ-LINKs"}
+    assert outcome["result"]["understanding"]["modelType"] == "AXIEZ-LINKs"
 
 
 # ---------------------------------------------------------------- ノウハウ
@@ -356,7 +391,10 @@ def test_retry_search_adds_new_documents_then_finishes(runner):
     outcome, events, *_ = _run(runner, deps)
     assert _flow(events).count(("retry_search", "running")) == 1
     assert _flow(events).count(("sufficiency", "done")) == 2
-    assert deps.purposes() == ["understand", "sufficiency", "sufficiency", "synthesize"]
+    assert deps.purposes() == ["understand", "sufficiency", "sufficiency", "synthesize", "grounding"]
+    summaries = [json.loads(user.split("<results>\n", 1)[1].split("\n</results>", 1)[0])
+                 for purpose, user in deps.model_calls if purpose == "sufficiency"]
+    assert [summary["retries_left"] for summary in summaries] == [4, 3]
     assert outcome["result"]["stopReason"] == "sufficient"
     assert {s["documentName"] for s in outcome["result"]["sources"]["tech"]} == {"TI-1.pdf", "TI-9.pdf"}
     retry_event = next(e for e in events if e["step"] == "retry_search" and e["status"] == "done")
@@ -369,7 +407,7 @@ def test_duplicate_retry_query_is_rejected_without_searching(runner):
     assert outcome["result"]["stopReason"] == "no_new_results"
     assert ("retry_search", "running") not in _flow(events)
     assert len(deps.tech_calls) == 2  # 初回の2本だけ（原文 + 整理語）
-    assert deps.purposes() == ["understand", "sufficiency", "synthesize"]
+    assert deps.purposes() == ["understand", "sufficiency"]
 
 
 def test_retry_with_no_new_documents_stops(runner):
@@ -377,37 +415,186 @@ def test_retry_with_no_new_documents_stops(runner):
     outcome, events, *_ = _run(runner, deps)
     assert outcome["result"]["stopReason"] == "no_new_results"
     assert ("retry_search", "done") in _flow(events)
-    assert deps.purposes() == ["understand", "sufficiency", "synthesize"]  # 2回目の十分性は聞かない
+    assert deps.purposes() == ["understand", "sufficiency"]
 
 
-def test_at_most_two_extra_searches_then_budget_stop(runner):
+def test_more_than_two_progressing_searches_can_reach_sufficient(runner):
     counter = {"n": 0}
 
     def tech(query, model):
         counter["n"] += 1
         return _retrieval(_tech(f"D{counter['n']}.pdf", 1))
 
-    deps = FakeDeps(tech=tech, sufficiency=[_retry("言い換え1"), _retry("言い換え2"), _retry("言い換え3")])
+    deps = FakeDeps(tech=tech, sufficiency=[_retry("言い換え1"), _retry("言い換え2"), _retry("言い換え3"), SUFFICIENT])
     limits = support.load_module("senpai_research_config.py").BudgetLimits(
         max_searches=20, max_model_calls=10, job_ms=60000, synth_reserve_ms=20000)
     outcome, events, *_ = _run(runner, deps, limits=limits)
-    assert _flow(events).count(("retry_search", "running")) == 2
-    assert outcome["result"]["stopReason"] == "budget"
+    assert _flow(events).count(("retry_search", "running")) == 3
+    assert outcome["result"]["stopReason"] == "sufficient"
     assert deps.purposes().count("synthesize") == 1
 
 
-def test_search_budget_blocks_extra_searches_and_still_answers(runner):
+def test_search_budget_blocks_extra_searches_without_overriding_insufficient_coverage(runner):
     config = support.load_module("senpai_research_config.py")
     limits = config.BudgetLimits(max_searches=2, max_model_calls=4, job_ms=60000, synth_reserve_ms=20000)
     deps = FakeDeps(understand=_understanding(lawRelevant=True), sufficiency=[_retry("追加の検索")])
     outcome, events, budget, _clock = _run(runner, deps, limits=limits)
     assert outcome["result"]["stopReason"] == "budget"
-    assert outcome["result"]["kind"] == "answer"
+    assert outcome["result"]["kind"] == "not_found"
     assert ("retry_search", "running") not in _flow(events)
     assert budget.snapshot()["searchesUsed"] <= 2
+    user_text = next(user for purpose, user in deps.model_calls if purpose == "sufficiency")
+    summary = json.loads(user_text.split("<results>\n", 1)[1].split("\n</results>", 1)[0])
+    assert summary["retries_left"] == 0
 
 
-def test_time_budget_skips_sufficiency_and_synthesizes_what_it_has(runner):
+def test_same_document_new_page_is_progress_and_has_marginal_metrics(runner):
+    deps = FakeDeps(tech=lambda q, m: _retrieval(_tech('same.pdf', 8 if q == 'new page' else 1)),
+                    sufficiency=[_retry('new page'), SUFFICIENT])
+    outcome, *_ = _run(runner, deps)
+    assert outcome['result']['stopReason'] == 'sufficient'
+    assert outcome['debug']['progress'][0]['newCandidateItems'] == 1
+    assert outcome['debug']['progress'][0]['newExposedEvidence'] == 1
+    assert outcome['debug']['progress'][0]['evidenceValidity'] == 'unassessed'
+    assert outcome['debug']['stages'][0]['usageMissing'] is True
+
+
+def test_repeated_results_stop_without_using_the_whole_envelope(runner):
+    deps = FakeDeps(sufficiency=_retry('another expression'))
+    limits = support.load_module('senpai_research_config.py').load_limits()
+    outcome, *_ = _run(runner, deps, limits=limits)
+    assert outcome['result']['stopReason'] == 'no_new_results'
+    assert outcome['debug']['stopDetail'] == 'repeated_results'
+    assert outcome['debug']['lastJudgment'] == 'insufficient'
+    assert outcome['debug']['budget']['searchesUsed'] < limits.max_searches
+    assert 'synthesize' not in deps.purposes()
+
+
+def test_query_cycle_is_stopped_even_after_progress(runner):
+    deps = FakeDeps(tech=lambda q, m: _retrieval(_tech(q + '.pdf', 1)),
+                    sufficiency=[_retry('cycle A'), _retry('cycle B'), _retry('cycle A')])
+    limits = support.load_module('senpai_research_config.py').load_limits()
+    outcome, *_ = _run(runner, deps, limits=limits)
+    assert outcome['debug']['stopDetail'] == 'repeated_query'
+    assert [q for q, _ in deps.tech_calls].count('cycle A') == 1
+    assert len(outcome['debug']['progress']) == 3
+
+
+def test_different_raw_candidates_outside_judge_limit_do_not_allow_endless_search(runner):
+    initial = [_tech('high' + str(i) + '.pdf', 1, score=0.99) for i in range(10)]
+    def tech(q, m):
+        return _retrieval(*(initial if not q.startswith('low') else [_tech(q + '.pdf', 1, score=0.1)]))
+    deps = FakeDeps(tech=tech, sufficiency=[_retry('low A'), _retry('low B'), SUFFICIENT])
+    limits = support.load_module('senpai_research_config.py').load_limits()
+    outcome, *_ = _run(runner, deps, limits=limits)
+    assert outcome['debug']['stopDetail'] == 'no_exposed_progress'
+    assert [p['newCandidateItems'] for p in outcome['debug']['progress']] == [1, 1]
+    assert [p['newExposedEvidence'] for p in outcome['debug']['progress']] == [0, 0]
+    assert 'synthesize' not in deps.purposes()
+
+
+def test_explicit_model_filter_change_is_a_different_search(runner):
+    directive = _directive(sufficient=False, action='retry_search', query='AXIEZ-LINKs ドア 開閉 異音',
+                           target='tech', dropModelFilter=True)
+    deps = FakeDeps(tech=lambda q, m: _retrieval(_tech('filtered.pdf' if m else 'all.pdf', 1)),
+                    sufficiency=[directive, SUFFICIENT])
+    outcome, *_ = _run(runner, deps)
+    assert outcome['result']['stopReason'] == 'sufficient'
+    assert ('AXIEZ-LINKs ドア 開閉 異音', None) in deps.tech_calls
+    ui = FakeDeps(sufficiency=directive)
+    out, *_ = _run(runner, ui, model_type='AXIEZ-LINKs')
+    assert out['debug']['stopDetail'] == 'repeated_query'
+    assert all(model == 'AXIEZ-LINKs' for _, model in ui.tech_calls)
+
+
+def test_judge_receives_zero_actual_searches_after_managed_initial_calls(runner):
+    deps = FakeDeps(understand=_understanding(lawRelevant=True, queries={
+        'tech': 'initial tech', 'law': 'initial law', 'knowhow': 'initial cards'}),
+        sufficiency=_retry('law retry', 'law'))
+    deps.knowhow_uses_remote = True
+    def cards(queries, model, claim_search):
+        for q in queries:
+            assert claim_search()
+        return {'cards': deps.cards, 'hints': []}
+    deps.search_knowhow = cards
+    outcome, *_ = _run(runner, deps)
+    assert outcome['debug']['stopDetail'] == 'search_limit'
+    assert outcome['debug']['lastJudgment'] == 'insufficient'
+    assert runner.BUDGET_NOTE in outcome['result']['answerMarkdown']
+    assert 'law retry' not in deps.law_calls
+    user = next(u for p, u in deps.model_calls if p == 'sufficiency')
+    assert json.loads(user.split('<results>\n')[1].split('\n</results>')[0])['retries_left'] == 0
+
+
+def test_measured_usage_survives_in_stage_diagnostics_without_text(runner):
+    deps = FakeDeps()
+    def measured(purpose, system, user, maximum):
+        return deps.call_model(purpose, system, user, maximum), {
+            'inputTokens': 23, 'outputTokens': 7, 'cacheReadInputTokens': 0, 'cacheWriteInputTokens': 0}
+    deps.call_model_with_usage = measured
+    outcome, *_ = _run(runner, deps)
+    stage = next(s for s in outcome['debug']['stages'] if s['stage'] == 'sufficiency')
+    assert stage['usage']['inputTokens'] == 23 and stage['usageMissing'] is False
+    assert QUESTION not in json.dumps(outcome['debug']['stages'], ensure_ascii=False)
+
+
+def test_oversized_input_never_reaches_model(runner):
+    config = support.load_module('senpai_research_config.py')
+    limits = config.BudgetLimits(18, 10, 90000, 45000, max_input_bytes=10)
+    deps = FakeDeps()
+    with pytest.raises(runner.ResearchFailure) as caught:
+        _run(runner, deps, limits=limits)
+    assert caught.value.code == 'BudgetExceeded'
+    assert deps.model_calls == []
+
+
+def test_model_emergency_limit_does_not_synthesize_missing_coverage(runner):
+    deps = FakeDeps(tech=lambda q, m: _retrieval(_tech(q + '.pdf', 1)), sufficiency=_retry('novel'))
+    limits = support.load_module('senpai_research_config.py').BudgetLimits(18, 3, 90000, 45000)
+    outcome, *_ = _run(runner, deps, limits=limits)
+    assert outcome['debug']['stopDetail'] == 'model_limit'
+    assert outcome['debug']['lastJudgment'] == 'insufficient'
+    assert deps.purposes() == ['understand', 'sufficiency']
+    assert outcome['kind'] == 'not_found'
+
+
+def test_retry_search_errors_are_not_reported_as_repeated_results(runner):
+    def tech(q, model):
+        return RuntimeError('search down') if q == 'failed retry' else _retrieval(_tech('initial.pdf', 1))
+    deps = FakeDeps(tech=tech, sufficiency=_retry('failed retry'))
+    with pytest.raises(runner.ResearchFailure) as caught:
+        _run(runner, deps)
+    assert caught.value.code == 'Internal'
+    assert caught.value.debug['tools'][-1]['error'] is True
+    assert caught.value.debug['stopDetail'] != 'repeated_results'
+
+
+def test_failed_managed_search_still_records_charged_work(runner):
+    deps = FakeDeps()
+    deps.knowhow_uses_remote = True
+    def cards(queries, model, claim_search):
+        assert claim_search()
+        raise RuntimeError('managed down')
+    deps.search_knowhow = cards
+    outcome, *_ = _run(runner, deps)
+    stage = next(s for s in outcome['debug']['stages'] if s['stage'] == 'knowhow')
+    assert stage['searches'] == 1 and stage['completed'] is False
+
+
+def test_same_document_query_can_check_two_different_pages(runner):
+    responses = [
+        _directive(sufficient=False, action='doc_page', query='section',
+                   target={'documentName': 'manual.pdf', 'pageNumber': page}) for page in (2, 3)]
+    def tech(q, model):
+        return _retrieval(*[_tech('manual.pdf', page, str(page)) for page in (2, 3)]) if 'manual.pdf' in q else _retrieval()
+    deps = FakeDeps(tech=tech, sufficiency=[*responses, SUFFICIENT])
+    limits = support.load_module('senpai_research_config.py').load_limits()
+    outcome, *_ = _run(runner, deps, limits=limits)
+    assert outcome['result']['stopReason'] == 'sufficient'
+    assert [p['newCandidateItems'] for p in outcome['debug']['progress']] == [1, 1]
+
+
+def test_time_budget_skips_new_models_and_returns_source_list(runner):
     clock_box = {}
 
     def slow_tech(query, model):
@@ -420,7 +607,9 @@ def test_time_budget_skips_sufficiency_and_synthesizes_what_it_has(runner):
     outcome = runner.run_research(job, deps, recorder, budget)
     assert outcome["result"]["stopReason"] == "budget"
     assert "sufficiency" not in deps.purposes()
-    assert deps.purposes()[-1] == "synthesize"
+    assert "synthesize" not in deps.purposes()
+    assert "grounding" not in deps.purposes()
+    assert outcome['debug']['grounding']['mode'] == 'source_list_only'
     assert outcome["result"]["kind"] == "answer"
 
 
@@ -438,7 +627,45 @@ def test_sufficiency_model_failure_proceeds_with_current_results(runner):
     deps = FakeDeps(sufficiency=[RuntimeError("bedrock down")])
     outcome, events, *_ = _run(runner, deps)
     assert outcome["result"]["kind"] == "answer"
+    assert outcome["result"]["stopReason"] == "judgment_failed"
+    assert runner.JUDGMENT_NOTE in outcome["result"]["answerMarkdown"]
     assert ("sufficiency", "done") in _flow(events)
+
+
+@pytest.mark.parametrize("directive", [
+    _directive(sufficient=False, action="none"),
+    _retry("AXIEZ-LINKs ドア 開閉 異音"),
+    _retry("まったく別の言い方"),
+])
+def test_insufficient_evidence_never_becomes_answer_from_candidate_presence(runner, directive):
+    deps = FakeDeps(sufficiency=[directive])
+    outcome, events, *_ = _run(runner, deps)
+    assert outcome["result"]["kind"] == "not_found"
+    assert outcome["result"]["stopReason"] in {"insufficient", "no_new_results"}
+    assert "synthesize" not in deps.purposes()
+    assert outcome["result"]["sources"]["knowhow"]["used"] == []
+    assert len(outcome["result"]["sources"]["knowhow"]["candidates"]) == 1
+
+
+@pytest.mark.parametrize("has_sources", [True, False])
+def test_broken_sufficiency_is_not_reported_as_sufficient(runner, has_sources):
+    deps = FakeDeps(sufficiency=["{broken"],
+                    tech=None if has_sources else lambda query, model: _retrieval(),
+                    cards=None if has_sources else [])
+    outcome, *_ = _run(runner, deps)
+    assert outcome["result"]["stopReason"] == "judgment_failed"
+    assert outcome["result"]["kind"] == ("answer" if has_sources else "not_found")
+
+
+def test_sufficiency_receives_effective_ui_model_and_missing_context(runner):
+    deps = FakeDeps(understand=_understanding(controlMethod="VFGLF", missing=["設置条件"]))
+    _run(runner, deps, model_type="NEXCUBE")
+    user_text = next(user for purpose, user in deps.model_calls if purpose == "sufficiency")
+    summary = json.loads(user_text.split("<results>\n", 1)[1].split("\n</results>", 1)[0])
+    assert summary["understanding"]["modelType"] == "NEXCUBE"
+    assert summary["understanding"]["extractedModelType"] == "AXIEZ-LINKs"
+    assert summary["understanding"]["controlMethod"] == "VFGLF"
+    assert summary["understanding"]["missing"] == ["設置条件"]
 
 
 def test_doc_page_fetches_the_named_document_only(runner):

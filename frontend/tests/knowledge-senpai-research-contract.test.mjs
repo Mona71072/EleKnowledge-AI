@@ -35,6 +35,7 @@ function loadTsx(path) {
   const compiled = { exports: {} };
   const localRequire = (name) => {
     if (/^\.\/Senpai/u.test(name)) return loadTsx(`../src/components/knowledge/${name.slice(2)}.tsx`);
+    if (name === './kb-model-types.generated.mjs') return require('../src/data/kb-model-types.generated.mjs');
     if (name === '@/data/kbModelTypes') return loadTsx('../src/data/kbModelTypes.ts');
     if (name.startsWith('@/lib/')) return require(`../src/lib/${name.slice(6)}`);
     return require(name);
@@ -96,7 +97,7 @@ test('answer sample parses and renders the unified answer with grouped sources',
   assert.equal(rows.length, 7);
   const page = render({ status: 'completed', steps: done.steps, result: done.result, debug: done.debug }, { selectedModel: 'AXIEZ-LINKs' });
   assert.match(page, /7手順で調査/);
-  for (const ref of ['T1', 'T2', 'L1', 'K1', 'K2']) {
+  for (const ref of ['T1', 'L1']) {
     assert.match(page, new RegExp(`href="#senpai-turn-1-ref-${ref}"`));
     assert.match(page, new RegExp(`id="senpai-turn-1-ref-${ref}"`));
   }
@@ -104,12 +105,11 @@ test('answer sample parses and renders the unified answer with grouped sources',
   // 技術資料は実在しうるバケット名の s3 URI なので、既存の文書ルートへリンクする。
   assert.match(page, new RegExp(`href="/doc\\?uri=${encodeURIComponent('s3://kb-docs-bucket/docs/TI-1.pdf').replace(/[%.]/g, '\\$&')}#page=3"`));
   assert.doesNotMatch(page, /TI-1\.pdf · 3ページ（安全なリンクを確認できません）/);
-  assert.match(page, /ドア開閉時の異音/);
-  assert.match(page, /戸の擦り音（別機種）/);
+  assert.doesNotMatch(page, /ref-T2|ref-K1|ref-K2/);
   // 使わなかった候補・ID・版・長い説明は一般表示に出さない。
   assert.doesNotMatch(page, /候補として渡したが使わなかったノウハウ|ドア全般の点検メモ|探索の手掛かり/);
   assert.doesNotMatch(page, /<h[1-6][^>]*>(結論|根拠と手順)</);
-  assert.equal(page.match(/でも当てはまるかは要確認です/g).length, 1);
+  assert.match(page, /生成した説明は検証を通過していない/);
   assert.doesNotMatch(page, /ref-T9/);
   const dev = render({ status: 'completed', steps: done.steps, result: done.result, debug: done.debug }, { developerView: true });
   assert.match(dev, /照合で外した参照: T9/);
@@ -151,16 +151,16 @@ test('history detail restores the saved answer into the controller and renders i
   assert.match(turn.query, /ドアが開閉時に異音/);
   assert.equal(turn.research.status, 'completed');
   assert.deepEqual(turn.research.steps, []);
-  assert.equal(turn.research.result.sources.knowhow.used.length, 2);
+  assert.equal(turn.research.result.sources.knowhow.used.length, 0);
 
   const chat = createSenpaiChat({ researchSource: async () => ({}) });
   chat.restore(saved);
   const restored = chat.getSnapshot().turns[0];
   const page = render(restored.research, { selectedModel: restored.modelType });
   assert.doesNotMatch(page, /調べた手順/);
-  assert.match(page, /text-\[17px\]/);
-  assert.match(page, /でも当てはまるかは要確認です/);
-  assert.match(page, /href="#senpai-turn-1-ref-K2"/);
+  assert.match(page, /text-\[15px\]/);
+  assert.match(page, /生成した説明は検証を通過していない/);
+  assert.doesNotMatch(page, /ref-K2/);
   assert.doesNotMatch(page, /ref-T9/);
 });
 

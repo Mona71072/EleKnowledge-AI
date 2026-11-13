@@ -6,13 +6,29 @@ technical authority, even when their source record says ``approved``.
 from __future__ import annotations
 
 import json
+import hashlib
+import importlib.util
 import math
 import os
 import re
+import sys
 import time
 import unicodedata
 from datetime import datetime
 from typing import Any
+
+try:
+    import vocabulary_generated as _vocabulary
+except ModuleNotFoundError as exc:
+    # Lambda puts sibling modules on sys.path; scripts and tests may load this file by path.
+    if exc.name != 'vocabulary_generated':
+        raise
+    _vocabulary_spec = importlib.util.spec_from_file_location(
+        'knowhow_vocabulary_runtime', os.path.join(os.path.dirname(__file__), 'vocabulary_generated.py')
+    )
+    _vocabulary = importlib.util.module_from_spec(_vocabulary_spec)
+    sys.modules[_vocabulary_spec.name] = _vocabulary
+    _vocabulary_spec.loader.exec_module(_vocabulary)
 
 
 MAX_INDEX_BYTES = 8 * 1024 * 1024
@@ -25,19 +41,23 @@ ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 BODY_HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
-SOURCE_TYPES = frozenset({"lists_item", "onenote_page", "kb_document", "law_rag"})
+SOURCE_TYPES = frozenset({"lists_item", "onenote_page", "kb_document", "law_rag", "knowhow"})
 # SYNC: must equal SOURCE_REF_KEYS in build-senpai-index.mjs and KNOWHOW_SOURCE_FIELDS in knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 SOURCE_REF_KEYS = frozenset({
     "ref_type", "source_id", "list_item_id", "onenote_id", "document_number",
     "kb_filename", "kb_verify_status", "page_role", "law_id", "law_title",
-    "locator",
+    "locator", "knowhow_id", "origin",
 })
 SOURCE_ID_KEYS = {
     "lists_item": "list_item_id",
     "onenote_page": "onenote_id",
     "kb_document": "document_number",
     "law_rag": "law_id",
+    "knowhow": "knowhow_id",
 }
+# 人が書いたもの・現場報告を出典にするときの経路（設計 2026-11-11 §4.7.2）。knowhow だけが持つ。
+# SYNC: must equal KNOWHOW_ORIGINS in build-senpai-index.mjs and knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
+KNOWHOW_ORIGINS = frozenset({"editor", "field_report"})
 # SYNC: must equal MODEL_SCOPE_KEYS in build-senpai-index.mjs and KNOWHOW_SCOPE_FIELDS in knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 MODEL_SCOPE_KEYS = frozenset({
     "control_methods", "door_families", "door_types", "excludes",
@@ -59,19 +79,13 @@ POSITIVE_SCOPE_KEYS = (
 )
 MODEL_CLASSIFY_KEYS = ("product_lines", "model_abbreviations", "lists_model_label", "observed_on")
 # Keys mirror app.UI_MODEL_FILTERS; values are normalized aliases found in card scopes.
-MODEL_ALIASES = {
-    "AXIEZ": frozenset({"axiez", "axiez(ke-wf・ke-hf)", "駅舎エレ"}),
-    "AXIEZ-LINKs": frozenset({"axiez-links"}),
-    "NEXCUBE": frozenset({"nexcube", "nexcube limited", "特注機械室レスエレベーター"}),
-    "メルシティ": frozenset({"メルシティ"}),
-    "メルワイド": frozenset({"メルワイド"}),
-    "エスカレーター": frozenset({"エスカレーター", "escalator"}),
-}
+# Generated from knowledge/registry/applicability-vocabulary.json (vocabulary_generated.py).
+MODEL_ALIASES = _vocabulary.MODEL_ALIASES
 # SYNC: must equal KNOWHOW_MODEL_FITS in knowledge-research.mjs (tests/unit/test_knowhow_contract_sync.py).
 MODEL_FIT_VALUES = frozenset({"matched", "general", "other_product", "unknown"})
 ESCALATOR_KEY = "エスカレーター"
-GENERIC_ELEVATOR_LABEL = "全エレ機種"
-GENERIC_ESCALATOR_LABEL = "全エス機種"
+GENERIC_ELEVATOR_LABEL = _vocabulary.GENERIC_ELEVATOR_LABEL
+GENERIC_ESCALATOR_LABEL = _vocabulary.GENERIC_ESCALATOR_LABEL
 
 _cache: dict[str, Any] = {"identity": None, "expires": 0.0, "index": None,
                          "version_id": None, "etag": None}
@@ -129,6 +143,8 @@ def _validate_source_refs(source_refs: Any) -> None:
             raise KnowhowIndexError("source reference identity is invalid")
         if any(field in ref for field in SOURCE_ID_KEYS.values() if field != identity_key):
             raise KnowhowIndexError("source reference identity type is invalid")
+        if (ref_type == "knowhow") != ("origin" in ref) or ref.get("origin", "editor") not in KNOWHOW_ORIGINS:
+            raise KnowhowIndexError("source reference origin is invalid")
         for key, value in ref.items():
             if not isinstance(value, str) or not _safe_text(value, 500):
                 raise KnowhowIndexError("source reference value is invalid")
@@ -263,7 +279,87 @@ def clear_cache() -> None:
     """Clear process-local cache; exposed for deterministic unit tests."""
     _cache.update(identity=None, expires=0.0, index=None, version_id=None, etag=None)
     _feature_cache.update(signature=None, value=None)
+    _manifest_cache.clear()
+
+
+# WP4 (design 2026-11-11 §4.11 step 5, §4.12): an index built from the common-knowledge published
+# versions is re-checked against the manifest before a card reaches an answer, so a withdrawn card,
+# a newer published version, another audience or an expired bundle drops out within the cache TTL
+# without rebuilding the index. Fail-closed: an unreadable manifest store raises KnowhowIndexError.
+_manifest_cache: dict[str, tuple[float, dict | None]] = {}
+MANIFEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+
+
+def published_guard_config() -> tuple[str, frozenset[str]] | None:
+    """(canonical bucket, allowed audiences) when the guard is configured, else None."""
+    bucket = os.environ.get("KNOWHOW_CANONICAL_BUCKET", "").strip()
+    audiences = frozenset(value.strip() for value in os.environ.get("KNOWHOW_AUDIENCES", "").split(",")
+                          if value.strip())
+    if not bucket:
+        return None
+    if len(bucket) > 255 or not audiences:
+        raise KnowhowIndexError("published guard is misconfigured")
+    return bucket, audiences
+
+
+def _published_manifest(s3_client, bucket: str, knowledge_id: str, current: float) -> dict | None:
+    cached = _manifest_cache.get(knowledge_id)
+    if cached and current < cached[0]:
+        return cached[1]
+    try:
+        response = s3_client.get_object(Bucket=bucket, Key=f"manifests/{knowledge_id}.json")
+        raw = response["Body"].read(64 * 1024 + 1)
+        if len(raw) > 64 * 1024:
+            raise KnowhowIndexError("manifest is too large")
+        manifest = json.loads(raw)
+    except KnowhowIndexError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - S3 details never reach clients
+        code = getattr(exc, "response", {}).get("Error", {}).get("Code") if hasattr(exc, "response") else None
+        if code in ("NoSuchKey", "404"):
+            manifest = None
+        else:
+            raise KnowhowIndexError("published manifest is unavailable") from exc
+    _manifest_cache[knowledge_id] = (current + CACHE_TTL_SECONDS, manifest)
+    return manifest
+
+
+def confirm_published(cards: list[dict], *, s3_client=None, now: float | None = None,
+                      monotonic: float | None = None) -> list[dict]:
+    """Keep only cards whose exact body is the active published version for an allowed audience.
+
+    Without ``KNOWHOW_CANONICAL_BUCKET`` the cards are returned unchanged (the Git-built index).
+    """
+    config = published_guard_config()
+    if config is None or not cards:
+        return cards
+    bucket, audiences = config
+    if s3_client is None:
+        import boto3
+        s3_client = boto3.client("s3")
+    wall = time.time() if now is None else now
+    current = time.monotonic() if monotonic is None else monotonic
+    kept = []
+    for card in cards:
+        knowledge_id = card.get("knowledgeId")
+        if not isinstance(knowledge_id, str) or not MANIFEST_ID_PATTERN.fullmatch(knowledge_id):
+            continue
+        manifest = _published_manifest(s3_client, bucket, knowledge_id, current)
+        bundle = (manifest or {}).get("bundle") or {}
+        if (manifest and manifest.get("active")
+                and bundle.get("knowledgeId") == knowledge_id
+                and bundle.get("rawSha256") == card.get("sha256")
+                and bundle.get("audience") in audiences
+                and isinstance(bundle.get("expiresAt"), int) and bundle["expiresAt"] > wall):
+            kept.append(card)
+    return kept
     _validated.update(index=None, fingerprint=None)
+
+
+def canonical_index_version(index: dict) -> str:
+    """Recompute the builder's content hash, including bodies, scope and sources."""
+    serialized = json.dumps(index["cards"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def load_index(s3_client=None, *, bucket: str | None = None, key: str | None = None,
@@ -572,7 +668,7 @@ def model_fit(card: dict, model_type: str) -> dict:
     return {"modelFit": "unknown"}
 
 
-def search_index(index: dict, query: str, model_type: str | None = None) -> dict:
+def search_index(index: dict, query: str, model_type: str | None = None, *, max_matches: int = MAX_MATCHES) -> dict:
     """Return up to three whole relevant cards under one combined body-size budget.
 
     ``model_type`` (a UI model key) drops only person-verified cards
@@ -582,6 +678,8 @@ def search_index(index: dict, query: str, model_type: str | None = None) -> dict
     response-only ``modelFit`` fields (see ``model_fit``).
     """
     index = _ensure_valid(index)
+    if type(max_matches) is not int or not 1 <= max_matches <= 12:
+        raise KnowhowIndexError("invalid candidate limit")
     if not isinstance(query, str) or len(query) > 12000:
         raise KnowhowIndexError("query is invalid")
     ranked = _rank(index, query, model_type)
@@ -590,7 +688,7 @@ def search_index(index: dict, query: str, model_type: str | None = None) -> dict
     total_body_chars = 0
     for score, card in ranked:
         if (score < MIN_MATCH_SCORE or score < RELATIVE_SCORE_GATE * top_score
-                or len(matches) >= MAX_MATCHES):
+                or len(matches) >= max_matches):
             break
         if total_body_chars + len(card["body"]) > MAX_RESPONSE_BODY_CHARS:
             continue
@@ -627,3 +725,91 @@ def derive_kb_hints(matches: list[dict], *, max_hints: int = 8) -> list[str]:
                     if len(hints) >= max_hints:
                         return hints
     return hints
+
+
+def retrieve_cards(index: dict, query: str, model_type: str | None = None,
+                   *, client=None, claim_search=None, max_matches: int = MAX_MATCHES) -> dict:
+    """Retrieve release-bound candidates, returning only canonical card content.
+
+    The default remains the local index. Managed retrieval never treats a KB
+    chunk as an authoritative card and never falls back on remote failure.
+    """
+    if type(max_matches) is not int or not 1 <= max_matches <= 12:
+        raise KnowhowIndexError("invalid candidate limit")
+    backend = os.environ.get("KNOWHOW_BACKEND", "local").strip()
+    if backend == "local":
+        return search_index(index, query, model_type=model_type, max_matches=max_matches)
+    if backend != "managed" or os.environ.get("ENVIRONMENT") != "dev":
+        raise KnowhowIndexError("invalid knowhow backend environment")
+    index = validate_index(index)
+    release = os.environ.get("KNOWHOW_RELEASE_ID", "").strip()
+    kb_id = os.environ.get("KNOWHOW_MANAGED_KB_ID", "").strip()
+    bucket = os.environ.get("KNOWHOW_INDEX_BUCKET", "").strip()
+    if (not re.fullmatch(r"[a-f0-9]{64}", release) or index["indexVersion"] != f"sha256:{release}"
+            or canonical_index_version(index) != index["indexVersion"]
+            or not re.fullmatch(r"[A-Z0-9]{10}", kb_id) or not bucket):
+        raise KnowhowIndexError("managed release is not configured")
+    if not isinstance(query, str) or not query.strip() or len(query) > 12000:
+        raise KnowhowIndexError("query is invalid")
+    if claim_search is not None and not claim_search():
+        raise KnowhowIndexError("managed search budget exhausted")
+    if client is None:
+        import boto3
+        from botocore.config import Config
+        client = boto3.client("bedrock-agent-runtime", config=Config(
+            connect_timeout=3, read_timeout=20, retries={"total_max_attempts": 1},
+        ))
+    try:
+        response = client.retrieve(
+            knowledgeBaseId=kb_id, retrievalQuery={"text": query},
+            retrievalConfiguration={"managedSearchConfiguration": {
+                "numberOfResults": 12,
+                "filter": {"equals": {"key": "release_id", "value": release}},
+            }},
+        )
+    except Exception as error:
+        raise KnowhowIndexError("managed retrieval unavailable") from error
+    by_id = {card["knowledgeId"]: card for card in index["cards"]}
+    selected, seen, total_chars = [], set(), 0
+    if not isinstance(response, dict):
+        raise KnowhowIndexError("invalid managed response")
+    results = response.get("retrievalResults")
+    if not isinstance(results, list) or len(results) > 12 or response.get("nextToken"):
+        raise KnowhowIndexError("invalid managed response")
+    for hit in results:
+        if not isinstance(hit, dict) or not isinstance(hit.get("metadata"), dict):
+            raise KnowhowIndexError("managed card metadata missing")
+        meta = hit["metadata"]
+        identity = meta.get("knowledge_id")
+        if not isinstance(identity, str):
+            raise KnowhowIndexError("invalid managed card ID")
+        card = by_id.get(identity)
+        if card is None:
+            raise KnowhowIndexError("unknown managed card")
+        location = hit.get("location")
+        if (not isinstance(location, dict) or location.get("type") != "S3"
+                or not isinstance(location.get("s3Location"), dict)):
+            raise KnowhowIndexError("invalid managed card location")
+        uri = location["s3Location"].get("uri")
+        expected_uri = f"s3://{bucket}/releases/{release}/documents/{card['knowledgeId']}.md"
+        region = os.environ.get("AWS_REGION", "").strip()
+        expected_https_uri = (f"https://{bucket}.s3.{region}.amazonaws.com/"
+                              f"releases/{release}/documents/{card['knowledgeId']}.md") if region else None
+        if (meta.get("release_id") != release or meta.get("card_version") != str(card["cardVersion"])
+                or meta.get("card_sha256") != card["sha256"]
+                or not isinstance(uri, str) or uri not in {expected_uri, expected_https_uri}):
+            raise KnowhowIndexError("managed card identity mismatch")
+        score = hit.get("score", 0)
+        if type(score) not in (int, float) or not math.isfinite(score):
+            raise KnowhowIndexError("invalid managed score")
+        if card["knowledgeId"] in seen:
+            continue
+        seen.add(card["knowledgeId"])
+        if model_type in MODEL_ALIASES and _conflicts_with_model(card, model_type):
+            continue
+        if len(selected) >= max_matches or total_chars + len(card["body"]) > MAX_RESPONSE_BODY_CHARS:
+            continue
+        selected.append({**card, **model_fit(card, model_type)} if model_type in MODEL_ALIASES else card)
+        total_chars += len(card["body"])
+    return {"status": "matched" if selected else "not_found",
+            "indexVersion": index["indexVersion"], "matches": selected}

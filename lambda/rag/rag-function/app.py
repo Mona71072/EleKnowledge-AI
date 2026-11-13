@@ -44,8 +44,21 @@ except ModuleNotFoundError as exc:
     log_unknown_model_once = _model_profile_module.log_unknown_model_once
 
 try:
+    import vocabulary_generated as _vocabulary
+except ModuleNotFoundError as exc:
+    # Lambda puts sibling modules on sys.path; scripts and tests may load this file by path.
+    if exc.name != 'vocabulary_generated':
+        raise
+    _vocabulary_spec = importlib.util.spec_from_file_location(
+        'rag_vocabulary_runtime', os.path.join(os.path.dirname(__file__), 'vocabulary_generated.py')
+    )
+    _vocabulary = importlib.util.module_from_spec(_vocabulary_spec)
+    sys.modules[_vocabulary_spec.name] = _vocabulary
+    _vocabulary_spec.loader.exec_module(_vocabulary)
+
+try:
     from knowhow_retrieval import (
-        KnowhowIndexError, derive_kb_hints, load_index, search_index,
+        KnowhowIndexError, confirm_published, derive_kb_hints, load_index, search_index, retrieve_cards,
     )
 except ModuleNotFoundError as exc:
     if exc.name != 'knowhow_retrieval':
@@ -60,6 +73,32 @@ except ModuleNotFoundError as exc:
     derive_kb_hints = _knowhow_module.derive_kb_hints
     load_index = _knowhow_module.load_index
     search_index = _knowhow_module.search_index
+    retrieve_cards = _knowhow_module.retrieve_cards
+    confirm_published = _knowhow_module.confirm_published
+
+try:
+    import question_model
+except ModuleNotFoundError as exc:
+    if exc.name != 'question_model':
+        raise
+    _question_model_spec = importlib.util.spec_from_file_location(
+        'rag_question_model', os.path.join(os.path.dirname(__file__), 'question_model.py')
+    )
+    question_model = importlib.util.module_from_spec(_question_model_spec)
+    sys.modules[_question_model_spec.name] = question_model
+    _question_model_spec.loader.exec_module(question_model)
+
+try:
+    import knowhow_answer
+except ModuleNotFoundError as exc:
+    if exc.name != 'knowhow_answer':
+        raise
+    _knowhow_answer_spec = importlib.util.spec_from_file_location(
+        'rag_knowhow_answer', os.path.join(os.path.dirname(__file__), 'knowhow_answer.py')
+    )
+    knowhow_answer = importlib.util.module_from_spec(_knowhow_answer_spec)
+    sys.modules[_knowhow_answer_spec.name] = knowhow_answer
+    _knowhow_answer_spec.loader.exec_module(knowhow_answer)
 
 
 def _utc_now_iso() -> str:
@@ -282,14 +321,8 @@ HANDLED_MODEL_TYPES = frozenset({
 # UI項目別の実測母数（AXIEZ 1,137 / AXIEZ-LINKs 913 / NEXCUBE 485 /
 # メルシティ 292 / メルワイド 291 / エスカレーター 83 ＋共通819常時）:
 # docs/rag-model-filter-mapping-2026-08-26.md §1（PR #54）
-UI_MODEL_FILTERS = {
-    'AXIEZ': ('AXIEZ', 'AXIEZ(KE-WF・KE-HF)', '駅舎エレ'),
-    'AXIEZ-LINKs': ('AXIEZ-LINKs',),
-    'NEXCUBE': ('NEXCUBE', 'NEXCUBE Limited', '特注機械室レスエレベーター'),
-    'メルシティ': ('メルシティ',),
-    'メルワイド': ('メルワイド',),
-    'エスカレーター': ('エスカレーター',),
-}
+# 値の正本は knowledge/registry/applicability-vocabulary.json（vocabulary_generated.py に生成）。
+UI_MODEL_FILTERS = _vocabulary.UI_MODEL_FILTERS
 
 # spec モードで参照する資料カテゴリ（本命: C / TI / 据付基準）。
 # 旧実装は 'D資料' を強制していたが、この KB に D資料 は存在せず必ず 0 件になっていた。
@@ -1583,7 +1616,9 @@ LEGACY_GENERATION_TEMPERATURE = 0.3
 
 def build_generation_request(system_prompt: str, messages: list, model_id: str,
                              max_tokens: int = None, temperature: float = None,
-                             apply_generation_settings: bool = True) -> dict:
+                             apply_generation_settings: bool = True,
+                             generation_thinking: str = None,
+                             generation_effort: str = None) -> dict:
     """InvokeModel payload using capabilities of the selected model family.
 
     Supplemental calls such as title generation use the same conservative
@@ -1597,16 +1632,28 @@ def build_generation_request(system_prompt: str, messages: list, model_id: str,
     if system_prompt:
         body["system"] = system_prompt
     profile = get_model_profile(model_id)
+    if generation_thinking not in (None, 'disabled', 'adaptive'):
+        raise ValueError('generation_thinking must be disabled or adaptive')
+    if generation_effort not in (None, 'low', 'medium', 'high'):
+        raise ValueError('generation_effort must be low, medium, or high')
+    effective_thinking = (
+        (generation_thinking or GENERATION_THINKING)
+        if apply_generation_settings else 'disabled'
+    )
+    effective_effort = (
+        (generation_effort or GENERATION_EFFORT)
+        if apply_generation_settings else 'low'
+    )
     if profile.sampling:
         body["temperature"] = LEGACY_GENERATION_TEMPERATURE if temperature is None else temperature
-    elif apply_generation_settings and GENERATION_THINKING == 'adaptive' and profile.adaptive:
+    elif effective_thinking == 'adaptive' and profile.adaptive:
         body["thinking"] = {"type": "adaptive"}
         if profile.effort:
-            body["output_config"] = {"effort": GENERATION_EFFORT}
+            body["output_config"] = {"effort": effective_effort}
     elif profile.thinking_disable:
         body["thinking"] = {"type": "disabled"}
     elif profile.effort:
-        body["output_config"] = {"effort": "low"}
+        body["output_config"] = {"effort": effective_effort}
     return body
 
 
@@ -1657,13 +1704,17 @@ def invoke_generation(client, model_id: str, system_prompt: str, messages: list,
                       max_tokens: int = None, temperature: float = None,
                       apply_generation_settings: bool = True,
                       ensure_ascii: bool = True,
-                      call_name: str = 'answer') -> tuple:
+                      call_name: str = 'answer',
+                      generation_thinking: str = None,
+                      generation_effort: str = None) -> tuple:
     """モデル能力に応じて生成し、本文・usage・停止理由を返す。"""
     profile = get_model_profile(model_id)
     request_body = build_generation_request(
         system_prompt, messages, model_id, max_tokens=max_tokens,
         temperature=temperature,
         apply_generation_settings=apply_generation_settings,
+        generation_thinking=generation_thinking,
+        generation_effort=generation_effort,
     )
     if profile.api == 'converse':
         converse_messages, system = build_converse_messages(
@@ -2422,6 +2473,12 @@ def handle_rag_request(event, context, started_at):
             return validation_error('includeKnowhow must be a boolean')
         if include_knowhow and requested_mode == 'law':
             return validation_error('includeKnowhow is supported only in normal mode')
+        # D16（設計 rag-two-modes §11.13）: 先輩チャットをノウハウだけで答える。技術KB・法令KBは検索しない。
+        knowhow_only = body.get('knowhowOnly', False)
+        if type(knowhow_only) is not bool:
+            return validation_error('knowhowOnly must be a boolean')
+        if knowhow_only and not include_knowhow:
+            return validation_error('knowhowOnly requires includeKnowhow')
         if include_knowhow and (
             ENVIRONMENT != 'dev' or not KNOWHOW_ENABLED or not is_admin_caller(event)
         ):
@@ -2512,6 +2569,13 @@ def handle_rag_request(event, context, started_at):
             return validation_error('filters.modelType must be a string')
 
         mode, filters = normalize_mode_and_filters(requested_mode, filters)
+        # 先輩チャットだけ（2026-11-12 itai 決定）: 機種が未選択で、質問に 1 機種の呼び名だけがあれば、
+        # 画面で選んだのと同じ絞り込み（技術KBのフィルタ・ノウハウの機種判定・聞き返し）にする。
+        model_from_question = None
+        if include_knowhow and mode != 'law' and not filters.get('modelType'):
+            model_from_question = question_model.model_from_question(query)
+            if model_from_question:
+                filters['modelType'] = model_from_question
 
         # Generate new session ID if not provided
         if not session_id:
@@ -2580,9 +2644,14 @@ def handle_rag_request(event, context, started_at):
                     compose_search_query(query, chat_history), chat_history,
                     request_deadline=request_deadline,
                 )
-                knowhow_result = search_index(
+                knowhow_search = search_index if os.environ.get('KNOWHOW_BACKEND', 'local') == 'local' else retrieve_cards
+                knowhow_result = knowhow_search(
                     knowhow_index, knowhow_search_query, model_type=filters.get('modelType')
                 )
+                # WP4: only the active published version (manifest) for an allowed audience is used.
+                confirmed = confirm_published(knowhow_result['matches'])
+                knowhow_result = {**knowhow_result, 'matches': confirmed,
+                                  'status': 'matched' if confirmed else 'not_found'}
                 knowhow_hints = derive_kb_hints(knowhow_result['matches'])
                 knowhow_payload = {
                     'status': knowhow_result['status'],
@@ -2603,6 +2672,53 @@ def handle_rag_request(event, context, started_at):
                     }, ensure_ascii=False),
                 }
 
+        if knowhow_only:
+            response_type, ai_response = knowhow_answer.answer(
+                query, knowhow_payload, chat_history,
+                lambda system_prompt, messages: invoke_generation(
+                    bedrock_runtime, BEDROCK_MODEL_ID, system_prompt, messages, call_name='knowhow_answer',
+                )[0],
+            )
+            if model_from_question:
+                ai_response = question_model.notice(model_from_question) + '\n' + ai_response
+            session_title = _fallback_session_title(query) if not chat_history else None
+            user_message_id = save_message_to_dynamodb(
+                session_id=session_id, user_id=user_id, role='user', content=query,
+                rag_mode=mode,
+                senpai_conversation_id=senpai_conversation_id if senpai_tagged else None,
+                senpai_turn_id=senpai_turn_id if senpai_tagged else None,
+            )
+            if not chat_history:
+                enqueue_session_title(session_id, user_message_id, user_id, query)
+            ai_message_id = save_message_to_dynamodb(
+                session_id=session_id, user_id=user_id, role='assistant',
+                content=ai_response, response_type=response_type,
+                query_filters=filters or {},
+                rag_mode=mode,
+                senpai_conversation_id=senpai_conversation_id if senpai_tagged else None,
+                senpai_turn_id=senpai_turn_id if senpai_tagged else None,
+                knowhow=knowhow_payload,
+            )
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': json.dumps({
+                    'sessionId': session_id,
+                    **senpai_response_fields,
+                    'sessionTitle': session_title,
+                    'userMessageId': user_message_id,
+                    'aiMessageId': ai_message_id,
+                    'responseType': response_type,
+                    'clarifyQuestions': [],
+                    'pageCandidates': [],
+                    'content': ai_response,
+                    'citations': [],
+                    'sourceDocuments': [],
+                    'knowhow': knowhow_payload,
+                    'timestamp': _utc_now_iso()
+                }, ensure_ascii=False)
+            }
+
         # --- Phase1: 聞き返しゲート（検索前） ---
         # 法令modeは設備症状用の聞き返しルールと通常KBの機種filterを使わない。
         response_type = 'pages'
@@ -2618,6 +2734,8 @@ def handle_rag_request(event, context, started_at):
         )
         if should_clarify:
             ai_response = build_clarify_content(clarify_questions)
+            if model_from_question:
+                ai_response = question_model.notice(model_from_question) + '\n\n' + ai_response
             response_type = 'clarify'
             session_title = _fallback_session_title(query) if not chat_history else None
             user_message_id = save_message_to_dynamodb(
@@ -2722,6 +2840,8 @@ def handle_rag_request(event, context, started_at):
                 '対象の法令・工事条件を補足するか、e-Gov原文をご確認ください。'
                 if mode == 'law' else build_not_found_content(filters)
             )
+            if model_from_question:
+                ai_response = question_model.notice(model_from_question) + '\n\n' + ai_response
             citations, source_documents = extract_citations(
                 kb_results, mode, rank_key=RERANK_RANK_KEY
             )
@@ -2803,6 +2923,8 @@ def handle_rag_request(event, context, started_at):
             search_query=search_query,
             rank_key=RERANK_RANK_KEY,
         )
+        if model_from_question:
+            ai_response = question_model.notice(model_from_question) + '\n\n' + ai_response
         if mode != 'law' and not filters.get('modelType') and page_candidates:
             # 機種未指定の一般検索であることを明示（断定防止）
             ai_response = (

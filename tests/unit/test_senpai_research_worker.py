@@ -72,7 +72,7 @@ def test_happy_path_completes_job_with_steps_result_and_debug(world):
     assert seqs == list(range(1, len(seqs) + 1))
     assert [s["step"] for s in job["steps"]][:2] == ["understand", "understand"]
     assert job["steps"][-1]["step"] == "verify" and job["steps"][-1]["status"] == "done"
-    assert job["debug"]["budget"]["modelCallsUsed"] == 3
+    assert job["debug"]["budget"]["modelCallsUsed"] == 4
     assert job["debug"]["queries"]["tech"]
 
 

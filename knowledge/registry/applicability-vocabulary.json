@@ -1,0 +1,2549 @@
+{
+  "schema_version": 2,
+  "status": "production",
+  "description": "テーマカードの適用範囲（model_scope）の語彙。APPLICABILITY-TAXONOMY.md をもとに作成し、値の正本として運用する。カード・画面の機種一覧・検索の別名・質問中の機種の呼び名との一致を tests/unit/test_applicability_vocabulary.py で検査する。",
+  "created_from": "knowledge/registry/APPLICABILITY-TAXONOMY.md",
+  "created_at": "2026-11-11",
+  "maintainers": [
+    "itai",
+    "mona"
+  ],
+  "out_of_scope": [
+    "symptoms",
+    "conditions",
+    "lists_model_label",
+    "observed_on",
+    "may_apply_to",
+    "excludes",
+    "scope_note"
+  ],
+  "generic_labels": {
+    "elevator": "全エレ機種",
+    "escalator": "全エス機種"
+  },
+  "id_rule": "id は「種類:最初の正式表記」で作り、以後は変えない。表記を変えるときは value を変え、旧表記を deprecated に移す。法令は版を含まない e-Gov の法令ID。",
+  "axes": {
+    "product_lines": [
+      {
+        "id": "product_line:AXIEZ",
+        "value": "AXIEZ",
+        "admitted": [],
+        "deprecated": [],
+        "ui_filter": {
+          "key": "AXIEZ",
+          "kb_model_types": [
+            "AXIEZ",
+            "AXIEZ(KE-WF・KE-HF)",
+            "駅舎エレ"
+          ],
+          "extra_card_aliases": [
+            "アクシーズ"
+          ]
+        },
+        "question_aliases": [
+          "axiez",
+          "アクシーズ"
+        ],
+        "note": "AXIEZ-LINKs とは別製品（制御方式・巻上機の位置が異なる）。駅舎用（KE-SA 等）は UI では AXIEZ に含める。",
+        "relations": [
+          {
+            "type": "related",
+            "target": "machine_room:MRL",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "control_method:VFGLB",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "control_method:VFGLB-JB",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KE-PF",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KE-RF",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KE-RFS",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KE-BF",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KE-WF",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KE-HF",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KE-SA",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KE-SAT",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KM-SA",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KM-SAT",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          }
+        ]
+      },
+      {
+        "id": "product_line:AXIEZ-LINKs",
+        "value": "AXIEZ-LINKs",
+        "admitted": [
+          "AXIEZ-LINKS"
+        ],
+        "deprecated": [],
+        "ui_filter": {
+          "key": "AXIEZ-LINKs",
+          "kb_model_types": [
+            "AXIEZ-LINKs"
+          ],
+          "extra_card_aliases": [
+            "LINKs",
+            "アクシーズリンクス",
+            "リンクス"
+          ]
+        },
+        "question_aliases": [
+          "axiez-links",
+          "axiez links",
+          "アクシーズリンクス",
+          "links",
+          "リンクス"
+        ],
+        "note": "制御方式は Lists・Vault 上 VFGLF と書かれることが多い。",
+        "relations": [
+          {
+            "type": "related",
+            "target": "machine_room:MRL",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "control_method:VFGLF",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          }
+        ]
+      },
+      {
+        "id": "product_line:NEXCUBE",
+        "value": "NEXCUBE",
+        "admitted": [
+          "Nexcube"
+        ],
+        "deprecated": [
+          "NEXWAY"
+        ],
+        "ui_filter": {
+          "key": "NEXCUBE",
+          "kb_model_types": [
+            "NEXCUBE",
+            "NEXCUBE Limited",
+            "特注機械室レスエレベーター"
+          ],
+          "extra_card_aliases": [
+            "ネクスキューブ"
+          ]
+        },
+        "question_aliases": [
+          "nexcube",
+          "ネクスキューブ"
+        ],
+        "note": "NEXWAY は NEXCUBE の海外呼称（2026-10-20）。カードでは NEXCUBE を使う。",
+        "relations": [
+          {
+            "type": "related",
+            "target": "machine_room:MR",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "control_method:VFGLB-WB",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "control_method:VFGLB-K",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "control_method:VFGH",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "control_method:VFEL",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:KM-LD",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:CM-LB",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:CM-MA",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:ME-CH",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:ME-CM",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:ME-BL",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          }
+        ]
+      },
+      {
+        "id": "product_line:メルシティ",
+        "value": "メルシティ",
+        "admitted": [
+          "MELCITY"
+        ],
+        "deprecated": [],
+        "ui_filter": {
+          "key": "メルシティ",
+          "kb_model_types": [
+            "メルシティ"
+          ],
+          "extra_card_aliases": [
+            "MELCITY"
+          ]
+        },
+        "question_aliases": [
+          "メルシティ",
+          "melcity"
+        ],
+        "note": "",
+        "relations": [
+          {
+            "type": "related",
+            "target": "machine_room:MRL",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "control_method:VFGR",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:AC-PB",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:AC-CB",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          }
+        ]
+      },
+      {
+        "id": "product_line:メルワイド",
+        "value": "メルワイド",
+        "admitted": [
+          "MELWIDE"
+        ],
+        "deprecated": [],
+        "ui_filter": {
+          "key": "メルワイド",
+          "kb_model_types": [
+            "メルワイド"
+          ],
+          "extra_card_aliases": [
+            "MELWIDE"
+          ]
+        },
+        "question_aliases": [
+          "メルワイド",
+          "melwide"
+        ],
+        "note": "",
+        "relations": [
+          {
+            "type": "related",
+            "target": "machine_room:MRL",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "control_method:VFGR",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:AC-PB",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:AC-CB",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          }
+        ]
+      },
+      {
+        "id": "product_line:エスカレーター",
+        "value": "エスカレーター",
+        "admitted": [
+          "escalator"
+        ],
+        "deprecated": [],
+        "ui_filter": {
+          "key": "エスカレーター",
+          "kb_model_types": [
+            "エスカレーター"
+          ],
+          "extra_card_aliases": [
+            "escalator"
+          ]
+        },
+        "question_aliases": [
+          "エスカレーター",
+          "escalator",
+          "エスカ"
+        ],
+        "note": "エスカのカードはエレの制御方式（VF で始まるもの）の軸に載せない。エスカの制御方式は SV で始まる（例: SVFC）。",
+        "relations": [
+          {
+            "type": "related",
+            "target": "control_method:SVFC",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:S1UJ1",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:S6UJ1",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:ZJ2",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          },
+          {
+            "type": "related",
+            "target": "model_abbreviation:ZJ2S",
+            "source": "knowledge/registry/APPLICABILITY-TAXONOMY.md"
+          }
+        ]
+      },
+      {
+        "id": "product_line:elecall",
+        "value": "elecall",
+        "kind": "add_on",
+        "admitted": [
+          "エレコール"
+        ],
+        "deprecated": [],
+        "ui_filter": null,
+        "question_aliases": [],
+        "note": "エレコール。エレベーターと併用して運用する付加仕様の製品（itai、2026-11-11）。機種ではないため、画面の機種一覧と機種フィルタの対象にしない。"
+      }
+    ],
+    "machine_room": [
+      {
+        "id": "machine_room:MRL",
+        "value": "MRL",
+        "admitted": [],
+        "deprecated": [],
+        "note": "機械室なし。"
+      },
+      {
+        "id": "machine_room:MR",
+        "value": "MR",
+        "admitted": [],
+        "deprecated": [
+          "CMR"
+        ],
+        "note": "機械室あり。提供画像 catalog の CMR はカードでは MR と書く。"
+      }
+    ],
+    "control_methods": [
+      {
+        "id": "control_method:VFGLB",
+        "value": "VFGLB",
+        "admitted": [],
+        "deprecated": [],
+        "note": "AXIEZ。VFGLF とは別の制御方式。"
+      },
+      {
+        "id": "control_method:VFGLB-JB",
+        "value": "VFGLB-JB",
+        "admitted": [],
+        "deprecated": [],
+        "note": "catalog の結合セルで要再確認。"
+      },
+      {
+        "id": "control_method:VFGLB-WB",
+        "value": "VFGLB-WB",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "control_method:VFGLB-K",
+        "value": "VFGLB-K",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "control_method:VFGLF",
+        "value": "VFGLF",
+        "admitted": [],
+        "deprecated": [],
+        "note": "AXIEZ-LINKs / NEXIEZ 系。"
+      },
+      {
+        "id": "control_method:VFGH",
+        "value": "VFGH",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "control_method:VFGL",
+        "value": "VFGL",
+        "admitted": [],
+        "deprecated": [],
+        "note": "駅舎用。"
+      },
+      {
+        "id": "control_method:VFGR",
+        "value": "VFGR",
+        "admitted": [],
+        "deprecated": [],
+        "note": "MELCITY / MELWIDE。"
+      },
+      {
+        "id": "control_method:VFEL",
+        "value": "VFEL",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "control_method:SVFC",
+        "value": "SVFC",
+        "admitted": [],
+        "deprecated": [],
+        "note": "エスカレーター用の制御方式（SV で始まる制御方式はエスカレーター用。itai、2026-11-11）。"
+      }
+    ],
+    "model_abbreviations": [
+      {
+        "id": "model_abbreviation:KE-PF",
+        "value": "KE-PF",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KE-RF",
+        "value": "KE-RF",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KE-RFS",
+        "value": "KE-RFS",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KE-BF",
+        "value": "KE-BF",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KE-WF",
+        "value": "KE-WF",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KE-HF",
+        "value": "KE-HF",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KM-LD",
+        "value": "KM-LD",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:CM-LB",
+        "value": "CM-LB",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:CM-MA",
+        "value": "CM-MA",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:ME-CH",
+        "value": "ME-CH",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:ME-CM",
+        "value": "ME-CM",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:ME-BL",
+        "value": "ME-BL",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:AC-PB",
+        "value": "AC-PB",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:AC-CB",
+        "value": "AC-CB",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KF-ETC",
+        "value": "KF-ETC",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KF-MTC",
+        "value": "KF-MTC",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:FE-TA",
+        "value": "FE-TA",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:FM-TA",
+        "value": "FM-TA",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KE-SA",
+        "value": "KE-SA",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KE-SAT",
+        "value": "KE-SAT",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KM-SA",
+        "value": "KM-SA",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:KM-SAT",
+        "value": "KM-SAT",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "model_abbreviation:S1UJ1",
+        "value": "S1UJ1",
+        "admitted": [],
+        "deprecated": [],
+        "note": "エスカレーター（S1000）。"
+      },
+      {
+        "id": "model_abbreviation:S6UJ1",
+        "value": "S6UJ1",
+        "admitted": [],
+        "deprecated": [],
+        "note": "エスカレーター（S600）。"
+      },
+      {
+        "id": "model_abbreviation:ZJ2",
+        "value": "ZJ2",
+        "admitted": [],
+        "deprecated": [],
+        "note": "エスカレーター。"
+      },
+      {
+        "id": "model_abbreviation:ZJ2S",
+        "value": "ZJ2S",
+        "admitted": [],
+        "deprecated": [],
+        "note": "エスカレーター。"
+      }
+    ],
+    "guide_systems": [
+      {
+        "id": "guide_system:roller_guide",
+        "value": "roller_guide",
+        "admitted": [],
+        "deprecated": [],
+        "note": "ローラーガイド。"
+      }
+    ],
+    "door_families": [
+      {
+        "id": "door_family:L型",
+        "value": "L型",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "door_family:K型",
+        "value": "K型",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      }
+    ],
+    "door_types": [
+      {
+        "id": "door_type:LV5K",
+        "value": "LV5K",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "door_type:LV5K-2S",
+        "value": "LV5K-2S",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "door_type:LV5K-CO/2S",
+        "value": "LV5K-CO/2S",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "door_type:LV6K",
+        "value": "LV6K",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "door_type:LV6K-CO/2S",
+        "value": "LV6K-CO/2S",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "door_type:LV6K-CO/2S/SS/2CO",
+        "value": "LV6K-CO/2S/SS/2CO",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "door_type:LV0K-7-2S",
+        "value": "LV0K-7-2S",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "door_type:KV4K-3",
+        "value": "KV4K-3",
+        "admitted": [
+          "KV4"
+        ],
+        "deprecated": [],
+        "note": "戸閉装置型名。KV4 は略称。"
+      },
+      {
+        "id": "door_type:K4N-2",
+        "value": "K4N-2",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "door_type:2S",
+        "value": "2S",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "door_type:気配りドア付",
+        "value": "気配りドア付",
+        "admitted": [],
+        "deprecated": [],
+        "note": "付加機能。"
+      },
+      {
+        "id": "door_type:HMS",
+        "value": "HMS",
+        "admitted": [],
+        "deprecated": [],
+        "note": "付加機能。"
+      },
+      {
+        "id": "door_type:MBS",
+        "value": "MBS",
+        "admitted": [],
+        "deprecated": [],
+        "note": "付加機能。"
+      },
+      {
+        "id": "door_type:CM-LB戸短検出（ラッチあり）",
+        "value": "CM-LB戸短検出（ラッチあり）",
+        "admitted": [],
+        "deprecated": [],
+        "note": "要確認: 型式コードではなく説明の可能性。カード 1 枚で使用（2026-11-11）。"
+      },
+      {
+        "id": "door_type:M系2S/2CO低速",
+        "value": "M系2S/2CO低速",
+        "admitted": [],
+        "deprecated": [],
+        "note": "要確認: 型式コードではなく説明の可能性。カード 1 枚で使用（2026-11-11）。"
+      }
+    ]
+  },
+  "items": {
+    "laws": [
+      {
+        "id": "law:325AC0000000201",
+        "value": "建築基準法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "325AC0000000201_20260527_508AC0000000023",
+        "note": ""
+      },
+      {
+        "id": "law:325CO0000000338",
+        "value": "建築基準法施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "325CO0000000338_20251201_507CO0000000377",
+        "note": ""
+      },
+      {
+        "id": "law:325M50004000040",
+        "value": "建築基準法施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "325M50004000040_20260401_508M60000800022",
+        "note": ""
+      },
+      {
+        "id": "law:323AC1000000186",
+        "value": "消防法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "323AC1000000186_20250601_504AC0000000068",
+        "note": ""
+      },
+      {
+        "id": "law:336CO0000000037",
+        "value": "消防法施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "336CO0000000037_20251001_507CO0000000085",
+        "note": ""
+      },
+      {
+        "id": "law:336M50000008006",
+        "value": "消防法施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "336M50000008006_20260626_508M60000008081",
+        "note": ""
+      },
+      {
+        "id": "law:418AC0000000091",
+        "value": "高齢者、障害者等の移動等の円滑化の促進に関する法律",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "418AC0000000091_20250401_505AC0000000024",
+        "note": ""
+      },
+      {
+        "id": "law:418CO0000000379",
+        "value": "高齢者、障害者等の移動等の円滑化の促進に関する法律施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "418CO0000000379_20250601_506CO0000000221",
+        "note": ""
+      },
+      {
+        "id": "law:418M60000800110",
+        "value": "高齢者、障害者等の移動等の円滑化の促進に関する法律施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "418M60000800110_20250601_506M60000800100",
+        "note": ""
+      },
+      {
+        "id": "law:418M60000800114",
+        "value": "高齢者、障害者等が円滑に利用できるようにするために誘導すべき建築物特定施設の構造及び配置に関する基準を定める省令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "418M60000800114_20250601_506M60000800100",
+        "note": ""
+      },
+      {
+        "id": "law:347AC0000000057",
+        "value": "労働安全衛生法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "347AC0000000057_20260401_507AC0000000033",
+        "note": ""
+      },
+      {
+        "id": "law:347CO0000000318",
+        "value": "労働安全衛生法施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "347CO0000000318_20260401_507CO0000000361",
+        "note": ""
+      },
+      {
+        "id": "law:347M50002000032",
+        "value": "労働安全衛生規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "347M50002000032_20260801_508M60000100086",
+        "note": ""
+      },
+      {
+        "id": "law:347M50002000034",
+        "value": "クレーン等安全規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "347M50002000034_20260401_508M60000100003",
+        "note": ""
+      },
+      {
+        "id": "law:347M50002000035",
+        "value": "ゴンドラ安全規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "347M50002000035_20260401_508M60000100003",
+        "note": ""
+      },
+      {
+        "id": "law:347M50002000042",
+        "value": "酸素欠乏症等防止規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "347M50002000042_20260401_508M60000100003",
+        "note": ""
+      },
+      {
+        "id": "law:417M60000100021",
+        "value": "石綿障害予防規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "417M60000100021_20260401_508M60000100003",
+        "note": ""
+      },
+      {
+        "id": "law:354M50002000018",
+        "value": "粉じん障害防止規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "354M50002000018_20260901_508M60000100116",
+        "note": ""
+      },
+      {
+        "id": "law:347M50002000036",
+        "value": "有機溶剤中毒予防規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "347M50002000036_20260901_508M60000100116",
+        "note": ""
+      },
+      {
+        "id": "law:347M50002000039",
+        "value": "特定化学物質障害予防規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "347M50002000039_20260901_508M60000100116",
+        "note": ""
+      },
+      {
+        "id": "law:322AC0000000049",
+        "value": "労働基準法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "322AC0000000049_20260717_508AC0000000060",
+        "note": ""
+      },
+      {
+        "id": "law:322M40000100023",
+        "value": "労働基準法施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "322M40000100023_20260401_508M60000100057",
+        "note": ""
+      },
+      {
+        "id": "law:339AC0000000170",
+        "value": "電気事業法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "339AC0000000170_20260803_508AC0000000068",
+        "note": ""
+      },
+      {
+        "id": "law:409M50000400052",
+        "value": "電気設備に関する技術基準を定める省令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "409M50000400052_20230320_504M60000400096",
+        "note": ""
+      },
+      {
+        "id": "law:335AC0000000139",
+        "value": "電気工事士法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "335AC0000000139_20250601_504AC0000000068",
+        "note": ""
+      },
+      {
+        "id": "law:345AC1000000096",
+        "value": "電気工事業の業務の適正化に関する法律",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "345AC1000000096_20250601_504AC0000000068",
+        "note": ""
+      },
+      {
+        "id": "law:345CO0000000327",
+        "value": "電気工事業の業務の適正化に関する法律施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "345CO0000000327_20191216_501CO0000000183",
+        "note": ""
+      },
+      {
+        "id": "law:345M50000400103",
+        "value": "電気工事業の業務の適正化に関する法律施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "345M50000400103_20250731_507M60000400056",
+        "note": ""
+      },
+      {
+        "id": "law:336AC0000000234",
+        "value": "電気用品安全法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "336AC0000000234_20251225_506AC0000000067",
+        "note": ""
+      },
+      {
+        "id": "law:324AC0000000100",
+        "value": "建設業法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "324AC0000000100_20251212_506AC0000000049",
+        "note": ""
+      },
+      {
+        "id": "law:412AC0000000104",
+        "value": "建設工事に係る資材の再資源化等に関する法律",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "412AC0000000104_20250601_504AC0000000068",
+        "note": ""
+      },
+      {
+        "id": "law:412CO0000000495",
+        "value": "建設工事に係る資材の再資源化等に関する法律施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "412CO0000000495_20250401_506CO0000000172",
+        "note": ""
+      },
+      {
+        "id": "law:414M60001800001",
+        "value": "建設工事に係る資材の再資源化等に関する法律施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "414M60001800001_20210901_503M60001800002",
+        "note": ""
+      },
+      {
+        "id": "law:345AC0000000137",
+        "value": "廃棄物の処理及び清掃に関する法律",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "345AC0000000137_20260701_508AC0000000022",
+        "note": ""
+      },
+      {
+        "id": "law:346CO0000000300",
+        "value": "廃棄物の処理及び清掃に関する法律施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "346CO0000000300_20260401_508CO0000000066",
+        "note": ""
+      },
+      {
+        "id": "law:346M50000100035",
+        "value": "廃棄物の処理及び清掃に関する法律施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "346M50000100035_20260701_508M60001000019",
+        "note": ""
+      },
+      {
+        "id": "law:343AC0000000097",
+        "value": "大気汚染防止法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "343AC0000000097_20260701_508AC0000000022",
+        "note": ""
+      },
+      {
+        "id": "law:343CO0000000329",
+        "value": "大気汚染防止法施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "343CO0000000329_20221001_503CO0000000275",
+        "note": ""
+      },
+      {
+        "id": "law:346M50000500001",
+        "value": "大気汚染防止法施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "346M50000500001_20260701_508M60001000019",
+        "note": ""
+      },
+      {
+        "id": "law:343AC0000000098",
+        "value": "騒音規制法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "343AC0000000098_20260701_508AC0000000022",
+        "note": ""
+      },
+      {
+        "id": "law:343CO0000000324",
+        "value": "騒音規制法施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "343CO0000000324_20221201_503CO0000000346",
+        "note": ""
+      },
+      {
+        "id": "law:346M50014D00001",
+        "value": "騒音規制法施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "346M50014D00001_20210401_503M60001000003",
+        "note": ""
+      },
+      {
+        "id": "law:351AC0000000064",
+        "value": "振動規制法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "351AC0000000064_20250601_504AC0000000068",
+        "note": ""
+      },
+      {
+        "id": "law:351CO0000000280",
+        "value": "振動規制法施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "351CO0000000280_20221201_503CO0000000346",
+        "note": ""
+      },
+      {
+        "id": "law:351M50000002058",
+        "value": "振動規制法施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "351M50000002058_20210401_503M60001000003",
+        "note": ""
+      },
+      {
+        "id": "law:327AC1000000180",
+        "value": "道路法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "327AC1000000180_20260723_508AC0000000065",
+        "note": ""
+      },
+      {
+        "id": "law:327CO0000000479",
+        "value": "道路法施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "327CO0000000479_20260401_507CO0000000444",
+        "note": ""
+      },
+      {
+        "id": "law:327M50004000025",
+        "value": "道路法施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "327M50004000025_20260401_508M60000800038",
+        "note": ""
+      },
+      {
+        "id": "law:335AC0000000105",
+        "value": "道路交通法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "335AC0000000105_20260721_508AC0000000052",
+        "note": ""
+      },
+      {
+        "id": "law:335CO0000000270",
+        "value": "道路交通法施行令",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "335CO0000000270_20260901_506CO0000000248",
+        "note": ""
+      },
+      {
+        "id": "law:335M50000002060",
+        "value": "道路交通法施行規則",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "335M50000002060_20260901_506M60000002067",
+        "note": ""
+      },
+      {
+        "id": "law:326AC0000000204",
+        "value": "高圧ガス保安法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "326AC0000000204_20251001_507AC0000000044",
+        "note": ""
+      },
+      {
+        "id": "law:350AC0000000028",
+        "value": "作業環境測定法",
+        "admitted": [],
+        "deprecated": [],
+        "current_folder": "350AC0000000028_20260401_507AC0000000033",
+        "note": ""
+      }
+    ],
+    "document_categories": [
+      {
+        "id": "document_category:C資料",
+        "value": "C資料",
+        "admitted": [],
+        "deprecated": [
+          "03_C資料"
+        ],
+        "note": "旧 TSV の document_type は deprecated に置く"
+      },
+      {
+        "id": "document_category:Qシート",
+        "value": "Qシート",
+        "admitted": [],
+        "deprecated": [
+          "06_Qシート"
+        ],
+        "note": "旧 TSV の document_type は deprecated に置く"
+      },
+      {
+        "id": "document_category:W資料",
+        "value": "W資料",
+        "admitted": [],
+        "deprecated": [
+          "12_W資料"
+        ],
+        "note": "旧 TSV の document_type は deprecated に置く"
+      },
+      {
+        "id": "document_category:テクニカルインフォメーション",
+        "value": "テクニカルインフォメーション",
+        "admitted": [],
+        "deprecated": [
+          "04_テクニカルインフォメーション"
+        ],
+        "note": "旧 TSV の document_type は deprecated に置く"
+      },
+      {
+        "id": "document_category:品質管理業務マニュアル",
+        "value": "品質管理業務マニュアル",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      },
+      {
+        "id": "document_category:据付ノート",
+        "value": "据付ノート",
+        "admitted": [],
+        "deprecated": [
+          "01_据付ノート"
+        ],
+        "note": "旧 TSV の document_type は deprecated に置く"
+      },
+      {
+        "id": "document_category:据付基準",
+        "value": "据付基準",
+        "admitted": [],
+        "deprecated": [
+          "02_据付基準"
+        ],
+        "note": "旧 TSV の document_type は deprecated に置く"
+      },
+      {
+        "id": "document_category:据付場用図",
+        "value": "据付場用図",
+        "admitted": [],
+        "deprecated": [
+          "05_据付場用図"
+        ],
+        "note": "旧 TSV の document_type は deprecated に置く"
+      },
+      {
+        "id": "document_category:災害事例集",
+        "value": "災害事例集",
+        "admitted": [],
+        "deprecated": [
+          "07_災害事例"
+        ],
+        "note": "旧 TSV の document_type は deprecated に置く"
+      },
+      {
+        "id": "document_category:現場代理人業務マニュアル",
+        "value": "現場代理人業務マニュアル",
+        "admitted": [],
+        "deprecated": [],
+        "note": ""
+      }
+    ]
+  },
+  "misplaced": [
+    {
+      "axis": "control_methods",
+      "value": "LINKS",
+      "move_to_axis": "product_lines",
+      "move_to_value": "AXIEZ-LINKs",
+      "note": "製品名が制御方式の欄にある。"
+    },
+    {
+      "axis": "control_methods",
+      "value": "AXIEZ-LINKS",
+      "move_to_axis": "product_lines",
+      "move_to_value": "AXIEZ-LINKs",
+      "note": "製品名が制御方式の欄にある。"
+    },
+    {
+      "axis": "control_methods",
+      "value": "AXIEZ",
+      "move_to_axis": "product_lines",
+      "move_to_value": "AXIEZ",
+      "note": "製品名が制御方式の欄にある。"
+    },
+    {
+      "axis": "control_methods",
+      "value": "CM-MA",
+      "move_to_axis": "model_abbreviations",
+      "move_to_value": "CM-MA",
+      "note": "機種略称が制御方式の欄にある。"
+    },
+    {
+      "axis": "control_methods",
+      "value": "KM-LD",
+      "move_to_axis": "model_abbreviations",
+      "move_to_value": "KM-LD",
+      "note": "機種略称が制御方式の欄にある。"
+    },
+    {
+      "axis": "control_methods",
+      "value": "KM-SA",
+      "move_to_axis": "model_abbreviations",
+      "move_to_value": "KM-SA",
+      "note": "機種略称が制御方式の欄にある。"
+    },
+    {
+      "axis": "model_abbreviations",
+      "value": "NEXWAY",
+      "move_to_axis": "product_lines",
+      "move_to_value": "NEXCUBE",
+      "note": "NEXWAY は NEXCUBE の海外呼称で、機種略称ではない。"
+    },
+    {
+      "axis": "door_types",
+      "value": "L型",
+      "move_to_axis": "door_families",
+      "move_to_value": "L型",
+      "note": "ドアの大分類がドア型式の欄にある。"
+    },
+    {
+      "axis": "guide_systems",
+      "value": "メンテコン",
+      "move_to_axis": null,
+      "move_to_value": null,
+      "note": "要確認: ガイド方式ではない可能性。置き場を決める。"
+    },
+    {
+      "axis": "door_families",
+      "value": "タッチレス乗場・かご内",
+      "move_to_axis": null,
+      "move_to_value": null,
+      "note": "要確認: L型 / K型の大分類ではない。置き場を決める。"
+    }
+  ],
+  "kb_value_map": {
+    "source": "knowledge/registry/kb-document-index.jsonl",
+    "as_of": "2026-08-26",
+    "note": "KB のメタデータの値と項目の対応。needs_review は未判断（取扱外の決定ではない。取扱外にするには業務スコープの共同確認が要る）。model_type は「 / 」区切りを要素に分けて数えた文書数。",
+    "model_type": [
+      {
+        "kb_value": "AXIEZ",
+        "documents": 1116,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:AXIEZ"
+        ]
+      },
+      {
+        "kb_value": "AXIEZ-LINKs",
+        "documents": 913,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:AXIEZ-LINKs"
+        ]
+      },
+      {
+        "kb_value": "general",
+        "documents": 487,
+        "status": "all_models",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXCUBE",
+        "documents": 483,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:NEXCUBE"
+        ]
+      },
+      {
+        "kb_value": "NEXIEZ-MRL Version 2",
+        "documents": 397,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "*",
+        "documents": 332,
+        "status": "all_models",
+        "maps_to": []
+      },
+      {
+        "kb_value": "機械室レス荷物用(中抵製)",
+        "documents": 329,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "メルシティ",
+        "documents": 292,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:メルシティ"
+        ]
+      },
+      {
+        "kb_value": "メルワイド",
+        "documents": 291,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:メルワイド"
+        ]
+      },
+      {
+        "kb_value": "機械室レス荷物用(モダニ)",
+        "documents": 155,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "AXIEZ(KE-WF・KE-HF)",
+        "documents": 146,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:AXIEZ"
+        ]
+      },
+      {
+        "kb_value": "NEXIEZ-MRL",
+        "documents": 104,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "エスカレーター",
+        "documents": 83,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:エスカレーター"
+        ]
+      },
+      {
+        "kb_value": "NexWay-S",
+        "documents": 78,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXIEZ",
+        "documents": 75,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NexWay",
+        "documents": 74,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Elemotion+",
+        "documents": 71,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXCUBE Limited",
+        "documents": 71,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:NEXCUBE"
+        ]
+      },
+      {
+        "kb_value": "ELENESSA",
+        "documents": 70,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MAXIEZ LZ",
+        "documents": 51,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MAXIEZ CZ",
+        "documents": 47,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "モダニゼーションAXIEZ",
+        "documents": 45,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "レールブラケット",
+        "documents": 42,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Diamond Trac2",
+        "documents": 39,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "DIAMOND TRAC",
+        "documents": 38,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Elemotion+ [ZERO]",
+        "documents": 34,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION-IZ",
+        "documents": 33,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION-IM",
+        "documents": 32,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MAXIEZ-B",
+        "documents": 32,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "中高速モダニ",
+        "documents": 32,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEPAQ i",
+        "documents": 30,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION-TZ",
+        "documents": 29,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "駅舎エレ",
+        "documents": 29,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:AXIEZ"
+        ]
+      },
+      {
+        "kb_value": "DIAMOND HS",
+        "documents": 28,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION-AZ",
+        "documents": 28,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEPAQ",
+        "documents": 25,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXCUBEモダニゼーション",
+        "documents": 25,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "制御モダニ",
+        "documents": 23,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELENESSA-IP",
+        "documents": 21,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "特注機械室レスエレベーター",
+        "documents": 21,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:NEXCUBE"
+        ]
+      },
+      {
+        "kb_value": "EleFine",
+        "documents": 20,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "EleFine+",
+        "documents": 20,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "モダニゼーション",
+        "documents": 20,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION-LS",
+        "documents": 18,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXIEZ-Fit",
+        "documents": 18,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXIEZ-GPX",
+        "documents": 18,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXIEZ-GPX-MRL",
+        "documents": 18,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXIEZ-LITE",
+        "documents": 18,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION-IH",
+        "documents": 17,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXIEZ-S",
+        "documents": 17,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION-HS",
+        "documents": 16,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ニューグランディ",
+        "documents": 16,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION一括改修(ウォーム巻上機)",
+        "documents": 15,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NexWay MODERNIZATION",
+        "documents": 15,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ニューアクセルAI",
+        "documents": 15,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION E系制御改修(巻上機取替)",
+        "documents": 14,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION E系制御改修(巻上機流用)",
+        "documents": 14,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION M系制御改修(巻上機取替)",
+        "documents": 14,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION M系制御改修(巻上機流用)",
+        "documents": 14,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELENESSA-AP",
+        "documents": 14,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "AXIEZ-LINKsモダニ",
+        "documents": 13,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Elemotion+[STEP]",
+        "documents": 13,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPM-3U",
+        "documents": 13,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPM-III",
+        "documents": 13,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "アクセルAI",
+        "documents": 13,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION-TY",
+        "documents": 12,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MAXIEZ-H",
+        "documents": 11,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MAXIEZ-M",
+        "documents": 11,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXIEZ-LITE MRL",
+        "documents": 11,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NexWay-S MODERNIZATION",
+        "documents": 11,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "中小形荷物用(中抵製)",
+        "documents": 11,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "規格荷物用MRLエレ",
+        "documents": 11,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION",
+        "documents": 10,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ELEMOTION一括改修(ヘリカル巻上機)",
+        "documents": 10,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPS-III",
+        "documents": 10,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "アクセルVF",
+        "documents": 10,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "中小形荷物用",
+        "documents": 10,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "標準荷物用",
+        "documents": 10,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPS-IIIW",
+        "documents": 9,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPM-IIIMZ",
+        "documents": 8,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPQ",
+        "documents": 8,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "国内マルチブランド分割制御モダニ",
+        "documents": 8,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "AT-MOD",
+        "documents": 7,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Elemotion+ for Compact4",
+        "documents": 7,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPS-IIIMZ",
+        "documents": 7,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MELCITY",
+        "documents": 7,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:メルシティ"
+        ]
+      },
+      {
+        "kb_value": "MELWIDE",
+        "documents": 7,
+        "status": "mapped",
+        "maps_to": [
+          "product_line:メルワイド"
+        ]
+      },
+      {
+        "kb_value": "エレペットアドバンス",
+        "documents": 7,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "グランディ",
+        "documents": 7,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "標準形荷物用",
+        "documents": 7,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "特注形荷物用",
+        "documents": 7,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "規格形荷物用",
+        "documents": 7,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "C2級荷物用",
+        "documents": 6,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPX",
+        "documents": 6,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "コンパクト4",
+        "documents": 6,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "コンパクト4C",
+        "documents": 6,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "大容量荷物用",
+        "documents": 6,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "大形荷物用",
+        "documents": 6,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "小形荷物用",
+        "documents": 6,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "標準小中形荷物用",
+        "documents": 6,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "標準自動車用",
+        "documents": 6,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "特大形荷物用",
+        "documents": 6,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "D3型",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "D型",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "E2型",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "E型",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Fシリーズ",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "NEXIEZ-MRL MP",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "WELL",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "WELL2",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "WELLファミリー",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "エレペット",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "エレペットアドバンスV",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ダイヤグライド",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ホスペット",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "メルピア5",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "斜行エレベーター",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "治工具",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "自動車用エレベーター(横エレOEM)",
+        "documents": 5,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "エレコールシステムセキュリティシステム",
+        "documents": 4,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "三菱小型荷物用昇降機（Ｇシリーズ）",
+        "documents": 4,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "荷物用(横エレOEM)",
+        "documents": 4,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "COMPACT4",
+        "documents": 3,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "DeLITE",
+        "documents": 3,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Elemotion+ for Compact4c",
+        "documents": 3,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "その他上部作業床",
+        "documents": 3,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "ボルトナット・アンカーボルト",
+        "documents": 3,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPM",
+        "documents": 2,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPS",
+        "documents": 2,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPS-II",
+        "documents": 2,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "J*",
+        "documents": 2,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Modernization",
+        "documents": 2,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "CPX-4",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "E*",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "EP",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Elemotion+ for MELWIDE",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Freight elevator",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Freight elevator(TMEC)",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "GPM-L",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SEB-0",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SED200",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SED200S",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SED200S (New)",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SED300",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SED300S",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SED300S (New)",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SHA300S",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SVA-0",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SVB200",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SVC200",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SVC200 (New)",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SVC200D",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SVC200S",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SVC250L (New)",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SVC260D",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SVC260SL",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Home Elevator SVC280S",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "LINKs上部作業床",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "LM-EX",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MELSAFETY-P",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MP",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MP-II",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MP-III",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "MP-VF",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "S2-GAW",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "SP",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "SP-II",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "SP-III",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "SP-VF",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "SP-VF(R)",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "SP-VM",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "Standard type freight elevator",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "グローバル保守基盤システム",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      },
+      {
+        "kb_value": "グローバル遠隔監視装置 GRM-3XXXシリーズ",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      }
+    ],
+    "category": [
+      {
+        "kb_value": "据付場用図",
+        "documents": 2027,
+        "status": "mapped",
+        "maps_to": [
+          "document_category:据付場用図"
+        ]
+      },
+      {
+        "kb_value": "C資料",
+        "documents": 729,
+        "status": "mapped",
+        "maps_to": [
+          "document_category:C資料"
+        ]
+      },
+      {
+        "kb_value": "テクニカルインフォメーション",
+        "documents": 308,
+        "status": "mapped",
+        "maps_to": [
+          "document_category:テクニカルインフォメーション"
+        ]
+      },
+      {
+        "kb_value": "災害事例集",
+        "documents": 294,
+        "status": "mapped",
+        "maps_to": [
+          "document_category:災害事例集"
+        ]
+      },
+      {
+        "kb_value": "Qシート",
+        "documents": 156,
+        "status": "mapped",
+        "maps_to": [
+          "document_category:Qシート"
+        ]
+      },
+      {
+        "kb_value": "据付基準",
+        "documents": 121,
+        "status": "mapped",
+        "maps_to": [
+          "document_category:据付基準"
+        ]
+      },
+      {
+        "kb_value": "据付ノート",
+        "documents": 67,
+        "status": "mapped",
+        "maps_to": [
+          "document_category:据付ノート"
+        ]
+      },
+      {
+        "kb_value": "現場代理人業務マニュアル",
+        "documents": 30,
+        "status": "mapped",
+        "maps_to": [
+          "document_category:現場代理人業務マニュアル"
+        ]
+      },
+      {
+        "kb_value": "品質管理業務マニュアル",
+        "documents": 7,
+        "status": "mapped",
+        "maps_to": [
+          "document_category:品質管理業務マニュアル"
+        ]
+      },
+      {
+        "kb_value": "W資料",
+        "documents": 5,
+        "status": "mapped",
+        "maps_to": [
+          "document_category:W資料"
+        ]
+      },
+      {
+        "kb_value": "TEST",
+        "documents": 1,
+        "status": "needs_review",
+        "maps_to": []
+      }
+    ]
+  }
+}

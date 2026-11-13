@@ -19,6 +19,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 RETRIEVAL = ROOT / "lambda/rag/rag-function/knowhow_retrieval.py"
 BUILD_SCRIPT = ROOT / "scripts/knowledge/build-senpai-index.mjs"
+# MODEL_ALIASES・汎用ラベルは語彙ファイルから生成し、build-senpai-index.mjs と画面が import する。
+BUILD_VOCAB = ROOT / "scripts/knowledge/vocabulary.generated.mjs"
+FRONTEND_VOCAB = ROOT / "frontend/src/data/kb-model-types.generated.mjs"
 FRONTEND_LIB = ROOT / "frontend/src/lib/knowledge-research.mjs"
 FIXTURE = ROOT / "tests/fixtures/knowledge/synthetic/built-index.json"
 QUEUE_SCRIPT = ROOT / "scripts/knowledge/build_scope_review_queue.py"
@@ -78,7 +81,7 @@ def _js_string_map(path: Path, name: str) -> dict[str, str]:
 
 def _js_alias_map(path: Path, name: str) -> dict[str, set[str]]:
     return {key: set(re.findall(r"'([^']+)'", values))
-            for key, values in re.findall(r"'([^']+)': \[([^\]]*)\]", _js_block(path, name))}
+            for key, values in re.findall(r"'([^']+)': (?:Object\.freeze\()?\[([^\]]*)\]", _js_block(path, name))}
 
 
 def _js_string(path: Path, name: str) -> str:
@@ -98,6 +101,8 @@ def test_source_types_and_identity_keys_match_across_lambda_builder_and_frontend
     assert set(lambda_module.SOURCE_TYPES) == _js_set(BUILD_SCRIPT, "SOURCE_REF_TYPES")
     assert dict(lambda_module.SOURCE_ID_KEYS) == _js_string_map(BUILD_SCRIPT, "SOURCE_ID_KEYS")
     assert dict(lambda_module.SOURCE_ID_KEYS) == _js_string_map(FRONTEND_LIB, "KNOWHOW_SOURCE_IDS")
+    assert set(lambda_module.KNOWHOW_ORIGINS) == _js_set(BUILD_SCRIPT, "KNOWHOW_ORIGINS")
+    assert set(lambda_module.KNOWHOW_ORIGINS) == _js_set(FRONTEND_LIB, "KNOWHOW_ORIGINS")
 
 
 def test_scope_status_values_and_date_pattern_match_between_lambda_and_builder():
@@ -108,9 +113,12 @@ def test_scope_status_values_and_date_pattern_match_between_lambda_and_builder()
 
 def test_model_aliases_and_generic_labels_match_between_lambda_and_builder():
     lambda_module = _retrieval()
-    assert {key: set(values) for key, values in lambda_module.MODEL_ALIASES.items()} == _js_alias_map(BUILD_SCRIPT, "MODEL_ALIASES")
-    assert lambda_module.GENERIC_ELEVATOR_LABEL == _js_string(BUILD_SCRIPT, "GENERIC_ELEVATOR_LABEL")
-    assert lambda_module.GENERIC_ESCALATOR_LABEL == _js_string(BUILD_SCRIPT, "GENERIC_ESCALATOR_LABEL")
+    assert {key: set(values) for key, values in lambda_module.MODEL_ALIASES.items()} == _js_alias_map(BUILD_VOCAB, "MODEL_ALIASES")
+    assert lambda_module.GENERIC_ELEVATOR_LABEL == _js_string(BUILD_VOCAB, "GENERIC_ELEVATOR_LABEL")
+    assert lambda_module.GENERIC_ESCALATOR_LABEL == _js_string(BUILD_VOCAB, "GENERIC_ESCALATOR_LABEL")
+    build_text = BUILD_SCRIPT.read_text(encoding="utf-8")
+    assert "from './vocabulary.generated.mjs'" in build_text
+    assert "const MODEL_ALIASES" not in build_text
     assert set(lambda_module.MODEL_CLASSIFY_KEYS) == _js_set(BUILD_SCRIPT, "MODEL_CLASSIFY_KEYS")
 
 
@@ -197,4 +205,7 @@ def test_fixture_search_terms_have_no_duplicates(index):
 def test_model_fit_values_and_products_match_between_lambda_and_frontend():
     lambda_module = _retrieval()
     assert set(lambda_module.MODEL_FIT_VALUES) == _js_set(FRONTEND_LIB, "KNOWHOW_MODEL_FITS")
-    assert set(lambda_module.MODEL_ALIASES) == _js_set(FRONTEND_LIB, "KNOWHOW_MODEL_PRODUCTS")
+    keys = re.search(r"export const KB_MODEL_KEYS = Object\.freeze\(\[(.*?)\]\);", FRONTEND_VOCAB.read_text(encoding="utf-8"))
+    assert keys, "KB_MODEL_KEYS not found"
+    assert set(lambda_module.MODEL_ALIASES) == set(re.findall(r"'([^']+)'", keys.group(1)))
+    assert "const KNOWHOW_MODEL_PRODUCTS = new Set(KB_MODEL_KEYS);" in FRONTEND_LIB.read_text(encoding="utf-8")

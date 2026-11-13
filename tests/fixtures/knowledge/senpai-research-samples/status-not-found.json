@@ -2,13 +2,25 @@
   "body": {
     "debug": {
       "budget": {
-        "elapsedMaxMs": 60000,
-        "elapsedMs": 300,
-        "modelCallsMax": 4,
+        "elapsedMaxMs": 90000,
+        "elapsedMs": 900,
+        "inputBytesMax": 120000,
+        "modelCallsMax": 10,
         "modelCallsUsed": 2,
-        "searchesMax": 6,
+        "searchesMax": 18,
         "searchesUsed": 2
       },
+      "coverage": {
+        "missing": [
+          "A1"
+        ],
+        "supported": []
+      },
+      "grounding": {
+        "mode": "not_run"
+      },
+      "lastJudgment": "insufficient",
+      "progress": [],
       "queries": {
         "knowhow": "ドア 異音",
         "law": [],
@@ -17,26 +29,81 @@
           "AXIEZ-LINKs ドア 開閉 異音"
         ]
       },
+      "stages": [
+        {
+          "completed": true,
+          "modelCalls": 1,
+          "ms": 50,
+          "stage": "understand",
+          "usage": {},
+          "usageMissing": true
+        },
+        {
+          "completed": true,
+          "evidenceValidity": "unassessed",
+          "ms": 50,
+          "searches": 0,
+          "selected": 0,
+          "stage": "knowhow"
+        },
+        {
+          "completed": true,
+          "modelCalls": 1,
+          "ms": 50,
+          "stage": "sufficiency",
+          "usage": {},
+          "usageMissing": true
+        },
+        {
+          "evidenceValidity": "unassessed",
+          "ms": 100,
+          "newCandidateItems": 0,
+          "newExposedEvidence": 0,
+          "searchesCharged": 1,
+          "selected": 0,
+          "seq": 6,
+          "stage": "tech_search"
+        },
+        {
+          "evidenceValidity": "unassessed",
+          "ms": 101,
+          "newCandidateItems": 0,
+          "newExposedEvidence": 0,
+          "searchesCharged": 1,
+          "selected": 0,
+          "seq": 6,
+          "stage": "tech_search"
+        }
+      ],
+      "stopDetail": null,
       "tools": [
         {
+          "evidenceValidity": "unassessed",
           "filters": {
             "modelType": "AXIEZ-LINKs"
           },
           "hits": 0,
-          "ms": 50,
+          "ms": 100,
+          "newCandidateItems": 0,
+          "newExposedEvidence": 0,
           "query": "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか",
+          "searchesCharged": 1,
           "selected": 0,
           "seq": 6,
           "tool": "tech_search",
           "topScores": []
         },
         {
+          "evidenceValidity": "unassessed",
           "filters": {
             "modelType": "AXIEZ-LINKs"
           },
           "hits": 0,
-          "ms": 50,
+          "ms": 101,
+          "newCandidateItems": 0,
+          "newExposedEvidence": 0,
           "query": "AXIEZ-LINKs ドア 開閉 異音",
+          "searchesCharged": 1,
           "selected": 0,
           "seq": 6,
           "tool": "tech_search",
@@ -44,6 +111,13 @@
         }
       ],
       "understandingRaw": {
+        "aspects": [
+          {
+            "id": "A1",
+            "kind": "legal",
+            "question": "AXIEZ-LINKsのドアが開閉時に異音がします。建築基準法上の確認は必要ですか"
+          }
+        ],
         "controlMethod": null,
         "fallback": false,
         "intent": "cause",
@@ -63,7 +137,7 @@
     "jobId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     "pollAfterMs": 0,
     "result": {
-      "answerMarkdown": "該当する資料・法令・事例が見つかりませんでした。\n\n機種名、部位、症状、状況を具体的に書いて、もう一度お試しください。",
+      "answerMarkdown": "質問に直接答える根拠が見つかりませんでした。取得候補があっても、十分な裏付けは確認できていません。\n\n機種名、部位、症状、状況を具体的に書いて、もう一度お試しください。",
       "clarifyQuestions": [],
       "kind": "not_found",
       "sources": {
@@ -74,7 +148,7 @@
         "law": [],
         "tech": []
       },
-      "stopReason": "sufficient",
+      "stopReason": "insufficient",
       "understanding": {
         "controlMethod": null,
         "intent": "cause",
@@ -168,7 +242,7 @@
         "step": "sufficiency"
       },
       {
-        "detailJa": "十分な根拠が揃っています",
+        "detailJa": "追加で調べる方法がありません",
         "endedAt": "2027-01-15T08:00:09Z",
         "labelJa": "足りない点を確認中",
         "seq": 9,

@@ -117,6 +117,26 @@ def test_title_generation_can_override_budget(rag_app, monkeypatch):
     assert legacy["temperature"] == 0 and legacy["max_tokens"] == 64
 
 
+def test_research_generation_settings_override_normal_mode_only_for_call(rag_app, monkeypatch):
+    monkeypatch.setattr(rag_app, "GENERATION_THINKING", "disabled")
+    monkeypatch.setattr(rag_app, "GENERATION_EFFORT", "low")
+
+    research = rag_app.build_generation_request(
+        "sys", [{"role": "user", "content": "q"}],
+        "global.anthropic.claude-sonnet-5",
+        generation_thinking="adaptive", generation_effort="medium",
+    )
+    normal = rag_app.build_generation_request(
+        "sys", [{"role": "user", "content": "q"}],
+        "global.anthropic.claude-sonnet-5",
+    )
+
+    assert research["thinking"] == {"type": "adaptive"}
+    assert research["output_config"] == {"effort": "medium"}
+    assert normal["thinking"] == {"type": "disabled"}
+    assert "output_config" not in normal
+
+
 def test_extract_response_text_skips_thinking_block(rag_app):
     body = {"content": [{"type": "thinking", "thinking": "reason"}, {"type": "text", "text": "回答"}]}
     assert rag_app.extract_response_text(body) == "回答"

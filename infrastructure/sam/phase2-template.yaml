@@ -127,29 +127,43 @@ Parameters:
 
   SenpaiResearchMaxSearches:
     Type: Number
-    Default: 6
+    Default: 18
     MinValue: 1
-    MaxValue: 20
-    Description: Maximum Knowledge Base searches per research job (technical + law, including re-searches).
+    MaxValue: 60
+    Description: Emergency limit including Managed knowhow, technical, law and abbreviation searches.
 
   SenpaiResearchMaxModelCalls:
     Type: Number
-    Default: 4
+    Default: 10
     MinValue: 1
-    MaxValue: 10
+    MaxValue: 20
     Description: Maximum model calls per research job (understand, sufficiency, synthesis, ...). One is always kept for synthesis.
 
   SenpaiResearchJobBudgetMs:
     Type: Number
-    Default: 60000
+    Default: 90000
     MinValue: 5000
-    MaxValue: 110000
+    MaxValue: 90000
     Description: >-
       Soft time budget per research job in milliseconds. After it, the worker starts no new search or judgement
       and answers with what it has (stopReason=budget). Every search and model call is also limited to the
-      remaining budget (plus 20 seconds reserved for the answer) and to the Lambda remaining time minus a
+      remaining budget (plus 45 seconds reserved for the answer) and to the Lambda remaining time minus a
       10 second margin; when too little time is left the worker returns a list of the sources found instead
-      of calling the model. The worker Lambda timeout is fixed at 120 seconds.
+      of calling the model. The worker Lambda timeout is fixed at 145 seconds.
+
+  SenpaiResearchMaxInputBytes:
+    Type: Number
+    Default: 120000
+    MinValue: 1000
+    MaxValue: 120000
+    Description: Maximum UTF-8 input bytes including system per model call; not a token or currency limit.
+
+  SenpaiResearchNoProgressLimit:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 3
+    Description: Consecutive retry rounds with new candidates but no new evidence exposed to the judge.
 
   SenpaiUnderstandModelId:
     Type: String
@@ -181,6 +195,20 @@ Parameters:
     Default: ''
     AllowedPattern: '^$|^[A-Za-z0-9._/-]{1,512}$'
     Description: Fixed key for the Senpai navigation index; no prefix listing is granted
+
+  KnowhowCanonicalBucket:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: >-
+      Common-knowledge canonical bucket (manifests/). When set, each Senpai card is re-checked
+      against its publication manifest before use (design 2026-11-11 WP4). Empty keeps the Git index.
+
+  KnowhowAudiences:
+    Type: String
+    Default: 'all-users'
+    AllowedPattern: '^[A-Za-z0-9_-]{1,64}(,[A-Za-z0-9_-]{1,64}){0,4}$'
+    Description: Comma-separated publication audiences the Senpai chat may use
 
   LawDataBucketName:
     Type: String
@@ -450,6 +478,9 @@ Conditions:
     - !Equals [!Ref KnowhowEnabled, 'true']
     - !Not [!Equals [!Ref KnowhowIndexBucket, '']]
     - !Not [!Equals [!Ref KnowhowIndexKey, '']]
+  KnowhowPublishedGuardEnabled: !And
+    - !Condition KnowhowIndexDevEnabled
+    - !Not [!Equals [!Ref KnowhowCanonicalBucket, '']]
   SenpaiSynthesisDevEnabled: !And
     - !Equals [!Ref Environment, dev]
     - !Equals [!Ref SenpaiSynthesisEnabled, 'true']
@@ -701,6 +732,13 @@ Resources:
                     - s3:GetObject
                   Resource: !Sub arn:aws:s3:::${KnowhowIndexBucket}/${KnowhowIndexKey}
                 - !Ref AWS::NoValue
+              - !If
+                - KnowhowPublishedGuardEnabled
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource: !Sub arn:aws:s3:::${KnowhowCanonicalBucket}/manifests/*
+                - !Ref AWS::NoValue
 
   ChatLambdaRole:
     Type: AWS::IAM::Role
@@ -772,6 +810,8 @@ Resources:
           # never signs a URL for a previously configured admin index.
           KNOWHOW_INDEX_BUCKET: !Ref KnowhowIndexBucket
           KNOWHOW_INDEX_KEY: !Ref KnowhowIndexKey
+          KNOWHOW_CANONICAL_BUCKET: !If [KnowhowPublishedGuardEnabled, !Ref KnowhowCanonicalBucket, '']
+          KNOWHOW_AUDIENCES: !Ref KnowhowAudiences
           ENVIRONMENT: !Ref Environment
           ADMIN_GROUP_NAME: admin
           LAW_DATA_BUCKET_NAME: !If [LawFullTextDevEnabled, !Ref LawDataBucketName, '']
@@ -1175,8 +1215,8 @@ Resources:
           SENPAI_RESEARCH_TABLE: !Ref SenpaiResearchJobsTable
           SENPAI_RESEARCH_WORKER_NAME: !Ref SenpaiResearchWorkerFunction
           SENPAI_RESEARCH_DAILY_LIMIT: !Ref SenpaiResearchDailyLimit
-          # 進行中ジョブ・ロックの有効秒数（リース）。非同期起動の最大待ち（120 秒）+ ワーカーの Timeout（120 秒）以上。
-          SENPAI_RESEARCH_JOB_TTL_SECONDS: '300'
+          # 起動待ち120秒＋ワーカー180秒＋保存余裕30秒。画面の360秒以内。
+          SENPAI_RESEARCH_JOB_TTL_SECONDS: '330'
       Events:
         ResearchCreate:
           Type: Api
@@ -1317,6 +1357,13 @@ Resources:
                     Resource: !Sub arn:aws:s3:::${KnowhowIndexBucket}/${KnowhowIndexKey}
                   - !Ref AWS::NoValue
                 - !If
+                  - KnowhowPublishedGuardEnabled
+                  - Effect: Allow
+                    Action:
+                      - s3:GetObject
+                    Resource: !Sub arn:aws:s3:::${KnowhowCanonicalBucket}/manifests/*
+                  - !Ref AWS::NoValue
+                - !If
                   - LawFullTextDevEnabled
                   - Effect: Allow
                     Action: s3:GetObject
@@ -1358,9 +1405,8 @@ Resources:
       Handler: senpai_research_worker.lambda_handler
       Description: Dev-only 先輩チャットの調査ジョブのワーカー（受付から非同期起動のみ。再試行しない）
       Role: !GetAtt SenpaiResearchWorkerLambdaRole.Arn
-      # ジョブ全体の予算は 60 秒（SenpaiResearchJobBudgetMs）+ まとめ用 20 秒。待ち時間は残り予算と
-      # Lambda の残り時間から決め、超えそうなら呼ばずに資料の一覧で返す。余裕を見て 120 秒。
-      Timeout: 120
+      # 探索計画90秒＋進行中呼出し最大45秒＋保存余裕。ロック330秒は起動待ち120秒も含む。
+      Timeout: 180
       MemorySize: !Ref RagLambdaMemory
       # 非同期起動のみ。再試行すると同じ質問で重複して検索・生成するため 0 にする。
       EventInvokeConfig:
@@ -1376,6 +1422,8 @@ Resources:
           KNOWHOW_ENABLED: !If [KnowhowIndexDevEnabled, 'true', 'false']
           KNOWHOW_INDEX_BUCKET: !Ref KnowhowIndexBucket
           KNOWHOW_INDEX_KEY: !Ref KnowhowIndexKey
+          KNOWHOW_CANONICAL_BUCKET: !If [KnowhowPublishedGuardEnabled, !Ref KnowhowCanonicalBucket, '']
+          KNOWHOW_AUDIENCES: !Ref KnowhowAudiences
           ENVIRONMENT: !Ref Environment
           ADMIN_GROUP_NAME: admin
           LAW_DATA_BUCKET_NAME: !If [LawFullTextDevEnabled, !Ref LawDataBucketName, '']
@@ -1396,9 +1444,9 @@ Resources:
             Fn::ImportValue: !Sub ${ProjectName}-${Environment}-DocumentsBucketName
           PRESIGNED_URL_EXPIRES_IN: !Ref PresignedUrlExpiresIn
           CITATION_URI_MODE: !Ref CitationUriMode
-          # Bedrock の読み取り待ち。ジョブ全体の予算（60 秒）の中で、まとめの生成が通る長さ。
+          # SDK自動再試行は0回。初回試行と明示的な検索だけを有限枠へ計上する。
           BEDROCK_READ_TIMEOUT: '40'
-          BEDROCK_MAX_ATTEMPTS: '2'
+          BEDROCK_MAX_ATTEMPTS: '0'
           # 調査ジョブ専用の待ち時間（残り予算でさらに短くなる）。KB 検索 1 回の読み取り待ち（秒）と、モデル 1 呼び出しの上限（秒）。
           SENPAI_RESEARCH_KB_READ_TIMEOUT: '12'
           SENPAI_RESEARCH_MODEL_READ_TIMEOUT: '40'
@@ -1408,8 +1456,10 @@ Resources:
           SENPAI_RESEARCH_MAX_SEARCHES: !Ref SenpaiResearchMaxSearches
           SENPAI_RESEARCH_MAX_MODEL_CALLS: !Ref SenpaiResearchMaxModelCalls
           SENPAI_RESEARCH_JOB_BUDGET_MS: !Ref SenpaiResearchJobBudgetMs
+          SENPAI_RESEARCH_MAX_INPUT_BYTES: !Ref SenpaiResearchMaxInputBytes
+          SENPAI_RESEARCH_NO_PROGRESS_LIMIT: !Ref SenpaiResearchNoProgressLimit
           # 追加の検索・判断を始める前に、まとめ用に残しておく時間（ミリ秒）。
-          SENPAI_RESEARCH_SYNTH_RESERVE_MS: '20000'
+          SENPAI_RESEARCH_SYNTH_RESERVE_MS: '45000'
 
   ChatManagementFunction:
     Type: AWS::Serverless::Function

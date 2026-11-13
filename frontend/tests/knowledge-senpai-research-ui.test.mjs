@@ -22,6 +22,7 @@ function loadTsx(path, mocks = {}) {
     if (/^\.\/Senpai[A-Za-z]+$/u.test(name) && name !== './SenpaiFieldReportForm') return loadTsx(`../src/components/knowledge/${name.slice(2)}.tsx`);
     if (name === './SenpaiConversationSidebar') return loadTsx('../src/components/knowledge/SenpaiConversationSidebar.tsx');
     if (name === './SenpaiFieldReportForm') return loadTsx('../src/components/knowledge/SenpaiFieldReportForm.tsx', { '@/lib/auth-helpers': { getIdToken: async () => 'test-token' } });
+    if (name === './kb-model-types.generated.mjs') return require('../src/data/kb-model-types.generated.mjs');
     if (name === '@/data/kbModelTypes') return loadTsx('../src/data/kbModelTypes.ts');
     if (name === '@/lib/knowledge-senpai-synthesis.mjs') return { requestSenpaiSynthesis: async () => ({}) };
     if (name === '@/lib/knowledge-senpai-field-report.mjs') return require('../src/lib/knowledge-senpai-field-report.mjs');
@@ -258,6 +259,20 @@ test('developer view explains when no debug information exists', () => {
   const dev = html(createElement(SenpaiDevPanel, { steps: [] }));
   assert.match(dev, /デバッグ情報はありません/);
   assert.match(dev, /保存されていません/);
+});
+
+test('developer view separates missing usage and unassessed marginal evidence', () => {
+  const dev = html(createElement(SenpaiDevPanel, { steps: [], debug: {
+    stages: [{ stage: 'sufficiency', ms: 25, modelCalls: 1, usage: { inputTokens: 123 }, usageMissing: true }],
+    progress: [{ round: 1, searches: 1, newCandidateItems: 3, newExposedEvidence: 0, evidenceValidity: 'unassessed' }],
+    stopDetail: 'no_exposed_progress', lastJudgment: 'insufficient',
+  } }));
+  assert.match(dev, /段階別の使用量/);
+  assert.match(dev, /実請求額ではありません/);
+  assert.match(dev, />123</);
+  assert.match(dev, /あり/);
+  assert.match(dev, /増分の有効性は未評価/);
+  assert.match(dev, /no_exposed_progress/);
 });
 
 // ---- ページ（コントローラ・フラグ・開発者表示の切り替え） ----

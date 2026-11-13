@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import type { SenpaiChatLane, SenpaiChatTurn } from '@/lib/knowledge-senpai-chat.mjs';
-import { modelFitNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
-import { SenpaiMarkdown } from './SenpaiMarkdown';
+import { KNOWHOW_NOT_OFFICIAL_NOTICE, knowhowStatusLabel, modelFitNotice, scopeUnverifiedNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
+import { SenpaiMarkdown, type SenpaiLinkTarget } from './SenpaiMarkdown';
+import { knowhowCardAnchor } from '@/lib/citation-links.mjs';
 import { buildChatSessionHref } from '@/lib/chat-session-link.mjs';
 import {
   researchSourceHref,
@@ -31,7 +32,7 @@ const scopeLabels: Record<string, string> = {
 const refLabels: Record<string, string> = {
   list_item_id: 'Lists項目', onenote_id: 'OneNoteページ', source_id: '出典ID', document_number: '資料番号',
   kb_filename: 'KB資料名', kb_verify_status: 'KB確認状況', page_role: 'ページの役割', law_id: '法令ID',
-  law_title: '法令名', locator: '参照箇所',
+  law_title: '法令名', locator: '参照箇所', knowhow_id: 'ノウハウの記録', origin: '経路',
 };
 
 // Unknown keys fall back to the raw key so a label never renders as "undefined".
@@ -48,6 +49,11 @@ function scopeValue(key: string, value: string | string[]) {
   return (Array.isArray(value) ? value.join('、') : value) || '未記載';
 }
 
+/** 回答ごとの、カードへのアンカーの接頭辞（同じ画面に複数の相談が並ぶため、回答の識別子を入れる）。 */
+function cardPrefix(answer: import('@/lib/knowledge-research.mjs').ResearchAnswer, mode: KnowledgeResearchMode) {
+  return `lane-${mode}-${String(answer.messageId || 'answer').replace(/[^A-Za-z0-9-]/gu, '-')}`;
+}
+
 function KnowhowReferences({ answer, selectedModel }: { answer: import('@/lib/knowledge-research.mjs').ResearchAnswer; selectedModel?: string }) {
   const knowhow = answer.knowhow;
   if (!knowhow) return null;
@@ -57,19 +63,20 @@ function KnowhowReferences({ answer, selectedModel }: { answer: import('@/lib/kn
   return (
     <section aria-label="参照したノウハウMarkdown" className="rounded-xl bg-gray-50 p-3">
       <h5 className="text-xs font-medium text-gray-700">参照したノウハウMarkdown</h5>
-      <p className="mt-1 text-xs leading-5 text-gray-500">参考候補です。技術的な根拠や承認を示しません。</p>
+      <p className="mt-1 text-xs leading-5 text-gray-500">参考候補です。{KNOWHOW_NOT_OFFICIAL_NOTICE}</p>
       <ul className="mt-2 space-y-3">
         {knowhow.matches.map((match) => (
           <li key={`${match.knowledgeId}-${match.cardVersion}`} className="rounded-lg bg-white p-3 text-xs text-gray-800">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold">{match.title}</span>
               <span>v{match.cardVersion}</span>
-              <span className="text-amber-700">{match.status === 'draft' ? '未承認（下書き）' : '承認済みカード・参照用のみ'}</span>
+              <span className="text-amber-700">{knowhowStatusLabel(match)}</span>
               <span className="text-gray-500">参照用のみ</span>
             </div>
             {modelFitNotice(match, selectedModel) && <p role="note" className="mt-2 text-amber-700">{modelFitNotice(match, selectedModel)}</p>}
+            {scopeUnverifiedNotice(match) && <p role="note" className="mt-1 text-gray-600">{scopeUnverifiedNotice(match)}</p>}
             <details className="mt-2">
-              <summary className="cursor-pointer font-medium text-gray-600">適用条件・出典と本文を確認</summary>
+              <summary id={knowhowCardAnchor(cardPrefix(answer, 'normal'), match.knowledgeId)} className="cursor-pointer font-medium text-gray-600">適用条件・出典と本文を確認</summary>
               <dl className="mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 break-words text-gray-700">
                 <dt className="text-gray-500">ノウハウID</dt><dd>{match.knowledgeId}</dd>
                 <dt className="text-gray-500">本文の識別値</dt><dd className="break-all font-mono">{match.sha256}</dd>
@@ -92,8 +99,20 @@ function KnowhowReferences({ answer, selectedModel }: { answer: import('@/lib/kn
   );
 }
 
-export function LaneReply({ lane, mode, selectedModel }: { lane: SenpaiChatLane; mode: KnowledgeResearchMode; selectedModel?: string }) {
-  const name = mode === 'law' ? '法令KB' : '技術KB';
+/** `label` を渡すと、その名前で表示し、該当なしでもサーバーの本文（注意・定型文）を出す（先輩チャットのノウハウだけの回答）。 */
+/** 本文の資料名（返した資料）とカード名（参照したノウハウ）を、出典・カードへのリンクにする一覧。 */
+function laneLinkTargets(answer: import('@/lib/knowledge-research.mjs').ResearchAnswer, mode: KnowledgeResearchMode): SenpaiLinkTarget[] {
+  const documents = (answer.sourceDocuments || []).map((source) => ({
+    names: [source.documentName, source.title], href: researchSourceHref(source, mode),
+  }));
+  const cards = mode === 'normal' ? (answer.knowhow?.matches || []).map((match) => ({
+    names: [match.title], href: `#${knowhowCardAnchor(cardPrefix(answer, mode), match.knowledgeId)}`,
+  })) : [];
+  return [...cards, ...documents];
+}
+
+export function LaneReply({ lane, mode, selectedModel, label }: { lane: SenpaiChatLane; mode: KnowledgeResearchMode; selectedModel?: string; label?: string }) {
+  const name = label ?? (mode === 'law' ? '法令KB' : '技術KB');
   if (lane.status === 'loading') return <p role="status" className="text-sm text-gray-600">{name}を検索しています…</p>;
   if (lane.status === 'error') return <p role="alert" className="text-sm text-red-700">{lane.message || `${name}への問い合わせに失敗しました。設定・通信状態を確認してください。`}</p>;
   if (lane.status === 'cancelled') return <p role="status" className="text-sm text-gray-600">{name}への検索は中止されました。</p>;
@@ -105,7 +124,7 @@ export function LaneReply({ lane, mode, selectedModel }: { lane: SenpaiChatLane;
   const candidates = answer.pageCandidates || [];
   return (
     <div className="space-y-3">
-      {answer.responseType === 'not_found' ? (
+      {answer.responseType === 'not_found' && !label ? (
         <p className="text-sm text-gray-900">このKBでは該当情報を確認できませんでした。</p>
       ) : answer.responseType === 'clarify' ? (
         <div className="text-sm text-gray-900">
@@ -114,7 +133,7 @@ export function LaneReply({ lane, mode, selectedModel }: { lane: SenpaiChatLane;
         </div>
       ) : (
         answer.content
-          ? <SenpaiMarkdown markdown={answer.content} knownRefs={NO_REFS} anchorPrefix={`lane-${mode}`} variant="plain" />
+          ? <SenpaiMarkdown markdown={answer.content} knownRefs={NO_REFS} anchorPrefix={`lane-${mode}`} variant="plain" linkTargets={laneLinkTargets(answer, mode)} />
           : <p className="text-sm leading-6 text-gray-800">回答本文がありません。</p>
       )}
       {mode === 'normal' && <KnowhowReferences answer={answer} selectedModel={selectedModel} />}
@@ -152,7 +171,7 @@ export function LaneReply({ lane, mode, selectedModel }: { lane: SenpaiChatLane;
           </ul>
         </div>
       )}
-      {answer.sessionId && (
+      {answer.sessionId && !label && (
         <Link href={buildChatSessionHref(answer.sessionId, mode)} className="inline-flex text-xs text-gray-500 underline underline-offset-2">
           {mode === 'law' ? '法令チャットの履歴を開く' : '技術チャットの履歴を開く'}
         </Link>

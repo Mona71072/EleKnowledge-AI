@@ -38,7 +38,9 @@ def build_runtime() -> SimpleNamespace:
 
 def build_deps():
     import senpai_research_rag  # noqa: PLC0415 - app.py の読み込みは必要になるまで遅らせる
-    return senpai_research_rag.RagDeps()
+    deps = senpai_research_rag.RagDeps()
+    deps.configure_worker_clients()
+    return deps
 
 
 def _canonical_uuid(value) -> bool:

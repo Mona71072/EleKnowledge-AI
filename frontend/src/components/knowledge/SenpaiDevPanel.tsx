@@ -85,6 +85,34 @@ export function SenpaiDevPanel({ debug, steps, unverifiedRefs, knowhow }: {
               )}
             </div>
           )}
+          {debug?.stopDetail && <p>停止の内訳: {debug.stopDetail} / 最後の判定: {debug.lastJudgment ?? 'unjudged'}</p>}
+          {debug?.grounding && <p>根拠対応の検証: {debug.grounding.mode}</p>}
+          {debug?.coverage && <details><summary className="cursor-pointer font-sans font-medium">論点ごとの根拠対応</summary><pre>{json(debug.coverage)}</pre></details>}
+          {debug?.stages && (
+            <details>
+              <summary className="cursor-pointer font-sans font-medium">段階別の使用量</summary>
+              <p className="font-sans">トークン数・検索枠・時間の記録です。実請求額ではありません。並列処理の時間は合算できません。</p>
+              <div className="overflow-x-auto"><table className="mt-1 min-w-full border-collapse">
+                <thead><tr>{['段階', '時間(ms)', '検索枠', '入力token', '出力token', 'cache読取/書込', 'usage欠測'].map((name) => <th key={name} scope="col" className={tableHead}>{name}</th>)}</tr></thead>
+                <tbody>{debug.stages.map((stage, index) => (
+                  <tr key={index}>
+                    <td className={tableCell}>{stage.stage ?? '–'}</td><td className={tableCell}>{stage.ms ?? '–'}</td>
+                    <td className={tableCell}>{stage.searches ?? stage.searchesCharged ?? '–'}</td>
+                    <td className={tableCell}>{stage.usage?.inputTokens ?? '–'}</td><td className={tableCell}>{stage.usage?.outputTokens ?? '–'}</td>
+                    <td className={tableCell}>{stage.usage?.cacheReadInputTokens ?? '–'} / {stage.usage?.cacheWriteInputTokens ?? '–'}</td>
+                    <td className={tableCell}>{stage.usageMissing === undefined ? '対象外' : stage.usageMissing ? 'あり' : 'なし'}</td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+            </details>
+          )}
+          {debug?.progress && debug.progress.length > 0 && (
+            <details>
+              <summary className="cursor-pointer font-sans font-medium">追加検索で増えた候補と判定への露出</summary>
+              <p className="font-sans">増分の有効性は未評価です。候補数や露出数は、品質改善や技術的正解率を示しません。</p>
+              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-white p-2">{json(debug.progress)}</pre>
+            </details>
+          )}
           {unverifiedRefs && unverifiedRefs.length > 0 && <p>照合で外した参照: {unverifiedRefs.join('、')}</p>}
           <details>
             <summary className="cursor-pointer font-sans font-medium">生の段階イベント（{steps.length}）</summary>

@@ -32,9 +32,9 @@ def test_parameters_are_off_by_default_with_documented_limits(template):
     assert params["SenpaiResearchEnabled"]["Default"] == "false"
     assert params["SenpaiResearchEnabled"]["AllowedValues"] == ["true", "false"]
     assert int(params["SenpaiResearchDailyLimit"]["Default"]) == 20
-    assert int(params["SenpaiResearchMaxSearches"]["Default"]) == 6
-    assert int(params["SenpaiResearchMaxModelCalls"]["Default"]) == 4
-    assert int(params["SenpaiResearchJobBudgetMs"]["Default"]) == 60000
+    assert int(params["SenpaiResearchMaxSearches"]["Default"]) == 18
+    assert int(params["SenpaiResearchMaxModelCalls"]["Default"]) == 10
+    assert int(params["SenpaiResearchJobBudgetMs"]["Default"]) == 90000
     for name in ("SenpaiResearchDailyLimit", "SenpaiResearchMaxSearches",
                  "SenpaiResearchMaxModelCalls", "SenpaiResearchJobBudgetMs"):
         assert "MinValue" in params[name] and "MaxValue" in params[name], name
@@ -104,12 +104,12 @@ def test_api_role_is_minimal(template):
 
 # ---------------------------------------------------------------- ワーカー Lambda
 
-def test_worker_function_is_async_only_with_no_retry_and_120s_timeout(template):
+def test_worker_function_is_async_only_with_no_retry_and_180s_timeout(template):
     function = _function(template, "SenpaiResearchWorkerFunction")
     assert function["CodeUri"] == "../../lambda/rag/rag-function/"
     assert function["Handler"] == "senpai_research_worker.lambda_handler"
     assert "Events" not in function  # API から直接は呼べない
-    assert int(function["Timeout"]) == 120
+    assert int(function["Timeout"]) == 180
     assert function["EventInvokeConfig"]["MaximumRetryAttempts"] == 0
     assert function["Role"] != _function(template, "SenpaiResearchApiFunction")["Role"]
 
@@ -131,7 +131,38 @@ def test_worker_env_mirrors_rag_function_and_adds_research_settings(template):
     assert env["SENPAI_RESEARCH_JOB_BUDGET_MS"] == "SenpaiResearchJobBudgetMs"
     # Bedrock の読み取り待ちは、ジョブ全体の上限より十分短く、Lambda の Timeout 内に収める
     assert int(env["BEDROCK_READ_TIMEOUT"]) < 60
-    assert int(env["BEDROCK_MAX_ATTEMPTS"]) <= 2
+    assert int(env["BEDROCK_MAX_ATTEMPTS"]) == 0
+
+
+def test_queue_worker_lock_and_polling_bounds_are_consistent(template, monkeypatch):
+    import re
+    from pathlib import Path
+    import test_senpai_research_support as support
+    config = support.load_module('senpai_research_config.py')
+    for name in list(__import__('os').environ):
+        if name.startswith('SENPAI_RESEARCH_'):
+            monkeypatch.delenv(name)
+    worker = _function(template, 'SenpaiResearchWorkerFunction')
+    api = _function(template, 'SenpaiResearchApiFunction')
+    limits = config.load_limits()
+    assert (limits.max_searches, limits.max_model_calls, limits.job_ms) == (18, 10, 90000)
+    params = template['Parameters']
+    for param, attr in [('SenpaiResearchMaxSearches', 'max_searches'),
+                        ('SenpaiResearchMaxModelCalls', 'max_model_calls'),
+                        ('SenpaiResearchJobBudgetMs', 'job_ms'), ('SenpaiResearchMaxInputBytes', 'max_input_bytes'),
+                        ('SenpaiResearchNoProgressLimit', 'no_progress_limit')]:
+        assert int(params[param]['Default']) == getattr(limits, attr)
+    lock = int(api['Environment']['Variables']['SENPAI_RESEARCH_JOB_TTL_SECONDS'])
+    queue = worker['EventInvokeConfig']['MaximumEventAgeInSeconds']
+    assert queue + worker['Timeout'] + 30 <= lock == config.job_ttl_seconds()
+    assert params['SenpaiResearchJobBudgetMs']['MaxValue'] / 1000 + 45 + 30 <= worker['Timeout']
+    polling = (Path(__file__).resolve().parents[2] / 'frontend/src/lib/research-polling.mjs').read_text(encoding='utf-8')
+    poll_ms = int(re.search(r'POLL_GIVE_UP_MS = (\d+)', polling).group(1))
+    assert (lock + 30) * 1000 <= poll_ms
+    monkeypatch.setenv('SENPAI_RESEARCH_JOB_TTL_SECONDS', '1')
+    monkeypatch.setenv('SENPAI_RESEARCH_JOB_BUDGET_MS', '999999')
+    assert config.job_ttl_seconds() == lock
+    assert config.load_limits().job_ms == params['SenpaiResearchJobBudgetMs']['MaxValue']
 
 
 def test_worker_role_is_least_privilege(template):

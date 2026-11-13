@@ -20,6 +20,8 @@ const FIELD_REPORTS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORT
 const SYNTHESIS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS === 'true';
 // 調査ジョブ（試作）は SAM の SenpaiResearchEnabled と合わせて有効化する（既定オフ）。オフなら従来の2レーン表示。
 const RESEARCH_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SENPAI_RESEARCH === 'true';
+// D16（設計 rag-two-modes §11.13）: 先輩チャットをノウハウだけで答える。技術KB・法令KB・調査ジョブ・まとめは使わない。
+const KNOWHOW_ONLY = process.env.NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY === 'true';
 const DEV_VIEW_STORAGE_KEY = 'senpai-research-developer-view';
 
 function useController(
@@ -41,9 +43,11 @@ function useController(
         senpaiTurnId,
         ...(sessionId ? { sessionId } : {}),
         ...(mode === 'normal' ? { includeKnowhow: true } : {}),
+        ...(KNOWHOW_ONLY && mode === 'normal' ? { knowhowOnly: true } : {}),
         signal,
       }),
-      ...(RESEARCH_ENABLED ? {
+      ...(KNOWHOW_ONLY ? { modes: ['normal'] as const } : {}),
+      ...(RESEARCH_ENABLED && !KNOWHOW_ONLY ? {
         researchSource: (request) => runSenpaiResearch({
           baseUrl: process.env.NEXT_PUBLIC_RAG_API_URL || '',
           getToken: getIdToken,
@@ -167,7 +171,7 @@ export function KnowledgeSenpaiChat() {
     scrollAfterSendRef.current = false;
   }, [snapshot]);
   useMenuDismissal(menuOpen, setMenuOpen);
-  const continuationPaused = isContinuationPaused(snapshot, RESEARCH_ENABLED);
+  const continuationPaused = isContinuationPaused(snapshot, RESEARCH_ENABLED && !KNOWHOW_ONLY);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -260,7 +264,7 @@ export function KnowledgeSenpaiChat() {
       onSelectConversation={openSavedChat}
       onSynthesize={requestSynthesis}
       onResend={resend}
-      flags={{ research: RESEARCH_ENABLED, fieldReports: FIELD_REPORTS_ENABLED, synthesis: SYNTHESIS_ENABLED }}
+      flags={{ research: RESEARCH_ENABLED && !KNOWHOW_ONLY, fieldReports: FIELD_REPORTS_ENABLED, synthesis: SYNTHESIS_ENABLED && !KNOWHOW_ONLY, knowhowOnly: KNOWHOW_ONLY }}
       developerView={developerView.enabled}
       onToggleDeveloperView={developerView.toggle}
       menuOpen={menuOpen}

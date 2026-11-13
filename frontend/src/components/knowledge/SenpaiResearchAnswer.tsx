@@ -17,7 +17,7 @@ import {
   sourceSummary,
   structureAnswer,
 } from '@/lib/knowledge-senpai-research-view.mjs';
-import { modelFitNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
+import { KNOWHOW_NOT_OFFICIAL_NOTICE, modelFitNotice } from '@/lib/knowledge-senpai-model-fit.mjs';
 import { DisclosureChevron, RetryIcon } from './SenpaiIcons';
 import { SenpaiCopyButton } from './SenpaiCopyButton';
 import { SenpaiDevPanel } from './SenpaiDevPanel';
@@ -78,6 +78,7 @@ function KnowhowUsed({ result, prefix, selectedModel }: { result: SenpaiResearch
   return (
     <section aria-label="ノウハウ">
       <h5 className={groupLabel}>ノウハウ</h5>
+      <p className="text-xs text-gray-500">{KNOWHOW_NOT_OFFICIAL_NOTICE}</p>
       <ul>
         {used.map((card) => {
           const notice = modelFitNotice(card, selectedModel);

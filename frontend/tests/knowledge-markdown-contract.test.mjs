@@ -51,7 +51,8 @@ result=module.search_index(index,'合成点検の確認条件を教えて')
 result['searchTerms']=module.derive_kb_hints(result['matches'])
 print(json.dumps(result,ensure_ascii=False))
 `;
-  const knowhow = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c', program, modulePath], {
+  const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+  const knowhow = JSON.parse(execFileSync(python, ['-X', 'utf8', '-c', program, modulePath], {
     input: JSON.stringify(index), encoding: 'utf8', timeout: 10000,
   }));
   const answer = await queryKnowledgeSource({

@@ -165,6 +165,15 @@ test('同じ jobId を二重に start しても確認は 1 本だけ', async () 
   assert.equal(calls.length, 1);
 });
 
+test('受付応答のpollAfterMsは最初の確認から使う', async () => {
+  const { clock, calls, poller } = setup(running);
+  poller.start('job-1', { pollAfterMs: 5000 });
+  await clock.advance(4999);
+  assert.equal(calls.length, 0);
+  await clock.advance(1);
+  assert.equal(calls.length, 1);
+});
+
 test('非表示の間は確認せず、表示に戻ったらすぐ 1 回確認して再開する', async () => {
   const { clock, calls, poller } = setup(running);
   poller.start('job-1');

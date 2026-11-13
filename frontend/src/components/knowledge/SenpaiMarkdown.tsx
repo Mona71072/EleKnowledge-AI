@@ -5,6 +5,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { linkResearchRefs, researchRefAnchor } from '@/lib/knowledge-senpai-research-view.mjs';
 import { openAncestorDetails } from '@/lib/knowledge-senpai-dom.mjs';
+import { linkCitedNames } from '@/lib/citation-links.mjs';
 
 // SECURITY: 回答本文はモデルの出力。生の HTML は react-markdown が描画せず、画像は出さず、
 // リンクは同じ画面内の出典アンカーだけを許す（外部へ送る追跡リンクを作らない）。
@@ -65,9 +66,19 @@ function mutePhrases(nodes: ReactNode[]): ReactNode[] {
 
 export type SenpaiMarkdownVariant = 'default' | 'plain' | 'lead';
 
-function makeComponents(refTitles: Readonly<Record<string, string>>, knownRefs: ReadonlySet<string>, anchorPrefix: string): Components {
+/** 本文の資料名・カード名を、この回答で返した資料・カードへのリンクにする一覧（呼び出し側が作る）。 */
+export type SenpaiLinkTarget = { names: ReadonlyArray<string | undefined | null>; href: string | undefined | null };
+
+function makeComponents(refTitles: Readonly<Record<string, string>>, knownRefs: ReadonlySet<string>, anchorPrefix: string,
+  allowedHrefs: ReadonlySet<string>): Components {
   return {
     a: ({ href, children }) => {
+      // SECURITY: 呼び出し側が作った一覧（返した資料の安全なリンクと、この画面内のカード）にある href だけをリンクにする。
+      if (typeof href === 'string' && allowedHrefs.has(href)) {
+        return href.startsWith('#')
+          ? <a href={href} onClick={() => openAncestorDetails(document.getElementById(href.slice(1)))} className="text-violet-700 underline underline-offset-2">{children}</a>
+          : <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">{children}</a>;
+      }
       const match = typeof href === 'string' ? REF_ANCHOR.exec(href) : null;
       if (!match || typeof href !== 'string') return <span>{children}</span>;
       const refId = `${match[1]}${match[2]}`;
@@ -98,8 +109,10 @@ function makeComponents(refTitles: Readonly<Record<string, string>>, knownRefs: 
 }
 
 /** 統一回答の本文。[T1] [L1] [K1] を出典一覧へ飛ぶ小さな番号（技1・法1・ノ1）にして表示する。 */
-export function SenpaiMarkdown({ markdown, knownRefs, anchorPrefix, refTitles = {}, variant = 'default', className = '' }: {
+export function SenpaiMarkdown({ markdown, knownRefs, anchorPrefix, refTitles = {}, variant = 'default', className = '', linkTargets = [] }: {
   markdown: string;
+  /** 本文の資料名・カード名をリンクにする一覧。無ければ従来どおり。 */
+  linkTargets?: ReadonlyArray<SenpaiLinkTarget>;
   knownRefs: ReadonlySet<string>;
   anchorPrefix: string;
   refTitles?: Readonly<Record<string, string>>;
@@ -109,8 +122,9 @@ export function SenpaiMarkdown({ markdown, knownRefs, anchorPrefix, refTitles = 
 }) {
   return (
     <div className={`min-w-0 break-words [overflow-wrap:anywhere] ${variant === 'plain' ? 'text-sm leading-6 text-gray-700' : variant === 'lead' ? 'text-[17px] font-medium leading-8 text-gray-900' : 'text-[15px] leading-7 text-gray-900'} ${className}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(refTitles, knownRefs, anchorPrefix)}>
-        {linkResearchRefs(markdown, knownRefs, anchorPrefix)}
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(refTitles, knownRefs, anchorPrefix,
+        new Set(linkTargets.map((target) => target.href).filter((href): href is string => typeof href === 'string' && href.length > 0)))}>
+        {linkResearchRefs(linkCitedNames(markdown, linkTargets), knownRefs, anchorPrefix)}
       </ReactMarkdown>
     </div>
   );

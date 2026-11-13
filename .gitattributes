@@ -3,3 +3,7 @@
 lambda/rag/rag-function/app.py whitespace=cr-at-eol
 # 知識カードは台帳・承認manifestのハッシュの一部なので、Windowsのチェックアウトでも LF のまま保つ。
 knowledge/cards/** text eol=lf
+# 語彙ファイルからの生成物（scripts/knowledge/generate_vocabulary.py）。生成結果と比べるので LF のまま保つ。
+lambda/rag/rag-function/vocabulary_generated.py text eol=lf
+scripts/knowledge/vocabulary.generated.mjs text eol=lf
+frontend/src/data/kb-model-types.generated.mjs text eol=lf
