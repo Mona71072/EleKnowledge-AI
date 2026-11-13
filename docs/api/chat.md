@@ -38,7 +38,10 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 > **WHY:** 直近メッセージ（多くは AI 回答）の先頭50文字を使っていたため、機種未指定時に回答冒頭へ付く「※機種未指定のため、一般資料…」で一覧が埋まり、会話を判別できなかった（PR #84）。注意書き自体は断定防止のため回答に残す。
 
 ## GET /chat/sessions/{sessionId}/messages
-メッセージ一覧
+
+> 最終検証: 2026-11-12 — PR #209 の `get_session_messages` と照合（未デプロイ）
+
+メッセージ一覧。各メッセージに `retrievalTrace`（検索トレース）は**含めない**（サーバー側で除外。管理者が呼んでも同じ）。
 
 ## DELETE /chat/sessions/{sessionId}
 論理削除（`deleted` フラグ。TTL と Stream→S3 アーカイブで保全）
@@ -80,6 +83,7 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 
 ## GET /chat/admin/failures
 
+> 最終検証: 2026-11-12 — `traceSummary` を PR #209 の `trace_summary` と照合（未デプロイ）
 > 最終検証: 2026-10-02 — #104レビュー指摘を反映し、言い換え条件に資料クリックなし（`documentOpens = 0`）を追記（未デプロイ）
 
 失敗一覧（**admin グループのみ**。UI ガードだけでは不十分・サーバー側 403）
@@ -132,7 +136,7 @@ related-code: lambda/chat/, frontend/src/app/chat/, frontend/src/app/admin/failu
 | `opened` | 引用文書を開いた回数（chatlogs `documentOpens`） |
 | `reformulated` | `reformulatedAt` があり、👍 も資料クリックも無い |
 | `triage` | 振り分け。未設定は `{ "status": "open", "cause": null, "note": null, "ref": null, "by": null, "at": null }` |
-| `traceSummary` | `retrievalTrace`（別設計、未実装）の要約。無ければ `null` |
+| `traceSummary` | 検索トレースの要約（トレース本体は返さない）。トレースが無い行（配備前の回答など）は `null`。`mergedCount`＝重複を統合し機種スコープ外を除いた後の候補数（採用＋閾値未満＋上限超過）、`selectedCount`＝AI に渡した根拠の数、`excludedByModelScope`＝機種スコープで除外した数、`topScore`＝検索スコアの最大値、`inputTokens` / `outputTokens`＝生成のトークン数、`latencyMs`＝`{ retrieve: 検索の合計, generate: 生成, total: 全体 }`（ミリ秒） |
 | `hints` | 機械的な手がかり（判断ではない）。機種スコープ除外 / 上位スコアが弱い（仮 0.45）/ 資料は開かれた / 言い換え後に評価なし / カテゴリ過絞り / 聞き返し後 |
 
 `count` は返却件数、`matchedCount` は今回の Scan で得た一致件数（`limit` 適用前）です。`truncated` は一致件数が `limit` を超えたこと、`incomplete` は25ページ上限で未走査分が残ることを示します。`incomplete=true` の場合、`matchedCount` は全件数ではありません。

@@ -29,6 +29,7 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/, lambda/metrics/, lambd
 
 ### eleknowledge-chatlogs テーブル（ホットウィンドウ）
 
+> 最終検証: 2026-11-12 — `retrievalTrace` を PR #209 の実装（RAG の保存処理・chat-management の除外）と照合（未デプロイ）
 > 最終検証: 2026-10-14 — シャード数変更時の制約をバックフィルの未設定行だけを更新する条件と照合。既存実データの移行は未実施。
 > 最終検証: 2026-10-10 — 日別集計キー `metricDay` / `metricDayShard` と GSI `metricDayShard-timestamp-index` を SAM テンプレート・書込み側・集計 Lambda のコードと照合（AWS 未実査。未デプロイ。移行手順は [ops-runbook.md](./ops-runbook.md) §8.1）
 > 最終検証: 2026-09-25 — telemetry の `reformulatedAt` 設定条件・後続集計の除外条件を実装と照合（未デプロイ。#111 / #114 のマージ・SAM デプロイ後に有効）
@@ -72,6 +73,10 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/, lambda/metrics/, lambd
   // --- 2026-10-10 日別集計キー（issue #130。書込み側が付ける。既存行はバックフィル）---
   metricDay?: string;       // timestamp を JST に変換した日付 YYYY-MM-DD（集計の日付境界と同じ）
   metricDayShard?: string;  // "<metricDay>#<shard>"。shard = crc32(messageId) % CHATLOGS_METRIC_SHARDS（既定 10）
+  // --- 2026-11-12 検索トレース（assistant のみ。PR #209。設計 design-2026-09-10-retrieval-trace.md §3）---
+  retrievalTrace?: object;  // 検索の分析用。利用者向け API（GET .../messages）と CloudWatch には出さない
+                            // 検索試行・候補（上位 30）と選ばれなかった理由・AI に渡した抜粋（1 件 1,200 字まで）・生成のトークン数と時間・requestId
+                            // 項目が 400 KB に近づくと抜粋を落として truncatedTrace=true。保存に失敗したらトレースなしで保存し直す
   deleted?: boolean;        // 論理削除
   ttl: number;              // TTL（保存時から約60日。Stream→S3 で保全）
 }
@@ -80,6 +85,7 @@ related-code: infrastructure/, lambda/rag/, lambda/chat/, lambda/metrics/, lambd
 **GSI (Global Secondary Index):**
 - userId-timestamp-index: ユーザーごとの履歴取得
 - metricDayShard-timestamp-index（PK `metricDayShard`、SK `timestamp`、ALL）: 日別集計。日付ごとに全シャードを Query する（Scan は使わない）。`metricDayShard` を持たない行は載らないため、既存行は `scripts/ops/backfill_chatlogs_metric_day.py` で埋める。シャード数は移行後に固定する。既存キーはこのスクリプトで再配置されないため、変更時は別の移行計画が必要。
+- どちらの GSI も射影は ALL のため、`retrievalTrace` も GSI に複製される。会話一覧（`userId-timestamp-index`）は ProjectionExpression で一覧に使う属性だけを読む（読み取り容量は減らない）。
 
 
 失敗一覧（`GET /chat/admin/failures`）は失敗専用 GSI を持たず Scan + Filter（試用初期向け）。詳細は [`docs/api/chat.md`](./api/chat.md)。
