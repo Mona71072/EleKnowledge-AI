@@ -17,6 +17,7 @@ import { documentHref, documentHrefWithPage } from '@/lib/documents';
 import { getAnnouncements, Announcement } from '@/lib/announcements';
 import { NoticeBanner } from '@/components/announcements/NoticeBanner';
 import { resolveInitialChatMode } from '@/lib/chat-session-link.mjs';
+import { resolveAssistantDisplayText } from '@/lib/chat-display-text.mjs';
 import {
   BadFeedbackReasonId,
   FEEDBACK_COMMENT_MAX,
@@ -1130,7 +1131,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                 </>
                               ) : (
                                 <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-                                  {normalizeTableMarkdown(streamingMessages[message.id] || message.content)}
+                                  {normalizeTableMarkdown(resolveAssistantDisplayText(message.id, message.content, streamingMessageId, streamingMessages))}
                                 </ReactMarkdown>
                               )}
                             </div>
