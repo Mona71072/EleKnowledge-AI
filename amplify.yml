@@ -25,6 +25,12 @@ frontend:
                 echo "itai: RAG/Chat/Research APIs overridden by branch variables" ;;
             esac
           fi
+          # monaブランチ限定: 試作の画面確認用に先輩チャットの入口を表示する。
+          # 下の env.variables は "false" のまま（develop・共有devでは非表示を維持）。
+          if [ "$AWS_BRANCH" = "mona" ]; then
+            export NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH="true"
+            echo "mona: knowledge workbench entry enabled for this branch only"
+          fi
           npm run build
     postBuild:
       commands:
