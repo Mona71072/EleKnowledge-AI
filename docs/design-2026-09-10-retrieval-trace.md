@@ -335,11 +335,19 @@ ORDER BY a.newimage.messageid, c.rank;
 
 ## 11. 配備後の確認（2026-11-12 追加）
 
-phase2 の配備後、1 問流して、その回答の項目に `retrievalTrace` が付いていることを 1 件確かめる（件数だけを見る。中身は画面に出さない）。付いていなければ、配備を記録する PR・issue に「未記録」と書く。
+phase2 の配備後、合成質問を 1 問流し、その回答の項目を `sessionId`（パーティションキー）と回答の `messageId`（ソートキー）で 1 件だけ読む。整合性のある読み取りで、取り出す属性は `retrievalTrace.logicVersion` と `retrievalTrace.gate.responseType` の 2 つに絞る（トレースの中身は画面に出さない）。
+
+- `logicVersion` が今回配備した SHA（`RagLogicVersion` に渡した値）と一致すること
+- `responseType` が、流した質問で想定した経路（clarify / not_found / pages / law のいずれか）と一致すること
+
+どちらかが違う、または項目に `retrievalTrace` が無ければ、配備を記録する PR・issue に「未記録」と書く。
 
 ```bash
-aws dynamodb scan --table-name chatlogs-dev --select COUNT \
-  --filter-expression "attribute_exists(retrievalTrace)"
+aws dynamodb get-item --table-name chatlogs-dev --consistent-read \
+  --key '{"sessionId":{"S":"<合成質問の sessionId>"},"messageId":{"S":"<回答の messageId>"}}' \
+  --projection-expression "retrievalTrace.logicVersion, retrievalTrace.gate.responseType"
 ```
+
+表全体の件数（`Scan` で `attribute_exists(retrievalTrace)` を数える）は使わない。過去のトレースが TTL（60 日）まで残るため、2 回目以降の配備では壊れていても 1 件以上になり、今回の配備を判定できない（mona 指摘・itai 合意 2026-11-13）。
 
 9/25 の実装が入ったと思われたまま 7 週間記録されなかった反省から、指標・アラームは置かず、この確認とテストで代える（itai 2026-11-12）。
