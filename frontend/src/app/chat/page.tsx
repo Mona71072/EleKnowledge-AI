@@ -19,6 +19,7 @@ import { linkCitedNames } from '@/lib/citation-links.mjs';
 import { getAnnouncements, Announcement } from '@/lib/announcements';
 import { NoticeBanner } from '@/components/announcements/NoticeBanner';
 import { resolveInitialChatMode } from '@/lib/chat-session-link.mjs';
+import { resolveAssistantDisplayText } from '@/lib/chat-display-text.mjs';
 import { createJobPoller, type JobPoller, type ResearchJobStatus } from '@/lib/research-polling.mjs';
 import {
   BadFeedbackReasonId,
@@ -1412,7 +1413,7 @@ const normalizeTableMarkdown = (text: string): string => {
                                   {/* 本文の資料名を、この回答の参考資料へのリンクにする（返した資料の名前だけ）。
                                       「資料名 p.N」は該当ページを開く。法令は法令チャットと同じ e-Gov の URL（lawCitation.sourceUrl）で、ページは付けない。 */}
                                   {linkCitedNames(
-                                    normalizeTableMarkdown(streamingMessages[message.id] || message.content),
+                                    normalizeTableMarkdown(resolveAssistantDisplayText(message.id, message.content, streamingMessageId, streamingMessages)),
                                     message.role === 'assistant'
                                       ? getUniqueDocs(message.sourceDocuments).map((doc) => {
                                         const ctx = { sessionId: currentSession, messageId: message.id };
