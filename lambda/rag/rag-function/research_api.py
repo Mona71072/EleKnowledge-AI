@@ -318,11 +318,13 @@ def _handle_post(event, headers, user_id: str, jobs_table, dynamodb_client):
         message["sessionTitle"] = rag_app._fallback_session_title(request["query"])
     message.update(rag_app.chatlog_metric_keys.metric_day_keys(now, user_message_id))
 
+    question_saved = False
     try:
         chatlogs.put_item(
             Item=message,
             ConditionExpression="attribute_not_exists(sessionId) AND attribute_not_exists(messageId)",
         )
+        question_saved = True
         boto3.client("lambda", region_name=REGION).invoke(
             FunctionName=os.environ["RESEARCH_WORKER_FUNCTION"],
             InvocationType="Event",
@@ -338,6 +340,19 @@ def _handle_post(event, headers, user_id: str, jobs_table, dynamodb_client):
         except ClientError as cleanup_error:
             print(f"[research] reservation_cleanup_failed error_type={type(cleanup_error).__name__}")
         print(f"[research] dispatch_failed error_type={type(error).__name__}")
+        if question_saved:
+            # 再送で同じ質問が重複しないよう、保存済みの質問行を論理削除する。
+            # ChatLogs の削除は deleted=True の更新が流儀（実行ロールも DeleteItem を持たない）。
+            try:
+                chatlogs.update_item(
+                    Key={"sessionId": session_id, "messageId": user_message_id},
+                    UpdateExpression="SET #del = :true",
+                    ConditionExpression="attribute_exists(messageId)",
+                    ExpressionAttributeNames={"#del": "deleted"},
+                    ExpressionAttributeValues={":true": True},
+                )
+            except Exception as cleanup_error:
+                print(f"[research] question_cleanup_failed error_type={type(cleanup_error).__name__}")
         return _error(503, "ResearchUnavailable", headers)
 
     quota = get_daily_quota(jobs_table, user_id, now)

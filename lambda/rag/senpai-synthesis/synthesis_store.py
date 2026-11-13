@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 from botocore.exceptions import ClientError
 
-HISTORY_PAGE_SIZE = 200
-HISTORY_MAX_PAGES = 10
+HISTORY_PAGE_SIZE = 500
+HISTORY_MAX_PAGES = 25
 TTL_SECONDS = 60 * 24 * 60 * 60
 SYNTHESIS_MODE = "senpai_synthesis"
 UNUSABLE_RESPONSE_TYPES = frozenset({"not_found", "clarify"})

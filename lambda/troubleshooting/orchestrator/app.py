@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -36,6 +37,12 @@ dynamodb_resource = boto3.resource("dynamodb", region_name=os.environ.get("BEDRO
 
 class ValidationError(Exception):
     pass
+
+
+def _error_summary(e: Exception) -> str:
+    """例外本文は利用者入力を含み得るため、種類と AWS エラーコードだけをログ用に返す。"""
+    error_code = e.response.get("Error", {}).get("Code") if isinstance(e, ClientError) else None
+    return f"error_type={type(e).__name__} error_code={error_code}"
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +230,7 @@ def _presign_source_uri(uri: str) -> str:
             ExpiresIn=PRESIGNED_URL_EXPIRES_IN,
         )
     except Exception as e:
-        logger.warning(f"presigned URL generation failed: {e}")
+        logger.warning("presigned URL generation failed: %s", _error_summary(e))
         return uri
 
 
@@ -317,5 +324,5 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except ValidationError as e:
         return format_response(400, {"error": str(e)})
     except Exception as e:
-        logger.error(f"Lambda error: {e}")
+        logger.error("Lambda error: %s", _error_summary(e))
         return format_response(500, {"error": "内部エラー"})

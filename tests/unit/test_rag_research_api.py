@@ -328,3 +328,90 @@ def test_post_reserves_job_saves_question_and_dispatches_job_id_only():
     lambda_client.invoke.assert_called_once()
     assert json.loads(lambda_client.invoke.call_args.kwargs["Payload"]) == {"jobId": payload["jobId"]}
     api_reserve.assert_called_once()
+
+
+def _post_with_failing_dispatch(chatlogs_table, lambda_client):
+    jobs_table = Mock(name="research-jobs-test")
+    jobs_table.name = "research-jobs-test"
+    dynamodb_resource = Mock()
+    dynamodb_resource.Table.return_value = chatlogs_table
+    fake_app = SimpleNamespace(
+        generate_session_id=lambda: "session-1",
+        generate_message_id=lambda: "message-1",
+        get_chat_history=lambda *args, **kwargs: [],
+        needs_clarify=lambda *args, **kwargs: (False, []),
+        owns_session=lambda *args, **kwargs: True,
+        _fallback_session_title=lambda query: query[:50],
+        chatlog_metric_keys=SimpleNamespace(metric_day_keys=lambda *args: {}),
+    )
+    body = {
+        "query": "compare these models",
+        "clientRequestId": "550e8400-e29b-41d4-a716-446655440000",
+    }
+    with (
+        patch.object(research_api, "_load_rag_app", return_value=fake_app),
+        patch.object(research_api, "_get_request_record", return_value=None),
+        patch.object(research_api.boto3, "resource", return_value=dynamodb_resource),
+        patch.object(research_api.boto3, "client", return_value=lambda_client),
+        patch.object(research_api.research_job_store, "reserve_research_job"),
+        patch.object(research_api.research_job_store, "fail_queued_research_job"),
+    ):
+        return research_api._handle_post(
+            _event("POST", "/dev/rag/research", body=body),
+            {}, "user-1", jobs_table, Mock(),
+        )
+
+
+@patch.dict("os.environ", {
+    "RESEARCH_MODE_ENABLED": "beta",
+    "CHATLOGS_TABLE": "chatlogs-test",
+    "RESEARCH_WORKER_FUNCTION": "rag-research-worker-dev",
+}, clear=False)
+def test_post_dispatch_failure_marks_saved_question_deleted():
+    chatlogs_table = Mock()
+    lambda_client = Mock()
+    lambda_client.invoke.side_effect = RuntimeError("boom")
+
+    result = _post_with_failing_dispatch(chatlogs_table, lambda_client)
+
+    assert result["statusCode"] == 503
+    kwargs = chatlogs_table.update_item.call_args.kwargs
+    assert kwargs["Key"] == {"sessionId": "session-1", "messageId": "message-1"}
+    assert kwargs["ExpressionAttributeValues"][":true"] is True
+    assert "deleted" in kwargs["ExpressionAttributeNames"].values()
+
+
+@patch.dict("os.environ", {
+    "RESEARCH_MODE_ENABLED": "beta",
+    "CHATLOGS_TABLE": "chatlogs-test",
+    "RESEARCH_WORKER_FUNCTION": "rag-research-worker-dev",
+}, clear=False)
+def test_post_dispatch_failure_still_503_when_question_cleanup_fails(capsys):
+    chatlogs_table = Mock()
+    chatlogs_table.update_item.side_effect = RuntimeError("secret-detail")
+    lambda_client = Mock()
+    lambda_client.invoke.side_effect = RuntimeError("boom")
+
+    result = _post_with_failing_dispatch(chatlogs_table, lambda_client)
+
+    assert result["statusCode"] == 503
+    out = capsys.readouterr().out
+    assert "question_cleanup_failed error_type=RuntimeError" in out
+    assert "secret-detail" not in out
+
+
+@patch.dict("os.environ", {
+    "RESEARCH_MODE_ENABLED": "beta",
+    "CHATLOGS_TABLE": "chatlogs-test",
+    "RESEARCH_WORKER_FUNCTION": "rag-research-worker-dev",
+}, clear=False)
+def test_post_question_save_failure_does_not_touch_chatlogs_again():
+    chatlogs_table = Mock()
+    chatlogs_table.put_item.side_effect = RuntimeError("put failed")
+    lambda_client = Mock()
+
+    result = _post_with_failing_dispatch(chatlogs_table, lambda_client)
+
+    assert result["statusCode"] == 503
+    chatlogs_table.update_item.assert_not_called()
+    lambda_client.invoke.assert_not_called()
