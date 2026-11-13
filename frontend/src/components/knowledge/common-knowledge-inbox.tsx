@@ -39,7 +39,8 @@ export function CommonKnowledgeInbox() {
   const apiUrl = process.env.NEXT_PUBLIC_COMMON_KNOWLEDGE_API_URL || '';
   const scope = process.env.NEXT_PUBLIC_COMMON_KNOWLEDGE_VALIDATION_SCOPE || '';
   const [actor, setActor] = useState('viewer');
-  const [state, setState] = useState('unconfirmed');
+  // 移行済みのカードは「正本反映済み」で入っているため、開いた直後に見える状態を初期値にする。
+  const [state, setState] = useState('reflected');
   const [items, setItems] = useState<Candidate[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<Candidate | null>(null);
