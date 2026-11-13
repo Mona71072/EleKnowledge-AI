@@ -18,7 +18,7 @@ def test_amplify_shared_dev_keeps_knowledge_workbench_disabled() -> None:
 
 def test_sam_prototype_resource_flags_default_off() -> None:
     template = (ROOT / "infrastructure/sam/phase2-template.yaml").read_text(encoding="utf-8")
-    for name in ("KnowhowEnabled", "SenpaiSynthesisEnabled", "SenpaiFieldReportsEnabled", "SenpaiResearchEnabled"):
+    for name in ("KnowhowEnabled", "SenpaiSynthesisEnabled", "SenpaiFieldReportsEnabled", "SenpaiResearchEnabled", "KnowhowRewriteEnabled"):
         block = re.search(rf"^  {name}:\n(?P<body>(?:^    .*\n|^\n)*)", template, re.MULTILINE)
         assert block, f"{name} parameter is missing"
         assert re.search(r"^    Default:\s*['\"]false['\"]\s*$", block.group("body"), re.MULTILINE), name

@@ -92,6 +92,14 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: Enable the admin-only development Markdown navigation feature
 
+  KnowhowRewriteEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Enable the admin-only development feature "ノウハウカード本文の書き換え案" (POST /rag/knowhow/rewrite-proposal).
+      Effective only when Environment is dev. Each call invokes BedrockModelId once. Nothing is stored.
+
   SenpaiSynthesisEnabled:
     Type: String
     Default: 'false'
@@ -481,6 +489,9 @@ Conditions:
   KnowhowPublishedGuardEnabled: !And
     - !Condition KnowhowIndexDevEnabled
     - !Not [!Equals [!Ref KnowhowCanonicalBucket, '']]
+  KnowhowRewriteDevEnabled: !And
+    - !Equals [!Ref Environment, dev]
+    - !Equals [!Ref KnowhowRewriteEnabled, 'true']
   SenpaiSynthesisDevEnabled: !And
     - !Equals [!Ref Environment, dev]
     - !Equals [!Ref SenpaiSynthesisEnabled, 'true']
@@ -963,6 +974,99 @@ Resources:
           Properties:
             RestApiId: !Ref RagApi
             Path: /rag/senpai/synthesis
+            Method: POST
+
+  # ============================================================================
+  # Lambda Functions - Knowhow card rewrite proposal (dev-only, admin-only, off by default)
+  # ============================================================================
+  # 保存しない。Bedrock の InvokeModel だけを持ち、DynamoDB・S3・Retrieve の権限は付けない。
+  KnowhowRewriteLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: KnowhowRewriteDevEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # BedrockModelId だけを呼べる（SenpaiSynthesisLambdaRole と同じ ARN の組み立て）。
+        - PolicyName: BedrockInvokeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - !Ref BedrockModelId
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !If
+                  - BedrockModelIdIsApplicationProfile
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub
+                    - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                    - FoundationModelId: !Join
+                        - '.'
+                        - - !Select [1, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                          - !Select [2, !Split ['.', !Join ['', [!Ref BedrockModelId, '..']]]]
+                Condition:
+                  StringLike:
+                    bedrock:InferenceProfileArn: !If
+                      - BedrockModelIdIsApplicationProfile
+                      - !Ref BedrockModelId
+                      - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Env
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Phase
+          Value: "2"
+
+  KnowhowRewriteFunction:
+    Type: AWS::Serverless::Function
+    Condition: KnowhowRewriteDevEnabled
+    Properties:
+      Tags:
+        gyoumu012Project: !Ref CostProjectName
+        gyoumu012Component: rag
+        gyoumu012Usage: !Ref CostUsage
+      FunctionName: !Sub knowhow-rewrite-${Environment}
+      CodeUri: ../../lambda/rag/knowhow-rewrite/
+      Handler: app.lambda_handler
+      Description: Dev-only admin feature that proposes rewrites of knowhow-card sections from confirmed evidence
+      Role: !GetAtt KnowhowRewriteLambdaRole.Arn
+      # Timeout 30 秒: Bedrock の読み取り待ち 24 秒（再試行なし）+ 出力検証の余裕。API Gateway の統合
+      # タイムアウト（29 秒）が先に切れるため、これ以上長くしても呼び出し元には届かない。
+      # Memory 512 MB: 入力は最大でも 256 KiB、正規表現の検証は線形で、boto3 と JSON 処理だけ。
+      # 実測はしていない（senpai-synthesis と同じ値を据え置き。配備後に CloudWatch の Max Memory Used で見直す）。
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          KNOWHOW_REWRITE_ENABLED: 'true'
+          ENVIRONMENT: !Ref Environment
+          ADMIN_GROUP_NAME: admin
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_READ_TIMEOUT: '24'
+          KNOWHOW_REWRITE_MAX_TOKENS: '4096'
+      Events:
+        RewriteProposalApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApi
+            Path: /rag/knowhow/rewrite-proposal
             Method: POST
 
   # ============================================================================
@@ -1708,6 +1812,11 @@ Outputs:
     Condition: SenpaiFieldReportsDevEnabled
     Description: Senpai field reports (dev-only) Lambda Function ARN
     Value: !GetAtt SenpaiFieldReportFunction.Arn
+
+  KnowhowRewriteFunctionArn:
+    Condition: KnowhowRewriteDevEnabled
+    Description: Knowhow card rewrite proposal (dev-only) Lambda Function ARN
+    Value: !GetAtt KnowhowRewriteFunction.Arn
 
   SenpaiSynthesisFunctionArn:
     Condition: SenpaiSynthesisDevEnabled

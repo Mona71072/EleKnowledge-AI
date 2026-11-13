@@ -1,0 +1,74 @@
+{
+  "endpoint": "POST /rag/knowhow/rewrite-proposal",
+  "targetHeadings": ["統合した回答・ノウハウ", "調査・確認手順", "未確認事項"],
+  "limits": {
+    "bodyBytes": 262144,
+    "knowledgeIdPattern": "^KH-[A-Z0-9-]{1,80}$",
+    "cardVersion": { "min": 1, "max": 9999 },
+    "targets": { "min": 1, "max": 3, "bodyChars": 2000, "totalChars": 4000 },
+    "context": { "min": 0, "max": 8, "bodyChars": 4000, "totalChars": 16000 },
+    "evidence": { "min": 1, "max": 12, "questionChars": 2000, "answerChars": 2000 },
+    "sources": { "min": 0, "max": 8, "titleChars": 200, "pageMin": 1, "pageMax": 9999 },
+    "response": { "bodyChars": 4000, "reasonChars": 300, "summaryChars": 200 }
+  },
+  "request": {
+    "knowledgeId": "KH-PIT-TRAP-POSITION-394",
+    "cardVersion": 1,
+    "targets": [
+      { "heading": "統合した回答・ノウハウ", "body": "据付 SUE-3-17（600 mm 近接）と社内検査 800 mm は別の基準として共存しうる。" },
+      { "heading": "未確認事項", "body": "- SUE-3-17 本文（600 mm 規定の現行文言）" }
+    ],
+    "context": [
+      { "heading": "使う場面・対象条件", "body": "- ピットタラップを戸袋側へ移設したが社内検査で指摘されたとき" }
+    ],
+    "evidence": [
+      {
+        "question": "「ピットタラップ取付位置と800mm基準の整理」に関して、SUE-3-17 本文（600 mm 規定の現行文言）を確認できる資料はありますか。",
+        "lane": "technical",
+        "checkedOn": "2026-11-14",
+        "answer": "据付基準では三方枠からタラップ中心までの水平距離を 600 mm 以下に近づけることとしています。",
+        "sources": [{ "title": "SUE-3-17_ピット点検タラップ.pdf", "page": 4 }]
+      }
+    ]
+  },
+  "response": {
+    "knowledgeId": "KH-PIT-TRAP-POSITION-394",
+    "cardVersion": 1,
+    "sections": [
+      {
+        "heading": "統合した回答・ノウハウ",
+        "status": "unchanged"
+      },
+      {
+        "heading": "未確認事項",
+        "status": "changed",
+        "body": "- SUE-3-17 本文は「三方枠からタラップ中心まで 600 mm 以下に近づける」と確認済み（技術KB、2026-11-14）。",
+        "reason": "確認済みの根拠 1 で SUE-3-17 の 600 mm の記載を確認できたため。",
+        "evidence": [1],
+        "warnings": []
+      }
+    ],
+    "conflicts": []
+  },
+  "sectionStatus": ["changed", "unchanged", "rejected"],
+  "warningCodes": ["unsupported_value", "unverified_number", "heading_in_body", "missing_evidence", "too_long"],
+  "errors": [
+    { "status": 400, "error": "ValidationError" },
+    { "status": 401, "error": "Unauthorized" },
+    { "status": 403, "error": "FeatureUnavailable" },
+    { "status": 405, "error": "MethodNotAllowed" },
+    { "status": 413, "error": "PayloadTooLarge" },
+    { "status": 429, "error": "RewriteThrottled" },
+    { "status": 502, "error": "RewriteFailed" },
+    { "status": 502, "error": "RewriteTruncated" },
+    { "status": 504, "error": "RewriteTimeout" },
+    { "status": 500, "error": "InternalError" }
+  ],
+  "notes": [
+    "根拠の番号は evidence 配列の 1 始まり。",
+    "未知のキーは 400。",
+    "status が unchanged / rejected の節は body を返さない。rejected は warnings に理由を持つ。",
+    "新しい本文の資料番号・法令番号・単位つき数値が、元の節・context・根拠のどこにも無ければ rejected（unsupported_value）。2 桁以上の裸の数字が無ければ警告（unverified_number）。",
+    "サーバーは本文も結果も保存しない。ログに本文・質問・回答・ID・例外本文を出さない。"
+  ]
+}
