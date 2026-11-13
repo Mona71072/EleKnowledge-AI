@@ -23,3 +23,13 @@ export function applyCheckProposals(
   markdown: string,
   proposals: ReadonlyArray<{ question: string; checkedOn: string; markdown: string }>,
 ): { markdown: string; applied: number; skipped: number };
+
+/** 回答の先頭部分を、文の切れ目で切る（要約はしない）。 */
+export function answerHead(content: string): string;
+/** frontmatter とコードフェンスを除いた、H2 見出しの位置（行番号）と名前。 */
+export function scanStructure(lines: readonly string[]): {
+  plain: boolean[];
+  headings: number[];
+  labels: Map<number, string>;
+};
+export function isPlaceholderText(text: string): boolean;

@@ -141,3 +141,102 @@ export function summarizeDiff(rows) {
     removed: rows.filter((row) => row.kind === 'removed').length,
   };
 }
+
+/** 行内の強調を計算する1行の最大文字数。超えたら強調しない（計算量を抑える）。 */
+export const MAX_INLINE_LINE_CHARS = 400;
+/** 1回の `annotateInlineChanges` で使う LCS の表のセル数の合計の上限。 */
+const MAX_INLINE_TOTAL_CELLS = 2_000_000;
+// 英数字の連なり・空白の連なり・それ以外の1文字（日本語は1文字ずつ）に分ける。どれも入力長に対して線形。
+const INLINE_TOKEN = /[A-Za-z0-9_]+|\s+|[\s\S]/gu;
+
+/** 同じ種類（changed かどうか）が続く断片を1つにまとめる。 */
+function mergeSegments(pieces) {
+  return pieces.reduce((merged, piece) => {
+    const last = merged.at(-1);
+    return last && last.changed === piece.changed
+      ? [...merged.slice(0, -1), { text: last.text + piece.text, changed: piece.changed }]
+      : [...merged, piece];
+  }, []);
+}
+
+/** トークン列の LCS をたどり、左右それぞれの「残る／変わる」の印を返す。 */
+function markTokens(left, right) {
+  const { lengths, width } = buildLcsTable(left, right);
+  const leftChanged = Array(left.length).fill(true);
+  const rightChanged = Array(right.length).fill(true);
+  let i = 0;
+  let j = 0;
+  while (i < left.length && j < right.length) {
+    if (left[i] === right[j]) {
+      leftChanged[i] = false;
+      rightChanged[j] = false;
+      i += 1;
+      j += 1;
+    } else if (lengths[(i + 1) * width + j] >= lengths[i * width + j + 1]) {
+      i += 1;
+    } else {
+      j += 1;
+    }
+  }
+  return { leftChanged, rightChanged };
+}
+
+const toPieces = (tokens, changed) => tokens.map((text, index) => ({ text, changed: changed[index] }));
+
+/**
+ * 1行の変更前後を比べ、行内で変わった部分だけを `changed: true` の断片にする。
+ * 変更が無い・片方が空・どちらかが上限を超える・共通部分が全く無いときは null。
+ * @param {string} before
+ * @param {string} after
+ * @param {{ maxChars?: number }} [options]
+ * @returns {{ before: Array<{text: string, changed: boolean}>, after: Array<{text: string, changed: boolean}>, cells: number } | null}
+ */
+export function diffInline(before, after, { maxChars = MAX_INLINE_LINE_CHARS } = {}) {
+  if (typeof before !== 'string' || typeof after !== 'string' || before === after
+    || before === '' || after === '' || before.length > maxChars || after.length > maxChars) return null;
+  const left = before.match(INLINE_TOKEN) ?? [];
+  const right = after.match(INLINE_TOKEN) ?? [];
+  const prefix = commonPrefixLength(left, right);
+  const suffix = commonSuffixLength(left, right, prefix);
+  const middleLeft = left.slice(prefix, left.length - suffix);
+  const middleRight = right.slice(prefix, right.length - suffix);
+  const { leftChanged, rightChanged } = markTokens(middleLeft, middleRight);
+  if (prefix + suffix === 0 && leftChanged.every(Boolean) && rightChanged.every(Boolean)) return null;
+  const same = (tokens) => tokens.map((text) => ({ text, changed: false }));
+  return {
+    before: mergeSegments([...same(left.slice(0, prefix)), ...toPieces(middleLeft, leftChanged), ...same(left.slice(left.length - suffix))]),
+    after: mergeSegments([...same(right.slice(0, prefix)), ...toPieces(middleRight, rightChanged), ...same(right.slice(right.length - suffix))]),
+    cells: (middleLeft.length + 1) * (middleRight.length + 1),
+  };
+}
+
+/**
+ * 連続する削除行と追加行を先頭から順に対にし、対ごとに行内の変更箇所（`segments`）を付ける。
+ * 元の行は変更しない。計算量の合計が上限を超えたら、以降の対は強調しない。
+ * @param {ReadonlyArray<{ kind: string, text: string }>} rows `diffLines` の rows
+ */
+export function annotateInlineChanges(rows) {
+  const out = rows.map((row) => ({ ...row }));
+  let budget = MAX_INLINE_TOTAL_CELLS;
+  let index = 0;
+  while (index < out.length) {
+    if (out[index].kind !== 'removed') {
+      index += 1;
+      continue;
+    }
+    const removedEnd = out.findIndex((row, at) => at >= index && row.kind !== 'removed');
+    const start = removedEnd < 0 ? out.length : removedEnd;
+    const addedEnd = out.findIndex((row, at) => at >= start && row.kind !== 'added');
+    const stop = addedEnd < 0 ? out.length : addedEnd;
+    const pairs = Math.min(start - index, stop - start);
+    for (let pair = 0; pair < pairs && budget > 0; pair += 1) {
+      const result = diffInline(out[index + pair].text, out[start + pair].text);
+      if (!result) continue;
+      budget -= result.cells;
+      out[index + pair].segments = result.before;
+      out[start + pair].segments = result.after;
+    }
+    index = Math.max(stop, index + 1);
+  }
+  return out;
+}

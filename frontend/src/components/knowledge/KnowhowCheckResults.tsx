@@ -109,7 +109,7 @@ export function KnowhowCheckResults({ questions, snapshot, decisions, onDecide, 
         const tasks = snapshot.tasks.filter((task) => task.questionId === question.id);
         const proposal = proposals.get(question.id);
         return (
-          <section key={question.id} className="min-w-0 space-y-3 rounded-lg border border-gray-200 p-3 sm:p-4">
+          <section key={question.id} id={`check-question-${question.id}`} className="min-w-0 scroll-mt-24 space-y-3 rounded-lg border border-gray-200 p-3 sm:p-4">
             <h4 className="break-words text-sm font-semibold text-gray-950">{question.text}</h4>
             <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
               {tasks.map((task) => <CheckLane key={task.id} task={task} onRetry={onRetry} />)}

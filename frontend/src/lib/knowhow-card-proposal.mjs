@@ -89,7 +89,7 @@ export function classifyCheckAnswer(answer) {
 }
 
 /** 回答の先頭部分を、文の切れ目で切る（要約はしない）。 */
-function answerHead(content) {
+export function answerHead(content) {
   const chars = Array.from(content.trim());
   if (chars.length <= PROPOSAL_ANSWER_HEAD_CHARS) return chars.join('');
   const head = chars.slice(0, PROPOSAL_ANSWER_HEAD_CHARS).join('');
@@ -205,7 +205,7 @@ function bodyStart(lines) {
 }
 
 /** frontmatter とコードフェンスを除いた行だけを対象に、見出し（##）の位置と名前を集める。 */
-function scanStructure(lines) {
+export function scanStructure(lines) {
   const start = bodyStart(lines);
   const isFenced = createFenceTracker();
   const plain = lines.map((line, index) => index >= start && !isFenced(line));
@@ -281,7 +281,8 @@ function rejectUnclosedFence(lines, from, to) {
   }
 }
 
-function isPlaceholderText(text) {
+/** 「（該当なし）」「（未実施 — …）」のような、情報の無い書き置きか。 */
+export function isPlaceholderText(text) {
   const wrapped = PLACEHOLDER_WRAPPED.exec(text.trim());
   if (!wrapped) return false;
   const parts = wrapped[1].replace(/。$/u, '').split(PLACEHOLDER_SEPARATOR);

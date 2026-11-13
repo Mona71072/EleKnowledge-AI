@@ -372,7 +372,7 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
             body={active.body}
             originalBody={parsed.body}
             busy={busy}
-            onAdopt={(expectedBody, body, applied, skipped) => {
+            onAdopt={(expectedBody, body, applied, skipped, rewritten) => {
               const current = workspaceRef.current;
               if (!current || current.document !== active.document || current.body !== expectedBody) {
                 setError('対象の本文が変わりました。もう一度「差分を確認」してください。');
@@ -387,7 +387,8 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
                 setConfirmed(false);
                 setError('');
                 const duplicateNote = skipped ? `重複した${skipped}件は省きました。` : '';
-                setMessage(`追記案${applied}件を編集中の本文に反映しました。${duplicateNote}ページ下部から修正候補を保存できます。`);
+                const done = [applied ? `追記案${applied}件` : '', rewritten ? `本文${rewritten}節の書き換え` : ''].filter(Boolean).join('と');
+                setMessage(`${done}を編集中の本文に反映しました。${duplicateNote}ページ下部から修正候補を保存できます。`);
                 return true;
               } catch {
                 setError('追記案を取り込めませんでした。本文が256 KiB以下になるよう追記案を選び直してください。');

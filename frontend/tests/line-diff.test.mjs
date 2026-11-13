@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DIFF_CONTEXT_LINES, MAX_DIFF_CELLS, diffLines, groupDiffHunks, summarizeDiff } from '../src/lib/line-diff.mjs';
+import {
+  annotateInlineChanges,
+  diffInline,
+  MAX_INLINE_LINE_CHARS, DIFF_CONTEXT_LINES, MAX_DIFF_CELLS, diffLines, groupDiffHunks, summarizeDiff } from '../src/lib/line-diff.mjs';
 
 const kinds = (rows) => rows.map((row) => `${row.kind === 'added' ? '+' : row.kind === 'removed' ? '-' : ' '}${row.text}`);
 
@@ -85,4 +88,59 @@ test('文字列でない入力は空として扱い、入力を書き換えな�
 test('片側だけの変更でも行数が非常に多い場合は全文表示に切り替える', () => {
   const manyLines = '変更行\n'.repeat(20000);
   assert.equal(diffLines('', manyLines).tooLarge, true);
+});
+
+const join = (segments) => segments.map((s) => s.text).join('');
+const changedText = (segments) => segments.filter((s) => s.changed).map((s) => s.text);
+
+test('行内の差分: 挿入・削除・置換で、変わった部分だけを changed にする', () => {
+  const inserted = diffInline('据付基準は 600 mm です', '据付基準は 600 mm 以下です');
+  assert.equal(join(inserted.before), '据付基準は 600 mm です');
+  assert.equal(join(inserted.after), '据付基準は 600 mm 以下です');
+  assert.deepEqual(changedText(inserted.before), []);
+  assert.deepEqual(changedText(inserted.after), ['以下']);
+  const deleted = diffInline('A と B と C', 'A と C');
+  assert.deepEqual(changedText(deleted.before), ['B と ']);
+  assert.deepEqual(changedText(deleted.after), []);
+  const replaced = diffInline('距離は 800 mm 以内', '距離は 600 mm 以内');
+  assert.deepEqual(changedText(replaced.before), ['800']);
+  assert.deepEqual(changedText(replaced.after), ['600']);
+});
+
+test('行内の差分: 日本語の語句の置換と、隣り合う変更の結合', () => {
+  const got = diffInline('三方枠から取り付けます。', '乗場側から取り付けます。');
+  assert.equal(join(got.before), '三方枠から取り付けます。');
+  assert.deepEqual(changedText(got.before), ['三方枠']);
+  assert.deepEqual(changedText(got.after), ['乗場側']);
+  assert.ok(got.after.every((s, i, all) => i === 0 || all[i - 1].changed !== s.changed), '同じ種類の断片は結合される');
+});
+
+test('行内の差分: 共通部分が無いとき・上限超過・同一のときは null', () => {
+  assert.equal(diffInline('あいう', 'xyz'), null);
+  assert.equal(diffInline('同じ', '同じ'), null);
+  const long = 'あ'.repeat(MAX_INLINE_LINE_CHARS + 1);
+  assert.equal(diffInline(long, `${long}い`), null);
+  assert.equal(diffInline('', 'x'), null);
+});
+
+test('行内の差分: 病的な入力でも1秒以内に終わる', () => {
+  const left = Array.from({ length: MAX_INLINE_LINE_CHARS }, (_, i) => (i % 2 ? 'a' : 'b')).join('');
+  const right = Array.from({ length: MAX_INLINE_LINE_CHARS }, (_, i) => (i % 3 ? 'b' : 'a')).join(' ');
+  const started = Date.now();
+  diffInline(left, right);
+  const rows = Array.from({ length: 3000 }, (_, i) => ({ kind: 'removed', text: `${left}${i}`, beforeLine: i + 1 }))
+    .concat(Array.from({ length: 3000 }, (_, i) => ({ kind: 'added', text: `${right}${i}`, afterLine: i + 1 })));
+  annotateInlineChanges(rows);
+  assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`);
+});
+
+test('行内の強調の付与: 連続する削除行と追加行を順に対にし、他の行は変えない', () => {
+  const rows = diffLines('前\n距離は 800 mm\n後', '前\n距離は 600 mm\n後').rows;
+  const annotated = annotateInlineChanges(rows);
+  assert.deepEqual(annotated.map((r) => r.kind), ['same', 'removed', 'added', 'same']);
+  assert.ok(annotated[1].segments && annotated[2].segments);
+  assert.equal(annotated[0].segments, undefined);
+  assert.equal(Object.hasOwn(rows[1], 'segments'), false, '元の行は変更しない');
+  const unpaired = annotateInlineChanges(diffLines('a\n距離 1', 'a').rows);
+  assert.equal(unpaired.every((r) => r.segments === undefined), true);
 });

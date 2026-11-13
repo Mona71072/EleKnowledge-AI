@@ -11,6 +11,8 @@ const OWNER = 'synthetic-user';
 const conversations = new Map();
 const requests = [];
 const retryRequests = new Set();
+const rewriteRequests = [];
+const rewriteProblems = [];
 const screenshotDirectory = process.env.KNOWHOW_SCREENSHOT_DIR;
 let web;
 let browser;
@@ -77,6 +79,31 @@ function answerFor(body) {
     ...(body.includeKnowhow ? {
       knowhow: { status: 'not_found', indexVersion: `sha256:${'0'.repeat(64)}`, matches: [], searchTerms: [] },
     } : {}),
+  };
+}
+
+const REWRITE_MAIN = '統合した回答・ノウハウ';
+const REWRITE_ADDED_LINE = '- 合成の根拠に基づく書き換え: 点検資料の要件を確認済み。';
+
+/** 書き換え案のモック。送られた内容が契約どおりで、未確認の根拠やカード全文を含まないことをここで確認する。 */
+function rewriteResponseFor(body) {
+  const text = JSON.stringify(body);
+  const evidence = Array.isArray(body.evidence) ? body.evidence : [];
+  if (Object.keys(body).sort().join(',') !== 'cardVersion,context,evidence,knowledgeId,targets') rewriteProblems.push('keys');
+  if (evidence.length !== 1 || evidence[0].lane !== 'technical') rewriteProblems.push('evidence は出典つきの技術KB 1件だけ');
+  if (!evidence[0]?.answer?.includes('合成応答 (normal)')) rewriteProblems.push('answer');
+  for (const leaked of ['source_refs', 'lists_item', 'onenote_id', '合成試験用の安全な点検手順', 'synthetic-local-card.md', 'questionId']) {
+    if (text.includes(leaked)) rewriteProblems.push(`含めてはいけない: ${leaked}`);
+  }
+  if (!body.targets.some((target) => target.heading === REWRITE_MAIN)) rewriteProblems.push('targets');
+  if (rewriteProblems.length) return null;
+  return {
+    knowledgeId: body.knowledgeId,
+    cardVersion: body.cardVersion,
+    sections: body.targets.map((target) => target.heading === REWRITE_MAIN
+      ? { heading: target.heading, status: 'changed', body: `${target.body}\n${REWRITE_ADDED_LINE}`, reason: '確認済みの根拠 1 で点検資料の記載を確認できたため。', evidence: [1], warnings: [] }
+      : { heading: target.heading, status: 'unchanged' }),
+    conflicts: [{ heading: null, summary: '合成の食い違い: カードの記述と根拠の記述が異なります。', evidence: [1] }],
   };
 }
 
@@ -150,6 +177,13 @@ function createApiServer() {
         ...(body.senpaiTurnId ? { senpaiTurnId: body.senpaiTurnId } : {}),
       });
     }
+    if (request.method === 'POST' && url.pathname === '/rag/knowhow/rewrite-proposal') {
+      const body = await collectBody(request);
+      rewriteRequests.push(body);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const result = rewriteResponseFor(body);
+      return result ? json(response, 200, result) : json(response, 400, { error: 'ValidationError' });
+    }
     return json(response, 404, { error: 'Not found' });
   });
 }
@@ -198,6 +232,7 @@ try {
       NEXT_PUBLIC_SKIP_AUTH: 'true',
       NEXT_PUBLIC_DEV_ADMIN: 'true',
       NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH: 'true',
+      NEXT_PUBLIC_ENABLE_KNOWHOW_REWRITE: 'true',
       NEXT_PUBLIC_ENABLE_SENPAI_RESEARCH: 'false',
       NEXT_PUBLIC_ENABLE_SENPAI_FIELD_REPORTS: 'false',
       NEXT_PUBLIC_ENABLE_SENPAI_SYNTHESIS: 'false',
@@ -371,6 +406,16 @@ source_refs:
 
   const proposalChoice = page.getByRole('button', { name: '確認して追記する' });
   await proposalChoice.click();
+  const rewritePanel = page.getByRole('region', { name: 'AI による本文の書き換え案' });
+  await rewritePanel.getByText('確認済みの根拠 1 件と、カードの2つの節を AI に送ります。AI の利用料がかかります。').waitFor();
+  await rewritePanel.getByRole('button', { name: 'AI に本文の書き換え案を作らせる' }).click();
+  await rewritePanel.getByText('変更理由: 確認済みの根拠 1 で点検資料の記載を確認できたため。').waitFor();
+  assert.equal(rewriteRequests.length, 1, 'the rewrite proposal is requested once');
+  assert.deepEqual(rewriteProblems, [], `the rewrite request broke the contract: ${rewriteProblems.join(' | ')}`);
+  assert.equal(await rewritePanel.locator('[aria-pressed="true"]').count(), 0, 'nothing is chosen by default');
+  await rewritePanel.getByText('1節中 0節を反映・0節を反映しない・1節が未確認').waitFor();
+  await rewritePanel.getByRole('button', { name: '確認して反映する' }).click();
+  await rewritePanel.getByText(/本文の主張を変えました。Git に入れるときは card_version を上げ/).waitFor();
   await page.getByRole('button', { name: '差分を確認' }).click();
   await page.getByRole('heading', { name: '読み込んだ原文との差分' }).waitFor();
   if (process.env.CAPTURE_KNOWHOW_SCREENSHOTS === '1' && screenshotDirectory) {
@@ -385,6 +430,7 @@ source_refs:
   await page.getByRole('tab', { name: '差分' }).click();
   await page.getByRole('heading', { name: '合成試験用の安全な点検手順' }).waitFor();
   assert.match(await page.locator('main').innerText(), /KB照合/);
+  assert.match(await page.locator('main').innerText(), /合成の根拠に基づく書き換え/, 'the rewritten section reaches the edited body together with the addition');
   assert.match(await page.locator('main').innerText(), /正式資料・元情報/);
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: '修正したMarkdownを保存' }).click();
@@ -396,6 +442,8 @@ source_refs:
   assert.match(downloadedMarkdown, /合成試験用の安全な点検手順/);
   assert.match(downloadedMarkdown, /Lists item 71 を照合し、確認した適用条件を追加する。/u, 'the evidence-informed card edit is included in the draft');
   assert.match(downloadedMarkdown, /KB照合/);
+  assert.match(downloadedMarkdown, /## 統合した回答・ノウハウ\n- 合成条件で動作を確認する。\n- 合成の根拠に基づく書き換え: 点検資料の要件を確認済み。/u, 'the confirmed section rewrite is in the draft');
+  assert.doesNotMatch(downloadedMarkdown, /合成の食い違い/u, 'a conflict nobody added stays out of the card');
   assert.match(downloadedMarkdown, /## KB確認に基づく追記\n\n### KB照合（確認日 \d{4}-\d{2}-\d{2}）/u, 'the placeholder section is replaced by the confirmed addition');
   assert.doesNotMatch(downloadedMarkdown, /## KB確認に基づく追記\n（該当なし）/u, 'the no-information placeholder is gone');
   assert.match(downloadedMarkdown, /- 確認: 管理者が出典を確認（\d{4}-\d{2}-\d{2}）/u, 'the confirmation line is recorded');

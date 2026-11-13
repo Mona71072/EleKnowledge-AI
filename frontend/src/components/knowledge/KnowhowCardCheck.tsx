@@ -1,25 +1,33 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { getIdToken } from '@/lib/auth-helpers';
 import { buildCheckQuestions, type CheckQuestion } from '@/lib/knowhow-card-check.mjs';
-import { applyCheckProposals, CHECK_DECISIONS, type CheckDecision } from '@/lib/knowhow-card-proposal.mjs';
+import { CHECK_DECISIONS, type CheckDecision } from '@/lib/knowhow-card-proposal.mjs';
+import { composeCardEdits, buildRewriteEvidence, buildRewriteRequest, isRewriteEnabled, type RewritePlan } from '@/lib/knowhow-rewrite.mjs';
 import { createCheckRunner, type CheckRunner } from '@/lib/knowhow-check-runner.mjs';
 import { queryKnowledgeSource, KnowledgeResearchError, type ResearchAnswer } from '@/lib/knowledge-research.mjs';
 import { KnowhowCheckQuestions } from './KnowhowCheckQuestions';
 import { KnowhowCheckResults, proposalForQuestion, type KnowhowCheckSnapshot, type KnowhowCheckTask } from './KnowhowCheckResults';
+import { KnowhowRewritePanel } from './KnowhowRewritePanel';
 import { KnowledgeLineDiff } from './KnowledgeLineDiff';
 import { knowledgeResearchErrorMessage } from './ResearchResultLane';
+import { useKnowhowRewrite } from './useKnowhowRewrite';
 
 type Props = {
   frontmatter: Record<string, unknown>;
   originalBody: string;
   body: string;
   /** 取り込めたら true。最新の本文に差し込んだ結果（expectedBody はその差し込み前の本文）を渡す。 */
-  onAdopt: (expectedBody: string, revisedBody: string, applied: number, skipped: number) => boolean;
+  onAdopt: (expectedBody: string, revisedBody: string, applied: number, skipped: number, rewritten: number) => boolean;
   busy: boolean;
 };
 
-type Preview = { before: string; after: string; applied: number; skipped: number };
+type Preview = { before: string; after: string; applied: number; skipped: number; rewritten: number };
+
+const NO_REWRITE_PLAN: RewritePlan = { request: null, evidenceRefs: [], evidenceOmitted: 0, excluded: [], blocker: '' };
+const STALE_NOTE = '本文が変わったため、もう一度案を作ってください。';
+const DECISION_CHANGED_NOTE = '確認の選択が変わったため、作った案を破棄しました。';
+const RETRY_NOTE = '照合をやり直したため、作った案を破棄しました。';
 
 const steps = ['質問を確認', '照合', '確認する', '差分を確認'];
 
@@ -34,6 +42,11 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
   const [message, setMessage] = useState('');
   const [previewError, setPreviewError] = useState('');
   const runner = useRef<CheckRunner<KnowhowCheckTask, ResearchAnswer> | null>(null);
+  const rewriteEnabled = isRewriteEnabled(process.env.NEXT_PUBLIC_ENABLE_KNOWHOW_REWRITE);
+  const rewritePlan = useMemo(() => (rewriteEnabled && snapshot
+    ? buildRewriteRequest({ frontmatter, body, evidence: buildRewriteEvidence({ questions: submitted, tasks: snapshot.tasks, decisions }) })
+    : NO_REWRITE_PLAN), [rewriteEnabled, snapshot, frontmatter, body, submitted, decisions]);
+  const rewrite = useKnowhowRewrite(rewritePlan, body);
 
   useEffect(() => () => {
     runner.current?.dispose();
@@ -50,6 +63,7 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
     setSubmitted(active);
     setStartedBody(body);
     setMessage('');
+    rewrite.discard();
     runner.current = createCheckRunner({
       tasks,
       execute: (task, signal) => queryKnowledgeSource({
@@ -75,6 +89,7 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
     setPreview(null);
     setMessage('');
     setPreviewError('');
+    rewrite.discard();
   };
 
   const showPreview = () => {
@@ -86,12 +101,14 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
     setMessage('');
     setPreviewError('');
     try {
-      const result = applyCheckProposals(body, proposals);
-      if (result.applied === 0) {
-        setMessage('確認して追記する追記案は、すでに本文にあります。');
+      const result = composeCardEdits(body, { rewrites: rewrite.accepted, expectedBody: rewrite.expectedBody, proposals });
+      const stale = result.stale.length ? `「${result.stale.join('」「')}」は${STALE_NOTE}` : '';
+      if (result.applied + result.rewritten === 0) {
+        setMessage(stale || '確認して追記する追記案は、すでに本文にあります。');
         return;
       }
-      setPreview({ before: body, after: result.markdown, applied: result.applied, skipped: result.skipped });
+      if (stale) setMessage(stale);
+      setPreview({ before: body, after: result.markdown, applied: result.applied, skipped: result.skipped, rewritten: result.rewritten });
     } catch {
       setPreviewError('追記位置を判定できませんでした。Markdownのコードフェンスが閉じているか確認してください。');
     }
@@ -100,7 +117,7 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
   const adopt = () => {
     if (!preview || busy) return;
     if (preview.before !== body) return;
-    if (onAdopt(preview.before, preview.after, preview.applied, preview.skipped)) reset();
+    if (onAdopt(preview.before, preview.after, preview.applied, preview.skipped, preview.rewritten)) reset();
   };
 
   const bodyChanged = snapshot !== null && startedBody !== null && startedBody !== body;
@@ -135,6 +152,7 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
               setPreview(null);
               setMessage('');
               setPreviewError('');
+              rewrite.discard(RETRY_NOTE);
               runner.current?.retry(id);
             }}
             onDecide={(id, decision) => {
@@ -142,10 +160,15 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
               setPreview(null);
               setMessage('');
               setPreviewError('');
+              rewrite.discard(DECISION_CHANGED_NOTE);
             }} />
+          <KnowhowRewritePanel hasKnowledgeId={typeof frontmatter.knowledge_id === 'string' && frontmatter.knowledge_id !== ''}
+            plan={rewritePlan} view={rewrite.view} decisions={rewrite.decisions} conflictDecisions={rewrite.conflictDecisions}
+            note={rewrite.note} checking={snapshot.running} busy={busy} onRun={rewrite.run} onCancel={rewrite.cancel}
+            onDecide={rewrite.decide} onDecideConflict={rewrite.decideConflict} />
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" disabled={snapshot.running} onClick={reset}>質問の編集に戻る</Button>
-            <Button type="button" disabled={snapshot.running || !confirmedCount || busy} onClick={showPreview}>差分を確認</Button>
+            <Button type="button" disabled={snapshot.running || (!confirmedCount && !rewrite.accepted.length) || busy} onClick={showPreview}>差分を確認</Button>
           </div>
           <p className="text-xs leading-5 text-gray-700">
             {confirmedCount
@@ -164,8 +187,10 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
         <section aria-label="採用する追記案の差分" className="min-w-0 space-y-3 border-t border-gray-200 pt-4">
           <h3 className="font-semibold text-gray-950">読み込んだ原文との差分</h3>
           <KnowledgeLineDiff before={originalBody} after={preview.after} />
-          <p className="text-xs leading-5 text-gray-700">「確認して追記する」を選んだ追記だけが入っています。保存したMarkdownは下書きになります。</p>
-          <Button type="button" disabled={busy || !confirmedCount} onClick={adopt}>本文に反映</Button>
+          <p className="text-xs leading-5 text-gray-700">
+            {preview.rewritten ? `「確認して反映する」を選んだ ${preview.rewritten} 節の書き換えと、「確認して追記する」を選んだ追記を、1つの差分にまとめています。` : '「確認して追記する」を選んだ追記だけが入っています。'}保存したMarkdownは下書きになります。
+          </p>
+          <Button type="button" disabled={busy || (!confirmedCount && !rewrite.accepted.length)} onClick={adopt}>本文に反映</Button>
         </section>
       )}
       {message && <p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-950">{message}</p>}

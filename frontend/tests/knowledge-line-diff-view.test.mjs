@@ -98,3 +98,17 @@ test('差分と全文表示は [before, after] に依存させてメモ化し、
   renderToStaticMarkup(createElement(Memoized, { before: big('前'), after: big('後') }));
   assert.ok(memoCalls.length >= 1, 'the full-text view is memoized too');
 });
+
+test('行内の強調は既定ではオフで、出力が変わらない。有効にすると変わった部分だけを濃い背景で示す', () => {
+  const before = '前\n距離は 800 mm 以内です\n後';
+  const after = '前\n距離は 600 mm 以内です\n後';
+  const plain = renderToStaticMarkup(createElement(KnowledgeLineDiff, { before, after }));
+  const off = renderToStaticMarkup(createElement(KnowledgeLineDiff, { before, after, inlineHighlight: false }));
+  assert.equal(off, plain);
+  assert.doesNotMatch(plain, /<mark/);
+  const on = renderToStaticMarkup(createElement(KnowledgeLineDiff, { before, after, inlineHighlight: true }));
+  assert.match(on, /<mark[^>]*bg-red-300[^>]*>800<\/mark>/);
+  assert.match(on, /<mark[^>]*bg-green-300[^>]*>600<\/mark>/);
+  assert.match(on, /mm 以内です/);
+  assert.doesNotMatch(on.replace(/<mark[^>]*>[^<]*<\/mark>/g, '').replace(/<[^>]*>/g, ''), /800|600/);
+});
