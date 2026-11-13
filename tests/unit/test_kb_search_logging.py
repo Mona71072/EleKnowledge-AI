@@ -71,3 +71,27 @@ def test_lambda_handler_logs_exception_type_without_user_input(index, rel_path, 
 
     assert "error_type=KBSearchError" in caplog.text
     assert marker not in caplog.text
+
+
+@pytest.mark.parametrize("index,rel_path", list(enumerate(LAMBDA_PATHS)))
+def test_error_response_body_does_not_contain_exception_text(index, rel_path, mocker):
+    module = _load(f"kb_search{index + 1}_response_error_app", rel_path)
+    marker = "応答本文に混入した例外_山田太郎_秘密"
+    event = {
+        "actionGroup": "Troubleshooting",
+        "function": "searchManual",
+        "parameters": [
+            {"name": "query", "value": "症状"},
+            {"name": "controlSystem", "value": "VFGLF"},
+        ],
+    }
+    mocker.patch.object(module.bedrock_client, "retrieve", side_effect=RuntimeError(marker))
+    response = module.lambda_handler(event, None)
+    body = response["response"]["functionResponse"]["responseBody"]["TEXT"]["body"]
+    assert marker not in body
+
+    # KBSearchError 以外の予期しない例外（500 側）も本文に出さない
+    mocker.patch.object(module, "search_knowledge_base", side_effect=RuntimeError(marker))
+    response = module.lambda_handler(event, None)
+    body = response["response"]["functionResponse"]["responseBody"]["TEXT"]["body"]
+    assert marker not in body

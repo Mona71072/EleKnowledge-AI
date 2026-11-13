@@ -114,3 +114,24 @@ def test_unknown_cognito_error_does_not_leak_provider_message():
     assert payload["error"] == "InternalServerError"
     assert "secret-cognito-detail" not in response["body"]
     assert "InternalErrorException" not in response["body"]
+
+
+def test_login_mfa_challenge_returns_4xx_without_session_token(caplog):
+    module = _load_auth_app("login")
+    module.cognito_client.initiate_auth.return_value = {
+        "ChallengeName": "SOFTWARE_TOKEN_MFA",
+        "Session": "secret-challenge-session-token",
+        "ChallengeParameters": {},
+    }
+
+    with caplog.at_level("DEBUG"):
+        response = module.lambda_handler(
+            {"body": json.dumps({"email": "user@example.com", "password": "Secret123!"})}, None
+        )
+
+    assert response["statusCode"] == 403
+    body = json.loads(response["body"])
+    assert body["error"] == "ChallengeNotSupported"
+    assert "secret-challenge-session-token" not in response["body"]
+    assert "secret-challenge-session-token" not in caplog.text
+    module.cognito_client.get_user.assert_not_called()

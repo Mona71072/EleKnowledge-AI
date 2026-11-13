@@ -139,7 +139,7 @@ def search_knowledge_base(query: str, filters: Dict[str, Any]) -> List[Dict[str,
     except Exception as e:
         error_code = e.response.get('Error', {}).get('Code') if isinstance(e, ClientError) else None
         logger.error("KB search failed: error_type=%s error_code=%s", type(e).__name__, error_code)
-        raise KBSearchError(f"Knowledge Base 検索失敗: {str(e)}")
+        raise KBSearchError("Knowledge Base 検索に失敗しました")
 
 
 def format_results(results: List[Dict[str, Any]]) -> str:
@@ -250,4 +250,4 @@ def lambda_handler(event, context):
     except Exception as e:
         error_code = e.response.get('Error', {}).get('Code') if isinstance(e, ClientError) else None
         logger.error("Unexpected error: error_type=%s error_code=%s", type(e).__name__, error_code)
-        return _make_response(event, 500, f"予期しないエラーが発生しました: {str(e)}")
+        return _make_response(event, 500, "予期しないエラーが発生しました")

@@ -1774,6 +1774,16 @@ def extract_response_text(response_body: dict) -> str:
     return ""
 
 
+def _generate_knowhow_text(system_prompt: str, messages: list) -> str:
+    """ノウハウ回答の生成。空・空白のみは成功として扱わない。"""
+    text = invoke_generation(
+        bedrock_runtime, BEDROCK_MODEL_ID, system_prompt, messages, call_name='knowhow_answer',
+    )[0]
+    if not isinstance(text, str) or not text.strip():
+        raise EmptyGenerationError('empty generation')
+    return text
+
+
 def generate_response_with_claude(query: str, kb_results: dict, chat_history: list = None,
                                   mode: str = "normal", search_query: str = None,
                                   rank_key: str = None) -> str:
@@ -1847,7 +1857,9 @@ def generate_response_with_claude(query: str, kb_results: dict, chat_history: li
             bedrock_runtime, BEDROCK_MODEL_ID, system_prompt, messages,
             call_name='answer',
         )
-        
+
+        if not isinstance(assistant_message, str) or not assistant_message.strip():
+            raise EmptyGenerationError('empty generation')
         return assistant_message
         
     except ClientError as e:
@@ -2236,6 +2248,30 @@ def is_admin_caller(event) -> bool:
     return ADMIN_GROUP_NAME in group_list
 
 
+LIVE_ROW_FILTER = (
+    '(attribute_not_exists(#del) OR #del = :false) '
+    'AND (attribute_not_exists(#ttl) OR #ttl > :now)'
+)
+LIVE_ROW_NAMES = {'#del': 'deleted', '#ttl': 'ttl'}
+# 通常のセッションは最古の行が有効なので 1 ページで返る。読む行数を抑えるためページは小さくする。
+SESSION_OWNER_PAGE_SIZE = 5
+SESSION_OWNER_MAX_PAGES = 1000
+
+
+class EmptyGenerationError(Exception):
+    """モデルが本文を返さなかった（空・空白のみ）。成功として保存しない。"""
+
+
+def _is_live_item(item) -> bool:
+    """削除済みでなく、TTL が切れていない行だけ True（ttl 属性なしは有効）。"""
+    if item.get('deleted') is True:
+        return False
+    ttl = item.get('ttl')
+    if ttl is not None and int(ttl) <= int(time.time()):
+        return False
+    return True
+
+
 def owns_session(session_id: str, user_id: str) -> bool:
     """session_id が user_id のものであるかを判定する。
 
@@ -2247,13 +2283,30 @@ def owns_session(session_id: str, user_id: str) -> bool:
     # 読取に失敗した場合（ClientError）は握りつぶさず呼び出し元へ伝える。
     # 「存在しない／他人のもの」(False → 404) と「確認できなかった」(例外 → 一般化した 500) を
     # 区別するため。構造化ログ（rag_error）は lambda_handler 側の error_response が出す。
-    response = chatlogs_table.query(
-        KeyConditionExpression='sessionId = :sid',
-        ExpressionAttributeValues={':sid': session_id},
-        Limit=1
-    )
-    items = response.get('Items', [])
-    return bool(items) and items[0].get('userId') == user_id
+    # 削除済み（deleted=true）と TTL 切れの行は「存在しない」とみなす。FilterExpression は
+    # Limit 適用後に評価されるため、有効な行が見つかるまでページングする。
+    exclusive_start = None
+    for _page_number in range(SESSION_OWNER_MAX_PAGES):
+        kwargs = {
+            'KeyConditionExpression': 'sessionId = :sid',
+            'FilterExpression': LIVE_ROW_FILTER,
+            'ExpressionAttributeNames': LIVE_ROW_NAMES,
+            'ExpressionAttributeValues': {
+                ':sid': session_id, ':false': False, ':now': int(time.time()),
+            },
+            'Limit': SESSION_OWNER_PAGE_SIZE,
+            'ConsistentRead': True,
+        }
+        if exclusive_start:
+            kwargs['ExclusiveStartKey'] = exclusive_start
+        response = chatlogs_table.query(**kwargs)
+        live_items = [item for item in (response.get('Items') or []) if _is_live_item(item)]
+        if live_items:
+            return live_items[0].get('userId') == user_id
+        exclusive_start = response.get('LastEvaluatedKey')
+        if not exclusive_start:
+            return False
+    return False
 
 
 def get_session_rag_mode(session_id: str) -> str | None:
@@ -2266,6 +2319,7 @@ def get_session_rag_mode(session_id: str) -> str | None:
         KeyConditionExpression='sessionId = :sid',
         ExpressionAttributeValues={':sid': session_id},
         Limit=10,
+        ConsistentRead=True,
     )
     for item in response.get('Items', []):
         if item.get('role') in ('user', 'assistant'):
@@ -2284,6 +2338,7 @@ def get_session_senpai_conversation_id(session_id: str) -> tuple[bool, str | Non
             'KeyConditionExpression': 'sessionId = :sid',
             'ExpressionAttributeValues': {':sid': session_id},
             'Limit': 500,
+            'ConsistentRead': True,
         }
         if exclusive_start_key:
             query['ExclusiveStartKey'] = exclusive_start_key
@@ -2331,16 +2386,21 @@ def get_chat_history(session_id: str, limit: int = 10, mode: str = 'normal') -> 
     while len(collected) < limit:
         kwargs = {
             'KeyConditionExpression': 'sessionId = :sid',
-            'FilterExpression': 'attribute_not_exists(#del) OR #del = :false',
-            'ExpressionAttributeNames': {'#del': 'deleted'},
-            'ExpressionAttributeValues': {':sid': session_id, ':false': False},
+            'FilterExpression': LIVE_ROW_FILTER,
+            'ExpressionAttributeNames': LIVE_ROW_NAMES,
+            'ExpressionAttributeValues': {
+                ':sid': session_id, ':false': False, ':now': int(time.time()),
+            },
             'ScanIndexForward': False,
             'Limit': max(limit * 2, 20),
+            'ConsistentRead': True,
         }
         if exclusive_start:
             kwargs['ExclusiveStartKey'] = exclusive_start
         response = chatlogs_table.query(**kwargs)
-        collected.extend(response.get('Items') or [])
+        collected.extend(
+            item for item in (response.get('Items') or []) if _is_live_item(item)
+        )
         exclusive_start = response.get('LastEvaluatedKey')
         if not exclusive_start:
             break
@@ -2675,9 +2735,7 @@ def handle_rag_request(event, context, started_at):
         if knowhow_only:
             response_type, ai_response = knowhow_answer.answer(
                 query, knowhow_payload, chat_history,
-                lambda system_prompt, messages: invoke_generation(
-                    bedrock_runtime, BEDROCK_MODEL_ID, system_prompt, messages, call_name='knowhow_answer',
-                )[0],
+                _generate_knowhow_text,
             )
             if model_from_question:
                 ai_response = question_model.notice(model_from_question) + '\n' + ai_response

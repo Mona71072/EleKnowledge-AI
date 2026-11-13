@@ -114,6 +114,22 @@ def lambda_handler(event, context):
             }
         )
         
+        # MFA 等のチャレンジ応答は AuthenticationResult を持たない。継続処理は未対応。
+        # SECURITY: チャレンジの Session トークンは応答にもログにも出さない。
+        if 'AuthenticationResult' not in auth_response:
+            logger.warning(json.dumps({
+                'event': 'auth_challenge_not_supported',
+                'challenge_name': str(auth_response.get('ChallengeName', ''))[:64]
+            }))
+            return {
+                'statusCode': 403,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'ChallengeNotSupported',
+                    'message': 'This account requires additional authentication, which is not supported by this API'
+                })
+            }
+
         # Get user attributes from Cognito
         user_response = cognito_client.get_user(
             AccessToken=auth_response['AuthenticationResult']['AccessToken']
