@@ -39,11 +39,6 @@ jobs:
           AWS_DEFAULT_REGION: ap-northeast-1
           AWS_REGION: ap-northeast-1
         run: python -m pytest tests/unit -q
-      - name: Run DynamoDB integration tests with synthetic data
-        env:
-          AWS_DEFAULT_REGION: ap-northeast-1
-          AWS_REGION: ap-northeast-1
-        run: python -m pytest tests/integration -q
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -52,6 +47,11 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+      - name: Run DynamoDB integration tests with synthetic data
+        env:
+          AWS_DEFAULT_REGION: ap-northeast-1
+          AWS_REGION: ap-northeast-1
+        run: python -m pytest tests/integration -q
       - name: Install Chromium for local synthetic browser flow
         working-directory: frontend
         run: npx playwright install --with-deps chromium
