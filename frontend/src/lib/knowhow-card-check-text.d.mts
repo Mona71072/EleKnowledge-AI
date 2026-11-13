@@ -1,0 +1,10 @@
+export const LAW_TERMS: readonly string[];
+export const MAX_TEXT_LINE_CHARS: number;
+export function clampLine(text: unknown): string;
+export function stripMarkdown(text: unknown): string;
+export function hasManagementTerms(text: unknown): boolean;
+export function stripManagementTerms(text: unknown): string;
+export function extractValueTokens(text: unknown): string[];
+export function isDocumentNumber(token: string): boolean;
+export function findLawTerms(text: unknown): string[];
+export function comparisonKey(text: unknown): string;

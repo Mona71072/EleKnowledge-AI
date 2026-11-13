@@ -1,3 +1,5 @@
+import type { KnowledgeSourceReviewInput, KnowledgeSourceReviewRecord } from './knowledge-source-review.mjs';
+
 export type KnowledgeKbReviewStatus = 'unverified' | 'reviewed' | 'conflict';
 
 export type KnowledgeParsedMarkdown = {
@@ -26,6 +28,15 @@ export type KnowledgePlacementReceipt = {
   text: string;
 };
 
+export type KnowledgeReviewCommentInput = { id: string; sectionId: string; text: string };
+
+export type KnowledgeReviewComment = KnowledgeReviewCommentInput & {
+  sectionLabel: string;
+  revision: number;
+  status: 'open' | 'applied';
+  appliedRevision?: number;
+};
+
 export type KnowledgeWorkspaceState = {
   document: {
     id: string;
@@ -42,6 +53,8 @@ export type KnowledgeWorkspaceState = {
   reviewedRevision: number | null;
   copiedRevision: number | null;
   placements: KnowledgePlacementReceipt[];
+  sourceReviews: KnowledgeSourceReviewRecord[];
+  reviewComments: KnowledgeReviewComment[];
 };
 
 export type KnowledgeProposalPacket = {
@@ -64,6 +77,8 @@ export type KnowledgeProposalPacket = {
   copiedRevision: number | null;
   placements: Array<KnowledgePlacementReceipt & { knowledgeId: string; textSha256: string }>;
   kbReview: KnowledgeKbReview;
+  sourceReviews: KnowledgeSourceReviewRecord[];
+  reviewComments: KnowledgeReviewComment[];
   hashes: {
     baseMarkdownSha256: string;
     bodySha256: string;
@@ -88,4 +103,7 @@ export function recordPlacement(
   state: KnowledgeWorkspaceState,
   placement: { destination: string; recordedAt: string },
 ): KnowledgeWorkspaceState;
+export function recordSourceReview(state: KnowledgeWorkspaceState, input: KnowledgeSourceReviewInput): KnowledgeWorkspaceState;
+export function addReviewComment(state: KnowledgeWorkspaceState, input: KnowledgeReviewCommentInput): KnowledgeWorkspaceState;
+export function applyReviewComment(state: KnowledgeWorkspaceState, id: string, expectedBody: string, body: string): KnowledgeWorkspaceState;
 export function exportProposal(state: KnowledgeWorkspaceState): Promise<KnowledgeProposalPacket>;

@@ -1,119 +1,13 @@
-import { isAlias, isMap, isScalar, isSeq, parseDocument, stringify } from 'yaml';
+import { stringify } from 'yaml';
+import { parseKnowledgeFrontmatter } from './knowledge-markdown-frontmatter.mjs';
+import { normalizeSourceReview } from './knowledge-source-review.mjs';
+import { findCommentSection, MAX_REVIEW_COMMENT_CHARS } from './knowledge-comment-review.mjs';
 
 const MAX_MARKDOWN_BYTES = 256 * 1024;
-const MAX_FRONTMATTER_DEPTH = 32;
-const MAX_FRONTMATTER_NODES = 12_000;
-const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const PROPOSAL_FORMAT = 'eleknowledge-knowledge-proposal/v1';
 
 function fail(message) {
   throw new TypeError(message);
-}
-
-function parseFrontmatter(markdown) {
-  if (typeof markdown !== 'string') fail('Markdown must be a string.');
-  if (markdown.includes('\0')) fail('Markdown cannot contain NUL bytes.');
-  if (new TextEncoder().encode(markdown).byteLength > MAX_MARKDOWN_BYTES) {
-    fail('Markdown exceeds the 256 KiB limit.');
-  }
-
-  const firstLineEnd = markdown.indexOf('\n');
-  if (firstLineEnd < 0 || !/^---\r?$/.test(markdown.slice(0, firstLineEnd))) {
-    fail('Markdown must start with YAML frontmatter.');
-  }
-
-  const firstContentOffset = firstLineEnd + 1;
-  let cursor = firstContentOffset;
-  let closingStart = -1;
-  let closingEnd = -1;
-  while (cursor <= markdown.length) {
-    const lineEnd = markdown.indexOf('\n', cursor);
-    const end = lineEnd < 0 ? markdown.length : lineEnd;
-    const line = markdown.slice(cursor, end).replace(/\r$/, '');
-    if (line === '---') {
-      closingStart = cursor;
-      closingEnd = lineEnd < 0 ? end : lineEnd + 1;
-      break;
-    }
-    if (lineEnd < 0) break;
-    cursor = lineEnd + 1;
-  }
-  if (closingStart < 0) fail('YAML frontmatter closing delimiter is missing.');
-
-  const yamlText = markdown.slice(firstContentOffset, closingStart);
-  const document = parseDocument(yamlText, {
-    schema: 'core',
-    uniqueKeys: true,
-    version: '1.2',
-  });
-  if (document.errors.length > 0 || document.warnings.length > 0) {
-    fail('YAML frontmatter contains a parse error or warning.');
-  }
-  if (!document.contents || !isMap(document.contents)) fail('YAML frontmatter must be a mapping.');
-
-  validateYamlNodes(document.contents);
-  let value;
-  try {
-    value = document.toJS({ maxAliasCount: 0, mapAsMap: false });
-  } catch {
-    fail('YAML aliases or unsupported values are not allowed.');
-  }
-  validatePlainValue(value);
-
-  const afterFence = markdown.slice(closingEnd);
-  const body = afterFence.startsWith('\r\n')
-    ? afterFence.slice(2)
-    : afterFence.startsWith('\n')
-      ? afterFence.slice(1)
-      : afterFence;
-  return { frontmatter: value, body };
-}
-
-function validateYamlNodes(node) {
-  if (!node) return;
-  if (isAlias(node)) fail('YAML aliases are not allowed.');
-  if (node.anchor) fail('YAML anchors are not allowed.');
-  if (node.tag) fail('Explicit YAML tags are not allowed.');
-  if (isMap(node)) {
-    for (const pair of node.items) {
-      validateYamlNodes(pair.key);
-      validateYamlNodes(pair.value);
-    }
-    return;
-  }
-  if (isSeq(node)) {
-    for (const item of node.items) validateYamlNodes(item);
-    return;
-  }
-  if (!isScalar(node)) fail('Unsupported YAML node type.');
-}
-
-function validatePlainValue(value) {
-  let count = 0;
-  const visit = (current, depth) => {
-    count += 1;
-    if (count > MAX_FRONTMATTER_NODES || depth > MAX_FRONTMATTER_DEPTH) {
-      fail('YAML frontmatter is too deeply nested or contains too many values.');
-    }
-    if (current === null || ['string', 'boolean'].includes(typeof current)) return;
-    if (typeof current === 'number') {
-      if (!Number.isFinite(current)) fail('Non-finite YAML numbers are not allowed.');
-      return;
-    }
-    if (Array.isArray(current)) {
-      for (const item of current) visit(item, depth + 1);
-      return;
-    }
-    const prototype = current && typeof current === 'object' ? Object.getPrototypeOf(current) : undefined;
-    if (typeof current !== 'object' || (prototype !== null && prototype !== Object.prototype)) {
-      fail('YAML frontmatter must contain only plain JSON-like values.');
-    }
-    for (const [key, child] of Object.entries(current)) {
-      if (DANGEROUS_KEYS.has(key) || key === '<<') fail('Unsafe YAML mapping key.');
-      visit(child, depth + 1);
-    }
-  };
-  visit(value, 0);
 }
 
 function cloneSafe(value) {
@@ -140,7 +34,7 @@ function getIdentity(frontmatter) {
 }
 
 export function parseKnowledgeMarkdown(markdown) {
-  const { frontmatter, body } = parseFrontmatter(markdown);
+  const { frontmatter, body } = parseKnowledgeFrontmatter(markdown, MAX_MARKDOWN_BYTES);
   const identity = getIdentity(frontmatter);
   const metadata = cloneSafe(frontmatter);
   return {
@@ -217,6 +111,8 @@ export function createWorkspace(parsed) {
     reviewedRevision: null,
     copiedRevision: null,
     placements: [],
+    sourceReviews: [],
+    reviewComments: [],
   };
 }
 
@@ -276,6 +172,48 @@ export function markCopied(state, expectedRevision) {
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== state.revision) fail('The copied text belongs to a stale revision.');
   if (state.reviewedRevision !== state.revision) fail('Confirm the current OneNote draft before copying it.');
   return { ...state, copiedRevision: state.revision, placements: [...state.placements] };
+}
+
+/** Record the evidence a person consulted at the current work revision. */
+export function recordSourceReview(state, input) {
+  const record = normalizeSourceReview(input, state.document.metadata, state.revision);
+  const reviews = state.sourceReviews ?? [];
+  const currentSource = (entry) => entry.revision === record.revision && entry.source.kind === record.source.kind
+    && entry.source.id === record.source.id && entry.locator === record.locator;
+  return { ...state, sourceReviews: [...reviews.filter((entry) => !currentSource(entry)), record] };
+}
+
+/** Save the requested research focus without modifying Markdown. */
+export function addReviewComment(state, { id, sectionId, text }) {
+  const comment = typeof text === 'string' ? text.trim() : '';
+  const comments = state.reviewComments ?? [];
+  const section = findCommentSection(state.body, sectionId);
+  if (typeof id !== 'string' || !/^[a-z0-9-]{1,80}$/iu.test(id) || comments.some((entry) => entry.id === id)
+    || !section || !comment || Array.from(comment).length > MAX_REVIEW_COMMENT_CHARS || comment.includes('\0')) {
+    fail('確認する節とコメントを指定してください。');
+  }
+  if (comments.length >= 50) fail('この作業に記録できるコメントは50件までです。');
+  return {
+    ...state,
+    reviewComments: [...comments, { id, sectionId, sectionLabel: section.label, text: comment, status: 'open', revision: state.revision }],
+  };
+}
+
+/** Apply an explicit preview only if the document still matches its base body. */
+export function applyReviewComment(state, id, expectedBody, body) {
+  const comments = state.reviewComments ?? [];
+  const comment = comments.find((entry) => entry.id === id && entry.status === 'open');
+  if (state.body !== expectedBody || body === expectedBody || !comment
+    || !findCommentSection(state.body, comment.sectionId, comment.sectionLabel)) {
+    fail('本文またはコメントの状態が変わりました。');
+  }
+  const next = editBody(state, body);
+  return {
+    ...next,
+    reviewComments: comments.map((entry) => entry.id === id
+      ? { ...entry, status: 'applied', appliedRevision: next.revision }
+      : entry),
+  };
 }
 
 function validDestination(destination) {
@@ -371,6 +309,8 @@ export async function exportProposal(state) {
     copiedRevision: state.copiedRevision,
     placements,
     kbReview: cloneSafe(state.kbReview),
+    sourceReviews: cloneSafe(state.sourceReviews ?? []),
+    reviewComments: cloneSafe(state.reviewComments ?? []),
     hashes: {
       baseMarkdownSha256: await sha256(baseMarkdown),
       bodySha256: await sha256(state.body),

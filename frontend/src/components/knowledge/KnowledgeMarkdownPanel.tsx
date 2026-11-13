@@ -1,8 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { researchSourceHref } from '@/lib/knowledge-research.mjs';
+import { KnowledgeLineDiff } from './KnowledgeLineDiff';
 
 type Props = {
   title: string;
@@ -14,6 +16,13 @@ type Props = {
 function safeExternalHref(href: string | undefined): string | null {
   if (!href) return null;
   try {
+    if (href.startsWith('/doc?')) {
+      const parsed = new URL(href, 'https://example.invalid');
+      const sourceUri = parsed.searchParams.get('uri') ?? undefined;
+      const pageNumber = Number(/^#page=(\d+)$/u.exec(parsed.hash)?.[1]);
+      const rebuilt = researchSourceHref({ sourceUri, pageNumber }, 'normal');
+      return href === rebuilt ? rebuilt : null;
+    }
     const parsed = new URL(href);
     return parsed.protocol === 'https:' ? parsed.href : null;
   } catch {
@@ -21,25 +30,8 @@ function safeExternalHref(href: string | undefined): string | null {
   }
 }
 
-function renderLineDiff(before: string, after: string): Array<{ kind: 'same' | 'removed' | 'added'; text: string }> {
-  const left = before.split('\n');
-  const right = after.split('\n');
-  const rows: Array<{ kind: 'same' | 'removed' | 'added'; text: string }> = [];
-  const max = Math.max(left.length, right.length);
-  for (let i = 0; i < max; i += 1) {
-    if (left[i] === right[i]) {
-      if (left[i] !== undefined) rows.push({ kind: 'same', text: left[i] });
-      continue;
-    }
-    if (left[i] !== undefined) rows.push({ kind: 'removed', text: left[i] });
-    if (right[i] !== undefined) rows.push({ kind: 'added', text: right[i] });
-  }
-  return rows;
-}
-
 export function KnowledgeMarkdownPanel({ title, originalBody, body, onChange }: Props) {
   const [view, setView] = useState<'edit' | 'compare' | 'preview'>('edit');
-  const diff = useMemo(() => renderLineDiff(originalBody, body), [originalBody, body]);
   const changed = originalBody !== body;
 
   return (
@@ -91,16 +83,15 @@ export function KnowledgeMarkdownPanel({ title, originalBody, body, onChange }: 
           </label>
         )}
 
-        {view === 'compare' && (
-          <div aria-label="原文と修正案の差分" className="max-h-[34rem] overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 font-mono text-xs leading-6">
-            {!changed && <p className="text-gray-600">原文からの変更はありません。</p>}
-            {changed && diff.map((row, index) => (
-              <div key={`${index}-${row.kind}`} className={row.kind === 'removed' ? 'bg-red-50 text-red-900' : row.kind === 'added' ? 'bg-green-50 text-green-900' : 'text-gray-700'}>
-                <span aria-hidden className="inline-block w-5 select-none text-gray-400">{row.kind === 'removed' ? '−' : row.kind === 'added' ? '+' : ' '}</span>
-                <span className="whitespace-pre-wrap break-words">{row.text || ' '}</span>
-              </div>
-            ))}
+        {view === 'edit' && changed && (
+          <div className="mt-4 space-y-2 border-t border-gray-200 pt-4">
+            <h4 className="text-sm font-semibold text-gray-950">元のMarkdownからの変更箇所</h4>
+            <KnowledgeLineDiff before={originalBody} after={body} />
           </div>
+        )}
+
+        {view === 'compare' && (
+          <KnowledgeLineDiff before={originalBody} after={body} />
         )}
 
         {view === 'preview' && (

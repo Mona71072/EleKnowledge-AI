@@ -2,6 +2,8 @@
 
 import { ChangeEvent, useRef, useState } from 'react';
 import {
+  addReviewComment,
+  applyReviewComment,
   confirmOneNote,
   createWorkspace,
   editBody,
@@ -10,16 +12,22 @@ import {
   markCopied,
   parseKnowledgeMarkdown,
   recordPlacement,
+  recordSourceReview,
   setKbReview,
   type KnowledgeKbReview,
   type KnowledgeParsedMarkdown,
   type KnowledgeWorkspaceState,
 } from '@/lib/knowledge-workbench.mjs';
 import { KnowledgeMarkdownPanel } from './KnowledgeMarkdownPanel';
+import { KnowledgeReviewComments } from './KnowledgeReviewComments';
 import { KnowledgeOneNotePanel } from './KnowledgeOneNotePanel';
 import { KnowledgeSourcePanel } from './KnowledgeSourcePanel';
+import { KnowledgeSourceReviewPanel } from './KnowledgeSourceReviewPanel';
 import { KnowledgeResearchWorkspace } from './KnowledgeResearchWorkspace';
+import { KnowhowCardCheck } from './KnowhowCardCheck';
+import { checkModelWords } from '@/lib/knowhow-card-check.mjs';
 import { buildResearchTargetNote } from '@/lib/knowledge-research.mjs';
+import { restoreReviewWorkspace } from '@/lib/knowledge-review-resume.mjs';
 
 
 function downloadFile(filename: string, content: string, type: string) {
@@ -71,6 +79,7 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [documentSession, setDocumentSession] = useState(0);
+  const [cardCheckRevision, setCardCheckRevision] = useState(0);
   const [researchTarget, setResearchTarget] = useState<ResearchTargetContext | null>(null);
   const researchTargetRef = useRef<ResearchTargetContext | null>(null);
   const [currentFilename, setCurrentFilename] = useState('');
@@ -94,13 +103,15 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
     setError('');
     setMessage('');
     setBusy(true);
+    const isPacket = research && /\.json$/iu.test(file.name);
     try {
-      if (!file.name.toLowerCase().endsWith('.md')) throw new TypeError('Markdown（.md）ファイルを選んでください。');
-      if (file.size > 256 * 1024) throw new TypeError('ファイルは256 KiB以下を選んでください。');
+      if (!isPacket && !file.name.toLowerCase().endsWith('.md')) throw new TypeError('Markdown（.md）ファイルを選んでください。');
+      if (file.size > (isPacket ? 4 * 1024 * 1024 : 256 * 1024)) throw new TypeError('ファイルが大きすぎます。');
       const text = await file.text();
+      const restored = isPacket ? await restoreReviewWorkspace(text) : null;
       if (token !== importToken.current) return;
-      const nextParsed = parseKnowledgeMarkdown(text);
-      const nextWorkspace = createWorkspace(nextParsed);
+      const nextParsed = restored?.parsed ?? parseKnowledgeMarkdown(text);
+      const nextWorkspace = restored?.workspace ?? createWorkspace(nextParsed);
       setParsed(nextParsed);
       replaceWorkspace(nextWorkspace);
       setDocumentSession(token);
@@ -108,11 +119,13 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
       replaceResearchTarget(createResearchTargetContext(token, nextWorkspace.document.id, nextWorkspace.document.baseVersion, nextWorkspace.revision));
       setKbDraft(nextWorkspace.kbReview);
       setConfirmed(false);
-      setMessage(`「${file.name}」を読み込みました。内容はこの画面内だけで扱われます。`);
+      setMessage(isPacket ? 'JSON作業記録を開きました。原文と差分、コメントを復元しました。'
+        : `「${file.name}」を読み込みました。内容はこの画面内だけで扱われます。`);
     } catch (reason) {
       if (token !== importToken.current) return;
       const reasonText = (reason as Error).message || '';
-      const guidance = reasonText.includes('256 KiB')
+      const guidance = isPacket ? 'この画面で保存した4 MiB以下のJSON作業記録を選んでください。'
+        : reasonText.includes('大きすぎます')
         ? '256 KiB以下のMarkdownを選んでください。'
         : reasonText.includes('Markdown（.md）')
           ? 'Markdown（.md）ファイルを選んでください。'
@@ -236,7 +249,7 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
         <h1 className="mt-1 text-2xl font-bold text-gray-950">{research ? '工技先輩（開発中）' : 'ノウハウ確認'}</h1>
         <p className="mt-2 max-w-4xl text-sm leading-6 text-gray-700">
           {research
-            ? '技術KB・法令KBの回答を比較し、選んだ回答を調査メモ候補としてMarkdownへ取り込みます。ファイルは選んだ後もブラウザー内だけで扱い、自分が送信する質問だけを検索APIへ送ります。'
+            ? '既存カードを選び、技術KB・OneNote・Listsの資料と照らし合わせて本文を更新します。カードの修正案と出典ごとの確認記録を保存できます。'
             : '自分で選んだMarkdownを確認し、修正候補とOneNoteへの追記文を作ります。内容はサーバーへ送られず、元ファイルも変更しません。画面を閉じたり別ファイルを読み込むと、保存していない作業は消えます。'}
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -244,13 +257,146 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
             Markdownを選ぶ
             <input aria-label="Markdownファイルを選択" type="file" accept=".md,text/markdown,text/plain" onChange={handleImport} disabled={busy} className="sr-only" />
           </label>
+          {research && (
+            <label className="inline-flex cursor-pointer items-center rounded-lg border border-blue-300 bg-white px-4 py-2.5 text-sm font-semibold text-blue-900 hover:bg-blue-100 focus-within:ring-2 focus-within:ring-blue-500">
+              JSON作業記録を開く
+              <input aria-label="JSON作業記録を開く" type="file" accept=".json,application/json" onChange={handleImport} disabled={busy} className="sr-only" />
+            </label>
+          )}
           <span className="text-sm text-gray-600">256 KiB以下の .md ファイルを1つ選択</span>
           {busy && <span role="status" className="text-sm text-gray-700">読み込み中…</span>}
           {currentFilename && <span className="rounded-full bg-white px-3 py-1.5 text-sm font-medium text-gray-800 shadow-sm">作業中: {currentFilename}</span>}
         </div>
         {message && <p role="status" className="mt-3 text-sm text-green-800">{message}</p>}
         {error && <p role="alert" className="mt-3 text-sm text-red-800">{error}</p>}
+        {research && active && (
+          <nav aria-label="カード更新の操作" className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold text-blue-800">
+            <a href="#review-card-sources" className="underline underline-offset-2">出典を確認・本文を編集</a>
+            <a href="#review-card-comments" className="underline underline-offset-2">コメントから追記案を作る</a>
+            <a href="#search-card-sources" className="underline underline-offset-2">技術KB・法令KBを調べる</a>
+            <a href="#save-card-draft" className="underline underline-offset-2">修正案を保存</a>
+          </nav>
+        )}
       </header>
+
+      {active && parsed && (
+        <div id="review-card-sources" className="grid min-w-0 scroll-mt-36 grid-cols-1 gap-5 lg:grid-cols-[minmax(16rem,0.9fr)_minmax(24rem,1.5fr)]">
+          {research ? (
+            <KnowledgeSourceReviewPanel
+              key={documentSession}
+              metadata={active.document.metadata}
+              records={active.sourceReviews}
+              revision={active.revision}
+              onRecord={(input) => {
+                const current = workspaceRef.current;
+                if (busy || !current || current.document !== active.document || current.revision !== active.revision) return false;
+                try {
+                  replaceWorkspace(recordSourceReview(current, input));
+                  setError('');
+                  return true;
+                } catch {
+                  setError('照合記録を追加できませんでした。出典と参照箇所、確認メモを確認してください。');
+                  return false;
+                }
+              }}
+            />
+          ) : <KnowledgeSourcePanel metadata={active.document.metadata} kbStatus={active.kbReview.status} />}
+          <KnowledgeMarkdownPanel
+            title={active.document.title}
+            originalBody={parsed.body}
+            body={active.body}
+            onChange={(body) => {
+              try {
+                const next = editBody(active, body);
+                replaceWorkspace(next);
+                setCardCheckRevision((revision) => revision + 1);
+                replaceResearchTarget(createResearchTargetContext(documentSession, next.document.id, next.document.baseVersion, next.revision));
+                setKbDraft(next.kbReview);
+                setConfirmed(false);
+                setMessage('');
+                setError('');
+              } catch {
+                setError('本文を更新できませんでした。256 KiB以下の文章であることを確認してください。');
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {research && active && (
+        <div id="review-card-comments" className="scroll-mt-36">
+          <KnowledgeReviewComments
+            key={documentSession}
+            body={active.body}
+            title={active.document.title}
+            modelWords={checkModelWords(active.document.metadata)}
+            bodyRevision={cardCheckRevision}
+            busy={busy}
+            comments={active.reviewComments}
+            onAdd={(input) => {
+              const current = workspaceRef.current;
+              if (!current || current.document !== active.document || busy) return false;
+              try {
+                replaceWorkspace(addReviewComment(current, input));
+                return true;
+              } catch {
+                return false;
+              }
+            }}
+            onApply={(id, expectedBody, body) => {
+              const current = workspaceRef.current;
+              if (!current || current.document !== active.document || busy) return false;
+              try {
+                const next = applyReviewComment(current, id, expectedBody, body);
+                replaceWorkspace(next);
+                setCardCheckRevision((revision) => revision + 1);
+                replaceResearchTarget(createResearchTargetContext(documentSession, next.document.id, next.document.baseVersion, next.revision));
+                setKbDraft(next.kbReview);
+                setConfirmed(false);
+                setError('');
+                setMessage('コメントへの追記案を対象の節に反映しました。Markdown本文の差分から確認できます。');
+                return true;
+              } catch {
+                return false;
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {research && parsed && active && (
+        <div id="search-card-sources" className="scroll-mt-36">
+          <KnowhowCardCheck
+            key={documentSession}
+            frontmatter={parsed.frontmatter}
+            body={active.body}
+            originalBody={parsed.body}
+            busy={busy}
+            onAdopt={(expectedBody, body, applied, skipped) => {
+              const current = workspaceRef.current;
+              if (!current || current.document !== active.document || current.body !== expectedBody) {
+                setError('対象の本文が変わりました。もう一度「差分を確認」してください。');
+                return false;
+              }
+              try {
+                const next = editBody(current, body);
+                replaceWorkspace(next);
+                setCardCheckRevision((revision) => revision + 1);
+                replaceResearchTarget(createResearchTargetContext(documentSession, next.document.id, next.document.baseVersion, next.revision));
+                setKbDraft(next.kbReview);
+                setConfirmed(false);
+                setError('');
+                const duplicateNote = skipped ? `重複した${skipped}件は省きました。` : '';
+                setMessage(`追記案${applied}件を編集中の本文に反映しました。${duplicateNote}ページ下部から修正候補を保存できます。`);
+                return true;
+              } catch {
+                setError('追記案を取り込めませんでした。本文が256 KiB以下になるよう追記案を選び直してください。');
+                return false;
+              }
+            }}
+          />
+        </div>
+      )}
 
       {research && (
         <KnowledgeResearchWorkspace
@@ -272,6 +418,7 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
               const provenance = buildResearchTargetNote(target);
               const next = editBody(current, `${current.body.trimEnd()}\n\n${provenance}\n\n${note}`);
               replaceWorkspace(next);
+              setCardCheckRevision((revision) => revision + 1);
               setKbDraft(next.kbReview);
               setConfirmed(false);
               setError('');
@@ -292,26 +439,12 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
         </div>
       ) : (
         <>
-          <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[minmax(16rem,0.9fr)_minmax(24rem,1.5fr)]">
-            <KnowledgeSourcePanel metadata={active.document.metadata} kbStatus={active.kbReview.status} />
-            <KnowledgeMarkdownPanel
-              title={active.document.title}
-              originalBody={parsed.body}
-              body={active.body}
-              onChange={(body) => {
-                try {
-                  const next = editBody(active, body);
-                  replaceWorkspace(next);
-                  replaceResearchTarget(createResearchTargetContext(documentSession, next.document.id, next.document.baseVersion, next.revision));
-                  setKbDraft(next.kbReview);
-                  setConfirmed(false);
-                  setMessage('');
-                } catch {
-                  setError('本文を更新できませんでした。256 KiB以下の文章であることを確認してください。');
-                }
-              }}
-            />
-          </div>
+          {research && (
+            <details className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+              <summary className="cursor-pointer font-medium text-gray-900">元のカードに記録された出典と適用条件</summary>
+              <div className="mt-3"><KnowledgeSourcePanel metadata={active.document.metadata} kbStatus={active.kbReview.status} /></div>
+            </details>
+          )}
 
           <KnowledgeOneNotePanel
             key={`${documentSession}-${active.copiedRevision ?? 'none'}`}
@@ -339,10 +472,10 @@ export function KnowledgeWorkbench({ research = false }: { research?: boolean })
             onRecordPlacement={addPlacement}
           />
 
-          <footer className="flex flex-col justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center">
+          <footer id="save-card-draft" className="flex scroll-mt-36 flex-col justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center">
             <div className="text-sm text-gray-700">
               <p className="font-medium">作業版 {active.revision} · 原版 {active.document.baseVersion}</p>
-              <p className="mt-1 text-xs text-gray-500">MarkdownはObsidianへ持ち帰る編集候補、JSONは原版・指紋・確認・掲載記録です。元ファイルは上書きしません。</p>
+              <p className="mt-1 text-xs text-gray-500">MarkdownはObsidianへ持ち帰る編集候補、JSONには原版・指紋・出典の確認記録・コメント・掲載記録を保存します。元ファイルは上書きしません。</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => saveProposal('markdown')} disabled={busy} className="rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
