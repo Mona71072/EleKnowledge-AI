@@ -200,6 +200,12 @@ Phase 3 Knowledge Bases still need to be created against the Phase 1 document bu
 > - Never call a write API on the KB, its data source, or the collection. **Never run a Sync.**
 > - `phase2-template.yaml` no longer creates an OpenSearch Serverless collection or a KB service role.
 >
+> **One-off exception (2026-11-13).** With prior consent from the MAI-Box side (the other app sharing
+> `VQV81CNYU4`), itai manually placed two PDFs in the KB bucket and re-ran the `KHPV3CNKOU` /
+> `A0XLFVSX3P` Syncs. The application and IaC stay read-only. A Sync also applies any earlier
+> deletions in the bucket — check `LastModified` and the object count before running one. See
+> `docs/decisions-2026-11-13-kb-document-migration.md`.
+>
 > For Phase 3 (which needs four separate Knowledge Bases) the rule below still applies until a
 > separate decision is recorded.
 
