@@ -73,6 +73,12 @@ USER_POOL_ID = os.environ.get('COGNITO_USER_POOL_ID')
 CLIENT_ID = os.environ.get('COGNITO_CLIENT_ID')
 USERS_TABLE_NAME = os.environ.get('USERS_TABLE')
 
+RATE_LIMIT_ERROR_CODES = frozenset({
+    'TooManyRequestsException',
+    'LimitExceededException',
+    'TooManyFailedAttemptsException',
+})
+
 # DynamoDB table
 users_table = dynamodb.Table(USERS_TABLE_NAME)
 
@@ -164,6 +170,15 @@ def lambda_handler(event, context):
                 'body': json.dumps({
                     'error': 'InvalidPasswordError',
                     'message': 'Password does not meet requirements: 8+ characters, uppercase, lowercase, number, symbol'
+                })
+            }
+        elif error_code in RATE_LIMIT_ERROR_CODES:
+            return {
+                'statusCode': 429,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'TooManyRequests',
+                    'message': '試行回数が多すぎます。しばらく待ってから再度お試しください。'
                 })
             }
         else:

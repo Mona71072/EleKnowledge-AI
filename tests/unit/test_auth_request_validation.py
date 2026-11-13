@@ -172,3 +172,47 @@ def test_verify_existing_error_statuses_unchanged(code, status):
     response = module.lambda_handler({"body": json.dumps(AUTH_CASES["verify"])}, None)
 
     assert response["statusCode"] == status
+
+
+_PROVIDER_CALLS = {"login": "initiate_auth", "signup": "sign_up"}
+
+
+@pytest.mark.parametrize("handler_name", ["login", "signup"])
+@pytest.mark.parametrize("code", [
+    "TooManyRequestsException",
+    "LimitExceededException",
+    "TooManyFailedAttemptsException",
+])
+def test_login_signup_rate_limit_errors_return_429_without_provider_message(handler_name, code):
+    module = _load_auth_app(handler_name)
+    getattr(module.cognito_client, _PROVIDER_CALLS[handler_name]).side_effect = ClientError(
+        {"Error": {"Code": code, "Message": "secret-cognito-detail"}},
+        "Operation",
+    )
+
+    response = module.lambda_handler({"body": json.dumps(AUTH_CASES[handler_name])}, None)
+
+    assert response["statusCode"] == 429
+    assert response["headers"]["Content-Type"] == "application/json"
+    assert json.loads(response["body"])["error"] == "TooManyRequests"
+    assert "secret-cognito-detail" not in response["body"]
+
+
+@pytest.mark.parametrize("handler_name,code,status", [
+    ("login", "NotAuthorizedException", 401),
+    ("login", "UserNotFoundException", 404),
+    ("login", "UserNotConfirmedException", 403),
+    ("login", "InternalErrorException", 500),
+    ("signup", "UsernameExistsException", 409),
+    ("signup", "InvalidPasswordException", 400),
+    ("signup", "InternalErrorException", 500),
+])
+def test_login_signup_existing_error_statuses_unchanged(handler_name, code, status):
+    module = _load_auth_app(handler_name)
+    getattr(module.cognito_client, _PROVIDER_CALLS[handler_name]).side_effect = ClientError(
+        {"Error": {"Code": code, "Message": "m"}}, "Operation"
+    )
+
+    response = module.lambda_handler({"body": json.dumps(AUTH_CASES[handler_name])}, None)
+
+    assert response["statusCode"] == status
