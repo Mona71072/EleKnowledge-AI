@@ -10,6 +10,8 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 >
 > **正本:** KB 側の問題点と実例はこの台帳に記録する。決定の経緯は [decisions-2026-09-24-rag-two-modes.md](./decisions-2026-09-24-rag-two-modes.md) の D4。所有部門への問い合わせ・連絡はまだ一切行っていない。
 >
+> **例外（2026-11-13）:** KB を共同で使う MAI-Box 側の事前了承のもと、itai が KB バケットへ資料 2 件を置き、`KHPV3CNKOU` / `A0XLFVSX3P` を取り込み直した（アプリと IaC は読み取り専用のまま）。経緯と戻し方は [decisions-2026-11-13-kb-document-migration.md](./decisions-2026-11-13-kb-document-migration.md)。
+>
 > **更新のしかた:** 日々の業務で問題の実例が出たら、該当項目の「実例の記録」に要約と根拠 ID を追記し、問題点を具体化する。実例を貯めて内容を厚くし、いずれまとめて一度に所有部門へ伝える。依頼文の下書きは作らない。状態は「まとめ中（未連絡）」とし、連絡後に必要な場合だけ更新する。
 >
 > **「望ましい対応（案）」列:** 依頼文ではなく、各問題が解決する KB 側の対応を 1 行で記すメモ。まとめて伝えるときにそのまま使う。
@@ -28,7 +30,7 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 | KB-02 | 運用 | Sync 統計の失敗数（14 件）と実際の欠落（20 件）が一致しない。最終 Sync は 2026-07-24 | — | 資料を直しても、検索できるようになったか分からない | Sync 結果（スキャン数・更新数・失敗一覧・索引済み数）を突合し、再 Sync の手順・担当・実行条件を明文化する（もう一方のアプリへの反映も確認） | 本システムは Sync しない（読み取り専用） | 同上、[aws-migration-runbook.md](./aws-migration-runbook.md) | 確認済み（現状は要再確認） | 共有 KB の変更は影響しうる（詳細は要確認） | 0 | まとめ中（未連絡） |
 | KB-03 | メタデータ | `model_type` の型が配列と文字列で混在。文字列でも `listContains` が一致するのは実測上の挙動で、AWS 仕様の保証ではない | 配列 2,599 件、文字列 1,146 件 | 再構築や AWS 側の変更で、機種の絞り込みが突然ずれるおそれ | 全資料の `model_type` を配列に統一し、共通資料を示す `*` / `general` の意味も定める（もう一方のアプリの絞り込みへの影響を確認） | 型をアプリで正規化し、検索後にも絞り込み直す | [verification-2026-08-26-kb-vqv-metadata.md](./verification-2026-08-26-kb-vqv-metadata.md)、`lambda/rag/rag-function/app.py` の `_model_type_elements` / `model_type_matches` | 確認済み | 共有 KB の変更は影響しうる（詳細は要確認） | 0 | まとめ中（未連絡） |
 | KB-04 | メタデータ | `model_type` がカンマでつないだ 1 つの文字列になっていて、`listContains` で要素として一致しない | 60 件（すべて据付場用図） | 機種を指定すると、その資料を取りこぼす | カンマ区切りの `model_type` を要素ごとの配列に直して再 Sync する（もう一方のアプリの機種検索への影響を確認） | 検索後の絞り込みで分解（検索前のフィルタでは救えない） | 同上、[rag-model-filter-mapping-2026-08-26.md](./rag-model-filter-mapping-2026-08-26.md) | 確認済み | 共有 KB の変更は影響しうる（詳細は要確認） | 0 | まとめ中（未連絡） |
-| KB-05 | データソース混入 | 本来の S3 以外に quick-start と web-crawler のデータソースがつながっている。quick-start にはカテゴリがなく、引用用のバケットも別 | 未計測 | 無関係な GenU 文書が候補に混ざりうる。quick-start 由来は引用を開けない | 用途外データソースを切り離すか、識別属性を付けて検索対象から区別する（もう一方のアプリで利用中のデータがないか確認） | カテゴリの許可リストで常に遮断 | [decisions-2026-08-26-kb-selection.md](./decisions-2026-08-26-kb-selection.md)、`app.py` の `ALLOWED_CATEGORY_VALUES` | 確認済み（規模は要再確認） | 共有 KB の変更は影響しうる（詳細は要確認） | 0 | まとめ中（未連絡） |
+| KB-05 | データソース混入 | 本来の S3 以外に quick-start と web-crawler のデータソースがつながっている。quick-start にはカテゴリがなく、引用用のバケットも別 | 2026-11-13 実測: quick-start（fmp バケット `docs/`）は用語辞書の csv/txt 2 件のみ（PDF は KB バケットへ移管済み）。web-crawler は取り込み履歴なし | 無関係な GenU 文書が候補に混ざりうる。quick-start 由来は引用を開けない | 用途外データソースを切り離すか、識別属性を付けて検索対象から区別する（もう一方のアプリで利用中のデータがないか確認） | カテゴリの許可リストで常に遮断 | [decisions-2026-08-26-kb-selection.md](./decisions-2026-08-26-kb-selection.md)、`app.py` の `ALLOWED_CATEGORY_VALUES` | 確認済み（規模は要再確認） | 共有 KB の変更は影響しうる（詳細は要確認） | 0 | まとめ中（未連絡） |
 | KB-06 | データソース混入 | 本来の S3 に `TEST` カテゴリのゴミデータがある | 1 件 | 他の利用者・別のアプリでは検索のノイズになる | S3 の `TEST` データを整理し、KB の検索結果からも除かれたことを確認する（削除前にもう一方のアプリへの影響を確認） | 許可リストで遮断 | [verification-2026-08-26-kb-vqv-metadata.md](./verification-2026-08-26-kb-vqv-metadata.md) | 確認済み | 共有 KB の変更は影響しうる（詳細は要確認） | 0 | まとめ中（未連絡） |
 | KB-07 | メタデータ | `model_type` の値が 174 種類あり、表記ゆれや業務上の正しさが未検証。正式な機種コードの一覧がない | 174 種。取扱外として 467 件（12.5%）を暫定除外 | 機種を指定したときの誤除外・混入 | 正式な機種コードと表記ゆれを整理し、資料ごとの適用機種・版を一覧化する（対象範囲はもう一方のアプリとも確認） | アプリに取扱機種 27 値の暫定リストを持つ | [decisions-2026-08-21-model-scope.md](./decisions-2026-08-21-model-scope.md) | 確認済み（業務上の正しさは要再確認） | 共有 KB の変更は影響しうる（詳細は要確認） | 0 | まとめ中（未連絡） |
 | KB-08 | メタデータ | 説明文が空または薄い資料が多い（旧 TSV の調査）。現行のメタデータには `description` 自体がない | 旧調査: 据付場用図 1,752 件中 1,474 件が説明なし、災害事例 294 件、Q シート 156 件は年のみ | 図番・年・症状の言葉で質問すると埋もれやすい | タイトル・図番・対象機種・年度・概要を検索可能な形で付与し、現行データの不足件数を再集計する（もう一方のアプリでの検索への影響を確認） | ハイブリッド検索を既定にしている | [survey-2026-07-29-hard-to-retrieve-counts.md](./survey-2026-07-29-hard-to-retrieve-counts.md)、[kb-metadata-catalog-2026-08-26.md](./kb-metadata-catalog-2026-08-26.md) | 要再確認 | 共有 KB の変更は影響しうる（詳細は要確認） | 0 | まとめ中（未連絡） |
@@ -59,7 +61,9 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 
 ### KB-02
 
-（まだなし）
+> 最終検証: 2026-11-13 — AWS 実査（KHPV3CNKOU の取り込み統計・KB バケット一覧・chatlogs-dev）
+
+- 2026-11-13／資料の移管で `KHPV3CNKOU` を取り込み直した／9/7 以降に誰かが KB バケットから消していた `IN-EL-12-104-02-E-H01.pdf`（11/7 まで引用あり）が、その取り込みで検索からも外れた。消した人・理由は不明（バージョン管理なし、CloudTrail に記録なし）。同日に控えから戻した／根拠: [decisions-2026-11-13-kb-document-migration.md](./decisions-2026-11-13-kb-document-migration.md) §3、取り込み job `OOVWDYPNU7`・`DPNEKY9VYZ`
 
 ### KB-03
 
@@ -71,7 +75,9 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 
 ### KB-05
 
-（まだなし）
+> 最終検証: 2026-11-13 — AWS 実査（A0XLFVSX3P の S3・取り込み統計、rag-api-dev アクセスログ、chatlogs-dev）
+
+- 2026-11-13／通常チャットで引用リンクを開く／quick-start（fmp バケット）にだけあった `IN-EL-12-107-01.pdf` が引用され、`/rag/document` が 400 で開けなかった。9/4 に fmp 側へカテゴリ付きの metadata が置かれ、カテゴリの許可リストも通っていた。引用のある回答の 9 月 4/22・10 月 13/146・11 月 13/70 件に出現。KB バケットへ移管して解消／根拠: [decisions-2026-11-13-kb-document-migration.md](./decisions-2026-11-13-kb-document-migration.md) §1・§2
 
 ### KB-06
 
@@ -107,7 +113,7 @@ related-code: lambda/rag/rag-function/app.py, infrastructure/sam/phase2-template
 
 ## アプリ側だけで対応済み・対応できること
 
-- カテゴリの許可リストで `TEST`・web-crawler・quick-start を遮断（`ALLOWED_CATEGORY_VALUES`）
+- カテゴリの許可リストで `TEST`・web-crawler・quick-start を遮断（`ALLOWED_CATEGORY_VALUES`）。ただし実カテゴリの metadata が付いた quick-start の資料は通る（2026-11-13 の KB-05 実例）
 - `model_type` の型の混在を正規化し、検索後に絞り込み直す
 - 部分一致の誤ヒット（AXIEZ 指定時 752 件）を `listContains` で抑制済み
 - `*` / `general` を共通資料として扱う（495 件の誤除外を回復済み）
