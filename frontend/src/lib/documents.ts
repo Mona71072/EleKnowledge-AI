@@ -1,4 +1,5 @@
 import { getIdToken, authHeaders } from './auth-helpers';
+import { safeExternalHref } from './safe-external-href.mjs';
 
 /**
  * どの回答の引用から文書を開いたか（到達ファネル「資料を開いた」の計測に使う）。
@@ -71,7 +72,7 @@ function s3UriFromHttpsUrl(url: string): string | null {
  * 判定できれば bucket/key を `s3://` URI に逆変換して同じ中継ページに流す。
  * 保存済み URL は期限切れで AccessDenied になっていたが、都度発行に乗せ替えることで
  * 過去履歴の引用が復活し、DynamoDB に残る発行済み URL が流出しても意味を持たなくなる。
- * S3 と判定できない https URL のみ従来どおりそのまま開かせる。
+ * S3 と判定できない http(s) URL のみ従来どおりそのまま開かせる。それ以外（javascript: など）はリンクにしない。
  */
 export function documentHref(sourceUri: string | undefined | null, ctx?: DocumentOpenContext): string | undefined {
   if (!sourceUri) return undefined;
@@ -82,7 +83,7 @@ export function documentHref(sourceUri: string | undefined | null, ctx?: Documen
   if (legacyS3Uri) {
     return `/doc?uri=${encodeURIComponent(legacyS3Uri)}${contextQuery(ctx)}`;
   }
-  return sourceUri;
+  return safeExternalHref(sourceUri);
 }
 
 /** PDF のページ指定はフラグメントで渡す（S3 の署名対象にはならない）。 */

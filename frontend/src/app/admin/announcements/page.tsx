@@ -22,6 +22,7 @@ import {
 import { ANNOUNCEMENT_TEMPLATES, getTemplate, fillTemplate, templatePlaceholders } from '@/lib/announcement-templates.mjs';
 import { canEndAnnouncementNow, resolveAnnouncementPublishFields } from '@/lib/announcement-publish.mjs';
 import { appendAnnouncementPage, sortActiveAnnouncements } from '@/lib/announcement-list.mjs';
+import { createLatestGuard } from '@/lib/latest-request.mjs';
 import { Button } from '@/components/ui/Button';
 import { Loading } from '@/components/ui/Loading';
 
@@ -88,6 +89,8 @@ export default function AdminAnnouncementsPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | AnnouncementStatus>('all');
   const formRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const loadGuard = useRef(createLatestGuard());
+  const loadMoreGuard = useRef(createLatestGuard());
 
   const scrollToForm = () => {
     setTimeout(() => {
@@ -97,32 +100,42 @@ export default function AdminAnnouncementsPage() {
   };
 
   const load = useCallback(async () => {
+    const token = loadGuard.current.begin();
+    // 一覧を作り直すので、進行中の「もっと見る」の応答は古いページになる。
+    loadMoreGuard.current.invalidate();
+    setLoadingMore(false);
     setLoading(true);
     setError(null);
     try {
       const [res, activeRes] = await Promise.all([listAllAnnouncements(), listActiveAnnouncements()]);
+      if (!loadGuard.current.isLatest(token)) return;
+      // 読み込み中に始まった「もっと見る」も、作り直した一覧には混ぜない。
+      loadMoreGuard.current.invalidate();
+      setLoadingMore(false);
       setList(res.announcements);
       setNextToken(res.nextToken);
       setActiveList(activeRes.announcements);
     } catch (e) {
-      setError((e as Error).message);
+      if (loadGuard.current.isLatest(token)) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (loadGuard.current.isLatest(token)) setLoading(false);
     }
   }, []);
 
   const loadMore = useCallback(async () => {
     if (!nextToken) return;
+    const token = loadMoreGuard.current.begin();
     setLoadingMore(true);
     setError(null);
     try {
       const res = await listAllAnnouncements({ nextToken });
+      if (!loadMoreGuard.current.isLatest(token)) return;
       setList((prev) => appendAnnouncementPage(prev, res.announcements));
       setNextToken(res.nextToken);
     } catch (e) {
-      setError((e as Error).message);
+      if (loadMoreGuard.current.isLatest(token)) setError((e as Error).message);
     } finally {
-      setLoadingMore(false);
+      if (loadMoreGuard.current.isLatest(token)) setLoadingMore(false);
     }
   }, [nextToken]);
 

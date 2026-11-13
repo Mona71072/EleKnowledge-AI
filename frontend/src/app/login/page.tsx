@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
 import { Card } from '@/components/ui/Card';
 import { safeNextPath } from '@/lib/safe-next-path.mjs';
+import { withErrorName } from '@/lib/auth-helpers';
 
 function LoginContent() {
   const router = useRouter();
@@ -120,7 +121,7 @@ function LoginContent() {
       } else if (err.message?.includes('Network')) {
         setError('ネットワーク接続エラーです。インターネット接続を確認してください。');
       } else {
-        setError(`ログインに失敗しました: ${err.message || 'Unknown error'}`);
+        setError(withErrorName('ログインに失敗しました。もう一度お試しください。', err));
       }
     } finally {
       setLoading(false);
