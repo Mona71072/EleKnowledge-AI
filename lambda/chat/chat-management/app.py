@@ -101,23 +101,39 @@ def jst_day_bounds(since: str = None, until: str = None) -> tuple:
     return lo, hi
 
 
+def _int_or_none(value):
+    return int(value) if value is not None else None
+
+
 def trace_summary(item: dict):
-    """retrievalTrace（別設計。未実装のうちは無い）の要約。無ければ None。"""
+    """retrievalTrace（docs/design-2026-09-10-retrieval-trace.md §3 第 1 版）の要約。無ければ None。
+
+    候補配列は上限 30 件で打ち切られるため、件数は gate の集計値から出す。
+    """
     tr = item.get('retrievalTrace') or {}
-    if not tr:
+    if not tr or 'gate' not in tr:
         return None
-    cands = tr.get('candidates') or []
-    ret = tr.get('retrieve') or {}
+    gate = tr.get('gate') or {}
+    excluded = gate.get('excludedCounts') or {}
     gen = tr.get('generation') or {}
-    top = cands[0].get('score') if cands else None
+    scores = [float(s) for s in (gate.get('scores') or []) if s is not None]
+    selected = int(gate.get('selectedCount') or 0)
+    attempt_ms = [a.get('latencyMs') for a in (tr.get('searchAttempts') or [])
+                  if a.get('latencyMs') is not None]
     return {
-        'mergedCount': int(ret.get('mergedCount') or len(cands)),
-        'selectedCount': sum(1 for c in cands if c.get('selected')),
-        'excludedByModelScope': sum(1 for c in cands if c.get('excludedBy') == 'model_scope'),
-        'topScore': float(top) if top is not None else None,
-        'inputTokens': gen.get('inputTokens'),
-        'outputTokens': gen.get('outputTokens'),
-        'latencyMs': tr.get('latencyMs'),
+        # マージ後（機種スコープ除外・重複統合の後）の候補数 = 採用 + 閾値未満 + 上限超過
+        'mergedCount': selected + int(excluded.get('below_threshold') or 0)
+        + int(excluded.get('limit') or 0),
+        'selectedCount': selected,
+        'excludedByModelScope': int(excluded.get('model_scope') or 0),
+        'topScore': max(scores) if scores else None,
+        'inputTokens': _int_or_none(gen.get('inputTokens')),
+        'outputTokens': _int_or_none(gen.get('outputTokens')),
+        'latencyMs': {
+            'retrieve': int(sum(attempt_ms)) if attempt_ms else None,
+            'generate': _int_or_none(gen.get('latencyMs')),
+            'total': _int_or_none((tr.get('latencyMs') or {}).get('total')),
+        },
     }
 
 
@@ -314,7 +330,14 @@ def get_sessions_by_user(user_id: str, limit: int = 50, mode: str = None) -> lis
                 'KeyConditionExpression': 'userId = :uid',
                 # Hide logically-deleted messages (deleted flag null/false only)
                 'FilterExpression': 'attribute_not_exists(#del) OR #del = :false',
-                'ExpressionAttributeNames': {'#del': 'deleted'},
+                # 一覧に使う属性だけを返す（回答の検索トレース・出典などを Lambda へ運ばない）。
+                # 読み取り容量は項目サイズで決まるため、この指定では減らない。
+                'ProjectionExpression': '#sid, #rm, #ts, #ttl, #title, #role, #content',
+                'ExpressionAttributeNames': {
+                    '#del': 'deleted', '#sid': 'sessionId', '#rm': 'ragMode',
+                    '#ts': 'timestamp', '#ttl': 'ttl', '#title': 'sessionTitle',
+                    '#role': 'role', '#content': 'content',
+                },
                 'ExpressionAttributeValues': {':uid': user_id, ':false': False},
                 'ScanIndexForward': False,
                 'Limit': limit * 10,
@@ -450,6 +473,8 @@ def get_session_messages(session_id: str, limit: int = 100, fetch_all: bool = Fa
         messages = collected if fetch_all else collected[:target]
 
         for msg in messages:
+            # SECURITY: 検索トレース（検索語・候補本文）は利用者向け応答に含めない（設計 §5）
+            msg.pop('retrievalTrace', None)
             if 'ttl' in msg:
                 msg['daysUntilDeletion'] = calculate_days_until_deletion(msg['ttl'])
 
