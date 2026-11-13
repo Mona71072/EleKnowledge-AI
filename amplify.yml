@@ -14,15 +14,16 @@ frontend:
     build:
       commands:
         - echo "Building Next.js application..."
-        # itaiブランチ限定: 下の env.variables はブランチ環境変数より優先されるため（2026-10-22 実査）、
+        # itai・monaブランチ限定: 下の env.variables はブランチ環境変数より優先されるため（2026-10-22 実査）、
         # ブランチ変数にRAG/Chat/Researchの各専用API URLが設定されたときだけ配信先を差し替える。
         # 他ブランチ・research URL未設定時はじっくりモードを表示しない。
+        # mona は試作の画面確認用。Amplify の mona ブランチに ITAI_* を設定するまでは共有devのまま。
         - |
-          if [ "$AWS_BRANCH" = "itai" ]; then
+          if [ "$AWS_BRANCH" = "itai" ] || [ "$AWS_BRANCH" = "mona" ]; then
             case "$ITAI_RAG_API_URL|$ITAI_CHAT_API_URL|$ITAI_RESEARCH_API_URL" in
               https://*\|https://*\|https://*)
                 export NEXT_PUBLIC_RAG_API_URL="$ITAI_RAG_API_URL" NEXT_PUBLIC_CHAT_API_URL="$ITAI_CHAT_API_URL" NEXT_PUBLIC_RESEARCH_API_URL="$ITAI_RESEARCH_API_URL" NEXT_PUBLIC_RESEARCH_MODE="beta"
-                echo "itai: RAG/Chat/Research APIs overridden by branch variables" ;;
+                echo "$AWS_BRANCH: RAG/Chat/Research APIs overridden by branch variables" ;;
             esac
           fi
           # monaブランチ限定: 試作の画面確認用に先輩チャットの入口を表示する。
