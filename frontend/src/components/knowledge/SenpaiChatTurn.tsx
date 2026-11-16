@@ -4,11 +4,11 @@ import type { FieldReport } from '@/lib/knowledge-senpai-field-report.mjs';
 import { LaneReply, SynthesisSection } from './SenpaiLegacyLanes';
 import { SenpaiFieldReportForm } from './SenpaiFieldReportForm';
 import { SenpaiResearchAnswer } from './SenpaiResearchAnswer';
-import { storeKnowledgeGapRequest } from '@/lib/knowledge-gap-request.mjs';
+import { storeKnowledgeGapRequest, storeResearchQuery } from '@/lib/knowledge-gap-request.mjs';
 
-/** 通常チャットを、じっくり調べるを選んだ状態で、質問を入れて開く（送信は利用者が行う）。 */
-export function researchHref(query: string) {
-  return `/chat?research=1&q=${encodeURIComponent(query)}`;
+/** 通常チャットを、質問本文をURLに含めず、じっくり調べるを選んで開く。 */
+export function researchHref() {
+  return '/chat?research=1';
 }
 
 /** 聞き直し・もう一度試す。補足つきの相談では、検索に使う質問（query）のほかに補足も渡して、同じ見え方で残す。 */
@@ -69,7 +69,7 @@ export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conv
               {turn.normal.status !== 'loading' && (
                 <p className="text-xs text-gray-500">
                   技術資料・法令で確かめるときは{' '}
-                  <a href={researchHref(turn.query)} className="text-gray-800 underline underline-offset-2">じっくり調べるで確かめる</a>
+                  <a href={researchHref()} onClick={(event) => { if (!storeResearchQuery(turn.query)) event.preventDefault(); }} className="text-gray-800 underline underline-offset-2">じっくり調べるで確かめる</a>
                   （通常チャットに質問を入れて開きます。送信すると、じっくり調べるの回数を使います）
                 </p>
               )}

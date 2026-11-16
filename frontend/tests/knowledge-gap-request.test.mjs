@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { consumeKnowledgeGapRequest, storeKnowledgeGapRequest } from '../src/lib/knowledge-gap-request.mjs';
+import { consumeKnowledgeGapRequest, consumeResearchQuery, storeKnowledgeGapRequest, storeResearchQuery } from '../src/lib/knowledge-gap-request.mjs';
 
 const TURN_ID = '123e4567-e89b-42d3-a456-426614174000';
 
 function storage(initial = null) {
-  let value = initial;
+  const values = new Map(initial === null ? [] : [['knowledge-gap-request', initial]]);
   return {
-    getItem(key) { return key === 'knowledge-gap-request' ? value : null; },
-    setItem(key, next) { if (key === 'knowledge-gap-request') value = next; },
-    removeItem(key) { if (key === 'knowledge-gap-request') value = null; },
-    value: () => value,
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, next) { values.set(key, next); },
+    removeItem(key) { values.delete(key); },
+    value: (key = 'knowledge-gap-request') => values.get(key) ?? null,
   };
 }
 
@@ -54,4 +54,22 @@ test('rejects malformed, extra-field, and unavailable storage safely', () => {
   assert.equal(storeKnowledgeGapRequest({ senpaiTurnId: 'bad' }, storage()), false);
   assert.equal(consumeKnowledgeGapRequest(), null);
   assert.equal(storeKnowledgeGapRequest({ senpaiTurnId: TURN_ID }, null), false);
+});
+
+test('stores and consumes a research query once without putting it in a URL marker', () => {
+  const target = storage();
+  assert.equal(storeResearchQuery('ブレーキの確認手順', target), true);
+  assert.equal(JSON.parse(target.value('knowledge-research-query')).query, 'ブレーキの確認手順');
+  assert.equal(consumeResearchQuery(target), 'ブレーキの確認手順');
+  assert.equal(target.value('knowledge-research-query'), null);
+  assert.equal(consumeResearchQuery(target), null);
+});
+
+test('rejects empty, oversized, malformed, and unavailable research handoffs', () => {
+  const target = storage();
+  assert.equal(storeResearchQuery('  ', target), false);
+  assert.equal(storeResearchQuery('質問'.repeat(2001), target), false);
+  assert.equal(storeResearchQuery('質問', null), false);
+  assert.equal(consumeResearchQuery(storage('{bad json')), null);
+  assert.equal(consumeResearchQuery(null), null);
 });

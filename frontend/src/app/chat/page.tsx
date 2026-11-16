@@ -23,7 +23,7 @@ import { resolveInitialChatMode } from '@/lib/chat-session-link.mjs';
 import { resolveAssistantDisplayText } from '@/lib/chat-display-text.mjs';
 import { createJobPoller, type JobPoller, type ResearchJobStatus } from '@/lib/research-polling.mjs';
 import { getUserInfo } from '@/lib/auth-helpers';
-import { storeKnowledgeGapRequest } from '@/lib/knowledge-gap-request.mjs';
+import { consumeResearchQuery, storeKnowledgeGapRequest } from '@/lib/knowledge-gap-request.mjs';
 import {
   BadFeedbackReasonId,
   FEEDBACK_COMMENT_MAX,
@@ -519,16 +519,17 @@ const normalizeTableMarkdown = (text: string): string => {
     initializeChat();
   }, [router]);
 
-  // ホームのクイック質問 (?q=...) と失敗一覧からのセッション (?session=...)
+  // ホームのクイック質問 (?q=...) と失敗一覧からのセッション (?session=...)。じっくり調査リンクの本文は同一タブの一時保存から読む。
   useEffect(() => {
     if (!userId) return;
     const params = new URLSearchParams(window.location.search);
     const initialMode: ChatMode = resolveInitialChatMode(window.location.search);
     setRagMode(initialMode);
-    const q = params.get('q');
+    const researchLink = params.get('research') === '1';
+    const q = researchLink ? consumeResearchQuery() : params.get('q');
     const sessionId = params.get('session');
-    let dirty = false;
-    if (q) {
+    let dirty = researchLink;
+    if (q && !(researchLink && initialMode === 'law')) {
       setInput(q);
       dirty = true;
       setTimeout(() => textareaRef.current?.focus(), 100);
@@ -1418,6 +1419,15 @@ const normalizeTableMarkdown = (text: string): string => {
                                     className="text-blue-700 underline underline-offset-2"
                                   >
                                     資料カテゴリの絞り込みを外す
+                                  </button>
+                                )}
+                                {canOpenOfficialKbGap && !isLawMode && answerMode === 'normal' && !loading && !error && !researchIsRunning && (
+                                  <button
+                                    type="button"
+                                    onClick={openOfficialKbGap}
+                                    className="text-blue-700 underline underline-offset-2"
+                                  >
+                                    ノウハウカードの候補にする
                                   </button>
                                 )}
                               </div>

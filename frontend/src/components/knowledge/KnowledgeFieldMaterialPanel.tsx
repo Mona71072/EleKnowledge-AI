@@ -310,8 +310,8 @@ export function KnowledgeFieldMaterialPanel({ body, busy, onApply, suggest }: Pr
             <p className="text-xs font-semibold text-gray-800">AIで要約案を作る</p>
             <label htmlFor="field-material-topic" className="mb-1 mt-2 block text-xs text-gray-700">確認テーマ</label>
             <input id="field-material-topic" value={topic} onChange={(event) => updateTopic(event.target.value)} maxLength={200} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" />
-            <label className="mt-2 flex items-start gap-2 text-xs leading-5 text-gray-700"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} className="mt-1" />選んだ抜粋と確認テーマをAIへ送ってよいことを確認した</label>
-            <p className="mt-1 text-[11px] text-gray-500">送信する情報: 確認テーマ、資料名、選択した抜粋だけ。原本全体と作業中のカード本文は送信しません。</p>
+            <label className="mt-2 flex items-start gap-2 text-xs leading-5 text-gray-700"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} className="mt-1" />選んだ抜粋・確認テーマ・資料名・確認日（本日）をAIへ送ってよいことを確認した</label>
+            <p className="mt-1 text-[11px] text-gray-500">送信する情報: 確認テーマ、資料名、選択した抜粋、確認日（本日）。原本全体と作業中のカード本文は送信しません。</p>
             <p className="mt-1 text-[11px] text-gray-500">AI利用料金が発生する場合があります。</p>
             <button type="button" onClick={requestSuggestion} disabled={!aiConsent || !excerptIsValid || !topic.trim() || isSuggesting} className="mt-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50">{isSuggesting ? '提案を作成中…' : '要約案を作る'}</button>
             {isSuggesting && <button type="button" onClick={invalidateSuggestion} className="ml-2 rounded-md px-3 py-1.5 text-xs text-gray-700 hover:bg-white">キャンセル</button>}

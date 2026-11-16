@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'knowledge-gap-request';
+const RESEARCH_QUERY_KEY = 'knowledge-research-query';
 const TURN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 function browserStorage() {
@@ -44,6 +45,39 @@ export function consumeKnowledgeGapRequest(storage = browserStorage()) {
     if (keys !== 3 || value.kind !== 'senpai'
       || typeof value.senpaiTurnId !== 'string' || !TURN_ID.test(value.senpaiTurnId)) return null;
     return { kind: 'senpai', senpaiTurnId: value.senpaiTurnId };
+  } catch {
+    return null;
+  }
+}
+
+/** Save a one-time research query in this tab only; never encode it in the destination URL. */
+export function storeResearchQuery(query, storage = browserStorage()) {
+  if (!storage || typeof query !== 'string' || !query.trim() || Array.from(query).length > 2000) return false;
+  try {
+    storage.setItem(RESEARCH_QUERY_KEY, JSON.stringify({ version: 1, query }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Read and remove the one-time research query. */
+export function consumeResearchQuery(storage = browserStorage()) {
+  if (!storage) return null;
+  let raw;
+  try {
+    raw = storage.getItem(RESEARCH_QUERY_KEY);
+    storage.removeItem(RESEARCH_QUERY_KEY);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'string') return null;
+  try {
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).length !== 2 || value.version !== 1
+      || typeof value.query !== 'string' || !value.query.trim() || Array.from(value.query).length > 2000) return null;
+    return value.query;
   } catch {
     return null;
   }

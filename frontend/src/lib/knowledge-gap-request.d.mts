@@ -10,3 +10,11 @@ export function storeKnowledgeGapRequest(
 export function consumeKnowledgeGapRequest(
   storage?: Pick<Storage, 'getItem' | 'removeItem'> | null,
 ): KnowledgeGapRequest | null;
+
+/** Store a bounded research query for one-time consumption in this tab. */
+export function storeResearchQuery(query: string, storage?: Pick<Storage, 'setItem'> | null): boolean;
+
+/** Read and remove the one-time research query, if valid. */
+export function consumeResearchQuery(
+  storage?: Pick<Storage, 'getItem' | 'removeItem'> | null,
+): string | null;
