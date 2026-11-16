@@ -4,7 +4,7 @@ export type RewriteSection = { heading: string; body: string };
 export type RewriteExcludedReason = 'duplicate' | 'empty' | 'too_long' | 'total_too_long';
 export type RewriteExcluded = { heading: string; reason: RewriteExcludedReason };
 export type RewriteSource = { title: string; page?: number };
-export type RewriteLane = 'technical' | 'law';
+export type RewriteLane = 'technical' | 'law' | 'field';
 export type RewriteEvidenceItem = {
   /** 画面側の対応づけ用。API には送らない。 */
   questionId: string;
@@ -96,6 +96,7 @@ export function buildRewriteRequest(input: {
   body: string;
   evidence: readonly RewriteEvidenceItem[];
 }): RewritePlan;
+export function buildFieldRewriteRequest(input: { topic?: string; title: string; excerpt: string; checkedOn: string }): RewriteRequest;
 
 export function describeRewriteWarning(warning: { code: string; values?: readonly string[] }): string;
 export function normalizeRewriteResponse(data: unknown, request: RewriteRequest): RewriteProposal | null;

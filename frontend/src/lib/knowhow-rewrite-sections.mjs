@@ -1,6 +1,6 @@
 // カード本文を節に分け、AI に書き換えを頼む節（対象）と、読むだけの節（context）を選ぶ。
 // 見出しの判定・コードフェンス・frontmatter の扱いは、既存の knowhow-card-view / knowhow-card-proposal に任せる。
-import { createFenceTracker, isEditorHeading } from './knowhow-card-view.mjs';
+import { createFenceTracker, FIELD_MATERIAL_SECTION, isEditorHeading } from './knowhow-card-view.mjs';
 import { scanStructure } from './knowhow-card-proposal.mjs';
 
 /** AI に書き換え案を作らせてよい節。カードの「主張」の節だけで、出どころや KB 確認の節は含まない。 */
@@ -85,7 +85,8 @@ function pickTargets(sections) {
 }
 
 function pickContext(sections) {
-  const others = sections.filter(({ heading, body }) => heading && charCount(heading) <= REWRITE_LIMITS.contextHeadingChars && !TARGETS.has(heading) && body !== '');
+  const others = sections.filter(({ heading, body }) => heading && heading !== FIELD_MATERIAL_SECTION
+    && charCount(heading) <= REWRITE_LIMITS.contextHeadingChars && !TARGETS.has(heading) && body !== '');
   const ordered = [...others.filter(({ heading }) => !isEditorHeading(heading)), ...others.filter(({ heading }) => isEditorHeading(heading))];
   const context = [];
   let total = 0;

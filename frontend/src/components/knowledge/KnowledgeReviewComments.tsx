@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { findCommentSection, listCommentSections, MAX_REVIEW_COMMENT_CHARS } from '@/lib/knowledge-comment-review.mjs';
 import type { KnowledgeReviewComment, KnowledgeReviewCommentInput } from '@/lib/knowledge-workbench.mjs';
@@ -12,13 +12,17 @@ type Props = {
   modelWords: readonly string[];
   comments: readonly KnowledgeReviewComment[];
   bodyRevision: number;
+  focusRequest?: { sectionId: string; request: number } | null;
   busy: boolean;
   onAdd: (input: KnowledgeReviewCommentInput) => boolean;
   onApply: (id: string, expectedBody: string, body: string) => boolean;
 };
 
-export function KnowledgeReviewComments({ body, title, modelWords, comments, bodyRevision, busy, onAdd, onApply }: Props) {
+export function KnowledgeReviewComments({ body, title, modelWords, comments, bodyRevision, focusRequest, busy, onAdd, onApply }: Props) {
   const labelId = useId();
+  const containerRef = useRef<HTMLElement>(null);
+  const commentInputRef = useRef<HTMLTextAreaElement>(null);
+  const lastFocusedRequest = useRef<number | null>(null);
   const sections = useMemo(() => listCommentSections(body), [body]);
   const ambiguousLabels = useMemo(() => {
     const seen = new Set<string>();
@@ -36,8 +40,22 @@ export function KnowledgeReviewComments({ body, title, modelWords, comments, bod
   const active = comments.find((comment) => comment.id === activeId && comment.status === 'open');
   const target = active && findCommentSection(body, active.sectionId, active.sectionLabel);
 
+  useEffect(() => {
+    if (!focusRequest || lastFocusedRequest.current === focusRequest.request) return;
+    const section = sections.find((candidate) => candidate.id === focusRequest.sectionId
+      && !ambiguousLabels.has(candidate.label));
+    if (!section) return;
+    lastFocusedRequest.current = focusRequest.request;
+    setSectionId(section.id);
+    const frame = window.requestAnimationFrame(() => {
+      containerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      commentInputRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusRequest, sections, ambiguousLabels]);
+
   return (
-    <section aria-label="コメントから追記案を作る" className="min-w-0 space-y-4 rounded-xl border border-blue-200 bg-white p-4 shadow-sm sm:p-5">
+    <section ref={containerRef} aria-label="コメントから追記案を作る" className="min-w-0 scroll-mt-24 space-y-4 rounded-xl border border-blue-200 bg-white p-4 shadow-sm sm:p-5">
       <header>
         <h2 className="text-lg font-bold text-gray-950">コメントから追記案を作る</h2>
         <p className="mt-1 text-sm text-gray-700">足りない内容を書き、該当する節を指定してください。機種や適用条件が分かる場合は、コメントに含めてください。</p>
@@ -68,7 +86,7 @@ export function KnowledgeReviewComments({ body, title, modelWords, comments, bod
         </div>
         <div>
           <label htmlFor={`${labelId}-comment`} className="block text-sm font-medium text-gray-900">足りない内容のコメント</label>
-          <textarea id={`${labelId}-comment`} value={text} onChange={(event) => setText(event.target.value)} rows={3}
+          <textarea ref={commentInputRef} id={`${labelId}-comment`} data-testid="review-comment-input" value={text} onChange={(event) => setText(event.target.value)} rows={3}
             maxLength={MAX_REVIEW_COMMENT_CHARS} placeholder="例: AXIEZの点検でこの手順が当てはまる条件を確認したい。"
             className="mt-1 block w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         </div>

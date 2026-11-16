@@ -34,7 +34,7 @@ const OPEN = '未確認事項';
 const STEPS = '調査・確認手順';
 const noop = () => {};
 const plan = {
-  request: { knowledgeId: 'KH-A', cardVersion: 1, targets: [{ heading: MAIN, body: 'a' }, { heading: STEPS, body: 'b' }, { heading: OPEN, body: 'c' }], context: [], evidence: [{}, {}] },
+  request: { knowledgeId: 'KH-A', cardVersion: 1, targets: [{ heading: MAIN, body: 'a' }, { heading: STEPS, body: 'b' }, { heading: OPEN, body: 'c' }], context: [{ heading: '前提', body: 'private context body' }], evidence: [{}, {}] },
   evidenceRefs: [{ number: 1, questionId: 'q1', question: '質問その1' }, { number: 2, questionId: 'q 2', question: '質問その2' }],
   evidenceOmitted: 0,
   excluded: [],
@@ -68,9 +68,17 @@ test('フラグが true でなければ何も描画しない。knowledge_id が�
   assert.notEqual(render({}), '');
 });
 
-test('実行前に、送る根拠の件数・節の数・利用料を表示し、ボタンが押せる', () => {
+test('実行前に送信項目を簡潔に開示し、詳細は折りたたんで表示する', () => {
   const html = render();
-  assert.match(html, /確認済みの根拠 2 件と、カードの3つの節を AI に送ります。AI の利用料がかかります。/);
+  assert.match(html, /確認済みの根拠 2 件、書き換え対象 3 節、文脈として参照する節 1 節、カード ID と版を AI に送ります。AI の利用料がかかります。/);
+  const details = /<details([^>]*)>([\s\S]*?)<\/details>/u.exec(html);
+  assert.ok(details);
+  assert.doesNotMatch(details[1], /\bopen\b/, '詳細は既定で閉じる');
+  assert.match(details[2], /カード: KH-A（版 1）/);
+  assert.match(details[2], /質問その1/);
+  assert.match(details[2], /統合した回答・ノウハウ/);
+  assert.match(details[2], /前提/);
+  assert.doesNotMatch(details[2], /private context body|旧の主張/, '本文は詳細にも出さない');
   assert.match(html, /AI に本文の書き換え案を作らせる/);
   const button = /<button[^>]*>AI に本文の書き換え案を作らせる<\/button>/u.exec(html)[0];
   assert.doesNotMatch(button, /disabled/);
@@ -80,7 +88,7 @@ test('作れない理由を短く表示し、ボタンを押せなくする', ()
   const html = render({ plan: { ...plan, request: null, blocker: '出典つきの確認済みが無いため作れません。' } });
   assert.match(html, /出典つきの確認済みが無いため作れません。/);
   assert.match(/<button[^>]*>AI に本文の書き換え案を作らせる<\/button>/u.exec(html)[0], /disabled/);
-  assert.doesNotMatch(html, /AI に送ります/);
+  assert.doesNotMatch(html, /送信内容の詳細/);
   const waiting = render({ checking: true });
   assert.match(/<button[^>]*>AI に本文の書き換え案を作らせる<\/button>/u.exec(waiting)[0], /disabled/);
 });

@@ -1,11 +1,10 @@
-import { createWorkspace, parseKnowledgeMarkdown } from './knowledge-workbench.mjs';
+import { createProposalMetadata, createWorkspace, MAX_MARKDOWN_BODY_BYTES, MAX_MARKDOWN_DOCUMENT_BYTES, parseKnowledgeMarkdown } from './knowledge-workbench.mjs';
 import { listCommentSections, MAX_REVIEW_COMMENT_CHARS } from './knowledge-comment-review.mjs';
 import { normalizeSourceReview } from './knowledge-source-review.mjs';
 
 /** 保存側（exportProposal）が書き出す形式の識別子。変更時は両方を同時に直す。 */
 const PROPOSAL_FORMAT = 'eleknowledge-knowledge-proposal/v1';
 export const MAX_REVIEW_RECORD_BYTES = 4 * 1024 * 1024;
-const MAX_MARKDOWN_BYTES = 256 * 1024;
 const MAX_COMMENTS = 50;
 const MAX_SOURCE_REVIEWS = 200;
 const MAX_PLACEMENTS = 100;
@@ -13,8 +12,10 @@ const SHA256 = /^[a-f0-9]{64}$/u;
 const COMMENT_ID = /^[a-z0-9-]{1,80}$/iu;
 const TOP_KEYS = ['format', 'base', 'proposal', 'noteNeedsReconcile', 'reviewedRevision', 'copiedRevision',
   'placements', 'kbReview', 'sourceReviews', 'reviewComments', 'hashes'];
+const OPTIONAL_TOP_KEYS = ['sourceReviews', 'reviewComments'];
 const PLACEMENT_KEYS = ['knowledgeId', 'baseVersion', 'revision', 'text', 'destination', 'recordedAt',
   'destinationVerified', 'verification', 'textSha256'];
+const HASH_MISMATCH = '作業記録のhashが一致しません。ファイルが壊れているか、別の版の記録です。この画面で保存した作業記録を選び直してください。';
 
 function fail(message) {
   throw new TypeError(message);
@@ -49,23 +50,13 @@ async function sha256(text) {
 }
 
 function parseCard(markdown, label) {
-  if (!isBoundedText(markdown, MAX_MARKDOWN_BYTES)) fail(`${label}のMarkdownが不正か、256 KiBを超えています。`);
+  if (!isBoundedText(markdown, MAX_MARKDOWN_DOCUMENT_BYTES)) fail(`${label}のMarkdownが不正か、320 KiBを超えています。`);
   try {
     return parseKnowledgeMarkdown(markdown);
   } catch {
     fail(`${label}のMarkdownのID・版・タイトルとYAML形式を確認してください。`);
   }
   return null;
-}
-
-/** 保存側 createProposalMarkdown と同じ規則で、原文のメタデータから修正案の先頭部分を再構成する。 */
-function expectedProposalMetadata(metadata) {
-  const next = structuredClone(metadata);
-  next.status = 'draft';
-  if (Object.hasOwn(next, 'review_status')) next.review_status = 'in_review';
-  if (Object.hasOwn(next, 'publication_status')) next.publication_status = 'not_published';
-  if (Object.hasOwn(next, 'cloud_approval')) next.cloud_approval = 'not_reviewed';
-  return next;
 }
 
 function validDestination(destination) {
@@ -136,7 +127,7 @@ async function restorePlacements(raw, base, revision) {
   const receipts = [];
   for (const entry of raw) {
     const valid = hasExactKeys(entry, PLACEMENT_KEYS) && entry.knowledgeId === base.id && entry.baseVersion === base.version
-      && isCount(entry.revision) && entry.revision <= revision && isBoundedText(entry.text, MAX_MARKDOWN_BYTES)
+      && isCount(entry.revision) && entry.revision <= revision && isBoundedText(entry.text, MAX_MARKDOWN_BODY_BYTES)
       && validDestination(entry.destination) && validTimestamp(entry.recordedAt)
       && entry.destinationVerified === false && entry.verification === 'self_reported';
     if (!valid) fail('配置記録（placement receipt）の内容が不正です。');
@@ -164,7 +155,10 @@ function parseRecord(text) {
   if (typeof packet.format === 'string' && packet.format !== PROPOSAL_FORMAT && packet.format.startsWith('eleknowledge-knowledge-proposal/')) {
     fail('この作業記録は別の版の形式のため開けません。');
   }
-  if (!hasExactKeys(packet, TOP_KEYS) || packet.format !== PROPOSAL_FORMAT) fail('JSON作業記録の形式が不正です。');
+  const keys = Object.keys(packet);
+  if (keys.some((key) => !TOP_KEYS.includes(key))
+    || TOP_KEYS.some((key) => !OPTIONAL_TOP_KEYS.includes(key) && !Object.hasOwn(packet, key))
+    || packet.format !== PROPOSAL_FORMAT) fail('JSON作業記録の形式が不正です。');
   return packet;
 }
 
@@ -186,22 +180,33 @@ export async function restoreReviewWorkspace(text) {
   if (base.id !== parsed.id || base.version !== parsed.version || !sameJson(base.metadata, parsed.metadata)) {
     fail('原文（base）の情報とMarkdownのメタデータが一致しません。');
   }
-  const proposed = parseCard(proposal.markdown, '修正案');
+  let proposed = parseCard(proposal.markdown, '修正案');
   if (proposed.id !== parsed.id || proposed.version !== parsed.version) fail('修正案のIDまたは版が原文と一致しません。');
-  if (!sameJson(proposed.metadata, expectedProposalMetadata(parsed.metadata))) fail('修正案のメタデータが原文と一致しません。');
   if (!isCount(proposal.revision) || proposal.publishable !== false || proposal.state !== 'working-proposal'
-    || !isBoundedText(proposal.oneNoteText, MAX_MARKDOWN_BYTES) || typeof packet.noteNeedsReconcile !== 'boolean') {
+    || !isBoundedText(proposal.oneNoteText, MAX_MARKDOWN_BODY_BYTES) || typeof packet.noteNeedsReconcile !== 'boolean') {
     fail('修正案の情報が不正です。');
   }
   const [baseHash, bodyHash, noteHash] = await Promise.all([
     sha256(base.markdown), sha256(proposed.body), sha256(proposal.oneNoteText),
   ]);
-  if (hashes.baseMarkdownSha256 !== baseHash || hashes.bodySha256 !== bodyHash || hashes.oneNoteTextSha256 !== noteHash) {
-    fail('作業記録のhashが一致しません。ファイルが壊れているか、別の版の記録です。この画面で保存した作業記録を選び直してください。');
+  if (hashes.baseMarkdownSha256 !== baseHash || hashes.oneNoteTextSha256 !== noteHash) fail(HASH_MISMATCH);
+  if (hashes.bodySha256 !== bodyHash) {
+    // 旧v1の出力はfrontmatter直後に区切り用の空行を置かなかった。
+    try {
+      proposed = parseKnowledgeMarkdown(proposal.markdown, { keepLeadingBlankLine: true });
+    } catch {
+      fail(HASH_MISMATCH);
+    }
+    if (await sha256(proposed.body) !== hashes.bodySha256) fail(HASH_MISMATCH);
   }
+  if (!sameJson(proposed.metadata, createProposalMetadata(parsed.metadata, proposed.body))) fail('修正案のメタデータが原文と一致しません。');
   const revision = proposal.revision;
-  const sourceReviews = restoreSourceReviews(packet.sourceReviews, parsed.metadata, revision);
-  const reviewComments = restoreComments(packet.reviewComments, proposed.body, revision);
+  const sourceReviews = restoreSourceReviews(
+    Object.hasOwn(packet, 'sourceReviews') ? packet.sourceReviews : [], parsed.metadata, revision,
+  );
+  const reviewComments = restoreComments(
+    Object.hasOwn(packet, 'reviewComments') ? packet.reviewComments : [], proposed.body, revision,
+  );
   const placements = await restorePlacements(packet.placements, base, revision);
   const workspace = {
     ...createWorkspace(parsed),

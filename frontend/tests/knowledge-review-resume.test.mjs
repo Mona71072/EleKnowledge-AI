@@ -77,6 +77,102 @@ test('restores proposal body against the exact base and keeps comments, evidence
   assert.equal(restored.workspace.placements.length, 0);
 });
 
+test('round trips field-report source refs while keeping attribution in the proposal body', async () => {
+  const id = `local-sha256:${'d'.repeat(64)}`;
+  const base = workspace();
+  const body = `\n${parsed().body}\n\n## 現場資料に基づくノウハウ\n要約。\n\n> 出典ID: ${id}\n> 資料: 点検要領 (第2版)\n> 参照箇所: p. 4\n`;
+  const packet = await exportProposal(editBody(base, body));
+  const restored = await restoreReviewWorkspace(JSON.stringify(packet));
+  assert.deepEqual(restored.workspace.document.metadata.source_refs, [
+    { ref_type: 'lists_item', list_item_id: 71 },
+  ]);
+  assert.match(restored.workspace.body, /> 出典ID: local-sha256:/u);
+  const reexported = await exportProposal(restored.workspace);
+  assert.deepEqual(parseKnowledgeMarkdown(reexported.proposal.markdown).metadata.source_refs, [
+    { ref_type: 'lists_item', list_item_id: 71 },
+    { ref_type: 'knowhow', knowhow_id: id, origin: 'field_report' },
+  ]);
+});
+
+test('round trips proposal bodies that begin with LF or CRLF without dropping their first blank line', async (t) => {
+  for (const prefix of ['\n', '\r\n']) {
+    await t.test(JSON.stringify(prefix), async () => {
+      const base = workspace();
+      const body = `${prefix}# Resume card\n\nOriginal body.`;
+      const edited = editBody(base, body);
+      const packet = await exportProposal(edited);
+      const restored = await restoreReviewWorkspace(JSON.stringify(packet));
+
+      assert.equal(restored.workspace.body, body);
+      assert.equal(packet.base.markdown, BASE);
+      assert.equal(base.document.metadata.status, 'approved');
+    });
+  }
+});
+
+test('restores legacy v1 exports whose leading LF or CRLF was consumed by the parser', async (t) => {
+  for (const prefix of ['\n', '\r\n']) {
+    await t.test(JSON.stringify(prefix), async () => {
+      const body = `${prefix}# Resume card\n\nOriginal body.`;
+      const current = await exportProposal(editBody(workspace(), body));
+      const legacy = structuredClone(current);
+      legacy.proposal.markdown = legacy.proposal.markdown.replace('\n---\n\n', '\n---\n');
+      assert.notEqual(legacy.proposal.markdown, current.proposal.markdown);
+
+      const restored = await restoreReviewWorkspace(JSON.stringify(legacy));
+      assert.equal(restored.workspace.body, body);
+    });
+  }
+});
+
+test('rejects legacy leading-EOL recovery when the saved body hash does not match', async () => {
+  const body = '\n# Resume card\n\nOriginal body.';
+  const packet = await exportProposal(editBody(workspace(), body));
+  packet.proposal.markdown = packet.proposal.markdown.replace('\n---\n\n', '\n---\n');
+  packet.proposal.markdown = packet.proposal.markdown.replace('Original body.', 'Changed body.');
+
+  await restoreFails(packet, /hash|一致/u);
+});
+
+test('restores a valid 256 KiB body alongside its frontmatter metadata', async () => {
+  const base = workspace();
+  const body = 'x'.repeat(256 * 1024);
+  const packet = await exportProposal(editBody(base, body));
+  const restored = await restoreReviewWorkspace(JSON.stringify(packet));
+
+  assert.equal(restored.workspace.body, body);
+  assert.equal(restored.parsed.metadata.record_id, 'resume-card');
+  assert.equal(packet.base.markdown, BASE);
+  assert.equal(base.document.metadata.status, 'approved');
+});
+
+test('accepts v1 records from before review history fields were added', async () => {
+  const packet = await packetWithHistory();
+  const { sourceReviews, reviewComments, ...legacy } = packet;
+  assert.ok(sourceReviews.length > 0);
+  assert.ok(reviewComments.length > 0);
+
+  const restored = await restoreReviewWorkspace(JSON.stringify(legacy));
+  assert.deepEqual(restored.workspace.sourceReviews, []);
+  assert.deepEqual(restored.workspace.reviewComments, []);
+});
+
+test('accepts either optional v1 review history field independently', async () => {
+  const packet = await packetWithHistory();
+  const { sourceReviews, ...withoutSourceReviews } = packet;
+  const sourceFallback = await restoreReviewWorkspace(JSON.stringify(withoutSourceReviews));
+  assert.deepEqual(sourceFallback.workspace.sourceReviews, []);
+  assert.deepEqual(sourceFallback.workspace.reviewComments, packet.reviewComments);
+
+  const { reviewComments, ...withoutComments } = packet;
+  const commentFallback = await restoreReviewWorkspace(JSON.stringify(withoutComments));
+  assert.deepEqual(commentFallback.workspace.reviewComments, []);
+  assert.deepEqual(commentFallback.workspace.sourceReviews, packet.sourceReviews);
+
+  await restoreFails({ ...packet, sourceReviews: null }, /出典/u);
+  await restoreFails({ ...packet, reviewComments: null }, /コメント/u);
+});
+
 test('preserves historical self-reported placement receipt without restoring copy privileges', async () => {
   const base = workspace();
   const reviewed = setKbReview(base, { status: 'reviewed', reference: 'KB-1', note: 'Checked.' });
@@ -164,9 +260,9 @@ test('rejects broken JSON, non-object JSON, other format versions, and extra top
   await restoreFails({ ...packet, format: 'eleknowledge-knowledge-proposal/v2' }, /版/u);
   await restoreFails({ ...packet, format: 'something-else' }, /形式/u);
   await restoreFails({ ...packet, extra: 1 }, /形式/u);
-  const { reviewComments, ...missing } = packet;
-  assert.ok(reviewComments);
-  await restoreFails(missing, /形式/u);
+  const { placements, ...missingRequired } = packet;
+  assert.ok(placements);
+  await restoreFails(missingRequired, /形式/u);
 });
 
 test('rejects non-string input and oversized fields', async () => {

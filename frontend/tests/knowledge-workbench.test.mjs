@@ -303,6 +303,20 @@ test('proposal export includes exact SHA-256 digests and keeps original metadata
   assert.equal(packet.noteNeedsReconcile, true);
 });
 
+test('proposal export adds deduplicated field-report refs from the canonical section', async () => {
+  const id = `local-sha256:${'c'.repeat(64)}`;
+  const base = workspace();
+  const body = `${base.body}\n\n## 現場資料に基づくノウハウ\n確認済みの要約。\n\n> 出典ID: ${id}\n> 資料: 点検要領 (第2版)\n> 参照箇所: p. 4\n\n> 出典ID: ${id}\n`;
+  const packet = await exportProposal(editBody(base, body));
+  const proposed = parseKnowledgeMarkdown(packet.proposal.markdown);
+  assert.deepEqual(proposed.metadata.source_refs, [
+    { ref_type: 'lists_item', list_item_id: 71 },
+    { ref_type: 'knowhow', knowhow_id: id, origin: 'field_report' },
+  ]);
+  assert.equal(packet.base.metadata.source_refs.length, 1);
+  assert.ok(packet.proposal.markdown.includes('> 参照箇所: p. 4'));
+});
+
 test('proposal export carries immutable OneNote placement receipts after later edits', async () => {
   const destination = 'onenote:https://tenant.sharepoint.com/sites/engineering/page-42';
   const transferText = 'Confirmed point.\nSource: Lists item 71.\nUnconfirmed: follow-up inspection.';

@@ -11,6 +11,7 @@ type Props = {
   originalBody: string;
   body: string;
   onChange: (value: string) => void;
+  onSectionSelect?: (sectionId: string) => void;
 };
 
 function safeExternalHref(href: string | undefined): string | null {
@@ -30,7 +31,7 @@ function safeExternalHref(href: string | undefined): string | null {
   }
 }
 
-export function KnowledgeMarkdownPanel({ title, originalBody, body, onChange }: Props) {
+export function KnowledgeMarkdownPanel({ title, originalBody, body, onChange, onSectionSelect }: Props) {
   const [view, setView] = useState<'edit' | 'compare' | 'preview'>('edit');
   const changed = originalBody !== body;
 
@@ -86,12 +87,12 @@ export function KnowledgeMarkdownPanel({ title, originalBody, body, onChange }: 
         {view === 'edit' && changed && (
           <div className="mt-4 space-y-2 border-t border-gray-200 pt-4">
             <h4 className="text-sm font-semibold text-gray-950">元のMarkdownからの変更箇所</h4>
-            <KnowledgeLineDiff before={originalBody} after={body} />
+            <KnowledgeLineDiff before={originalBody} after={body} onSectionSelect={onSectionSelect} />
           </div>
         )}
 
         {view === 'compare' && (
-          <KnowledgeLineDiff before={originalBody} after={body} />
+          <KnowledgeLineDiff before={originalBody} after={body} onSectionSelect={onSectionSelect} />
         )}
 
         {view === 'preview' && (

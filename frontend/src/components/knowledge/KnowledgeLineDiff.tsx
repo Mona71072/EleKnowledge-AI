@@ -1,5 +1,6 @@
 import { memo, useMemo } from 'react';
 import { annotateInlineChanges, diffLines, groupDiffHunks, summarizeDiff } from '../../lib/line-diff.mjs';
+import { listChangedSections } from '../../lib/knowledge-diff-sections.mjs';
 import type { DiffRow, InlineSegment } from '../../lib/line-diff.mjs';
 
 type Props = {
@@ -8,17 +9,23 @@ type Props = {
   label?: string;
   /** 対になった削除行・追加行で、行内の変わった部分だけを濃い背景で強調する。既定はオフ。 */
   inlineHighlight?: boolean;
+  onSectionSelect?: (sectionId: string) => void;
 };
 
 /** 原文と修正案を行ごとに比較し、変更箇所の前後3行と件数を表示する。 */
-export function KnowledgeLineDiff({ before, after, label = '原文と修正案の差分', inlineHighlight = false }: Props) {
+export function KnowledgeLineDiff({ before, after, label = '原文と修正案の差分', inlineHighlight = false, onSectionSelect }: Props) {
   // before / after が同じなら再計算しない（本文の編集以外の再描画で、行ごとの差分を作り直さない）。
-  const { diff, counts, rows } = useMemo(() => {
+  const { diff, counts, rows, changedSections } = useMemo(() => {
     const computed = diffLines(before, after);
     return computed.tooLarge
-      ? { diff: computed, counts: null, rows: [] }
-      : { diff: computed, counts: summarizeDiff(computed.rows), rows: groupDiffHunks(inlineHighlight ? annotateInlineChanges(computed.rows) : computed.rows) };
-  }, [before, after, inlineHighlight]);
+      ? { diff: computed, counts: null, rows: [], changedSections: [] }
+      : {
+        diff: computed,
+        counts: summarizeDiff(computed.rows),
+        rows: groupDiffHunks(inlineHighlight ? annotateInlineChanges(computed.rows) : computed.rows),
+        changedSections: onSectionSelect ? listChangedSections(before, after, computed.rows) : [],
+      };
+  }, [before, after, inlineHighlight, onSectionSelect]);
 
   if (diff.tooLarge || counts === null) {
     return (
@@ -38,6 +45,30 @@ export function KnowledgeLineDiff({ before, after, label = '原文と修正案�
 
   return (
     <section aria-label={label} className="space-y-3">
+      {onSectionSelect && changedSections.length > 0 && (
+        <nav aria-label="変更した節" data-testid="changed-section-shortcuts" className="rounded-lg border border-blue-100 bg-blue-50/60 p-3">
+          <p className="mb-2 text-xs font-semibold text-gray-700">変更した節</p>
+          <ul className="flex flex-wrap gap-2">
+            {changedSections.map((section) => (
+              <li key={`${section.label}-${section.status}`}>
+                {section.status === 'changed' && onSectionSelect ? (
+                  <button type="button" data-testid="changed-section-shortcut" data-section-label={section.label}
+                    data-section-status="changed" onClick={() => onSectionSelect(section.sectionId)}
+                    className="rounded-full border border-blue-300 bg-white px-3 py-1 text-left text-xs font-medium text-blue-900 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    「{section.label}」にコメント
+                  </button>
+                ) : (
+                  <span data-testid="changed-section-shortcut" data-section-label={section.label}
+                    data-section-status={section.status}
+                    className={`inline-flex rounded-full px-3 py-1 text-xs ${section.status === 'removed' ? 'bg-red-100 text-red-900' : 'bg-amber-100 text-amber-950'}`}>
+                    {section.status === 'removed' ? `「${section.label}」は削除` : `「${section.label}」は重複のため選べません`}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
       <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm font-medium" aria-live="polite">
         <span className="text-green-800">追加{counts.added}行</span>
         <span className="text-red-800">削除{counts.removed}行</span>

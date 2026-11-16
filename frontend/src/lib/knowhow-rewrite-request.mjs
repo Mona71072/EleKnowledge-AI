@@ -136,3 +136,25 @@ export function buildRewriteRequest({ frontmatter, body, evidence }) {
     blocker,
   };
 }
+
+/** Build one excerpt-only request. The routing envelope contains no actual card identity. */
+export function buildFieldRewriteRequest({ topic = '', title, excerpt, checkedOn }) {
+  if (typeof excerpt !== 'string' || !excerpt.trim() || Array.from(excerpt).length > REWRITE_LIMITS.answerChars
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\ud800-\udfff]/u.test(excerpt)) {
+    throw new TypeError('AIに送る抜粋を2,000文字以内で選んでください。');
+  }
+  const sourceTitle = oneLine(title);
+  const question = oneLine(topic) || '現場資料の適用条件と確認手順を整理する';
+  if (!sourceTitle || Array.from(sourceTitle).length > REWRITE_LIMITS.sourceTitleChars) throw new TypeError('資料名を200文字以内で入力してください。');
+  if (Array.from(question).length > REWRITE_LIMITS.questionChars) throw new TypeError('確認テーマを2,000文字以内で入力してください。');
+  const timestamp = Date.parse(checkedOn);
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(checkedOn) || !Number.isFinite(timestamp)
+    || new Date(timestamp).toISOString().slice(0, 10) !== checkedOn) throw new TypeError('確認日の日付が正しくありません。');
+  return {
+    knowledgeId: 'KH-FIELD-MATERIAL',
+    cardVersion: 1,
+    targets: [{ heading: '統合した回答・ノウハウ', body: '' }],
+    context: [],
+    evidence: [{ question, lane: 'field', checkedOn, answer: excerpt, sources: [{ title: sourceTitle }] }],
+  };
+}

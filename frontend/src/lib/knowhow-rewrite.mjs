@@ -12,7 +12,7 @@ export {
   readSections,
   selectRewriteSections,
 } from './knowhow-rewrite-sections.mjs';
-export { buildRewriteEvidence, buildRewriteRequest, isRewriteEnabled } from './knowhow-rewrite-request.mjs';
+export { buildFieldRewriteRequest, buildRewriteEvidence, buildRewriteRequest, isRewriteEnabled } from './knowhow-rewrite-request.mjs';
 export {
   buildAcceptedRewrites,
   buildConflictOpenItem,

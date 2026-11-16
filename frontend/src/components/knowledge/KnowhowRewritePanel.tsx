@@ -53,7 +53,27 @@ function Preface({ plan }: { plan: RewritePlan }) {
   return (
     <div className="space-y-1 text-sm leading-6 text-gray-800">
       {request
-        ? <p>確認済みの根拠 {request.evidence.length} 件と、カードの{request.targets.length}つの節を AI に送ります。AI の利用料がかかります。</p>
+        ? <>
+          <p>確認済みの根拠 {request.evidence.length} 件、書き換え対象 {request.targets.length} 節、文脈として参照する節 {request.context.length} 節、カード ID と版を AI に送ります。AI の利用料がかかります。</p>
+          <details className="rounded-md border border-gray-200 px-3 py-2 text-sm">
+            <summary className="cursor-pointer font-medium">送信内容の詳細</summary>
+            <div className="mt-2 space-y-2 text-gray-700">
+              <p>カード: {request.knowledgeId}（版 {request.cardVersion}）</p>
+              {request.evidence.length > 0 && <div>
+                <p className="font-medium">根拠（{request.evidence.length} 件）</p>
+                <ul className="list-disc pl-5">{plan.evidenceRefs.slice(0, request.evidence.length).map(({ number, question }) => <li key={number}>{question}</li>)}</ul>
+              </div>}
+              {request.targets.length > 0 && <div>
+                <p className="font-medium">書き換え対象の節（{request.targets.length} 節）</p>
+                <ul className="list-disc pl-5">{request.targets.map(({ heading }) => <li key={heading}>{heading}</li>)}</ul>
+              </div>}
+              {request.context.length > 0 && <div>
+                <p className="font-medium">文脈として参照する節（{request.context.length} 節）</p>
+                <ul className="list-disc pl-5">{request.context.map(({ heading }) => <li key={heading}>{heading}</li>)}</ul>
+              </div>}
+            </div>
+          </details>
+        </>
         : <p role="status" className="text-amber-950">{blocker}</p>}
       {excluded.map(({ heading, reason }) => <p key={heading} className="text-xs text-amber-950">「{heading}」は{EXCLUDED_TEXT[reason]}ため対象から外しました。</p>)}
       {evidenceOmitted > 0 && (

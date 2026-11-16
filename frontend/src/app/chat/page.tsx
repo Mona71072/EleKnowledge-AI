@@ -22,6 +22,8 @@ import { NoticeBanner } from '@/components/announcements/NoticeBanner';
 import { resolveInitialChatMode } from '@/lib/chat-session-link.mjs';
 import { resolveAssistantDisplayText } from '@/lib/chat-display-text.mjs';
 import { createJobPoller, type JobPoller, type ResearchJobStatus } from '@/lib/research-polling.mjs';
+import { getUserInfo } from '@/lib/auth-helpers';
+import { storeKnowledgeGapRequest } from '@/lib/knowledge-gap-request.mjs';
 import {
   BadFeedbackReasonId,
   FEEDBACK_COMMENT_MAX,
@@ -152,11 +154,23 @@ export default function ChatPage() {
   const [wishSubmitting, setWishSubmitting] = useState(false);
   const [wishSent, setWishSent] = useState(false);
   const [wishError, setWishError] = useState<string | null>(null);
+  const [canOpenOfficialKbGap, setCanOpenOfficialKbGap] = useState(false);
   const isLawMode = ragMode === 'law';
   const researchModeAvailable = !isLawMode && RESEARCH_MODE_SETTING !== 'off';
   const researchIsRunning = researchJob?.status === 'queued' || researchJob?.status === 'running';
   // 表示中の告知（障害中・復旧・メンテナンスなど、チャット画面の帯に出すもの）
   const [notices, setNotices] = useState<Announcement[]>([]);
+
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH !== 'true') return undefined;
+    let active = true;
+    getUserInfo().then((info) => {
+      if (active) setCanOpenOfficialKbGap(Boolean(info?.isAdmin));
+    }).catch(() => {
+      if (active) setCanOpenOfficialKbGap(false);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     getAnnouncements(10)
@@ -853,6 +867,14 @@ const normalizeTableMarkdown = (text: string): string => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const openOfficialKbGap = () => {
+    if (!storeKnowledgeGapRequest({ kind: 'official_kb' })) {
+      setToast({ message: '調査候補を開けませんでした。もう一度お試しください。', variant: 'error' });
+      return;
+    }
+    router.push('/admin/knowledge/research');
   };
 
   const handleNewSession = () => {

@@ -502,9 +502,14 @@ def test_saved_reports_exported_as_json_reorder_the_scope_review_queue(env, tmp_
     cards = root / "cards" / "practice-guides"
     cards.mkdir(parents=True)
     (cards / "KH-A.md").write_text(
-        "---\nknowledge_id: KH-A\nkind: practice_guide\nstatus: approved\ntitle: \"AXIEZ のカード\"\n"
+        "---\nknowledge_id: KH-A\ncard_version: 3\nkind: practice_guide\nstatus: approved\ntitle: \"AXIEZ のカード\"\n"
         "model_scope:\n  product_lines: [\"AXIEZ\"]\n  scope_status: verified\n"
         "  scope_verified_by: reviewer\n  scope_verified_at: \"2026-10-20\"\n---\n\n# body\n",
+        encoding="utf-8",
+    )
+    (cards / "KH-B.md").write_text(
+        "---\nknowledge_id: KH-B\ncard_version: 1\nkind: practice_guide\nstatus: draft\ntitle: NEXCUBE\n"
+        "model_scope:\n  product_lines: [NEXCUBE]\n---\n\n# body\n",
         encoding="utf-8",
     )
     spec = importlib.util.spec_from_file_location(
@@ -520,10 +525,11 @@ def test_saved_reports_exported_as_json_reorder_the_scope_review_queue(env, tmp_
     p0 = out.read_text(encoding="utf-8").split("## P0", 1)[1].split("\n## P1", 1)[0]
     row = next(line for line in p0.splitlines() if line.startswith("| [KH-A]"))
     cells = [cell.strip() for cell in row.split("|")]
-    assert cells[3] == "検証済み"
-    assert cells[4] == "1"   # 当てはまらなかった
-    assert cells[5] == "1"   # reported on NEXCUBE, card names only AXIEZ
-    assert "KH-B" in p0      # matched only → reference line
+    assert cells[2] == "v3（現行）"
+    assert cells[4] == "検証済み"
+    assert cells[5] == "1"   # 当てはまらなかった
+    assert cells[6] == "1"   # reported on NEXCUBE, card names only AXIEZ
+    assert "KH-B v1（1 件）" in p0  # matched only → reference line
     aggregate = (root / "queues" / "scope-review" / "field-reports.json").read_text(encoding="utf-8")
     for secret in (FINDING, CONDITION, USER_ID, TURN_ID, CONVERSATION_ID):
         assert secret not in aggregate and secret not in out.read_text(encoding="utf-8")
@@ -622,7 +628,7 @@ def test_research_turn_report_flows_through_the_scope_review_queue(env, tmp_path
     cards = root / "cards" / "practice-guides"
     cards.mkdir(parents=True)
     (cards / "KH-R1.md").write_text(
-        "---\nknowledge_id: KH-R1\nkind: practice_guide\nstatus: approved\ntitle: \"調査のカード\"\n"
+        "---\nknowledge_id: KH-R1\ncard_version: 2\nkind: practice_guide\nstatus: approved\ntitle: \"調査のカード\"\n"
         "model_scope:\n  product_lines: [\"AXIEZ\"]\n  scope_status: verified\n"
         "  scope_verified_by: reviewer\n  scope_verified_at: \"2026-10-20\"\n---\n\n# body\n",
         encoding="utf-8",
@@ -638,4 +644,5 @@ def test_research_turn_report_flows_through_the_scope_review_queue(env, tmp_path
     text = out.read_text(encoding="utf-8")
     row = next(line for line in text.splitlines() if line.startswith("| [KH-R1]"))
     cells = [cell.strip() for cell in row.split("|")]
-    assert cells[4] == "1"  # 当てはまらなかった（調査の回答に対する報告も数える）
+    assert cells[2] == "v2（現行）"
+    assert cells[5] == "1"  # 当てはまらなかった（調査の回答に対する報告も数える）

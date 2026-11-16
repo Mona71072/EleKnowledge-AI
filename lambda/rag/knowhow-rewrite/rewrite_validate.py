@@ -119,6 +119,8 @@ def _squash(text: str) -> str:
 
 
 def _support(request: dict) -> Support:
+    if request["evidence"][0]["lane"] == "field":
+        return Support([item["answer"] for item in request["evidence"]])
     texts = [item["body"] for item in request["targets"]]
     texts += [item["heading"] + "\n" + item["body"] for item in request["context"]]
     for item in request["evidence"]:
@@ -145,15 +147,17 @@ def _check_body(body: str, original: str, support: Support) -> list:
     return warnings
 
 
-def _evaluate(heading: str, parsed: dict, original: str, support: Support) -> dict:
+def _evaluate(heading: str, parsed: dict, original: str, support: Support, *, strict_numbers: bool = False) -> dict:
     unchanged = {"heading": heading, "status": "unchanged"}
     if parsed["status"] == "unchanged" or _squash(parsed["body"]) == _squash(original):
         return unchanged
     warnings = [] if parsed["evidence"] else [{"code": "missing_evidence"}]
     warnings += _check_body(parsed["body"], original, support)
+    unverified = support.unverified_numbers(parsed["body"])
+    if strict_numbers and unverified:
+        warnings.append({"code": "unverified_number", "tokens": unverified})
     if warnings:
         return _rejected(heading, warnings)
-    unverified = support.unverified_numbers(parsed["body"])
     return {
         "heading": heading,
         "status": "changed",
@@ -178,8 +182,12 @@ def build_response(request: dict, text: str, stop_reason: str) -> dict:
     sections = _parse_sections(parsed, headings, count)
     conflicts = _parse_conflicts(parsed, headings, count)
     support = _support(request)
+    strict_numbers = request["evidence"][0]["lane"] == "field"
     result = [
-        _evaluate(item["heading"], sections.get(item["heading"], {"status": "unchanged"}), item["body"], support)
+        _evaluate(
+            item["heading"], sections.get(item["heading"], {"status": "unchanged"}),
+            item["body"], support, strict_numbers=strict_numbers,
+        )
         for item in request["targets"]
     ]
     return {

@@ -92,7 +92,14 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
     rewrite.discard();
   };
 
+  const clearPreview = () => {
+    setPreview(null);
+    setMessage('');
+    setPreviewError('');
+  };
+
   const showPreview = () => {
+    setPreview(null);
     if (!snapshot || snapshot.running || busy) return;
     const proposals = submitted.filter((question) => decisions[question.id] === CHECK_DECISIONS.confirm).flatMap((question) => {
       const proposal = proposalForQuestion(question, snapshot.tasks.filter((task) => task.questionId === question.id));
@@ -164,8 +171,11 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
             }} />
           <KnowhowRewritePanel hasKnowledgeId={typeof frontmatter.knowledge_id === 'string' && frontmatter.knowledge_id !== ''}
             plan={rewritePlan} view={rewrite.view} decisions={rewrite.decisions} conflictDecisions={rewrite.conflictDecisions}
-            note={rewrite.note} checking={snapshot.running} busy={busy} onRun={rewrite.run} onCancel={rewrite.cancel}
-            onDecide={rewrite.decide} onDecideConflict={rewrite.decideConflict} />
+            note={rewrite.note} checking={snapshot.running} busy={busy}
+            onRun={() => { clearPreview(); rewrite.run(); }}
+            onCancel={() => { clearPreview(); rewrite.cancel(); }}
+            onDecide={(heading, decision) => { clearPreview(); rewrite.decide(heading, decision); }}
+            onDecideConflict={(index, decision) => { clearPreview(); rewrite.decideConflict(index, decision); }} />
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" disabled={snapshot.running} onClick={reset}>質問の編集に戻る</Button>
             <Button type="button" disabled={snapshot.running || (!confirmedCount && !rewrite.accepted.length) || busy} onClick={showPreview}>差分を確認</Button>

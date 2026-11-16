@@ -100,6 +100,12 @@ Parameters:
       Enable the admin-only development feature "ノウハウカード本文の書き換え案" (POST /rag/knowhow/rewrite-proposal).
       Effective only when Environment is dev. Each call invokes BedrockModelId once. Nothing is stored.
 
+  KnowhowFieldMaterialEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable the isolated field-material lane within knowhow rewrite proposals
+
   SenpaiSynthesisEnabled:
     Type: String
     Default: 'false'
@@ -1056,6 +1062,7 @@ Resources:
       Environment:
         Variables:
           KNOWHOW_REWRITE_ENABLED: 'true'
+          KNOWHOW_FIELD_MATERIAL_ENABLED: !Ref KnowhowFieldMaterialEnabled
           ENVIRONMENT: !Ref Environment
           ADMIN_GROUP_NAME: admin
           BEDROCK_MODEL_ID: !Ref BedrockModelId

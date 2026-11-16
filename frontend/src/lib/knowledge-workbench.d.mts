@@ -1,5 +1,8 @@
 import type { KnowledgeSourceReviewInput, KnowledgeSourceReviewRecord } from './knowledge-source-review.mjs';
 
+export const MAX_MARKDOWN_BODY_BYTES: number;
+export const MAX_MARKDOWN_DOCUMENT_BYTES: number;
+
 export type KnowledgeKbReviewStatus = 'unverified' | 'reviewed' | 'conflict';
 
 export type KnowledgeParsedMarkdown = {
@@ -86,7 +89,8 @@ export type KnowledgeProposalPacket = {
   };
 };
 
-export function parseKnowledgeMarkdown(markdown: string): KnowledgeParsedMarkdown;
+export function parseKnowledgeMarkdown(markdown: string, options?: { keepLeadingBlankLine?: boolean }): KnowledgeParsedMarkdown;
+export function createKnowledgeDraft(title: string): KnowledgeParsedMarkdown;
 export function createWorkspace(parsed: KnowledgeParsedMarkdown): KnowledgeWorkspaceState;
 export function editBody(state: KnowledgeWorkspaceState, body: string): KnowledgeWorkspaceState;
 export function editOneNoteDraft(state: KnowledgeWorkspaceState, text: string): KnowledgeWorkspaceState;

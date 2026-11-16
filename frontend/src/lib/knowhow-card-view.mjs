@@ -15,6 +15,8 @@ export const EDITOR_HEADING_KEYWORDS = Object.freeze([
   '関連事例',
 ]);
 
+export const FIELD_MATERIAL_SECTION = '現場資料に基づくノウハウ';
+
 // 「なし」「（該当なし）」「Lists のみ」「-」だけの行は、中身の無い行として扱う。
 const EMPTY_LINE = /^[（(]?\s*(?:なし|無し|該当なし|未記載|Lists\s*のみ|-|—|–)\s*[）)]?[。.]?$/u;
 const FENCE = /^\s{0,3}(`{3,}|~{3,})(.*)$/u;

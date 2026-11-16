@@ -29,6 +29,8 @@ export type SenpaiChatViewProps = {
   onSynthesize: (turnId: number) => void;
   onResend: (options: ResendOptions) => void;
   flags: { research: boolean; fieldReports: boolean; synthesis: boolean; knowhowOnly?: boolean };
+  /** Matches the destination workbench's existing admin gate and feature flag. */
+  canOpenGap?: boolean;
   developerView: boolean;
   onToggleDeveloperView: () => void;
   /** ⋯メニューの開閉（省略すると、ブラウザ任せの開閉になる）。 */
@@ -86,7 +88,7 @@ export function isContinuationPaused(snapshot: SenpaiChatSnapshot, researchEnabl
  * 先輩チャットの画面全体。状態・通信・コントローラは持たず、props だけで描画する
  * （固定データでの画面確認やテストに使える）。
  */
-export function SenpaiChatView({ snapshot, history, flags, transcriptRef, onTranscriptScroll, ...props }: SenpaiChatViewProps) {
+export function SenpaiChatView({ snapshot, history, flags, canOpenGap = false, transcriptRef, onTranscriptScroll, ...props }: SenpaiChatViewProps) {
   const latestTurn = snapshot.turns.at(-1);
   // 調査ジョブの相談は、完了・失敗・中止のどれでも次の質問を送れる。機能がオフの環境では続けられない。
   const researchUnavailable = !flags.research && Boolean(latestTurn?.research);
@@ -132,7 +134,7 @@ export function SenpaiChatView({ snapshot, history, flags, transcriptRef, onTran
                     conversationId={snapshot.conversationId} report={turn.senpaiTurnId ? props.reports[turn.senpaiTurnId] : undefined}
                     onReportSent={props.onReportSent} developerView={flags.research && props.developerView}
                     canReport={reportable(turn, flags.fieldReports)} synthesisEnabled={flags.synthesis}
-                    onSynthesize={props.onSynthesize} knowhowOnly={flags.knowhowOnly}
+                    onSynthesize={props.onSynthesize} knowhowOnly={flags.knowhowOnly} canOpenGap={canOpenGap}
                     onResend={turn.research && turn === latestTurn && !snapshot.running ? props.onResend : undefined}
                   />
                 ))}

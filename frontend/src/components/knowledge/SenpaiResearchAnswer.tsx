@@ -23,6 +23,7 @@ import { SenpaiCopyButton } from './SenpaiCopyButton';
 import { SenpaiDevPanel } from './SenpaiDevPanel';
 import { REF_PREFIX, REF_TONES, SenpaiMarkdown } from './SenpaiMarkdown';
 import { SenpaiStepTimeline } from './SenpaiStepTimeline';
+import { storeKnowledgeGapRequest } from '@/lib/knowledge-gap-request.mjs';
 
 const KNOWN_MODELS: ReadonlySet<string> = new Set(ALL_MODEL_TYPES.map((model) => model.value));
 // 見た目は小さいまま、押せる範囲だけ上下左右に広げる（::before）。
@@ -202,8 +203,8 @@ function ClarifyBlock({ result, prefix, query, onResend }: { result: SenpaiResea
   );
 }
 
-function ResultBody({ result, prefix, selectedModel, query, onResend, actions }: {
-  result: SenpaiResearchResult; prefix: string; selectedModel?: string; query?: string; onResend?: Resend; actions?: ReactNode;
+function ResultBody({ result, prefix, selectedModel, query, senpaiTurnId, canOpenGap, onResend, actions }: {
+  result: SenpaiResearchResult; prefix: string; selectedModel?: string; query?: string; senpaiTurnId?: string; canOpenGap?: boolean; onResend?: Resend; actions?: ReactNode;
 }) {
   const mismatch = modelMismatch(result, selectedModel, KNOWN_MODELS);
   // 機種を選んでいない相談でも、質問から読めた機種があれば、別機種の事例の注意に使う。
@@ -223,7 +224,10 @@ function ResultBody({ result, prefix, selectedModel, query, onResend, actions }:
       {result.stopReason === 'budget' && <p className="text-xs text-gray-500">時間の上限に達したため、確認できた範囲でまとめています</p>}
       {result.kind === 'clarify' && <ClarifyBlock result={result} prefix={prefix} query={query} onResend={onResend} />}
       {result.kind === 'not_found' && (
-        <p className="text-[15px] leading-7 text-gray-900">該当する情報を確認できませんでした。質問の言い換えや、機種の指定を試してください。</p>
+        <div className="space-y-2">
+          <p className="text-[15px] leading-7 text-gray-900">該当する情報を確認できませんでした。質問の言い換えや、機種の指定を試してください。</p>
+          {canOpenGap && senpaiTurnId && <a href="/admin/knowledge/research" onClick={() => storeKnowledgeGapRequest({ senpaiTurnId })} className="inline-flex min-h-8 items-center text-xs text-gray-600 underline underline-offset-2 hover:text-gray-900">不足を確認する</a>}
+        </div>
       )}
       {result.kind === 'answer' && <AnswerText result={result} prefix={prefix} />}
       <SourcesDisclosure result={result} prefix={prefix} selectedModel={noticeModel} />
@@ -246,12 +250,14 @@ function ResultBody({ result, prefix, selectedModel, query, onResend, actions }:
  * `onResend` は最新の相談にだけ渡す（聞き直し・もう一度試す）。中止は入力欄の停止ボタンだけ。
  * `actions` は操作列（コピー・もう一度調べる）の後ろに並べる追加のボタン（結果を残す）。
  */
-export function SenpaiResearchAnswer({ research, anchorPrefix, selectedModel, developerView, query, onResend, actions }: {
+export function SenpaiResearchAnswer({ research, anchorPrefix, selectedModel, developerView, query, senpaiTurnId, canOpenGap, onResend, actions }: {
   research: SenpaiResearchState;
   anchorPrefix: string;
   selectedModel?: string;
   developerView: boolean;
   query?: string;
+  senpaiTurnId?: string;
+  canOpenGap?: boolean;
   onResend?: Resend;
   actions?: ReactNode;
 }) {
@@ -268,7 +274,7 @@ export function SenpaiResearchAnswer({ research, anchorPrefix, selectedModel, de
         <p role="status" className="text-sm text-gray-600">{SENPAI_RESEARCH_CANCELLED_MESSAGE}{retry}</p>
       )}
       {research.status === 'completed' && research.result && (
-        <ResultBody result={research.result} prefix={anchorPrefix} selectedModel={selectedModel} query={query} onResend={onResend} actions={actions} />
+        <ResultBody result={research.result} prefix={anchorPrefix} selectedModel={selectedModel} query={query} senpaiTurnId={senpaiTurnId} canOpenGap={canOpenGap} onResend={onResend} actions={actions} />
       )}
       {developerView && <SenpaiDevPanel debug={research.debug} steps={research.steps} unverifiedRefs={research.result?.unverifiedRefs} knowhow={research.result?.sources.knowhow} />}
     </div>

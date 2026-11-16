@@ -69,6 +69,7 @@ ACTIONS = {
     "P2": "product_lines が正しければ検証済みにする（以後、他機種を選んだときに除外される）",
     "P3": "機種フィルタ対象外。全機種対応なら lists_model_label を全エレ機種へ",
 }
+HISTORICAL_REPORT_ACTION = "報告に記録されたカード版を先に確認し、その版のカードと現行版を照合してから必要な修正を判断する"
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,7 @@ class CardInfo:
     link: str
     section: str
     scope: dict
+    version: int | None
 
 
 @dataclass(frozen=True)
@@ -205,13 +207,14 @@ def scan(root: Path = KNOWLEDGE_ROOT) -> Inventory:
             continue
         knowledge_id = str(data.get("knowledge_id") or path.stem)
         title = str(data.get("title") or "")
+        version = data.get("card_version") if type(data.get("card_version")) is int else None
         link = "../../" + path.relative_to(root).as_posix()
         if scope.get("scope_status") == "verified":
             verified += 1
-            cards[knowledge_id] = CardInfo(title, link, "検証済み", scope)
+            cards[knowledge_id] = CardInfo(title, link, "検証済み", scope, version)
             continue
         priority, signal = _classify(scope, retrieval)
-        cards[knowledge_id] = CardInfo(title, link, priority, scope)
+        cards[knowledge_id] = CardInfo(title, link, priority, scope, version)
         rows.append(Row(
             priority=priority,
             knowledge_id=knowledge_id,
@@ -290,44 +293,51 @@ def _report_reactions(report) -> list | None:
     valid = []
     for entry in reactions:
         if (isinstance(entry, dict) and isinstance(entry.get("knowledgeId"), str)
-                and ID_PATTERN.match(entry["knowledgeId"]) and type(entry.get("cardVersion")) is int
+                and ID_PATTERN.fullmatch(entry["knowledgeId"])
+                and type(entry.get("cardVersion")) is int and 1 <= entry["cardVersion"] <= 1_000_000
                 and entry.get("reaction") in FIELD_REPORT_REACTIONS):
             valid.append(entry)
     return valid
 
 
-def _report_model(report: dict) -> str:
+def _report_model(report: dict, allowed_models: set[str]) -> str:
     model = report.get("modelType") or report.get("turnModelType") or ""
-    return model if isinstance(model, str) and len(model) <= 50 else ""
+    return model if isinstance(model, str) and model in allowed_models else ""
 
 
 def aggregate_field_reports(reports: list) -> dict:
-    """Counts-only aggregate per card. Report text, people and conversation IDs are dropped."""
+    """Counts-only aggregate per card version; arbitrary report labels and text are dropped."""
     cards: dict[str, dict] = {}
     counted = skipped = 0
+    allowed_models = set(load_retrieval().MODEL_ALIASES)
     for report in reports:
         reactions = _report_reactions(report)
         if reactions is None or report["reviewState"] not in OPEN_REVIEW_STATES:
             skipped += 1
             continue
         counted += 1
-        model = _report_model(report)
+        model = _report_model(report, allowed_models)
         found = DATE_PATTERN.match(str(report.get("createdAt") or ""))
         for entry in reactions:
-            card = cards.setdefault(entry["knowledgeId"], {"versions": set(), "reactions": {}, "latestReportDate": ""})
-            card["versions"].add(entry["cardVersion"])
-            counts = card["reactions"].setdefault(model, dict.fromkeys(FIELD_REPORT_REACTIONS, 0))
+            card = cards.setdefault(entry["knowledgeId"], {"byVersion": {}})
+            version_key = str(entry["cardVersion"])
+            version = card["byVersion"].setdefault(version_key, {"reactions": {}, "latestReportDate": ""})
+            counts = version["reactions"].setdefault(model, dict.fromkeys(FIELD_REPORT_REACTIONS, 0))
             counts[entry["reaction"]] += 1
-            if found and found.group(1) > card["latestReportDate"]:
-                card["latestReportDate"] = found.group(1)
+            if found and found.group(1) > version["latestReportDate"]:
+                version["latestReportDate"] = found.group(1)
     return {
         "counted": counted,
         "skipped": skipped,
         "cards": {
             knowledge_id: {
-                "versions": sorted(card["versions"]),
-                "reactions": {key: card["reactions"][key] for key in sorted(card["reactions"])},
-                "latestReportDate": card["latestReportDate"],
+                "byVersion": {
+                    version: {
+                        "reactions": {key: value["reactions"][key] for key in sorted(value["reactions"])},
+                        "latestReportDate": value["latestReportDate"],
+                    }
+                    for version, value in sorted(card["byVersion"].items(), key=lambda item: int(item[0]))
+                },
             }
             for knowledge_id, card in sorted(cards.items())
         },
@@ -369,34 +379,79 @@ class FieldRow:
     knowledge_id: str
     card: CardInfo | None
     totals: dict
-    other_model: int
+    other_model: int | None
     models: tuple[str, ...]
     latest: str
+    version: int | None
+    current: bool
+    version_note: str
 
     @property
     def needs_review(self) -> bool:
-        return self.totals["not_matched"] > 0 or self.other_model > 0
+        return (self.totals["not_matched"] > 0 or (self.other_model is not None and self.other_model > 0)
+                or not self.current)
 
     @property
     def sort_key(self) -> tuple:
-        return (-self.totals["not_matched"], -self.other_model, -sum(self.totals.values()), self.knowledge_id)
+        return (not self.current, -self.totals["not_matched"], -(self.other_model or 0),
+                -sum(self.totals.values()), self.knowledge_id, self.version if self.version is not None else -1)
 
 
 def _field_rows(aggregate: dict, cards: dict, retrieval: ModuleType) -> list[FieldRow]:
     rows = []
     for knowledge_id, entry in aggregate["cards"].items():
         card = cards.get(knowledge_id)
-        totals = dict.fromkeys(FIELD_REPORT_REACTIONS, 0)
-        other = 0
-        for model, counts in (entry.get("reactions") or {}).items():
-            reports = 0
-            for reaction in FIELD_REPORT_REACTIONS:
-                totals[reaction] += int(counts.get(reaction, 0))
-                reports += int(counts.get(reaction, 0))
-            if card is not None and _other_model(card.scope, model, retrieval):
-                other += reports
-        models = tuple(sorted(model for model in entry.get("reactions") or {} if model))
-        rows.append(FieldRow(knowledge_id, card, totals, other, models, str(entry.get("latestReportDate") or "")))
+        by_version = entry.get("byVersion")
+        if isinstance(by_version, dict):
+            version_entries = []
+            for version_text, version_data in by_version.items():
+                version = int(version_text) if isinstance(version_text, str) and version_text.isdigit() else None
+                version_entries.append((version, version_data if isinstance(version_data, dict) else {}))
+        else:
+            # Previous aggregates stored mixed-version totals. Preserve them as history without
+            # assigning them to any one of the versions listed alongside those totals.
+            version_entries = [(None, {
+                "reactions": entry.get("reactions") or {},
+                "latestReportDate": entry.get("latestReportDate") or "",
+                "legacyVersions": entry.get("versions") or [],
+            })]
+        for version, version_data in version_entries:
+            reactions = version_data.get("reactions") or {}
+            totals = dict.fromkeys(FIELD_REPORT_REACTIONS, 0)
+            current = card is not None and version is not None and card.version is not None and version == card.version
+            other = 0 if current else None
+            for model, counts in reactions.items():
+                reports = 0
+                for reaction in FIELD_REPORT_REACTIONS:
+                    amount = int(counts.get(reaction, 0))
+                    totals[reaction] += amount
+                    reports += amount
+                if current and _other_model(card.scope, model, retrieval):
+                    other += reports
+            models = tuple(sorted(model for model in reactions if model in retrieval.MODEL_ALIASES))
+            if card is None:
+                version_note = (
+                    f"v{version}（カードなし）" if version is not None
+                    else "版不明（旧集計・版を特定できない・カードなし）"
+                )
+            elif version is None:
+                version_note = "版不明（旧集計・版を特定できない）"
+            elif card.version is None:
+                version_note = f"v{version}（現行版不明）"
+            elif version == card.version:
+                version_note = f"v{version}（現行）"
+            elif version > card.version:
+                version_note = f"v{version}（現行より新しい版）"
+            else:
+                version_note = f"v{version}（旧版）"
+            if version is None and version_data.get("legacyVersions"):
+                recorded = sorted({v for v in version_data["legacyVersions"] if type(v) is int})
+                if recorded:
+                    version_note += "（記録版: " + ", ".join(f"v{v}" for v in recorded) + "）"
+            rows.append(FieldRow(
+                knowledge_id, card, totals, other, models, str(version_data.get("latestReportDate") or ""),
+                version, current, version_note,
+            ))
     return sorted(rows, key=lambda row: row.sort_key)
 
 
@@ -412,23 +467,25 @@ def _field_section(aggregate: dict | None, cards: dict, retrieval: ModuleType) -
     ]
     if review:
         lines += [
-            "| カード | タイトル | 通常の区分 | 当てはまらなかった | カードと違う機種 | 当てはまった | 分からない | 報告の機種 | 最新 | 推奨対応 |",
-            "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |",
+            "| カード | 報告の版 | タイトル | 通常の区分 | 当てはまらなかった | カードと違う機種 | 当てはまった | 分からない | 報告の機種 | 最新 | 推奨対応 |",
+            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |",
         ]
         for row in review:
             card = row.card
-            name = f"[{row.knowledge_id}]({card.link})" if card else f"{row.knowledge_id}（カードが見つからない）"
+            name = f"[{row.knowledge_id}]({card.link})" if card else row.knowledge_id
+            action = ACTIONS["P0"] if row.current else HISTORICAL_REPORT_ACTION
+            mismatch = row.other_model if row.other_model is not None else "—"
             lines.append(
-                f"| {name} | {_cell(card.title if card else '')} | {card.section if card else '—'} "
-                f"| {row.totals['not_matched']} | {row.other_model} | {row.totals['matched']} "
-                f"| {row.totals['unsure']} | {_cell(row.models)} | {row.latest or '—'} | {ACTIONS['P0']} |"
+                f"| {name} | {row.version_note} | {_cell(card.title if card else '')} | {card.section if card else '—'} "
+                f"| {row.totals['not_matched']} | {mismatch} | {row.totals['matched']} "
+                f"| {row.totals['unsure']} | {_cell(row.models)} | {row.latest or '—'} | {action} |"
             )
     else:
         lines.append("（確認が必要な報告なし）")
     reference = [row for row in rows if not row.needs_review]
     if reference:
-        lines += ["", "参考（当てはまった・分からないのみ）: " + ", ".join(
-            f"{row.knowledge_id}（{sum(row.totals.values())} 件）" for row in reference
+        lines += ["", "参考（現行版の当てはまった・分からないのみ）: " + ", ".join(
+            f"{row.knowledge_id} v{row.version}（{sum(row.totals.values())} 件）" for row in reference
         )]
     return lines, len(review)
 

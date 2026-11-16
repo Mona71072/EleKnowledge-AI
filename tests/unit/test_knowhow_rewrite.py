@@ -51,6 +51,7 @@ def rw():
 def rewrite_env(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "dev")
     monkeypatch.setenv("KNOWHOW_REWRITE_ENABLED", "true")
+    monkeypatch.setenv("KNOWHOW_FIELD_MATERIAL_ENABLED", "true")
     monkeypatch.setenv("ADMIN_GROUP_NAME", "admin")
     monkeypatch.setenv("BEDROCK_MODEL_ID", MODEL_ID)
     monkeypatch.delenv("KNOWHOW_REWRITE_MAX_TOKENS", raising=False)
@@ -59,6 +60,24 @@ def rewrite_env(monkeypatch):
 
 def _request(**overrides):
     body = copy.deepcopy(REQUEST)
+    body.update(overrides)
+    return body
+
+
+def _field_request(**overrides):
+    body = {
+        "knowledgeId": "KH-FIELD-MATERIAL",
+        "cardVersion": 1,
+        "targets": [{"heading": H_MAIN, "body": ""}],
+        "context": [],
+        "evidence": [{
+            "question": "戸袋側へ移設した際の現場記録",
+            "lane": "field",
+            "checkedOn": "2026-11-14",
+            "answer": "作業時は床面の段差を確認してから位置を決めた。",
+            "sources": [{"title": "現場記録 2026年11月"}],
+        }],
+    }
     body.update(overrides)
     return body
 
@@ -286,6 +305,65 @@ def test_limit_boundaries_are_accepted(env):
     assert response["statusCode"] == 200, response["body"]
 
 
+def test_field_lane_accepts_only_isolated_single_excerpt_request(env):
+    body = _field_request()
+    response = env.lambda_handler(_event(body), None)
+    assert response["statusCode"] == 200, response["body"]
+    assert _body(response)["knowledgeId"] == "KH-FIELD-MATERIAL"
+    sent = _invoke_body(env.bedrock_runtime)
+    assert "field" in sent["system"]
+    blocks = sent["messages"][0]["content"]
+    card = json.loads(blocks[0]["text"].split("\n", 1)[1])
+    assert card == {"targets": [{"heading": H_MAIN, "body": ""}], "context": []}
+
+
+def test_field_lane_is_disabled_by_default_even_when_rewrite_is_enabled(env, monkeypatch):
+    monkeypatch.setenv("KNOWHOW_FIELD_MATERIAL_ENABLED", "false")
+    response = env.lambda_handler(_event(_field_request()), None)
+    assert response["statusCode"] == 403
+    assert _body(response)["error"] == "FeatureUnavailable"
+    env.bedrock_runtime.invoke_model.assert_not_called()
+
+
+def test_field_lane_accepts_a_supported_proposal_from_the_empty_target(env):
+    text = json.dumps({
+        "sections": [{
+            "heading": H_MAIN,
+            "status": "changed",
+            "body": "現場では床面の段差を確認してから位置を決めた。",
+            "reason": "利用許可済みの現場記録に基づく観察知。",
+            "evidence": [1],
+        }],
+        "conflicts": [],
+    }, ensure_ascii=False)
+    env.bedrock_runtime = _bedrock(text)
+    response = env.lambda_handler(_event(_field_request()), None)
+    assert response["statusCode"] == 200
+    section = _body(response)["sections"][0]
+    assert section["status"] == "changed"
+    assert section["body"] == "現場では床面の段差を確認してから位置を決めた。"
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda b: b.update(knowledgeId="KH-REAL-CARD"),
+    lambda b: b.update(cardVersion=2),
+    lambda b: b.update(targets=[{"heading": H_MAIN, "body": "caller card text"}]),
+    lambda b: b.update(targets=[{"heading": "未確認事項", "body": ""}]),
+    lambda b: b.update(context=[{"heading": "使う場面", "body": "caller card text"}]),
+    lambda b: b["evidence"].append(copy.deepcopy(b["evidence"][0])),
+    lambda b: b["evidence"][0].update(lane="technical"),
+    lambda b: b["evidence"][0].update(sources=[]),
+    lambda b: b["evidence"][0].update(sources=[{"title": "現場記録", "page": 1}]),
+    lambda b: b["evidence"][0].update(sources=[{"title": "https://example.test/record"}]),
+])
+def test_field_lane_rejects_any_non_contract_shape(env, mutate):
+    body = _field_request()
+    mutate(body)
+    response = env.lambda_handler(_event(body), None)
+    assert response["statusCode"] == 400
+    env.bedrock_runtime.invoke_model.assert_not_called()
+
+
 def test_optional_parts_may_be_omitted(env):
     body = _request()
     body.pop("context")
@@ -334,6 +412,15 @@ def test_system_prompt_states_each_required_rule():
         "changed", "evidence", "reason", "箇条書き", "Lists", "JSON のみ",
     ):
         assert fragment in system, fragment
+
+
+def test_field_prompt_preserves_conditions_and_does_not_promote_observations():
+    request = _field_request()
+    parsed = sys.modules["rewrite_input"].parse_request(_event(request))
+    system = _prompt().system_prompt_for(parsed)
+    for fragment in ("field レーン専用規則", "非公式な観察知", "不確実性", "安全要件", "推論しない", "行動要求"):
+        assert fragment in system, fragment
+    assert _prompt().system_prompt_for(_request()) == _prompt().SYSTEM_PROMPT
 
 
 def test_data_is_escaped_and_injection_text_stays_data():
@@ -749,6 +836,8 @@ def test_sam_flag_is_off_by_default_and_effective_only_in_dev():
     template = _sam()
     param = template["Parameters"]["KnowhowRewriteEnabled"]
     assert param["Default"] == "false" and param["AllowedValues"] == ["true", "false"]
+    field_param = template["Parameters"]["KnowhowFieldMaterialEnabled"]
+    assert field_param["Default"] == "false" and field_param["AllowedValues"] == ["true", "false"]
     condition = template["Conditions"]["KnowhowRewriteDevEnabled"]
     assert condition == {"Fn::And": [
         {"Fn::Equals": ["Environment", "dev"]}, {"Fn::Equals": ["KnowhowRewriteEnabled", "true"]},
@@ -772,10 +861,11 @@ def test_sam_function_route_environment_and_limits():
     assert event["RestApiId"] == "RagApi" and "Auth" not in event
     env_vars = function["Environment"]["Variables"]
     assert set(env_vars) == {
-        "KNOWHOW_REWRITE_ENABLED", "ENVIRONMENT", "ADMIN_GROUP_NAME", "BEDROCK_MODEL_ID",
+        "KNOWHOW_REWRITE_ENABLED", "KNOWHOW_FIELD_MATERIAL_ENABLED", "ENVIRONMENT", "ADMIN_GROUP_NAME", "BEDROCK_MODEL_ID",
         "BEDROCK_READ_TIMEOUT", "KNOWHOW_REWRITE_MAX_TOKENS",
     }
     assert env_vars["KNOWHOW_REWRITE_ENABLED"] == "true"
+    assert env_vars["KNOWHOW_FIELD_MATERIAL_ENABLED"] == "KnowhowFieldMaterialEnabled"
     assert env_vars["BEDROCK_MODEL_ID"] == "BedrockModelId" and env_vars["ADMIN_GROUP_NAME"] == "admin"
     assert int(env_vars["BEDROCK_READ_TIMEOUT"]) == 24 and int(env_vars["KNOWHOW_REWRITE_MAX_TOKENS"]) == 4096
     assert function["Timeout"] == 30 and function["MemorySize"] == 512
@@ -833,6 +923,36 @@ def test_smuggled_or_swapped_values_are_rejected(new_body, answer, original):
     section = _verdict(new_body, answer, original)
     assert section["status"] == "rejected" and "body" not in section, (new_body, section)
     assert {"unsupported_value", "suspicious_text"} & set(_codes_of(section))
+
+
+@pytest.mark.parametrize("carrier,body,code,token", [
+    ("question", "Q-3786 を確認した。", "unsupported_value", "Q-3786"),
+    ("title", "Q-3786 を確認した。", "unsupported_value", "Q-3786"),
+    ("checkedOn", "2026年の記録。", "unverified_number", "2026"),
+])
+def test_field_values_only_use_excerpt_as_number_support(carrier, body, code, token):
+    request = _field_request()
+    request["evidence"][0]["answer"] = "現場で状態を確認した。"
+    if carrier == "question":
+        request["evidence"][0]["question"] = "Q-3786 に関する現場記録"
+    elif carrier == "title":
+        request["evidence"][0]["sources"] = [{"title": "Q-3786_現場記録.pdf"}]
+    section = _section(_ok(request, sections=[_changed(body=body)]), H_MAIN)
+    assert section["status"] == "rejected" and "body" not in section
+    warning = next(w for w in section["warnings"] if w["code"] == code)
+    assert token in warning["tokens"]
+
+
+def test_field_bare_numbers_reject_while_legacy_lanes_keep_warning():
+    field = _field_request()
+    field["evidence"][0]["answer"] = "現場で確認した。"
+    section = _section(_ok(field, sections=[_changed(body="12 の記録")]), H_MAIN)
+    assert section["status"] == "rejected"
+    assert "unverified_number" in _codes(section)
+
+    legacy = _section(_ok(sections=[_changed(body="12 の記録")]), H_MAIN)
+    assert legacy["status"] == "changed"
+    assert "unverified_number" in _codes(legacy)
 
 
 def test_unsupported_tokens_report_the_value_that_failed():

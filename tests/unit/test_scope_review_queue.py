@@ -23,7 +23,7 @@ def _write_card(root: Path, knowledge_id: str, scope_yaml: str, *, title: str = 
     directory = root / "cards" / "practice-guides"
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{knowledge_id}.md").write_text(
-        f"---\nknowledge_id: {knowledge_id}\nkind: practice_guide\nstatus: draft\n"
+        f"---\nknowledge_id: {knowledge_id}\ncard_version: 1\nkind: practice_guide\nstatus: draft\n"
         f"title: \"{title}\"\nmodel_scope:\n{scope_yaml}\n---\n\n# body\n",
         encoding="utf-8",
     )
@@ -139,16 +139,19 @@ def test_aggregate_counts_reactions_by_model_and_drops_text_and_people(reports_r
         {"broken": True},
     ], wrap=True)
     aggregate = module.aggregate_field_reports(module.load_field_report_export(export))
-    assert aggregate["cards"]["KH-AX"] == {
-        "versions": [1],
-        "reactions": {
-            "": {"matched": 1, "not_matched": 0, "unsure": 0},
-            "AXIEZ": {"matched": 0, "not_matched": 1, "unsure": 0},
-            "NEXCUBE": {"matched": 0, "not_matched": 1, "unsure": 0},
-        },
-        "latestReportDate": "2026-10-21",
+    assert aggregate["cards"]["KH-AX"]["byVersion"] == {
+        "1": {
+            "reactions": {
+                "": {"matched": 1, "not_matched": 0, "unsure": 0},
+                "AXIEZ": {"matched": 0, "not_matched": 1, "unsure": 0},
+                "NEXCUBE": {"matched": 0, "not_matched": 1, "unsure": 0},
+            },
+            "latestReportDate": "2026-10-21",
+        }
     }
-    assert aggregate["cards"]["KH-P2"]["reactions"] == {"NEXCUBE": {"matched": 0, "not_matched": 0, "unsure": 1}}
+    assert aggregate["cards"]["KH-P2"]["byVersion"]["1"]["reactions"] == {
+        "NEXCUBE": {"matched": 0, "not_matched": 0, "unsure": 1}
+    }
     assert aggregate["counted"] == 4 and aggregate["skipped"] == 3
     text = json.dumps(aggregate, ensure_ascii=False)
     for secret in ("ZZZ-FINDING", "ZZZ-CONDITION", "user-ZZZ", "conv-ZZZ", "turn-ZZZ"):
@@ -180,6 +183,74 @@ def test_p0_lists_not_matched_and_other_model_reports_first_including_verified(r
     assert "[KH-P3]" not in p0 and "KH-P3" in p0  # listed only in the reference line
     assert "KH-GONE" in p0  # unknown card is surfaced, not dropped
     assert "ZZZ" not in queue
+
+
+def test_p0_keeps_reactions_separate_by_version_and_prioritizes_current_version(reports_root, tmp_path):
+    module = _module()
+    card_path = reports_root / "cards" / "practice-guides" / "KH-AX.md"
+    card_path.write_text(card_path.read_text(encoding="utf-8").replace("card_version: 1", "card_version: 2"), encoding="utf-8")
+    export = _export(tmp_path, [
+        _report("KH-AX", "not_matched", model="AXIEZ", version=1),
+        _report("KH-AX", "matched", model="NEXCUBE", version=2, created="2026-10-21T01:00:00Z"),
+        _report("KH-AX", "not_matched", model="AXIEZ", version=99, created="2026-10-22T01:00:00Z"),
+    ])
+    module.write_field_report_aggregate(module.load_field_report_export(export), reports_root)
+
+    aggregate = module._read_aggregate(reports_root)
+    queue = module.render_queue(reports_root)
+    p0 = queue.split("## P0", 1)[1].split("\n## P1", 1)[0]
+
+    assert aggregate["cards"]["KH-AX"]["byVersion"]["1"]["reactions"]["AXIEZ"]["not_matched"] == 1
+    assert aggregate["cards"]["KH-AX"]["byVersion"]["2"]["reactions"]["NEXCUBE"]["matched"] == 1
+    assert "v2（現行）" in p0
+    assert "v1（旧版）" in p0 and "v99（現行より新しい版）" in p0
+    assert p0.index("v2（現行）") < p0.index("v1（旧版）")
+    old_line = next(line for line in p0.splitlines() if "v1（旧版）" in line)
+    assert "| 1 | — |" in old_line
+    assert "報告に記録されたカード版を先に確認" in old_line
+
+
+def test_legacy_aggregate_and_unknown_versions_remain_visible(reports_root):
+    module = _module()
+    aggregate_path = reports_root / "queues" / "scope-review" / "field-reports.json"
+    aggregate_path.parent.mkdir(parents=True)
+    aggregate_path.write_text(json.dumps({"counted": 2, "cards": {
+        "KH-AX": {"versions": [1, 2], "reactions": {
+            "NEXCUBE": {"matched": 1, "not_matched": 1, "unsure": 0}
+        }, "latestReportDate": "2026-10-20"},
+        "KH-GONE": {"versions": [4], "reactions": {
+            "NEXCUBE": {"matched": 1, "not_matched": 0, "unsure": 0}
+        }, "latestReportDate": ""},
+    }}), encoding="utf-8")
+
+    p0 = module.render_queue(reports_root).split("## P0", 1)[1].split("\n## P1", 1)[0]
+    assert "版不明（旧集計・版を特定できない）" in p0
+    assert "記録版: v1, v2" in p0
+    assert "KH-GONE" in p0
+    assert "版不明（旧集計" in p0
+    missing_line = next(line for line in p0.splitlines() if "KH-GONE" in line)
+    assert "| — |" in missing_line
+    assert "報告に記録されたカード版を先に確認" in missing_line
+
+
+def test_untrusted_report_model_is_not_written_to_aggregate(tmp_path):
+    module = _module()
+    aggregate = module.aggregate_field_reports([_report("KH-AX", "matched", model="PERSONAL-NAME-123")])
+    serialized = json.dumps(aggregate, ensure_ascii=False)
+
+    assert "PERSONAL-NAME-123" not in serialized
+    assert "NEXCUBE" not in serialized
+
+
+def test_report_card_version_must_be_positive_and_bounded():
+    module = _module()
+    aggregate = module.aggregate_field_reports([
+        _report("KH-ZERO", "not_matched", version=0),
+        _report("KH-NEGATIVE", "not_matched", version=-1),
+        _report("KH-TOO-LARGE", "not_matched", version=1_000_001),
+    ])
+
+    assert aggregate["cards"] == {}
 
 
 def test_queue_without_aggregate_has_empty_p0_and_is_deterministic(cards_root):

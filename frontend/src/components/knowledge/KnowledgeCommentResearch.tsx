@@ -42,6 +42,7 @@ export function KnowledgeCommentResearch({ body, title, modelWords, comment, bus
   const [choices, setChoices] = useState<Choices>({});
   const [error, setError] = useState('');
   const controller = useRef<AbortController | null>(null);
+  const searchCounts = useRef<Record<KnowledgeResearchMode, number>>({ normal: 0, law: 0 });
   const running = MODES.some((mode) => lanes[mode].status === 'loading');
   const query = buildCommentResearchQuery({ title, sectionLabel: comment.sectionLabel, comment: comment.text, modelWords });
 
@@ -58,21 +59,39 @@ export function KnowledgeCommentResearch({ body, title, modelWords, comment, bus
     setLanes({ normal: { status: 'loading' }, law: { status: 'loading' } });
     setChoices({});
     setError('');
-    await Promise.all(MODES.map(async (mode) => {
-      let state: LaneState;
-      try {
-        const answer = await queryKnowledgeSource({
-          baseUrl: process.env.NEXT_PUBLIC_RAG_API_URL || '',
-          getToken: getIdToken, mode, query, signal: request.signal,
-        });
-        state = { status: 'success', answer, contextKey: null, targetLabel: '', searchId: run + 1 };
-      } catch (reason) {
-        state = { status: 'error', message: knowledgeResearchErrorMessage(reason, mode) };
-      }
-      if (controller.current === request && !request.signal.aborted) {
-        setLanes((current) => ({ ...current, [mode]: state }));
-      }
-    }));
+    const requests = MODES.map((mode) => {
+      const searchId = ++searchCounts.current[mode];
+      return searchLane(mode, request, searchId);
+    });
+    await Promise.all(requests);
+    if (controller.current === request) controller.current = null;
+  }
+
+  async function searchLane(mode: KnowledgeResearchMode, request: AbortController, searchId: number) {
+    let state: LaneState;
+    try {
+      const answer = await queryKnowledgeSource({
+        baseUrl: process.env.NEXT_PUBLIC_RAG_API_URL || '',
+        getToken: getIdToken, mode, query, signal: request.signal,
+      });
+      state = { status: 'success', answer, contextKey: null, targetLabel: '', searchId };
+    } catch (reason) {
+      state = { status: 'error', message: knowledgeResearchErrorMessage(reason, mode) };
+    }
+    if (controller.current === request && !request.signal.aborted) {
+      setLanes((current) => ({ ...current, [mode]: state }));
+    }
+  }
+
+  async function retryLane(mode: KnowledgeResearchMode) {
+    const state = lanes[mode];
+    if (controller.current || busy || (state.status !== 'error' && state.status !== 'cancelled')) return;
+    const request = new AbortController();
+    controller.current = request;
+    setLanes((current) => ({ ...current, [mode]: { status: 'loading' } }));
+    setError('');
+    const searchId = ++searchCounts.current[mode];
+    await searchLane(mode, request, searchId);
     if (controller.current === request) controller.current = null;
   }
 
@@ -129,6 +148,11 @@ export function KnowledgeCommentResearch({ body, title, modelWords, comment, bus
             return (
               <div key={mode} role="group" aria-label={`${LABELS[mode]}の照会と追記案`} className="min-w-0 space-y-2">
                 <ResearchResultLane mode={mode} state={state} />
+                {(state.status === 'error' || state.status === 'cancelled') && (
+                  <Button type="button" variant="outline" disabled={busy || running} onClick={() => { void retryLane(mode); }}>
+                    {LABELS[mode]}だけ再確認
+                  </Button>
+                )}
                 {answer && classifyCheckAnswer(answer) === 'found' && (
                   <CommentCandidate key={run} answer={answer} decision={choices[mode]?.decision}
                     onEdit={() => forget(mode)}

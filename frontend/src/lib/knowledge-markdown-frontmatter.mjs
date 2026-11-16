@@ -8,7 +8,7 @@ function fail(message) {
   throw new TypeError(message);
 }
 
-export function parseKnowledgeFrontmatter(markdown, maxBytes) {
+export function parseKnowledgeFrontmatter(markdown, maxBytes, { keepLeadingBlankLine = false } = {}) {
   if (typeof markdown !== 'string') fail('Markdown must be a string.');
   if (markdown.includes('\0')) fail('Markdown cannot contain NUL bytes.');
   if (new TextEncoder().encode(markdown).byteLength > maxBytes) {
@@ -59,9 +59,9 @@ export function parseKnowledgeFrontmatter(markdown, maxBytes) {
   validatePlainValue(value);
 
   const afterFence = markdown.slice(closingEnd);
-  const body = afterFence.startsWith('\r\n')
+  const body = !keepLeadingBlankLine && afterFence.startsWith('\r\n')
     ? afterFence.slice(2)
-    : afterFence.startsWith('\n')
+    : !keepLeadingBlankLine && afterFence.startsWith('\n')
       ? afterFence.slice(1)
       : afterFence;
   return { frontmatter: value, body };

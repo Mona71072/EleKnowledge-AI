@@ -2,8 +2,10 @@ import { stringify } from 'yaml';
 import { parseKnowledgeFrontmatter } from './knowledge-markdown-frontmatter.mjs';
 import { normalizeSourceReview } from './knowledge-source-review.mjs';
 import { findCommentSection, MAX_REVIEW_COMMENT_CHARS } from './knowledge-comment-review.mjs';
+import { getFieldMaterialSourceRefs } from './knowledge-field-material.mjs';
 
-const MAX_MARKDOWN_BYTES = 256 * 1024;
+export const MAX_MARKDOWN_BODY_BYTES = 256 * 1024;
+export const MAX_MARKDOWN_DOCUMENT_BYTES = MAX_MARKDOWN_BODY_BYTES + 64 * 1024;
 const PROPOSAL_FORMAT = 'eleknowledge-knowledge-proposal/v1';
 
 function fail(message) {
@@ -33,8 +35,9 @@ function getIdentity(frontmatter) {
   return { id, version, title: frontmatter.title, idField: card ? 'knowledge_id' : 'record_id' };
 }
 
-export function parseKnowledgeMarkdown(markdown) {
-  const { frontmatter, body } = parseKnowledgeFrontmatter(markdown, MAX_MARKDOWN_BYTES);
+export function parseKnowledgeMarkdown(markdown, options) {
+  const { frontmatter, body } = parseKnowledgeFrontmatter(markdown, MAX_MARKDOWN_DOCUMENT_BYTES, options);
+  if (new TextEncoder().encode(body).byteLength > MAX_MARKDOWN_BODY_BYTES) fail('Markdown body exceeds 256 KiB.');
   const identity = getIdentity(frontmatter);
   const metadata = cloneSafe(frontmatter);
   return {
@@ -46,6 +49,20 @@ export function parseKnowledgeMarkdown(markdown) {
     metadata,
     originalMarkdown: markdown,
   };
+}
+
+export function createKnowledgeDraft(value) {
+  const title = typeof value === 'string' ? value.trim() : '';
+  if (!title || title.length > 200 || /[\u0000-\u001f\u007f-\u009f]/u.test(value)) fail('タイトルを1行、200文字以内で入力してください。');
+  const metadata = {
+    knowledge_id: `KH-FIELD-${globalThis.crypto.randomUUID().replaceAll('-', '').toUpperCase()}`,
+    card_version: 1,
+    kind: 'practice_guide',
+    title,
+    status: 'draft',
+  };
+  const heading = title.replace(/[\\`*_{}\[\]()#+.!|~<>]/gu, '\\$&');
+  return parseKnowledgeMarkdown(`---\n${stringify(metadata, { schema: 'core' }).trimEnd()}\n---\n\n# ${heading}\n`);
 }
 
 function getSourceLines(metadata) {
@@ -132,13 +149,13 @@ function changed(state, patch, options = {}) {
 
 export function editBody(state, body) {
   if (typeof body !== 'string') fail('Markdown body must be a string.');
-  if (new TextEncoder().encode(body).byteLength > MAX_MARKDOWN_BYTES || body.includes('\0')) fail('Markdown body is invalid or too large.');
+  if (new TextEncoder().encode(body).byteLength > MAX_MARKDOWN_BODY_BYTES || body.includes('\0')) fail('Markdown body is invalid or too large.');
   return changed(state, { body }, { noteNeedsReconcile: true });
 }
 
 export function editOneNoteDraft(state, text) {
   if (typeof text !== 'string') fail('OneNote draft must be a string.');
-  if (new TextEncoder().encode(text).byteLength > MAX_MARKDOWN_BYTES || text.includes('\0')) fail('OneNote draft is invalid or too large.');
+  if (new TextEncoder().encode(text).byteLength > MAX_MARKDOWN_BODY_BYTES || text.includes('\0')) fail('OneNote draft is invalid or too large.');
   return changed(state, { noteText: text });
 }
 
@@ -267,13 +284,24 @@ async function sha256(text) {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+export function createProposalMetadata(metadata, body) {
+  const frontmatter = { ...metadata, status: 'draft' };
+  if (Object.hasOwn(metadata, 'review_status')) frontmatter.review_status = 'in_review';
+  if (Object.hasOwn(metadata, 'publication_status')) frontmatter.publication_status = 'not_published';
+  if (Object.hasOwn(metadata, 'cloud_approval')) frontmatter.cloud_approval = 'not_reviewed';
+  const fieldRefs = getFieldMaterialSourceRefs(body);
+  if (fieldRefs.length) {
+    const refs = Array.isArray(frontmatter.source_refs) ? frontmatter.source_refs : [];
+    const existingFieldIds = new Set(refs.filter((ref) => ref?.ref_type === 'knowhow' && ref?.origin === 'field_report')
+      .map((ref) => ref.knowhow_id));
+    frontmatter.source_refs = [...refs, ...fieldRefs.filter((ref) => !existingFieldIds.has(ref.knowhow_id))];
+  }
+  return frontmatter;
+}
+
 function createProposalMarkdown(state) {
-  const frontmatter = cloneSafe(state.document.metadata);
-  frontmatter.status = 'draft';
-  if (Object.hasOwn(frontmatter, 'review_status')) frontmatter.review_status = 'in_review';
-  if (Object.hasOwn(frontmatter, 'publication_status')) frontmatter.publication_status = 'not_published';
-  if (Object.hasOwn(frontmatter, 'cloud_approval')) frontmatter.cloud_approval = 'not_reviewed';
-  return `---\n${stringify(frontmatter, { schema: 'core' }).trimEnd()}\n---\n${state.body}`;
+  const frontmatter = createProposalMetadata(state.document.metadata, state.body);
+  return `---\n${stringify(frontmatter, { schema: 'core' }).trimEnd()}\n---\n\n${state.body}`;
 }
 
 export async function exportProposal(state) {

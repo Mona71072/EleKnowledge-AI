@@ -4,7 +4,7 @@ import { FormEvent, UIEvent, useCallback, useEffect, useRef, useState } from 're
 import { useSenpaiHistory } from '@/hooks/useSenpaiHistory';
 import { SenpaiChatView, isContinuationPaused } from './SenpaiChatView';
 import type { ResendOptions } from './SenpaiChatTurn';
-import { getIdToken } from '@/lib/auth-helpers';
+import { getIdToken, getUserInfo } from '@/lib/auth-helpers';
 import { createSenpaiChat, type SenpaiChatController, type SenpaiChatSnapshot } from '@/lib/knowledge-senpai-chat.mjs';
 import { requestSenpaiSynthesis } from '@/lib/knowledge-senpai-synthesis.mjs';
 import { runSenpaiResearch } from '@/lib/knowledge-senpai-research.mjs';
@@ -144,6 +144,7 @@ export function KnowledgeSenpaiChat() {
   const [question, setQuestion] = useState('');
   const [modelType, setModelType] = useState('');
   const [sendError, setSendError] = useState('');
+  const [canOpenGap, setCanOpenGap] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const controllerRef = useRef<SenpaiChatController | null>(null);
@@ -153,6 +154,16 @@ export function KnowledgeSenpaiChat() {
   const nearBottomRef = useRef(true);
   const scrollAfterSendRef = useRef(false);
   useController(setSnapshot, controllerRef, mountedRef);
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_WORKBENCH !== 'true') return undefined;
+    let active = true;
+    getUserInfo().then((info) => {
+      if (active) setCanOpenGap(Boolean(info?.isAdmin));
+    }).catch(() => {
+      if (active) setCanOpenGap(false);
+    });
+    return () => { active = false; };
+  }, []);
   const history = useSenpaiHistory(snapshot, controllerRef);
   // 調査の開始と結果だけをスクリーンリーダーへ知らせる（描画中に、実行中フラグが変わった瞬間だけ更新する）。
   const [announced, setAnnounced] = useState({ running: false, text: '' });
@@ -265,6 +276,7 @@ export function KnowledgeSenpaiChat() {
       onSynthesize={requestSynthesis}
       onResend={resend}
       flags={{ research: RESEARCH_ENABLED && !KNOWHOW_ONLY, fieldReports: FIELD_REPORTS_ENABLED, synthesis: SYNTHESIS_ENABLED && !KNOWHOW_ONLY, knowhowOnly: KNOWHOW_ONLY }}
+      canOpenGap={canOpenGap}
       developerView={developerView.enabled}
       onToggleDeveloperView={developerView.toggle}
       menuOpen={menuOpen}

@@ -4,6 +4,7 @@ import type { FieldReport } from '@/lib/knowledge-senpai-field-report.mjs';
 import { LaneReply, SynthesisSection } from './SenpaiLegacyLanes';
 import { SenpaiFieldReportForm } from './SenpaiFieldReportForm';
 import { SenpaiResearchAnswer } from './SenpaiResearchAnswer';
+import { storeKnowledgeGapRequest } from '@/lib/knowledge-gap-request.mjs';
 
 /** 通常チャットを、じっくり調べるを選んだ状態で、質問を入れて開く（送信は利用者が行う）。 */
 export function researchHref(query: string) {
@@ -14,7 +15,7 @@ export function researchHref(query: string) {
 export type ResendOptions = { query: string; modelType?: string; supplement?: string; supplementOf?: string };
 
 /** 1回の相談: 右寄せの質問の吹き出しと、枠なしの回答。 */
-export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conversationId, report, onReportSent, developerView, canReport, synthesisEnabled, onSynthesize, onResend, knowhowOnly }: {
+export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conversationId, report, onReportSent, developerView, canReport, synthesisEnabled, onSynthesize, onResend, knowhowOnly, canOpenGap }: {
   turn: Turn;
   running: boolean;
   conversationId?: string;
@@ -29,6 +30,7 @@ export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conv
   onResend?: (options: ResendOptions) => void;
   /** D16: ノウハウだけで答える画面。法令KBの回答がある過去の相談は従来の 2 列で表示する。 */
   knowhowOnly?: boolean;
+  canOpenGap?: boolean;
 }) {
   const resend = onResend
     ? (options: ResendOptions) => onResend({ ...options, ...(turn.supplement && turn.supplementOf ? { supplement: turn.supplement, supplementOf: turn.supplementOf } : {}) })
@@ -36,6 +38,12 @@ export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conv
   const reportForm: ReactNode = canReport
     ? <SenpaiFieldReportForm conversationId={conversationId} turn={turn} sent={turn.senpaiTurnId ? report : undefined} onSent={onReportSent} />
     : null;
+  const legacyGap = !turn.research && turn.normal.status === 'success' && turn.law.status === 'success'
+    && turn.normal.answer?.responseType === 'not_found' && turn.law.answer?.responseType === 'not_found';
+  const knowhowOnlyGap = knowhowOnly && !turn.research && turn.normal.status === 'success'
+    && turn.normal.answer?.responseType === 'not_found'
+    && turn.normal.answer.knowhow?.status === 'not_found'
+    && turn.normal.answer.knowhow.matches.length === 0;
   return (
     <article className="space-y-6" aria-label={`相談 ${turn.id}`}>
       <div className="flex flex-col items-end gap-1">
@@ -50,13 +58,14 @@ export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conv
         <div className="min-w-0 flex-1">
           <h3 className="mb-1.5 text-xs font-medium text-gray-500">工技先輩</h3>
           {turn.research ? (
-            <SenpaiResearchAnswer research={turn.research} anchorPrefix={`senpai-turn-${turn.id}`} selectedModel={turn.modelType} developerView={developerView} query={turn.query} onResend={resend} actions={reportForm} />
+            <SenpaiResearchAnswer research={turn.research} anchorPrefix={`senpai-turn-${turn.id}`} selectedModel={turn.modelType} developerView={developerView} query={turn.query} senpaiTurnId={turn.senpaiTurnId} canOpenGap={canOpenGap} onResend={resend} actions={reportForm} />
           ) : knowhowOnly && turn.law.status !== 'success' ? (
             <div className="space-y-4">
               <section aria-label="ノウハウからの回答" className="min-w-0 space-y-2">
                 <h4 className="text-xs font-medium text-gray-500">ノウハウ</h4>
                 <LaneReply lane={turn.normal} mode="normal" selectedModel={turn.modelType} label="ノウハウ" />
               </section>
+              {canOpenGap && knowhowOnlyGap && turn.senpaiTurnId && <a href="/admin/knowledge/research" onClick={() => storeKnowledgeGapRequest({ senpaiTurnId: turn.senpaiTurnId! })} className="inline-flex min-h-8 items-center text-xs text-gray-600 underline underline-offset-2 hover:text-gray-900">不足を確認する</a>}
               {turn.normal.status !== 'loading' && (
                 <p className="text-xs text-gray-500">
                   技術資料・法令で確かめるときは{' '}
@@ -80,6 +89,7 @@ export const SenpaiChatTurn = memo(function SenpaiChatTurn({ turn, running, conv
                 </section>
               </div>
               <p className="text-xs text-gray-500">各KBの回答を個別に表示しています。必要に応じて根拠と適用条件を確認してください。</p>
+              {canOpenGap && legacyGap && turn.senpaiTurnId && <a href="/admin/knowledge/research" onClick={() => storeKnowledgeGapRequest({ senpaiTurnId: turn.senpaiTurnId! })} className="inline-flex min-h-8 items-center text-xs text-gray-600 underline underline-offset-2 hover:text-gray-900">不足を確認する</a>}
               {reportForm && <div className="-mx-1 flex flex-wrap items-center">{reportForm}</div>}
             </div>
           )}

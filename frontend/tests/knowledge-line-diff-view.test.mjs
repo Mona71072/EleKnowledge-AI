@@ -17,6 +17,7 @@ function loadTsx(path) {
   const compiledModule = { exports: {} };
   const localRequire = (name) => {
     if (name === '../../lib/line-diff.mjs') return require('../src/lib/line-diff.mjs');
+    if (name === '../../lib/knowledge-diff-sections.mjs') return require('../src/lib/knowledge-diff-sections.mjs');
     return require(name);
   };
   new Function('require', 'module', 'exports', outputText)(localRequire, compiledModule, compiledModule.exports);
@@ -81,6 +82,7 @@ test('差分と全文表示は [before, after] に依存させてメモ化し、
   const localRequire = (name) => {
     if (name === 'react') return { ...react, useMemo: (factory, deps) => { memoCalls.push(deps); return factory(); } };
     if (name === '../../lib/line-diff.mjs') return { ...lineDiff, diffLines: (...args) => { diffCalls.push(args); return lineDiff.diffLines(...args); } };
+    if (name === '../../lib/knowledge-diff-sections.mjs') return require('../src/lib/knowledge-diff-sections.mjs');
     return require(name);
   };
   const compiledModule = { exports: {} };
@@ -111,4 +113,20 @@ test('行内の強調は既定ではオフで、出力が変わらない。有�
   assert.match(on, /<mark[^>]*bg-green-300[^>]*>600<\/mark>/);
   assert.match(on, /mm 以内です/);
   assert.doesNotMatch(on.replace(/<mark[^>]*>[^<]*<\/mark>/g, '').replace(/<[^>]*>/g, ''), /800|600/);
+});
+
+test('原文との差分に変更節へのコメント導線を置き、削除節と重複節はリンクにしない', () => {
+  const html = renderToStaticMarkup(createElement(KnowledgeLineDiff, {
+    before: '## A\nold\n\n## B\ntext',
+    after: '## A\nnew\n\n## C\ntext\n\n## C\nsecond',
+    onSectionSelect: () => {},
+  }));
+
+  assert.match(html, /data-testid="changed-section-shortcuts"/);
+  assert.match(html, /data-section-label="A" data-section-status="changed"/);
+  assert.match(html, /「A」にコメント/);
+  assert.match(html, /data-section-label="B" data-section-status="removed"/);
+  assert.match(html, /「B」は削除/);
+  assert.match(html, /data-section-label="C" data-section-status="ambiguous"/);
+  assert.doesNotMatch(html, /「C」にコメント/);
 });

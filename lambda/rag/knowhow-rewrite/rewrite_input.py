@@ -16,7 +16,10 @@ KNOWLEDGE_ID = re.compile(r"KH-[A-Z0-9-]{1,80}")
 CHECKED_ON = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 CARD_VERSION_RANGE = (1, 9999)
 TARGET_HEADINGS = ("統合した回答・ノウハウ", "調査・確認手順", "未確認事項")
-LANES = ("technical", "law")
+FIELD_LANE = "field"
+LANES = ("technical", "law", FIELD_LANE)
+FIELD_KNOWLEDGE_ID = "KH-FIELD-MATERIAL"
+FIELD_TARGET = {"heading": "統合した回答・ノウハウ", "body": ""}
 TARGETS_MAX, TARGET_BODY_MAX, TARGETS_TOTAL_MAX = 3, 2000, 4000
 CONTEXT_MAX, CONTEXT_BODY_MAX, CONTEXT_TOTAL_MAX, CONTEXT_HEADING_MAX = 8, 4000, 16000, 200
 EVIDENCE_MAX, QUESTION_MAX, ANSWER_MAX = 12, 2000, 2000
@@ -126,6 +129,28 @@ def _evidence(raw) -> list:
     return items
 
 
+def _field_request(body: dict, request: dict) -> bool:
+    """Enforce the fixed, isolated envelope for the optional field-material workflow."""
+    evidence = request["evidence"]
+    has_field = any(item["lane"] == FIELD_LANE for item in evidence)
+    uses_reserved_id = body["knowledgeId"] == FIELD_KNOWLEDGE_ID
+    if not has_field and not uses_reserved_id:
+        return False
+    if not has_field or not uses_reserved_id or body["cardVersion"] != 1:
+        raise _invalid("field")
+    if request["targets"] != [FIELD_TARGET] or request["context"] or len(evidence) != 1:
+        raise _invalid("field")
+    item = evidence[0]
+    if item["lane"] != FIELD_LANE or len(item["sources"]) != 1:
+        raise _invalid("field")
+    source = item["sources"][0]
+    if "page" in source or not source["title"].strip() or re.search(
+        r"(?:https?://|www\.|[a-z][a-z0-9+.-]*://)", source["title"], re.IGNORECASE
+    ):
+        raise _invalid("field.sources")
+    return True
+
+
 def _decode(event: dict) -> str:
     raw = event.get("body")
     if isinstance(raw, str) and event.get("isBase64Encoded"):
@@ -156,10 +181,12 @@ def parse_request(event: dict) -> dict:
     low, high = CARD_VERSION_RANGE
     if not _is_int(body["cardVersion"]) or not low <= body["cardVersion"] <= high:
         raise _invalid("cardVersion")
-    return {
+    request = {
         "knowledgeId": body["knowledgeId"],
         "cardVersion": body["cardVersion"],
         "targets": _targets(body["targets"]),
         "context": _context(body.get("context", [])),
         "evidence": _evidence(body["evidence"]),
     }
+    _field_request(body, request)
+    return request

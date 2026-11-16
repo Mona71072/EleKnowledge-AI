@@ -98,11 +98,15 @@ def _handle(event: dict, claims: dict) -> dict:
     except ApiError as error:
         _log("input", "rejected", error)
         return _error(error.status, error.code, error.message)
+    if request["evidence"][0]["lane"] == rewrite_input.FIELD_LANE and os.environ.get(
+        "KNOWHOW_FIELD_MATERIAL_ENABLED"
+    ) != "true":
+        return _error(403, "FeatureUnavailable", "この資料レーンは利用できません")
     counts = {"targetCount": len(request["targets"]), "evidenceCount": len(request["evidence"])}
     model_id = os.environ.get("BEDROCK_MODEL_ID", "")
     try:
         text, usage, stop_reason = rewrite_model.generate(
-            bedrock_runtime, model_id, rewrite_prompt.SYSTEM_PROMPT,
+            bedrock_runtime, model_id, rewrite_prompt.system_prompt_for(request),
             rewrite_prompt.build_messages(request), rewrite_model.max_tokens_from_env(),
         )
     except Exception as error:  # noqa: BLE001 - mapped to the unified format, class only in logs
