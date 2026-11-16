@@ -258,9 +258,9 @@ async function testFieldMaterialWorkflow(page) {
   const { readFile } = await import('node:fs/promises');
   assert.deepEqual(await readFile(await (await originalDownload).path()), original, 'the original is locally recoverable byte for byte');
   const generate = field.getByRole('button', { name: '要約案を作る', exact: true });
+  await field.getByLabel('確認テーマ', { exact: true }).fill('目視の事例を整理する');
   assert.equal(await generate.isDisabled(), true, 'selected excerpt is not sent without consent');
   assert.equal(fieldSummaryRequests.length, 0);
-  await field.getByLabel('確認テーマ', { exact: true }).fill('目視の事例を整理する');
   await field.getByLabel('選んだ抜粋・確認テーマ・資料名・確認日（本日）をAIへ送ってよいことを確認した').check();
   await generate.click();
   await field.getByRole('button', { name: '要約欄へ反映' }).click();
