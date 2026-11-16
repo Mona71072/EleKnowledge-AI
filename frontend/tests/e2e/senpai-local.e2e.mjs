@@ -236,6 +236,7 @@ async function stop(child) {
 }
 
 async function testFieldMaterialWorkflow(page) {
+  await page.clock.setFixedTime('2026-11-17T12:00:00+09:00');
   const field = page.getByRole('region', { name: '現場資料の取り込み' });
   const original = Buffer.from(`\uFEFF合成の現場資料\r\n${FIELD_EXCERPT}\r\n${FIELD_OUTSIDE_SELECTION}\r\n`, 'utf8');
   const file = field.getByLabel('現場資料ファイルを選ぶ');
@@ -260,7 +261,7 @@ async function testFieldMaterialWorkflow(page) {
   assert.equal(await generate.isDisabled(), true, 'selected excerpt is not sent without consent');
   assert.equal(fieldSummaryRequests.length, 0);
   await field.getByLabel('確認テーマ', { exact: true }).fill('目視の事例を整理する');
-  await field.getByLabel('選んだ抜粋と確認テーマをAIへ送ってよいことを確認した').check();
+  await field.getByLabel('選んだ抜粋・確認テーマ・資料名・確認日（本日）をAIへ送ってよいことを確認した').check();
   await generate.click();
   await field.getByRole('button', { name: '要約欄へ反映' }).click();
   assert.equal(fieldSummaryRequests.length, 1);
@@ -268,6 +269,9 @@ async function testFieldMaterialWorkflow(page) {
   assert.deepEqual(request.targets, [{ heading: REWRITE_MAIN, body: '' }]);
   assert.deepEqual(request.context, []);
   assert.equal(request.knowledgeId, 'KH-FIELD-MATERIAL');
+  assert.equal(request.evidence[0].question, '目視の事例を整理する');
+  assert.equal(request.evidence[0].checkedOn, '2026-11-17');
+  assert.equal(request.evidence[0].lane, 'field');
   assert.equal(request.evidence[0].answer, FIELD_EXCERPT);
   assert.deepEqual(request.evidence[0].sources, [{ title: '合成現場資料' }]);
   for (const privateValue of [FIELD_OUTSIDE_SELECTION, 'synthetic-field-notes.txt', 'example.invalid', '根拠なしの合成質問', '現場資料の合成テストカード']) {
@@ -327,7 +331,7 @@ try {
   await waitForWeb(`${baseUrl}/knowledge/chat`);
 
   browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, timezoneId: 'Asia/Tokyo' });
   const pageErrors = [];
   page.on('pageerror', (error) => {
     pageErrors.push(error.message);
@@ -532,7 +536,13 @@ source_refs:
   await rewritePanel.getByText('変更理由: 確認済みの根拠 1 で点検資料の記載を確認できたため。').waitFor();
   assert.equal(rewriteRequests.length, 1, 'the rewrite proposal is requested once');
   assert.deepEqual(rewriteProblems, [], `the rewrite request broke the contract: ${rewriteProblems.join(' | ')}`);
-  assert.equal(await rewritePanel.locator('[aria-pressed="true"]').count(), 0, 'nothing is chosen by default');
+  const sectionChoices = rewritePanel.getByRole('article', { name: `${REWRITE_MAIN}の書き換え案` }).getByRole('button');
+  assert.equal(await sectionChoices.count(), 2, 'the rewrite section has confirm and reject choices');
+  assert.deepEqual(
+    await sectionChoices.evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-pressed'))),
+    ['false', 'false'],
+    'the rewrite section is unconfirmed by default',
+  );
   await rewritePanel.getByText('1節中 0節を反映・0節を反映しない・1節が未確認').waitFor();
   const rewriteDecision = rewritePanel.getByRole('button', { name: '確認して反映する' });
   await rewriteDecision.click();
