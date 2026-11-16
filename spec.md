@@ -47,12 +47,14 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 
 ### 🟡 開発中の機能（Phase 3）
 
+> 最終検証: 2026-10-23 — 製品用語・基礎知識の索引行だけを#200最新回答へ整合。他行は再検証していない。
+
 | 機能 | 仕様 | 補足資料 |
 |------|------|---------|
 | トラブルシューティング | [docs/features/development/phase3-troubleshooting-spec.md](docs/features/development/phase3-troubleshooting-spec.md) | AWS リソースは存在するが利用者向け E2E 未確認。既存の[処理シーケンス](docs/features/production/troubleshooting-sequence.md)は現行との照合が必要。PoC 設計: [docs/agent-spec.md](docs/agent-spec.md) ／ [実装ガイド](docs/features/development/phase3-troubleshooting-implementation-guide.md) |
 | 品質書類チェック（Claude 4 Vision） | [docs/features/development/phase3-quality-check-spec.md](docs/features/development/phase3-quality-check-spec.md) | 開発仕様のみ。実装・E2E は未確認。 |
 | 法令チャット（developプレリリース） | [法令RAG設計](docs/features/development/legal-rag-design.md) ／ [法令API補足](docs/api/legal-chat.md) | Amplify job 64でdevelopへ公開反映済み。法令カードと法令画面への遷移を実確認。itai配信版の実アカウント操作はユーザー確認済み。対象はdev全ユーザー、実費は今後確認。[対象一覧](docs/features/development/legal-rag-target-laws.md) ／ [公開・受入手順](docs/legal-chat-prerelease.md) ／ [確認記録](docs/verification-2026-10-09-legal-chat-prerelease.md) |
-| RAG の 2 モード化（通常モード＋じっくりモード。設計段階） | [設計（合意済み・未実装）](docs/design-2026-09-24-rag-two-modes.md) | 決定: [docs/decisions-2026-09-24-rag-two-modes.md](docs/decisions-2026-09-24-rag-two-modes.md) ／ 調査: [docs/survey-2026-09-24-agentic-rag.md](docs/survey-2026-09-24-agentic-rag.md) ／ [KB 修正依頼台帳](docs/kb-change-requests.md) |
+| RAG の 2 モード化（通常モード＋じっくりモード。設計段階） | [設計（合意済み・未実装）](docs/design-2026-09-24-rag-two-modes.md) | 決定: [docs/decisions-2026-09-24-rag-two-modes.md](docs/decisions-2026-09-24-rag-two-modes.md) ／ 調査: [docs/survey-2026-09-24-agentic-rag.md](docs/survey-2026-09-24-agentic-rag.md) ／ [KB 修正依頼台帳](docs/kb-change-requests.md)（資料の移管・復元 2026-11-13: [決定記録](docs/decisions-2026-11-13-kb-document-migration.md)） |
 | Know-how Knowledge Layer（設計段階・未確定） | [docs/design-2026-10-01-knowhow-flywheel.md](docs/design-2026-10-01-knowhow-flywheel.md) | 調査: [docs/survey-2026-10-01-knowhow-flywheel.md](docs/survey-2026-10-01-knowhow-flywheel.md) |
 | ノウハウ改善ループ（試作仕様・未実装） | [開発仕様](docs/features/development/knowhow-improvement-loop.md) | CommonKnowledgeの候補台帳・受信箱・版/承認/公開を再利用する案。チャットからの明示受付、指示付きAI再生成、候補別履歴、段階受入は未実装。共同確認・本番反映の決定ではない。 |
 | ノウハウ共通の用語・基礎知識（ローカル合成I1） | [実装契約・受入条件](docs/features/development/common-knowledge-i1-contract.md) ／ [統合・担当・試行手順](docs/features/development/common-knowledge-i1-integration.md) ／ [itai専用AWSへの引継ぎ・再開](docs/features/development/common-knowledge-itai-aws-handoff.md) | 既定オフ。投函・Git保存・特定版承認・別操作公開・共通読取・停止を合成で検証。次は許可されたitai専用AWS作成・デプロイへ。会社Git・実資料の受入は別。#195への採用・monaの担当引受けは未返答。 |
@@ -61,6 +63,7 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 | 先輩チャット「調査ジョブ（試作）」（バックエンド実装メモ） | [docs/features/development/senpai-research.md](docs/features/development/senpai-research.md) | dev・管理者限定、既定オフ。SAM パラメータと契約からのずれ。 |
 | 先輩チャット「工技先輩のまとめ（試作）」 | [docs/features/development/senpai-synthesis-prototype.md](docs/features/development/senpai-synthesis-prototype.md) | dev・管理者限定、既定オフ。ターンごとに手動で作る両KB回答の統合。 |
 | 先輩チャット「結果を残す」（現場の報告候補） | [docs/features/development/senpai-field-reports.md](docs/features/development/senpai-field-reports.md) | dev・管理者限定、既定オフ。未確認の観測候補。保存期間と共同確認事項は未確定。 |
+| 製品用語・基礎知識のAI共有（開発中・実装受入前） | [初期構想](docs/concept-2026-10-21-product-domain-knowledge.md) ／ [ノウハウ設計](docs/design-2026-10-01-knowhow-flywheel.md) | 決定: 2026-11-05からブレーキ（BK）系1単元の試行を開始し、開発中の内容確認・承認者と読者はmona・itaiのみ。公開版は版ごと無期限、草案は60日保持（暫定）。Git→S3切替はitaiが担当し、1単元試行後・運用開始直前に全カードを移行（暫定。運用開始日は未定）。Git側に承認記録がないため引継ぎせず、試行単元は二段階承認を新規実施。共通知識実装は#195に含めず別PR。管理者識別はCognito `admin`＋認可表の分野制約、停止はadmin全員（暫定）。AWS共有環境・KB取込・両AIの本番参照は未受入。 |
 
 ### 📖 利用者向け案内
 
@@ -71,8 +74,11 @@ EleKnowledgeは、昇降機に関する知識を集約し、AIを活用して以
 
 ### 🔧 運用・改善・評価
 
+> 最終検証: 2026-10-20 — SAMデプロイ引継ぎ手順の索引リンクを追加・確認。他の運用項目やAWS現況の再検証は含まない。
+
 | 項目 | 現在の状態 | 参照先 |
 |------|------------|--------|
+| SAM デプロイ引継ぎ | mona向けの説明用ドラフト。コマンド構文と記録・設定を照合。AWS実行は未実施 | [SAMデプロイ手順・よくあるミスと対策](docs/sam-deploy-handoff.md) |
 | AWS リソース・運用 | 2026-09-30 開発環境の読み取り専用スナップショット。IaC との差・未確認項目を含む | [AWS Resource Map](docs/aws-resource-map.md) ／ [運用ランブック](docs/ops-runbook.md) ／ [文書整備状況の確認記録](docs/verification-2026-09-30-current-state.md) |
 | コスト配分タグ | 2026-10-15に3キーを104リソースへ付与・再読取確認。管理部門での有効化・請求への反映は未確認 | [タグ運用](docs/ops-cost-allocation-tags.md) ／ [リソース別台帳](docs/cost-allocation-resource-register.md) |
 | 日次 KPI v2 | 設計。AWS の毎時ルールは確認したが、現在の aggregator は日次 UTC 集計 | [KPI v2 設計](docs/design-2026-09-10-metrics-v2.md) |

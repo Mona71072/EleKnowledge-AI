@@ -29,6 +29,8 @@ related-code: infrastructure/sam/phase2-template.yaml, lambda/rag/rag-function/a
 
 留意点: VQV81CNYU4 には quick-start（`A0XLFVSX3P`）/ web-crawler（`7NJIOJDD0Z`）データソースもあり、無関係な GenU 文書が混入しうる。アプリ側の category フィルタで遮断する方針（検証記録 §5.4）。
 
+> 追記 2026-11-13: quick-start にカテゴリ付きの資料（`IN-EL-12-107-01.pdf`）があり、フィルタを通って引用されていた（引用は開けなかった）。KB バケットへ移管して解消した。経緯は [decisions-2026-11-13-kb-document-migration.md](./decisions-2026-11-13-kb-document-migration.md)。
+
 ---
 
 ## 3. DF9XUCSPDM を不採用とする理由

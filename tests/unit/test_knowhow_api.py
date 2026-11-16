@@ -136,7 +136,12 @@ def _configure_successful_pipeline(rag_app, monkeypatch, *, weak=False, clarify=
     monkeypatch.setattr(rag_app, "enqueue_session_title", lambda *_args: None)
     monkeypatch.setattr(rag_app, "save_message_to_dynamodb", lambda **_kwargs: "message-synthetic")
     monkeypatch.setattr(rag_app, "needs_clarify", lambda *_args: (clarify, ["機種と発生条件"] if clarify else []))
-    monkeypatch.setattr(rag_app, "maybe_rewrite_search_query", lambda query, *_args, **_kwargs: query)
+    def rewrite(query, *_args, **kwargs):
+        if kwargs.get("return_trace"):
+            return query, {"enabled": False, "status": "skipped", "reason": "synthetic"}
+        return query
+
+    monkeypatch.setattr(rag_app, "maybe_rewrite_search_query", rewrite)
     monkeypatch.setattr(rag_app, "normalize_query_text", lambda query: query)
     monkeypatch.setattr(rag_app, "expand_query_abbreviations", lambda query: query)
     monkeypatch.setattr(
@@ -149,7 +154,7 @@ def _configure_successful_pipeline(rag_app, monkeypatch, *, weak=False, clarify=
         }]},
     )
     monkeypatch.setattr(rag_app, "select_retrieval_results", lambda results, **_kwargs: results)
-    monkeypatch.setattr(rag_app, "merge_retrieval_results", lambda first, second: first + second)
+    monkeypatch.setattr(rag_app, "merge_retrieval_results", lambda first, second, **_kwargs: first + second)
     monkeypatch.setattr(rag_app, "is_weak_retrieval", lambda *_args, **_kwargs: weak)
     monkeypatch.setattr(rag_app, "build_page_candidates", lambda *_args, **_kwargs: [])
     captured = {}
@@ -228,7 +233,10 @@ def test_markdown_search_reuses_the_conversation_rewrite_once(rag_app, monkeypat
 
     def rewrite(query, *_args, **_kwargs):
         rewrites.append(query)
-        return "かごの走行中振動"
+        rewritten = "かごの走行中振動"
+        if _kwargs.get("return_trace"):
+            return rewritten, {"enabled": False, "status": "skipped", "reason": "synthetic"}
+        return rewritten
 
     monkeypatch.setattr(rag_app, "maybe_rewrite_search_query", rewrite)
     response = rag_app.handle_rag_request(

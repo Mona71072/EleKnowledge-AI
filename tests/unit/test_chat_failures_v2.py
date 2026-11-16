@@ -137,17 +137,23 @@ def test_failures_items_include_opened_reformulated_triage_hints_and_trace():
         "queryFilters": {"modelType": "AXIEZ", "category": ["spec", "tech_info"]},
         "documentOpens": 2, "reformulatedAt": "2026-09-23T01:50:00Z",
         "triage": {"status": "in_progress", "cause": "snippet", "note": "表崩れ", "ref": "#112"},
-        "retrievalTrace": {"retrieve": {"mergedCount": 26}, "generation": {"inputTokens": 3700, "outputTokens": 500},
-                           "latencyMs": {"total": 10400},
-                           "candidates": [{"rank": 1, "score": 0.41, "selected": True}, {"rank": 2, "score": 0.35, "excludedBy": "model_scope"},
-                                          {"rank": 3, "score": 0.34, "excludedBy": "model_scope"}, {"rank": 4, "score": 0.30, "excludedBy": "model_scope"}]},
+        # 検索トレース第 1 版（docs/design-2026-09-10-retrieval-trace.md §3）の形
+        "retrievalTrace": {
+            "searchAttempts": [{"stage": "initial", "latencyMs": 820}],
+            "gate": {"responseType": "pages", "scores": [0.41, 0.35, 0.2], "selectedCount": 1,
+                     "excludedCounts": {"model_scope": 3, "dedupe": 1, "below_threshold": 20, "limit": 5}},
+            "generation": {"inputTokens": 3700, "outputTokens": 500, "latencyMs": 9305},
+            "latencyMs": {"total": 10400},
+            "candidates": [{"rank": 1, "score": 0.41, "selected": True},
+                           {"rank": 27, "score": 0.35, "excludedBy": "model_scope"}]},
     }
     table.scan.return_value = {"Items": [assistant], "ScannedCount": 1}
     session_messages = [
         {"sessionId": "s1", "messageId": "u0", "role": "user", "timestamp": "2026-09-23T01:40:00Z", "content": "最初"},
         {"sessionId": "s1", "messageId": "c0", "role": "assistant", "timestamp": "2026-09-23T01:40:10Z", "responseType": "clarify"},
         {"sessionId": "s1", "messageId": "u1", "role": "user", "timestamp": "2026-09-23T01:46:00Z", "content": "かご枠の水平"},
-        assistant,
+        # DynamoDB は呼び出しごとに別の項目を返す（履歴の読み出しがトレースを外しても scan 側に影響しない）
+        dict(assistant),
     ]
 
     def query(**kwargs):
@@ -162,7 +168,8 @@ def test_failures_items_include_opened_reformulated_triage_hints_and_trace():
     assert it["signals"] == ["bad"]
     assert it["triage"]["status"] == "in_progress" and it["triage"]["ref"] == "#112"
     assert it["traceSummary"] == {"mergedCount": 26, "selectedCount": 1, "excludedByModelScope": 3, "topScore": 0.41,
-                                  "inputTokens": 3700, "outputTokens": 500, "latencyMs": {"total": 10400}}
+                                  "inputTokens": 3700, "outputTokens": 500,
+                                  "latencyMs": {"retrieve": 820, "generate": 9305, "total": 10400}}
     hints = it["hints"]
     assert any("機種スコープで 3 件除外" in h for h in hints)
     assert any("上位スコアが弱い（0.41）" in h for h in hints)
