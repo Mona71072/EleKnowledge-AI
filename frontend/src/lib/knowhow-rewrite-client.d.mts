@@ -2,7 +2,7 @@ import type { RewriteProposal, RewriteRequest } from './knowhow-rewrite.mjs';
 
 export type KnowhowRewriteErrorCode =
   | 'auth' | 'config' | 'unavailable' | 'throttled' | 'failed' | 'network'
-  | 'validation' | 'too_large' | 'timeout' | 'cancelled' | 'invalid_response';
+  | 'validation' | 'conflict' | 'too_large' | 'timeout' | 'cancelled' | 'invalid_response';
 
 export const REWRITE_TIMEOUT_MS: number;
 

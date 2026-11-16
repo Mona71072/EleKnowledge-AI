@@ -182,7 +182,7 @@ def build_response(request: dict, text: str, stop_reason: str) -> dict:
     sections = _parse_sections(parsed, headings, count)
     conflicts = _parse_conflicts(parsed, headings, count)
     support = _support(request)
-    strict_numbers = request["evidence"][0]["lane"] == "field"
+    strict_numbers = request["evidence"][0]["lane"] == "field" or "instruction" in request
     result = [
         _evaluate(
             item["heading"], sections.get(item["heading"], {"status": "unchanged"}),

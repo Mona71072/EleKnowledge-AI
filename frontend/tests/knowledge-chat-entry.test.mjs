@@ -923,7 +923,10 @@ test('D16: with NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY the turn shows one knowhow answe
     assert.doesNotMatch(html, /aria-label="法令KBからの回答"|aria-label="技術KBからの回答"/);
     assert.match(html, /該当するノウハウはありません/);
     assert.doesNotMatch(html, /このKBでは該当情報を確認できませんでした/);
-    assert.match(html, /href="\/chat\?research=1&amp;q=%E3%82%A2/);
+    const researchHref = html.match(/href="([^"]*\/chat\?research=1[^"]*)"/)?.[1];
+    assert.equal(researchHref, '/chat?research=1');
+    assert.doesNotMatch(researchHref, /(?:^|[&?])q=/);
+    assert.doesNotMatch(decodeURIComponent(researchHref), /アクシーズで戸開しない/);
     assert.match(html, /じっくり調べるで確かめる/);
   } finally {
     delete process.env.NEXT_PUBLIC_SENPAI_KNOWHOW_ONLY;

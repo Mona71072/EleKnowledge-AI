@@ -172,7 +172,11 @@ export function KnowhowCardCheck({ frontmatter, originalBody, body, onAdopt, bus
           <KnowhowRewritePanel hasKnowledgeId={typeof frontmatter.knowledge_id === 'string' && frontmatter.knowledge_id !== ''}
             plan={rewritePlan} view={rewrite.view} decisions={rewrite.decisions} conflictDecisions={rewrite.conflictDecisions}
             note={rewrite.note} checking={snapshot.running} busy={busy}
+            history={rewrite.history} selectedHistoryIndex={rewrite.selectedHistoryIndex} instruction={rewrite.instruction}
+            onInstructionChange={rewrite.setInstruction}
             onRun={() => { clearPreview(); rewrite.run(); }}
+            onRetry={() => { clearPreview(); rewrite.retry(); }}
+            onSelectHistory={(index) => { clearPreview(); rewrite.selectHistory(index); }}
             onCancel={() => { clearPreview(); rewrite.cancel(); }}
             onDecide={(heading, decision) => { clearPreview(); rewrite.decide(heading, decision); }}
             onDecideConflict={(index, decision) => { clearPreview(); rewrite.decideConflict(index, decision); }} />

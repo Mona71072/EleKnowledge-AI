@@ -35,6 +35,8 @@ related-code:
 
 ## 要求
 
+> 最終検証: 2026-11-16 — `instruction` / `previousProposal` の Lambda 入力検証と合成単体テスト。フロント再実行UI・Bedrock実出力・AWS実機は未確認
+
 正本は `tests/fixtures/knowhow-rewrite/contract.json`。未知のキーは 400。
 
 | 項目 | 規則 |
@@ -44,6 +46,8 @@ related-code:
 | `cardVersion` | 整数 1〜9999 |
 | `targets` | 1〜3 件。`heading` は「統合した回答・ノウハウ」「調査・確認手順」「未確認事項」のみ・重複不可。`body` は各 2,000 字以下、合計 4,000 字以下 |
 | `context`（省略可） | 0〜8 件。`heading`（非空・200 字以下）と `body`（各 4,000 字以下、合計 16,000 字以下） |
+| `instruction`（省略可） | 管理者の編集指示。前後空白を除いて1〜1,000字。改行・復帰・タブ以外の制御文字は禁止 |
+| `previousProposal`（省略可） | 直前案。`knowledgeId`・整数型の `cardVersion`・対象節配列のSHA-256 (`bodyHash`)・`sections`（要求対象の全見出しと過不足なく一致する `heading` と `body`）を必須とし、boolを含む型違い・未知キー・重複/対象外/不足見出しを400で拒否。節本文は初回案の上限と同じ4,000字以下。カードID/版または対象節hashが現在要求と異なる場合は409 `StaleProposal` |
 | `evidence` | 通常レーンは 1〜12 件。`question` 2,000 字以下・`lane`（`technical` か `law`）・`checkedOn`（実在する `YYYY-MM-DD`）・`answer` 2,000 字以下・`sources`（省略可、0〜8 件）。`field` レーンは下記の専用形のみ |
 | `sources[]` | `title` 200 字以下、`page`（省略可）1〜9999 の整数 |
 
@@ -62,7 +66,11 @@ related-code:
 
 このレーンの提案は非公式な観察知として扱う。抜粋に書かれた条件と不確実性を維持し、公式要件・安全要件を追加したり、抜粋にない結論を推論したりしない。資料データに含まれる指示、URL、リンク、行動要求を提案へ転記・実行しない。従来の `technical` / `law` レーンの入力・画面・認可条件は変更しない。
 
+S1 の `instruction` / `previousProposal` は `field` レーンでは受け付けない（400）。
+
 値の裏付けは `answer` の抜粋だけから行う。`question`・`checkedOn`・`sources[].title` はトピックや出典の表示用で、数値・資料番号の根拠にはしない。単位のない2桁以上または小数の数字に `answer` 内の裏付けがない場合も、通常レーンの警告扱いではなく `unverified_number` で節を `rejected` にする。
+
+通常レーンの値の裏付け範囲は従来どおり対象節・参考節・根拠（質問・回答・出典名・確認日）に限る。管理者指示と直前案は別データブロックにし、裏付け範囲に含めない。指示付き要求では、単位のない2桁以上または小数の数字に裏付けがなければ `unverified_number` で節を `rejected` にする（初回案は警告のまま）。意味上の事実の正しさは機械検証できないため、指示付き案には管理者が差分と根拠を確認する注意を常時表示する。`bodyHash` は今回要求の `targets` 配列を UTF-8 JSON（空白なし）にしたものの SHA-256 とする。
 
 根拠の番号は `evidence` 配列の 1 始まり。`knowledgeId` と `cardVersion` はそのまま応答に写すだけで、モデルには渡さない。
 
@@ -97,7 +105,7 @@ related-code:
 | `link_or_html` | 元の節に無い URL（`http(s)://`・`www.`）、Markdown のリンク・画像、HTML タグ、`javascript:` 等のスキームがある | rejected |
 | `too_long` | 新しい本文が 4,000 字を超える | rejected |
 | `empty_body` | `changed` なのに本文が空 | rejected |
-| `unverified_number` | 単位の続かない 2 桁以上（または小数）の数字が、同じ範囲に無い（`tokens` あり） | 通常レーンは changed のまま警告。`field` レーンは rejected |
+| `unverified_number` | 単位の続かない 2 桁以上（または小数）の数字が、同じ範囲に無い（`tokens` あり） | 初回の通常レーンは changed のまま警告。指示付き通常レーンと `field` レーンは rejected |
 
 契約 JSON の `warningCodes` に無いコード（`suspicious_text`・`link_or_html`・`unclosed_fence`・`empty_body`）がある。フロントは未知のコードを汎用表示する。
 
@@ -108,6 +116,7 @@ related-code:
 | status | error | 条件 |
 | --- | --- | --- |
 | 400 | ValidationError | JSON 不正、未知のキー、上限・形式の違反、UTF-8 にできない文字（孤立サロゲート）や制御文字（改行・復帰・タブ以外）を含む文字列 |
+| 409 | StaleProposal | 前回案のカードID・版または対象節hashが今回要求と不一致 |
 | 401 | Unauthorized | `sub` が無い |
 | 403 | FeatureUnavailable | dev 以外、通常機能フラグがオフ、管理者以外。`field` レーンは追加フラグ `KnowhowFieldMaterialEnabled` が `true` でない場合も拒否 |
 | 405 | MethodNotAllowed | POST 以外（OPTIONS を除く） |
@@ -119,6 +128,8 @@ related-code:
 | 500 | InternalError | その他。例外の本文は返さない |
 
 ## サーバー側の検証規則（モデル出力）
+
+> 最終検証: 2026-11-16 — 数値裏付けが対象節・参考節・根拠だけに限定されることを `tests/unit/test_knowhow_rewrite.py` で確認。フロント再実行UI・Bedrock実出力・AWS実機は未確認
 
 1. 打ち切り（`stop_reason` が `max_tokens` など）は、JSON として読めても 502 `RewriteTruncated`。空応答は 502 `RewriteFailed`
 2. JSON の取り出しは、全体、または最初の `{` から最後の `}` まで。コードフェンスや前置きは許す。許可するキー以外は捨てる
@@ -132,7 +143,7 @@ related-code:
    * 照合の前に、NFKC 正規化、書式文字の除去、桁区切りのカンマの除去（`1,600 mm` と `1，600 mm` は `1600 mm`）、空白除去、大小文字統一を行う。Markdown の強調記号（`*` `_` `` ` `` `~~`）を除いた文字列でも検査する（`**600** cm` は `600 cm`）。`６００ｍｍ` と `600 mm` は同じ値
    * 通常レーンでは、元のその節・他の `targets`・`context`・根拠（`question`・`answer`・`sources[].title`）・確認日（`checkedOn`）のどこにも無い値が 1 つでもあれば `rejected`（`unsupported_value`）。契約の応答例が本文に確認日を書くため、通常レーンでは `checkedOn` を範囲に含める。`field` レーンは利用許可済み抜粋の `answer` だけを裏付け範囲とし、トピック・出典名・確認日・空の対象本文を根拠に使わない
    * 誤検出を避ける規則: 行頭の番号付き箇条書き（`1.` `2.` `10.`）は数字として扱わない。通常レーンでは日付 `2026-11-14` を確認日の数字で裏付けできる。`十分に` は数量にしない。単位の無い 1 桁の数字は検査しない。元の本文と同じ数量・同じ URL を保った書き換えは通る
-10. 単位の続かない 2 桁以上（または小数）の数字が同じ範囲に無ければ、通常レーンでは `changed` のまま警告（`unverified_number`）、`field` レーンでは `rejected`（同コード）
+10. 単位の続かない 2 桁以上（または小数）の数字が同じ範囲に無ければ、初回の通常レーンでは `changed` のまま警告（`unverified_number`）、指示付き通常レーンと `field` レーンでは `rejected`（同コード）。意味上の事実の正しさは検証せず、指示付き案には管理者の差分・根拠確認を促す注意を表示する
 11. 正規表現は 2,000 字ごとの区切り（行内）に当て、入れ子の量指定を避ける。病的な入力（長い数字列・記号・カンマ・括弧の連続）で 1 秒以内に終わることをテストで確認している
 
 ## モデル呼び出し

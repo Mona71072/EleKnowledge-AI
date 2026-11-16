@@ -9,6 +9,8 @@ import {
   buildConflictOpenItem,
   buildRewriteEvidence,
   buildRewriteRequest,
+  buildRewriteRetryRequest,
+  buildRewriteHistory,
   composeCardEdits,
   describeRewriteWarning,
   findRewriteBodyProblem,
@@ -71,6 +73,55 @@ test('表示条件は環境変数が文字列 true のときだけ', () => {
   for (const value of [undefined, '', 'false', 'TRUE', '1', 'yes', true]) assert.equal(isRewriteEnabled(value), false);
 });
 
+test('再実行指示は trim 後 1〜1,000 字で検証し、前回案を対象節と版に結び付ける', async () => {
+  const plan = buildRewriteRequest({ frontmatter: { knowledge_id: 'KH-A', card_version: 3 }, body: CARD, evidence: buildRewriteEvidence({ questions: [contractQuestion], tasks: contractTasks, decisions: confirmAll('q1') }) });
+  const proposal = { knowledgeId: 'KH-A', cardVersion: 3, bases: plan.request.targets, sections: plan.request.targets.map(({ heading, body }) => ({ heading, body: `改訂: ${body}`, status: 'changed' })) };
+  const retry = await buildRewriteRetryRequest({ request: plan.request, proposal, instruction: '  手順を簡潔にする  ' });
+  assert.equal(retry.instruction, '手順を簡潔にする');
+  assert.deepEqual(retry.previousProposal, {
+    knowledgeId: 'KH-A', cardVersion: 3,
+    bodyHash: await digest(JSON.stringify(plan.request.targets)),
+    sections: proposal.sections.map(({ heading, body }) => ({ heading, body })),
+  });
+  assert.deepEqual(retry.targets, plan.request.targets);
+  assert.deepEqual(retry.evidence, plan.request.evidence);
+  for (const instruction of ['', '   ', 'あ'.repeat(1001), 'a\u0000b']) {
+    await assert.rejects(buildRewriteRetryRequest({ request: plan.request, proposal, instruction }), TypeError);
+  }
+  assert.equal((await buildRewriteRetryRequest({ request: plan.request, proposal, instruction: '😀'.repeat(1000) })).instruction, '😀'.repeat(1000));
+  await assert.rejects(buildRewriteRetryRequest({ request: { ...plan.request, evidence: [{ ...plan.request.evidence[0], lane: 'field' }] }, proposal, instruction: '変更' }), /field/u);
+  await assert.rejects(buildRewriteRetryRequest({ request: { ...plan.request, targets: [{ heading: MAIN, body: 'あ'.repeat(2001) }] }, proposal, instruction: '変更' }), /対象の節/u);
+  await assert.rejects(buildRewriteRetryRequest({ request: plan.request, proposal: { ...proposal, bases: [] }, instruction: '変更' }), /直前案/u);
+});
+
+test('直前案本文は初回案上限の4,000字まで許可し、全対象見出しを要求する', async () => {
+  const plan = buildRewriteRequest({ frontmatter: { knowledge_id: 'KH-A', card_version: 3 }, body: CARD, evidence: buildRewriteEvidence({ questions: [contractQuestion], tasks: contractTasks, decisions: confirmAll('q1') }) });
+  const proposal = { knowledgeId: 'KH-A', cardVersion: 3, bases: plan.request.targets, sections: plan.request.targets.map(({ heading }, index) => ({ heading, body: 'x'.repeat(index === 0 ? 4000 : 0), status: 'changed' })) };
+  const retry = await buildRewriteRetryRequest({ request: plan.request, proposal, instruction: '要点を短く' });
+  assert.equal(retry.previousProposal.sections[0].body.length, 4000);
+  assert.equal(REWRITE_LIMITS.previousProposalBodyChars, REWRITE_LIMITS.responseBodyChars);
+  await assert.rejects(buildRewriteRetryRequest({ request: plan.request, proposal: { ...proposal, sections: proposal.sections.map((section, index) => index === 0 ? { ...section, body: `${section.body}x` } : section) }, instruction: '整える' }), /直前案/u);
+  for (const sections of [proposal.sections.slice(1), [...proposal.sections, { heading: '余分', body: '' }]]) {
+    await assert.rejects(buildRewriteRetryRequest({ request: plan.request, proposal: { ...proposal, sections }, instruction: '整える' }), /直前案/u);
+  }
+});
+
+test('案履歴は初回と指示ごとの再案を順番とラベルで区別する', () => {
+  const history = buildRewriteHistory([
+    { instruction: null, proposal: { id: 'one' } },
+    { instruction: '手順を短く', proposal: { id: 'two' } },
+  ]);
+  assert.deepEqual(history.map(({ label, instruction, proposal }) => ({ label, instruction, proposal })), [
+    { label: '第1案', instruction: '', proposal: { id: 'one' } },
+    { label: '指示1 → 第2案', instruction: '手順を短く', proposal: { id: 'two' } },
+  ]);
+});
+
+async function digest(value) {
+  const bytes = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 test('対象の節は契約の3つで、上限は契約と同じ', () => {
   assert.deepEqual([...REWRITE_TARGET_HEADINGS], contract.targetHeadings);
   const { limits } = contract;
@@ -83,6 +134,7 @@ test('対象の節は契約の3つで、上限は契約と同じ', () => {
   assert.equal(REWRITE_LIMITS.answerChars, limits.evidence.answerChars);
   assert.equal(REWRITE_LIMITS.sourcesMax, limits.sources.max);
   assert.equal(REWRITE_LIMITS.responseBodyChars, limits.response.bodyChars);
+  assert.equal(REWRITE_LIMITS.previousProposalBodyChars, limits.response.bodyChars);
   assert.equal(REWRITE_LIMITS.reasonChars, limits.response.reasonChars);
   assert.equal(REWRITE_LIMITS.knowledgeIdPattern.source, limits.knowledgeIdPattern);
 });

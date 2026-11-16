@@ -52,9 +52,14 @@ const proposal = {
   conflicts: [{ description: 'カードは 800 mm、根拠は 600 mm', evidence: [2] }],
 };
 const ready = { phase: 'ready', proposal, evidenceRefs: plan.evidenceRefs };
+const history = [
+  { label: '第1案', instruction: '', proposal, evidenceRefs: plan.evidenceRefs },
+  { label: '指示1 → 第2案', instruction: '手順を簡潔にする', proposal: { ...proposal, cardVersion: 2 }, evidenceRefs: plan.evidenceRefs },
+];
 const base = {
   hasKnowledgeId: true, plan, view: { phase: 'idle' }, decisions: {}, conflictDecisions: {}, note: '',
-  checking: false, busy: false, onRun: noop, onCancel: noop, onDecide: noop, onDecideConflict: noop,
+  checking: false, busy: false, history: [], selectedHistoryIndex: -1, instruction: '', onInstructionChange: noop, onRetry: noop, onSelectHistory: noop,
+  onRun: noop, onCancel: noop, onDecide: noop, onDecideConflict: noop,
 };
 function render(props = {}, flag = 'true') {
   if (flag === null) delete process.env[FLAG]; else process.env[FLAG] = flag;
@@ -161,6 +166,21 @@ test('選んだ節の件数と、反映するときの注意書き（card_versio
 test('案を破棄したときは、その旨を一言表示する', () => {
   const html = render({ note: '確認の選択が変わったため、作った案を破棄しました。' });
   assert.match(html, /role="status"[^>]*>確認の選択が変わったため、作った案を破棄しました。/);
+});
+
+test('通常レーンの結果に指示欄・文字数・案履歴が出て、fieldレーンには再実行欄を出さない', () => {
+  const html = render({ view: ready, history, selectedHistoryIndex: 1, instruction: '見直す' });
+  assert.match(html, /指示して作り直す/);
+  assert.match(html, /name="rewrite-instruction"/);
+  assert.match(html, /3\/1,000字/u);
+  assert.match(html, /第1案/);
+  assert.match(html, /指示1 → 第2案/);
+  assert.match(html, /指示: 手順を簡潔にする/);
+  assert.match(html, /指示で求めた内容は根拠で確認できていません。差分と根拠を確認してから採用してください/u);
+  assert.match(html, /aria-pressed="true"/);
+  const fieldPlan = { ...plan, request: { ...plan.request, evidence: [{ lane: 'field' }] } };
+  const fieldHtml = render({ view: ready, plan: fieldPlan });
+  assert.doesNotMatch(fieldHtml, /指示して作り直す|rewrite-instruction/u);
 });
 
 test('結果の注記: 不正な内容があっても React が文字列として描画する（HTML を解釈しない）', () => {

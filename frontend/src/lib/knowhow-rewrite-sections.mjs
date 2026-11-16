@@ -23,6 +23,7 @@ export const REWRITE_LIMITS = Object.freeze({
   sourcesMax: 8,
   sourceTitleChars: 200,
   responseBodyChars: 4000,
+  previousProposalBodyChars: 4000,
   reasonChars: 300,
 });
 

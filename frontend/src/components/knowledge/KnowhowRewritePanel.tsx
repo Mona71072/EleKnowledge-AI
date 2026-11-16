@@ -2,12 +2,14 @@ import { Button } from '@/components/ui/Button';
 import type { CheckDecision } from '@/lib/knowhow-card-proposal.mjs';
 import {
   REWRITE_LIMITS,
+  charCount,
   isRewriteEnabled,
   summarizeRewriteDecisions,
   type RewriteEvidenceRef,
   type RewriteExcludedReason,
   type RewritePlan,
   type RewriteProposal,
+  type RewriteHistoryEntry,
 } from '@/lib/knowhow-rewrite.mjs';
 import { RewriteConflicts, RewriteSectionCard } from './KnowhowRewriteSections';
 
@@ -42,6 +44,12 @@ type Props = {
   /** 一括照合の実行中。 */
   checking: boolean;
   busy?: boolean;
+  history: readonly RewriteHistoryEntry[];
+  selectedHistoryIndex: number;
+  instruction: string;
+  onInstructionChange: (value: string) => void;
+  onRetry: () => void;
+  onSelectHistory: (index: number) => void;
   onRun: () => void;
   onCancel: () => void;
   onDecide: (heading: string, decision: CheckDecision | null) => void;
@@ -109,9 +117,11 @@ function Results({ proposal, evidenceRefs, decisions, conflictDecisions, onDecid
  * AI に本文の書き換え案を作らせ、節ごとに確認して反映するかを選ぶ。
  * `NEXT_PUBLIC_ENABLE_KNOWHOW_REWRITE=true` で、knowledge_id を持つカードにだけ出る。
  */
-export function KnowhowRewritePanel({ hasKnowledgeId, plan, view, decisions, conflictDecisions, note, checking, busy, onRun, onCancel, onDecide, onDecideConflict }: Props) {
+export function KnowhowRewritePanel({ hasKnowledgeId, plan, view, decisions, conflictDecisions, note, checking, busy, history, selectedHistoryIndex, instruction, onInstructionChange, onRetry, onSelectHistory, onRun, onCancel, onDecide, onDecideConflict }: Props) {
   if (!hasKnowledgeId || !isRewriteEnabled(process.env.NEXT_PUBLIC_ENABLE_KNOWHOW_REWRITE)) return null;
   const loading = view.phase === 'loading';
+  const fieldLane = plan.request?.evidence.some(({ lane }) => lane === 'field') ?? false;
+  const selectedInstruction = history[selectedHistoryIndex]?.instruction;
   return (
     <section aria-label="AI による本文の書き換え案" className="min-w-0 space-y-3 rounded-lg border border-blue-200 bg-white p-3 sm:p-4">
       <h3 className="font-semibold text-gray-950">AI による本文の書き換え案</h3>
@@ -124,9 +134,33 @@ export function KnowhowRewritePanel({ hasKnowledgeId, plan, view, decisions, con
       </div>
       {note && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">{note}</p>}
       {view.phase === 'error' && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-900">{view.message}</p>}
+      {history.length > 0 && <nav aria-label="書き換え案の履歴" className="space-y-2">
+        <p className="text-sm font-medium text-gray-900">案の履歴（このページ内のみ）</p>
+        <ol className="flex flex-wrap gap-2">{history.map((entry, index) => <li key={`${entry.label}-${index}`} className="max-w-full space-y-1">
+          <Button type="button" variant="outline" aria-pressed={selectedHistoryIndex === index} disabled={loading || busy}
+            onClick={() => onSelectHistory(index)}>{entry.label}</Button>
+          {entry.instruction && <p className="break-words text-xs text-gray-700">指示: {entry.instruction}</p>}
+        </li>)}</ol>
+      </nav>}
       {view.phase === 'ready' && (
-        <Results proposal={view.proposal} evidenceRefs={view.evidenceRefs} decisions={decisions}
-          conflictDecisions={conflictDecisions} onDecide={onDecide} onDecideConflict={onDecideConflict} />
+        <>
+          {history.length > 1 && <p className="text-sm text-gray-700">表示中: {history[selectedHistoryIndex]?.label ?? '案'}</p>}
+          {selectedInstruction && <p role="note" className="rounded-lg bg-amber-50 p-3 text-sm font-semibold text-amber-950">指示で求めた内容は根拠で確認できていません。差分と根拠を確認してから採用してください</p>}
+          <Results proposal={view.proposal} evidenceRefs={view.evidenceRefs} decisions={decisions}
+            conflictDecisions={conflictDecisions} onDecide={onDecide} onDecideConflict={onDecideConflict} />
+          {!fieldLane && history.length > 0 && selectedHistoryIndex === history.length - 1 && <div className="space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3">
+            <label htmlFor="rewrite-instruction" className="block text-sm font-semibold text-gray-950">指示して作り直す</label>
+            <textarea id="rewrite-instruction" name="rewrite-instruction" rows={3} value={instruction} onChange={(event) => onInstructionChange(event.currentTarget.value)}
+              aria-describedby="rewrite-instruction-count" className="w-full rounded-md border border-gray-300 bg-white p-2 text-sm" />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span id="rewrite-instruction-count" className="text-xs text-gray-700">{charCount(instruction).toLocaleString('en-US')}/1,000字</span>
+              <Button type="button" disabled={loading || checking || busy || !instruction.trim() || charCount(instruction) > 1000}
+                onClick={onRetry}>指示して作り直す</Button>
+            </div>
+          </div>}
+          {!fieldLane && history.length > 1 && selectedHistoryIndex !== history.length - 1
+            && <p role="status" className="text-sm text-gray-700">再実行する場合は、最新案を選んでください。</p>}
+        </>
       )}
     </section>
   );

@@ -1,5 +1,6 @@
 """ノウハウカード本文の書き換え案 Lambda（POST /rag/knowhow/rewrite-proposal）の契約テスト。"""
 import copy
+import hashlib
 import importlib.util
 import io
 import json
@@ -387,6 +388,98 @@ def test_broken_or_non_object_json_is_400(env, raw):
     response = env.lambda_handler(_event(raw_body=raw), None)
     assert response["statusCode"] == 400
     assert _body(response)["error"] == "ValidationError"
+
+
+@pytest.mark.parametrize("instruction", ["", "   ", "x" * 1001, "改行\x00禁止"])
+def test_invalid_instruction_is_rejected(env, instruction):
+    response = env.lambda_handler(_event(_request(instruction=instruction)), None)
+    assert response["statusCode"] == 400
+
+
+def test_instruction_limit_applies_after_trimming(env):
+    response = env.lambda_handler(_event(_request(instruction=f"  {'x' * 1000}  ")), None)
+    assert response["statusCode"] == 200
+
+
+def test_previous_proposal_shape_and_identity_are_validated(env):
+    targets = _request()["targets"]
+    body_hash = hashlib.sha256(json.dumps(targets, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    previous = {"knowledgeId": REQUEST["knowledgeId"], "cardVersion": REQUEST["cardVersion"], "bodyHash": body_hash,
+                "sections": [{"heading": item["heading"], "body": "直前案 999 mm"} for item in targets]}
+    response = env.lambda_handler(_event(_request(instruction="根拠にない数量 999 mm を追加", previousProposal=previous)), None)
+    assert response["statusCode"] == 200
+
+    stale = {**previous, "knowledgeId": "KH-OTHER"}
+    response = env.lambda_handler(_event(_request(instruction="修正", previousProposal=stale)), None)
+    assert response["statusCode"] == 409
+
+
+def test_instruction_and_previous_proposal_are_not_numeric_support(env):
+    targets = _request()["targets"]
+    body_hash = hashlib.sha256(json.dumps(targets, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    request = _request(instruction="999 mm を追加", previousProposal={
+        "knowledgeId": REQUEST["knowledgeId"], "cardVersion": REQUEST["cardVersion"], "bodyHash": body_hash,
+        "sections": [{"heading": H_MAIN, "body": "999 mm"}],
+    })
+    result = _ok(request, sections=[_changed(body="確認値は 999 mm")])
+    section = _section(result, H_MAIN)
+    assert "unsupported_value" in _codes(section)
+
+
+def test_instruction_lane_rejects_unverified_bare_numbers_while_initial_lane_warns():
+    normal = _section(_ok(sections=[_changed(body="設備は 99 年ごとに点検する")]), H_MAIN)
+    instructed = _section(_ok(_request(instruction="根拠にない99年ごとの点検を追加"), sections=[_changed(body="設備は 99 年ごとに点検する")]), H_MAIN)
+    assert normal["status"] == "changed"
+    assert instructed["status"] == "rejected"
+    assert "unverified_number" in _codes(instructed)
+
+
+def test_previous_proposal_rejects_boolean_version_non_string_heading_and_missing_sections(env):
+    targets = _request()["targets"]
+    body_hash = hashlib.sha256(json.dumps(targets, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    sections = [{"heading": item["heading"], "body": "前回案"} for item in targets]
+    previous = {"knowledgeId": REQUEST["knowledgeId"], "cardVersion": REQUEST["cardVersion"], "bodyHash": body_hash, "sections": sections}
+    invalid_values = [
+        {**previous, "cardVersion": True},
+        {**previous, "sections": [{**sections[0], "heading": []}, *sections[1:]]},
+        {**previous, "sections": sections[:-1]},
+        {**previous, "sections": [sections[0], {**sections[1], "heading": H_MAIN}]},
+        {**previous, "sections": [*sections, {"heading": H_STEPS, "body": "余分"}]},
+    ]
+    for invalid in invalid_values:
+        response = env.lambda_handler(_event(_request(instruction="整える", previousProposal=invalid)), None)
+        assert response["statusCode"] == 400, invalid
+
+
+def test_previous_proposal_body_limit_matches_rewrite_response_limit(env):
+    targets = _request()["targets"]
+    body_hash = hashlib.sha256(json.dumps(targets, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    previous = {"knowledgeId": REQUEST["knowledgeId"], "cardVersion": REQUEST["cardVersion"], "bodyHash": body_hash,
+                "sections": [{"heading": item["heading"], "body": "x" * 4000} for item in targets]}
+    response = env.lambda_handler(_event(_request(instruction="要点を短く", previousProposal=previous)), None)
+    assert response["statusCode"] == 200
+    too_long = copy.deepcopy(previous)
+    too_long["sections"][0]["body"] += "x"
+    response = env.lambda_handler(_event(_request(instruction="要点を短く", previousProposal=too_long)), None)
+    assert response["statusCode"] == 400
+
+
+def test_previous_proposal_body_limit_matches_contract_response_limit():
+    assert sys.modules["rewrite_input"].PREVIOUS_PROPOSAL_BODY_MAX == LIMITS["response"]["bodyChars"]
+    assert sys.modules["rewrite_validate"].BODY_MAX_CHARS == LIMITS["response"]["bodyChars"]
+
+
+def test_instruction_and_previous_proposal_are_separate_prompt_data(env):
+    targets = _request()["targets"]
+    body_hash = hashlib.sha256(json.dumps(targets, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    request = _request(instruction="根拠外 999 mm を追記", previousProposal={
+        "knowledgeId": REQUEST["knowledgeId"], "cardVersion": REQUEST["cardVersion"], "bodyHash": body_hash,
+        "sections": [{"heading": item["heading"], "body": "前回案 999 mm"} for item in targets],
+    })
+    env.lambda_handler(_event(request), None)
+    blocks = _invoke_body(env.bedrock_runtime)["messages"][0]["content"]
+    assert "管理者の編集指示" in blocks[2]["text"] and "直前の案" in blocks[3]["text"]
+    assert "instruction は" not in blocks[1]["text"]
 
 
 # ---------------------------------------------------------------- prompt

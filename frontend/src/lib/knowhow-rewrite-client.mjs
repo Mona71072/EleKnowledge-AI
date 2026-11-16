@@ -17,6 +17,7 @@ const MESSAGES = Object.freeze({
   failed: '案を作れませんでした。やり直してください。',
   network: '案を作れませんでした。通信状態を確認してやり直してください。',
   validation: '送る内容を確認できませんでした。照合し直してからやり直してください。',
+  conflict: '元のカード版または対象本文が変わりました。最新のカードで照合し直してから案を作り直してください。',
   too_large: '送る内容が大きすぎます。確認済みの根拠を減らしてやり直してください。',
   timeout: '案の作成が時間内に完了しませんでした。やり直してください。',
   cancelled: '案の作成を中止しました。',
@@ -54,7 +55,7 @@ function endpoint(baseUrl) {
   return `${url.origin}${url.pathname.replace(/\/+$/u, '')}${PATH}`;
 }
 
-const STATUS_CODES = Object.freeze({ 400: 'validation', 401: 'auth', 403: 'unavailable', 413: 'too_large', 429: 'throttled' });
+const STATUS_CODES = Object.freeze({ 400: 'validation', 401: 'auth', 403: 'unavailable', 409: 'conflict', 413: 'too_large', 429: 'throttled' });
 
 function statusError(status) {
   fail(STATUS_CODES[status] ?? 'failed');

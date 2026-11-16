@@ -44,6 +44,7 @@ test('送信内容にカード全文・frontmatter・題名・内部IDが含ま�
 const FIXED = {
   401: 'ログイン状態または利用権限を確認してください。',
   403: 'この環境では使えません。',
+  409: '元のカード版または対象本文が変わりました。最新のカードで照合し直してから案を作り直してください。',
   429: '混み合っています。少し待ってからやり直してください。',
   502: '案を作れませんでした。やり直してください。',
   504: '案を作れませんでした。やり直してください。',
@@ -70,6 +71,7 @@ test('401 は auth、403 は unavailable、429 は throttled、502/504 は faile
   const codeOf = async (status) => requestKnowhowRewrite({ baseUrl, getToken, request, fetchImpl: respond(status, {}) }).catch((error) => error.code);
   assert.equal(await codeOf(401), 'auth');
   assert.equal(await codeOf(403), 'unavailable');
+  assert.equal(await codeOf(409), 'conflict');
   assert.equal(await codeOf(429), 'throttled');
   assert.equal(await codeOf(502), 'failed');
   assert.equal(await codeOf(504), 'failed');

@@ -5,6 +5,7 @@ Unknown keys are rejected so that nothing outside the contract can reach the pro
 """
 import base64
 import binascii
+import hashlib
 import json
 import re
 from datetime import date
@@ -21,12 +22,13 @@ LANES = ("technical", "law", FIELD_LANE)
 FIELD_KNOWLEDGE_ID = "KH-FIELD-MATERIAL"
 FIELD_TARGET = {"heading": "統合した回答・ノウハウ", "body": ""}
 TARGETS_MAX, TARGET_BODY_MAX, TARGETS_TOTAL_MAX = 3, 2000, 4000
+PREVIOUS_PROPOSAL_BODY_MAX = 4000
 CONTEXT_MAX, CONTEXT_BODY_MAX, CONTEXT_TOTAL_MAX, CONTEXT_HEADING_MAX = 8, 4000, 16000, 200
 EVIDENCE_MAX, QUESTION_MAX, ANSWER_MAX = 12, 2000, 2000
 SOURCES_MAX, SOURCE_TITLE_MAX, PAGE_RANGE = 8, 200, (1, 9999)
 
 _TOP_REQUIRED = frozenset({"knowledgeId", "cardVersion", "targets", "evidence"})
-_TOP_KEYS = _TOP_REQUIRED | {"context"}
+_TOP_KEYS = _TOP_REQUIRED | {"context", "instruction", "previousProposal"}
 _BAD = "リクエストの内容を確認してください"
 # Lone surrogates cannot be encoded as UTF-8; control characters other than newline, carriage return and tab are never valid text.
 _UNUSABLE_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff]")
@@ -138,6 +140,8 @@ def _field_request(body: dict, request: dict) -> bool:
         return False
     if not has_field or not uses_reserved_id or body["cardVersion"] != 1:
         raise _invalid("field")
+    if "instruction" in body or "previousProposal" in body:
+        raise _invalid("field")
     if request["targets"] != [FIELD_TARGET] or request["context"] or len(evidence) != 1:
         raise _invalid("field")
     item = evidence[0]
@@ -149,6 +153,33 @@ def _field_request(body: dict, request: dict) -> bool:
     ):
         raise _invalid("field.sources")
     return True
+
+
+def _previous_proposal(raw, knowledge_id: str, card_version: int, targets: list) -> dict:
+    _keys(raw, {"knowledgeId", "cardVersion", "bodyHash", "sections"}, set(), "previousProposal")
+    if not isinstance(raw["knowledgeId"], str) or not _is_int(raw["cardVersion"]):
+        raise _invalid("previousProposal")
+    if raw["knowledgeId"] != knowledge_id or raw["cardVersion"] != card_version:
+        raise ApiError(409, "StaleProposal", "カード版が変わったため、最新のカードから案を作り直してください")
+    expected_hash = hashlib.sha256(json.dumps(targets, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+    if not isinstance(raw["bodyHash"], str) or not re.fullmatch(r"[a-f0-9]{64}", raw["bodyHash"]):
+        raise _invalid("previousProposal.bodyHash")
+    if raw["bodyHash"] != expected_hash:
+        raise ApiError(409, "StaleProposal", "対象本文が変わったため、最新のカードから案を作り直してください")
+    sections = _array(raw["sections"], "previousProposal.sections", 1, TARGETS_MAX)
+    seen = set()
+    cleaned = []
+    expected_headings = {item["heading"] for item in targets}
+    for section in sections:
+        _keys(section, {"heading", "body"}, set(), "previousProposal.sections")
+        heading = _text(section["heading"], "previousProposal.sections.heading", 200, allow_empty=False)
+        if heading not in expected_headings or heading in seen:
+            raise _invalid("previousProposal.sections.heading")
+        seen.add(heading)
+        cleaned.append({"heading": heading, "body": _text(section["body"], "previousProposal.sections.body", PREVIOUS_PROPOSAL_BODY_MAX)})
+    if seen != expected_headings:
+        raise _invalid("previousProposal.sections")
+    return {"knowledgeId": knowledge_id, "cardVersion": card_version, "bodyHash": expected_hash, "sections": cleaned}
 
 
 def _decode(event: dict) -> str:
@@ -175,7 +206,7 @@ def parse_request(event: dict) -> dict:
         body = json.loads(_decode(event))
     except (json.JSONDecodeError, RecursionError) as error:
         raise _invalid("JSON") from error
-    _keys(body, set(_TOP_REQUIRED), {"context"}, "body")
+    _keys(body, set(_TOP_REQUIRED), {"context", "instruction", "previousProposal"}, "body")
     if not isinstance(body["knowledgeId"], str) or not KNOWLEDGE_ID.fullmatch(body["knowledgeId"]):
         raise _invalid("knowledgeId")
     low, high = CARD_VERSION_RANGE
@@ -188,5 +219,17 @@ def parse_request(event: dict) -> dict:
         "context": _context(body.get("context", [])),
         "evidence": _evidence(body["evidence"]),
     }
+    if "instruction" in body:
+        instruction = body["instruction"]
+        if not isinstance(instruction, str) or _UNUSABLE_CHARS.search(instruction):
+            raise _invalid("instruction")
+        instruction = instruction.strip()
+        if not instruction or len(instruction) > 1000:
+            raise _invalid("instruction")
+        request["instruction"] = instruction
+    if "previousProposal" in body:
+        request["previousProposal"] = _previous_proposal(
+            body["previousProposal"], request["knowledgeId"], request["cardVersion"], request["targets"]
+        )
     _field_request(body, request)
     return request

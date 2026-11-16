@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getIdToken } from '@/lib/auth-helpers';
 import type { CheckDecision } from '@/lib/knowhow-card-proposal.mjs';
 import { requestKnowhowRewrite, rewriteFailureMessage } from '@/lib/knowhow-rewrite-client.mjs';
-import { buildAcceptedRewrites, type RewritePlan } from '@/lib/knowhow-rewrite.mjs';
+import { buildAcceptedRewrites, buildRewriteHistory, buildRewriteRetryRequest, type RewriteHistoryEntry, type RewritePlan, type RewriteProposal } from '@/lib/knowhow-rewrite.mjs';
 import { createLatestGuard } from '@/lib/latest-request.mjs';
 import type { RewriteView } from './KnowhowRewritePanel';
 
@@ -29,6 +29,9 @@ export function useKnowhowRewrite(plan: RewritePlan, body: string) {
   const [decisions, setDecisions] = useState<Record<string, CheckDecision | undefined>>({});
   const [conflictDecisions, setConflictDecisions] = useState<Record<number, CheckDecision | undefined>>({});
   const [note, setNote] = useState('');
+  const [history, setHistory] = useState<RewriteHistoryEntry[]>([]);
+  const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(-1);
+  const [instruction, setInstruction] = useState('');
   const guard = useRef(createLatestGuard());
   const controller = useRef<AbortController | null>(null);
   const mounted = useRef(false);
@@ -54,6 +57,9 @@ export function useKnowhowRewrite(plan: RewritePlan, body: string) {
     setState(IDLE);
     setDecisions({});
     setConflictDecisions({});
+    setHistory([]);
+    setSelectedHistoryIndex(-1);
+    setInstruction('');
   }, [phase]);
 
   useEffect(() => {
@@ -65,21 +71,57 @@ export function useKnowhowRewrite(plan: RewritePlan, body: string) {
     if (mounted.current && guard.current.isLatest(token)) setState((prev) => ({ ...prev, view }));
   };
 
-  const run = () => {
-    const { request, evidenceRefs } = plan;
-    if (!request || controller.current) return;
+  const start = (request: NonNullable<RewritePlan['request']>, prompt: string | null, previousProposal?: RewriteProposal) => {
+    const { evidenceRefs } = plan;
+    if (controller.current) return;
     const own = new AbortController();
     controller.current = own;
     const token = guard.current.begin();
     setNote('');
     setDecisions({});
     setConflictDecisions({});
-    setState({ view: { phase: 'loading' }, key, requestBody: body });
-    requestKnowhowRewrite({ baseUrl: process.env.NEXT_PUBLIC_RAG_API_URL || '', getToken: getIdToken, request, signal: own.signal })
+    setState((previous) => ({ ...previous, view: { phase: 'loading' }, key, requestBody: body }));
+    const execute = prompt === null
+      ? Promise.resolve(request)
+      : previousProposal
+        ? buildRewriteRetryRequest({ request, proposal: previousProposal, instruction: prompt })
+        : Promise.reject(new Error('直前案を確認できません。'));
+    execute.then((prepared) => requestKnowhowRewrite({ baseUrl: process.env.NEXT_PUBLIC_RAG_API_URL || '', getToken: getIdToken, request: prepared, signal: own.signal }))
       .then(
-        (proposal) => finish(token, own, { phase: 'ready', proposal, evidenceRefs }),
+        (proposal) => {
+          const nextHistory = buildRewriteHistory([...(prompt === null ? [] : history), { instruction: prompt ?? '', proposal, evidenceRefs }]);
+          setHistory(nextHistory);
+          setSelectedHistoryIndex(nextHistory.length - 1);
+          setInstruction('');
+          finish(token, own, { phase: 'ready', proposal, evidenceRefs });
+        },
         (error: unknown) => finish(token, own, { phase: 'error', message: rewriteFailureMessage(error) }),
       );
+  };
+
+  const run = () => {
+    const { request } = plan;
+    if (!request || controller.current) return;
+    setHistory([]);
+    setSelectedHistoryIndex(-1);
+    start(request, null);
+  };
+
+  const retry = () => {
+    const { request } = plan;
+    const prompt = instruction;
+    const previousProposal = history.at(-1)?.proposal;
+    if (!request || !prompt.trim() || !previousProposal || controller.current || request.evidence.some(({ lane }) => lane === 'field')) return;
+    start(request, prompt, previousProposal);
+  };
+
+  const selectHistory = (index: number) => {
+    const entry = history[index];
+    if (!entry || controller.current) return;
+    setSelectedHistoryIndex(index);
+    setDecisions({});
+    setConflictDecisions({});
+    setState({ view: { phase: 'ready', proposal: entry.proposal, evidenceRefs: entry.evidenceRefs }, key, requestBody: body });
   };
 
   const accepted = useMemo(
@@ -89,6 +131,9 @@ export function useKnowhowRewrite(plan: RewritePlan, body: string) {
 
   return {
     view: state.view,
+    history,
+    selectedHistoryIndex,
+    instruction,
     decisions,
     conflictDecisions,
     note,
@@ -96,6 +141,9 @@ export function useKnowhowRewrite(plan: RewritePlan, body: string) {
     /** 案を作った時点の本文。節が編集されたかの判定に使う。 */
     expectedBody: state.requestBody,
     run,
+    retry,
+    selectHistory,
+    setInstruction,
     cancel: () => controller.current?.abort(),
     discard,
     decide: (heading: string, decision: CheckDecision | null) =>

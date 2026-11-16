@@ -20,6 +20,19 @@ export type RewriteRequest = {
   targets: RewriteSection[];
   context: RewriteSection[];
   evidence: Array<Omit<RewriteEvidenceItem, 'questionId'>>;
+  instruction?: string;
+  previousProposal?: {
+    knowledgeId: string;
+    cardVersion: number;
+    bodyHash: string;
+    sections: RewriteSection[];
+  };
+};
+export type RewriteHistoryEntry = {
+  label: string;
+  instruction: string;
+  proposal: RewriteProposal;
+  evidenceRefs: RewriteEvidenceRef[];
 };
 export type RewriteEvidenceRef = { number: number; questionId: string; question: string };
 export type RewritePlan = {
@@ -96,6 +109,13 @@ export function buildRewriteRequest(input: {
   body: string;
   evidence: readonly RewriteEvidenceItem[];
 }): RewritePlan;
+export function validateRewriteInstruction(value: unknown): string;
+export function buildRewriteRetryRequest(input: {
+  request: RewriteRequest;
+  proposal: RewriteProposal;
+  instruction: string;
+}): Promise<RewriteRequest & { instruction: string; previousProposal: NonNullable<RewriteRequest['previousProposal']> }>;
+export function buildRewriteHistory(entries: ReadonlyArray<Omit<RewriteHistoryEntry, 'label'>>): RewriteHistoryEntry[];
 export function buildFieldRewriteRequest(input: { topic?: string; title: string; excerpt: string; checkedOn: string }): RewriteRequest;
 
 export function describeRewriteWarning(warning: { code: string; values?: readonly string[] }): string;
