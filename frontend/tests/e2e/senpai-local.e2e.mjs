@@ -86,6 +86,8 @@ function answerFor(body) {
 
 const REWRITE_MAIN = '統合した回答・ノウハウ';
 const REWRITE_ADDED_LINE = '- 合成の根拠に基づく書き換え: 点検資料の要件を確認済み。';
+const REWRITE_RETRY_ONE = '- 合成の再生成1: 指示だけを反映した案。';
+const REWRITE_RETRY_TWO = '- 合成の再生成2: 直前案と追加指示を反映した案。';
 const SECTION_COMMENT = '点検対象の停止条件と復旧条件を、根拠資料に沿って明記したい。';
 const FIELD_EXCERPT = '合成条件で確認端子を目視した記録です。\r\n観測時の状況も記録した。';
 const FIELD_OUTSIDE_SELECTION = '原文の選択外を検出する合成文字列';
@@ -95,19 +97,30 @@ const FIELD_SUMMARY = '合成条件で確認端子の表示を目視した事例
 function rewriteResponseFor(body) {
   const text = JSON.stringify(body);
   const evidence = Array.isArray(body.evidence) ? body.evidence : [];
-  if (Object.keys(body).sort().join(',') !== 'cardVersion,context,evidence,knowledgeId,targets') rewriteProblems.push('keys');
+  const expectedKeys = body.instruction === undefined
+    ? 'cardVersion,context,evidence,knowledgeId,targets'
+    : 'cardVersion,context,evidence,instruction,knowledgeId,previousProposal,targets';
+  if (Object.keys(body).sort().join(',') !== expectedKeys) rewriteProblems.push('keys');
   if (evidence.length !== 1 || evidence[0].lane !== 'technical') rewriteProblems.push('evidence は出典つきの技術KB 1件だけ');
   if (!evidence[0]?.answer?.includes('合成応答 (normal)')) rewriteProblems.push('answer');
   for (const leaked of ['source_refs', 'lists_item', 'onenote_id', '合成試験用の安全な点検手順', 'synthetic-local-card.md', 'questionId']) {
     if (text.includes(leaked)) rewriteProblems.push(`含めてはいけない: ${leaked}`);
   }
   if (!body.targets.some((target) => target.heading === REWRITE_MAIN)) rewriteProblems.push('targets');
+  if (body.instruction !== undefined && (!body.previousProposal || body.previousProposal.cardVersion !== body.cardVersion)) {
+    rewriteProblems.push('再生成は同じカード版に結び付いた直前案を含める');
+  }
   if (rewriteProblems.length) return null;
+  const addition = body.instruction === '一度目の編集指示'
+    ? REWRITE_RETRY_ONE
+    : body.instruction === '二度目の編集指示'
+      ? REWRITE_RETRY_TWO
+      : REWRITE_ADDED_LINE;
   return {
     knowledgeId: body.knowledgeId,
     cardVersion: body.cardVersion,
     sections: body.targets.map((target) => target.heading === REWRITE_MAIN
-      ? { heading: target.heading, status: 'changed', body: `${target.body}\n${REWRITE_ADDED_LINE}`, reason: '確認済みの根拠 1 で点検資料の記載を確認できたため。', evidence: [1], warnings: [] }
+      ? { heading: target.heading, status: 'changed', body: `${target.body}\n${addition}`, reason: '確認済みの根拠 1 で点検資料の記載を確認できたため。', evidence: [1], warnings: [] }
       : { heading: target.heading, status: 'unchanged' }),
     conflicts: [{ heading: null, summary: '合成の食い違い: カードの記述と根拠の記述が異なります。', evidence: [1] }],
   };
@@ -536,6 +549,51 @@ source_refs:
   await rewritePanel.getByText('変更理由: 確認済みの根拠 1 で点検資料の記載を確認できたため。').waitFor();
   assert.equal(rewriteRequests.length, 1, 'the rewrite proposal is requested once');
   assert.deepEqual(rewriteProblems, [], `the rewrite request broke the contract: ${rewriteProblems.join(' | ')}`);
+  const initialRewriteRequest = rewriteRequests[0];
+  const initialSectionChoices = rewritePanel.getByRole('article', { name: `${REWRITE_MAIN}の書き換え案` }).getByRole('button');
+  const initialDecision = initialSectionChoices.first();
+  await initialDecision.click();
+  await rewritePanel.getByText(/本文の主張を変えました。Git に入れるときは card_version を上げ/).waitFor();
+  await page.getByRole('button', { name: '差分を確認' }).click();
+  const priorRewritePreview = page.getByRole('region', { name: '採用する追記案の差分' });
+  await priorRewritePreview.waitFor();
+  const instructionOne = '一度目の編集指示';
+  await rewritePanel.getByLabel('指示して作り直す').fill(instructionOne);
+  await rewritePanel.getByRole('button', { name: '指示して作り直す' }).click();
+  await rewritePanel.getByText(REWRITE_RETRY_ONE, { exact: false }).waitFor();
+  assert.equal(rewriteRequests.length, 2, 'the first retry creates a distinct proposal');
+  assert.equal(rewriteRequests[1].instruction, instructionOne);
+  assert.equal(rewriteRequests[1].cardVersion, initialRewriteRequest.cardVersion);
+  assert.deepEqual(rewriteRequests[1].evidence, initialRewriteRequest.evidence, 'retry preserves the confirmed evidence');
+  assert.deepEqual(rewriteRequests[1].targets, initialRewriteRequest.targets, 'retry preserves the target sections and base text');
+  assert.equal(rewriteRequests[1].previousProposal.sections.find(({ heading }) => heading === REWRITE_MAIN).body.includes(REWRITE_ADDED_LINE), true,
+    'the first retry sends the immediately preceding proposal');
+  assert.equal(await priorRewritePreview.count(), 0, 'regeneration invalidates the preview made from the prior confirmed proposal');
+  assert.equal(await page.getByRole('button', { name: '本文に反映' }).count(), 0, 'regeneration cannot reuse the prior diff for adoption');
+  assert.deepEqual(await rewritePanel.getByRole('article', { name: `${REWRITE_MAIN}の書き換え案` }).getByRole('button')
+    .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-pressed'))), ['false', 'false'],
+  'regeneration clears the prior human section decision');
+  const instructionTwo = '二度目の編集指示';
+  await rewritePanel.getByLabel('指示して作り直す').fill(instructionTwo);
+  await rewritePanel.getByRole('button', { name: '指示して作り直す' }).click();
+  await rewritePanel.getByText(REWRITE_RETRY_TWO, { exact: false }).waitFor();
+  assert.equal(rewriteRequests.length, 3, 'the second retry creates a third proposal');
+  assert.equal(rewriteRequests[2].instruction, instructionTwo);
+  assert.equal(rewriteRequests[2].cardVersion, initialRewriteRequest.cardVersion);
+  assert.deepEqual(rewriteRequests[2].evidence, initialRewriteRequest.evidence, 'the second retry preserves the confirmed evidence');
+  assert.deepEqual(rewriteRequests[2].targets, initialRewriteRequest.targets, 'the second retry preserves the target sections and base text');
+  assert.equal(rewriteRequests[2].previousProposal.sections.find(({ heading }) => heading === REWRITE_MAIN).body.includes(REWRITE_RETRY_ONE), true,
+    'the second retry sends the immediately preceding proposal');
+  assert.deepEqual(rewriteProblems, [], `a retry request broke the contract: ${rewriteProblems.join(' | ')}`);
+  const history = rewritePanel.getByRole('navigation', { name: '書き換え案の履歴' });
+  await history.getByRole('button', { name: '第1案' }).click();
+  await rewritePanel.getByText(REWRITE_ADDED_LINE, { exact: false }).waitFor();
+  assert.equal(await rewritePanel.getByText(REWRITE_RETRY_TWO, { exact: false }).count(), 0,
+    'selecting an older history entry shows its own proposal');
+  await history.getByRole('button', { name: '指示2 → 第3案' }).click();
+  await rewritePanel.getByText(REWRITE_RETRY_TWO, { exact: false }).waitFor();
+  assert.equal(await rewritePanel.getByText('指示で求めた内容は根拠で確認できていません。差分と根拠を確認してから採用してください').count(), 1,
+    'the selected instructed proposal displays the review warning');
   const sectionChoices = rewritePanel.getByRole('article', { name: `${REWRITE_MAIN}の書き換え案` }).getByRole('button');
   assert.equal(await sectionChoices.count(), 2, 'the rewrite section has confirm and reject choices');
   assert.deepEqual(
@@ -571,7 +629,9 @@ source_refs:
   await page.getByRole('tab', { name: '差分' }).click();
   await page.getByRole('heading', { name: '合成試験用の安全な点検手順' }).waitFor();
   assert.match(await page.locator('main').innerText(), /KB照合/);
-  assert.match(await page.locator('main').innerText(), /合成の根拠に基づく書き換え/, 'the rewritten section reaches the edited body together with the addition');
+  assert.match(await page.locator('main').innerText(), /合成の再生成2/, 'the confirmed latest rewrite reaches the edited body');
+  assert.doesNotMatch(await page.locator('main').innerText(), /合成の再生成1|合成の根拠に基づく書き換え/u,
+    'older, unselected proposals do not reach the edited body');
   assert.match(await page.locator('main').innerText(), /正式資料・元情報/);
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: '修正したMarkdownを保存' }).click();
@@ -583,7 +643,9 @@ source_refs:
   assert.match(downloadedMarkdown, /合成試験用の安全な点検手順/);
   assert.match(downloadedMarkdown, /Lists item 71 を照合し、確認した適用条件を追加する。/u, 'the evidence-informed card edit is included in the draft');
   assert.match(downloadedMarkdown, /KB照合/);
-  assert.match(downloadedMarkdown, /## 統合した回答・ノウハウ\n- 合成条件で動作を確認する。\n- 合成の根拠に基づく書き換え: 点検資料の要件を確認済み。/u, 'the confirmed section rewrite is in the draft');
+  assert.match(downloadedMarkdown, /## 統合した回答・ノウハウ\n- 合成条件で動作を確認する。\n- 合成の再生成2: 直前案と追加指示を反映した案。/u, 'the confirmed latest section rewrite is in the draft');
+  assert.doesNotMatch(downloadedMarkdown, /合成の再生成1|合成の根拠に基づく書き換え/u,
+    'unselected earlier proposals are excluded from the draft');
   assert.doesNotMatch(downloadedMarkdown, /合成の食い違い/u, 'a conflict nobody added stays out of the card');
   assert.match(downloadedMarkdown, /## KB確認に基づく追記\n\n### KB照合（確認日 \d{4}-\d{2}-\d{2}）/u, 'the placeholder section is replaced by the confirmed addition');
   assert.doesNotMatch(downloadedMarkdown, /## KB確認に基づく追記\n（該当なし）/u, 'the no-information placeholder is gone');
